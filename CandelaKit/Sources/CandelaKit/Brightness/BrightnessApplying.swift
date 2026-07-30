@@ -22,9 +22,14 @@ public protocol BrightnessApplying: Sendable {
 }
 
 /// Wraps the existing per-display DDC actor. A `.native` target is a
-/// path-selection wiring bug: rejected (`false`), logged once.
+/// path-selection wiring bug: rejected (`false`), logged once per instance.
 public struct DDCBrightnessApplier: BrightnessApplying {
-  private static let mismatchLogged = OSAllocatedUnfairLock(initialState: false)
+  /// Per-instance, not static (review M2): with multiple displays a static
+  /// flag would let the first display's wiring bug suppress the log for all
+  /// others. Copies share the lock's heap storage, so copies of one instance
+  /// still log once; the per-submit-constructed applier logs once per
+  /// affected write — acceptable, since a live wiring bug is a must-fix.
+  private let mismatchLogged = OSAllocatedUnfairLock(initialState: false)
   private let writer: any DDCWriting
 
   public init(writer: any DDCWriting) {
@@ -33,7 +38,7 @@ public struct DDCBrightnessApplier: BrightnessApplying {
 
   public func apply(_ target: HardwareTarget) async -> Bool {
     guard case let .ddc(raw) = target else {
-      logMismatchOnce(Self.mismatchLogged, "DDCBrightnessApplier received a .native target")
+      logMismatchOnce(mismatchLogged, "DDCBrightnessApplier received a .native target")
       return false
     }
     return await writer.write(command: VCP.brightness, value: raw)
@@ -43,9 +48,10 @@ public struct DDCBrightnessApplier: BrightnessApplying {
 /// Native-brightness applier over an injected apply closure — the app injects
 /// `DisplayServices.setBrightness`; injection keeps this type (and CandelaKit
 /// tests) independent of the private-framework shim. A `.ddc` target is a
-/// path-selection wiring bug: rejected (`false`), logged once.
+/// path-selection wiring bug: rejected (`false`), logged once per instance.
 public struct NativeBrightnessApplier: BrightnessApplying {
-  private static let mismatchLogged = OSAllocatedUnfairLock(initialState: false)
+  /// Per-instance, not static — see `DDCBrightnessApplier.mismatchLogged`.
+  private let mismatchLogged = OSAllocatedUnfairLock(initialState: false)
   private let displayID: CGDirectDisplayID
   private let applyNative: @Sendable (Float, CGDirectDisplayID) -> Bool
 
@@ -56,16 +62,15 @@ public struct NativeBrightnessApplier: BrightnessApplying {
 
   public func apply(_ target: HardwareTarget) async -> Bool {
     guard case let .native(value) = target else {
-      logMismatchOnce(Self.mismatchLogged, "NativeBrightnessApplier received a .ddc target")
+      logMismatchOnce(mismatchLogged, "NativeBrightnessApplier received a .ddc target")
       return false
     }
     return applyNative(value, displayID)
   }
 }
 
-/// Logs `message` only the first time its flag is seen unset: a wiring bug is
-/// worth exactly one log line, not one per coalesced write (which arrive at
-/// ~30 Hz during a drag).
+/// Logs `message` only the first time its (per-instance) flag is seen unset:
+/// repeated mismatches on the same applier instance produce one line.
 private func logMismatchOnce(_ flag: OSAllocatedUnfairLock<Bool>, _ message: String) {
   let firstTime = flag.withLock { logged -> Bool in
     if logged { return false }

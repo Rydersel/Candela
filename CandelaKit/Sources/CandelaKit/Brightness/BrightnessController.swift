@@ -194,10 +194,18 @@ actor BrightnessWriteCoalescer {
   /// (round 2): re-sending the value already on the wire saturates the
   /// DDC/I2C bus for nothing. Compared via `HardwareTarget` `Equatable` —
   /// targets are what hit hardware, so the same target carried by a
-  /// different applier is still a duplicate. `nil` until the first
-  /// successful apply. Lives in a lock (not actor state) so
+  /// different applier is still a duplicate. `target` is `nil` until the
+  /// first successful apply. Lives in a lock (not actor state) so
   /// `resetDuplicateState()` can clear it synchronously from any context.
-  private nonisolated let lastApplied = OSAllocatedUnfairLock<HardwareTarget?>(initialState: nil)
+  ///
+  /// `resets` versions the memo against a reset racing an in-flight apply
+  /// (review I1): a `resetDuplicateState()` that lands mid-apply must win
+  /// over that apply's success — on a rebind the in-flight value reached the
+  /// OLD hardware, so recording it would duplicate-skip the next same-value
+  /// write to the new panel forever. The drain captures `resets` before
+  /// applying and only records the target if no reset intervened.
+  private nonisolated let lastApplied =
+    OSAllocatedUnfairLock<(target: HardwareTarget?, resets: UInt64)>(initialState: (nil, 0))
 
   private var completedGeneration: UInt64 = 0
   private var waiters: [(generation: UInt64, continuation: CheckedContinuation<Void, Never>)] = []
@@ -222,7 +230,9 @@ actor BrightnessWriteCoalescer {
   /// the memo must be clearable — otherwise the next write to the same value
   /// would be skipped forever (review I10).
   nonisolated func resetDuplicateState() {
-    lastApplied.withLock { $0 = nil }
+    // Bumping `resets` invalidates any apply currently in flight — see the
+    // `lastApplied` comment.
+    lastApplied.withLock { $0 = (nil, $0.resets + 1) }
   }
 
   /// Synchronous and nonisolated on purpose — see the type comment.
@@ -272,14 +282,22 @@ actor BrightnessWriteCoalescer {
         // Duplicate-skip (round 2): never rewrite the target already on the
         // wire — duplicate re-sends saturate the bus for nothing. The
         // generation still completes.
-        if write.target != lastApplied.withLock({ $0 }) {
+        let memo = lastApplied.withLock { $0 }
+        if write.target != memo.target {
           // Only a *successful* apply means the value is on the hardware.
           // Advancing `lastApplied` after a failed apply would make the next
           // identical target look like a duplicate and get skipped, leaving
           // brightness stuck at the old level until the user moved to a
-          // different value.
+          // different value. And only an apply with no intervening reset may
+          // record its target: a reset that raced this apply means the value
+          // landed on hardware we no longer trust (review I1) — the `resets`
+          // captured in `memo` above detects that.
           if await write.applier.apply(write.target) {
-            lastApplied.withLock { $0 = write.target }
+            lastApplied.withLock { state in
+              if state.resets == memo.resets {
+                state.target = write.target
+              }
+            }
           }
         }
       }

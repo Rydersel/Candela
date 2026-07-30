@@ -200,6 +200,68 @@ final class FakeEpochGate: Sendable {
   #expect(await applier.appliedTargets() == [.ddc(raw: 70), .ddc(raw: 70)])
 }
 
+/// Applier whose applies block until released, for racing `resetDuplicateState`
+/// against an apply that is already in flight.
+actor GatedApplier: BrightnessApplying {
+  private(set) var applied: [HardwareTarget] = []
+  private var permits = 0
+  private var gateWaiters: [CheckedContinuation<Void, Never>] = []
+  private var startedCount = 0
+  private var startObservers: [CheckedContinuation<Void, Never>] = []
+
+  /// Suspends until at least `count` applies have entered `apply`.
+  func waitUntilApplyStarted(count: Int) async {
+    while startedCount < count {
+      await withCheckedContinuation { startObservers.append($0) }
+    }
+  }
+
+  /// Grants one permit; an in-flight (or future) apply consumes it to finish.
+  func release() {
+    permits += 1
+    if !gateWaiters.isEmpty {
+      permits -= 1
+      gateWaiters.removeFirst().resume()
+    }
+  }
+
+  func apply(_ target: HardwareTarget) async -> Bool {
+    applied.append(target)
+    startedCount += 1
+    for observer in startObservers {
+      observer.resume()
+    }
+    startObservers.removeAll()
+    if permits > 0 {
+      permits -= 1
+    } else {
+      await withCheckedContinuation { gateWaiters.append($0) }
+    }
+    return true
+  }
+
+  func appliedTargets() async -> [HardwareTarget] { applied }
+}
+
+/// A reset that lands while an apply is in flight must not be lost: if the
+/// apply then succeeds, it must NOT resurrect `lastApplied` — the reset was
+/// issued because that hardware state is no longer trustworthy (rebind: the
+/// in-flight value landed on the OLD panel). The next same-target write must
+/// reach hardware again, not be duplicate-skipped (review I1).
+@Test func resetDuplicateStateDuringInFlightApplyIsNotLost() async {
+  let applier = GatedApplier()
+  let coalescer = BrightnessWriteCoalescer()
+  coalescer.submit(.init(target: .ddc(raw: 70), applier: applier, epoch: 0, generation: 1))
+  await applier.waitUntilApplyStarted(count: 1) // apply is now in flight, blocked
+  coalescer.resetDuplicateState() // mid-apply: must win over the apply's success
+  await applier.release() // let the in-flight apply finish (returns true)
+  await coalescer.waitUntilCompleted(through: 1)
+  await applier.release() // pre-grant a permit so the re-apply completes
+  coalescer.submit(.init(target: .ddc(raw: 70), applier: applier, epoch: 0, generation: 2))
+  await coalescer.waitUntilCompleted(through: 2)
+  #expect(await applier.appliedTargets() == [.ddc(raw: 70), .ddc(raw: 70)])
+}
+
 // MARK: - Concrete appliers
 
 /// DDCBrightnessApplier maps `.ddc` onto the writer's brightness VCP write
