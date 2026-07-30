@@ -262,4 +262,25 @@ struct DisplayPrefsTests {
       #expect(prefs.multiKeyboardVolume == .mouse)
     }
   }
+
+  // Persisted-schema pins (review T2-F1/F2): these raws compose on-disk key
+  // strings and stored values — a rename or renumber is a silent migration.
+  @Test func persistedRawValuesNeverDrift() {
+    #expect(DDCCommand.allCases.map(\.rawValue) == ["brightness", "volume", "contrast"])
+    #expect(PollingMode.allCases.map(\.rawValue) == [-2, -1, 0, 1, 2])
+    #expect(StartupAction.allCases.map(\.rawValue) == [0, 1, 2])
+    #expect(MultiKeyboardVolume.allCases.map(\.rawValue) == [0, 1, 2])
+  }
+
+  @Test func commandTuningRoundTripsWholeStruct() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      let tuning = CommandTuning(
+        unavailableDDC: true, minDDCOverride: 5, maxDDCOverride: 90,
+        curveIndex: 7, invert: true, remapCodes: [0x10, 0x2F]
+      )
+      prefs.setTuning(tuning, for: .contrast)
+      #expect(prefs.tuning(for: .contrast) == tuning)
+    }
+  }
 }
