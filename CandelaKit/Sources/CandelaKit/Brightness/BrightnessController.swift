@@ -158,8 +158,13 @@ actor BrightnessWriteCoalescer {
       // wire — duplicate re-sends saturate the bus for nothing. The
       // generation still completes.
       if target.value != lastSentRaw {
-        _ = await writer.write(command: VCP.brightness, value: target.value)
-        lastSentRaw = target.value
+        // Only a *successful* write means the value is on the wire. Advancing
+        // `lastSentRaw` after a failed write would make the next identical
+        // target look like a duplicate and get skipped, leaving brightness
+        // stuck at the old level until the user moved to a different value.
+        if await writer.write(command: VCP.brightness, value: target.value) {
+          lastSentRaw = target.value
+        }
       }
       complete(target.generation)
     }

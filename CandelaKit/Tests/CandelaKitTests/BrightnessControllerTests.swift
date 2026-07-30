@@ -113,6 +113,37 @@ actor FakeDDC: DDCWriting {
   #expect(writes.map(\.value) == [44, 45])
 }
 
+/// Fails the first `write` and succeeds on every one after, recording the
+/// outcome of each attempt.
+actor FlakyDDC: DDCWriting {
+  private(set) var attempts: [(value: UInt16, succeeded: Bool)] = []
+
+  func write(command _: UInt8, value: UInt16) async -> Bool {
+    let succeeded = !attempts.isEmpty
+    attempts.append((value, succeeded))
+    return succeeded
+  }
+
+  func read(command _: UInt8) async -> (current: UInt16, max: UInt16)? { nil }
+
+  func recordedAttempts() async -> [(value: UInt16, succeeded: Bool)] { attempts }
+}
+
+/// A failed write must NOT advance the duplicate-skip watermark: resubmitting
+/// the same value has to reach the hardware again, or a single transient DDC
+/// failure leaves brightness stuck until the user picks a different value.
+@Test func coalescerRetriesSameValueAfterFailedWrite() async {
+  let fake = FlakyDDC()
+  let coalescer = BrightnessWriteCoalescer(writer: fake)
+  coalescer.submit(.init(value: 42, generation: 1)) // write fails
+  await coalescer.waitUntilCompleted(through: 1)
+  coalescer.submit(.init(value: 42, generation: 2)) // same value: must retry
+  await coalescer.waitUntilCompleted(through: 2)
+  let attempts = await fake.recordedAttempts()
+  #expect(attempts.map(\.value) == [42, 42]) // attempted twice, not duplicate-skipped
+  #expect(attempts.map(\.succeeded) == [false, true]) // and the retry landed
+}
+
 /// A wait issued for a generation whose target gets superseded must resolve
 /// when the newer target lands — never resolve early against an idle-looking
 /// coalescer, and never hang because its own target was dropped from the
