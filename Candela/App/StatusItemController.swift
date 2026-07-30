@@ -26,6 +26,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   // display's BrightnessController.
   private let shadeOverlay: ShadeOverlay
   private let gammaController: GammaController
+  /// Watches for f.lux-style apps rewriting our gamma tables and offers the
+  /// shade fallback. One monitor for all displays (the fork's counter is
+  /// global too); wired into every controller's pre-gamma-apply hook.
+  private let interferenceMonitor: GammaInterferenceMonitor
   private let model: AppModel
   private var statusItem: NSStatusItem?
 
@@ -34,6 +38,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     let gamma = GammaController()
     shadeOverlay = shade
     gammaController = gamma
+    interferenceMonitor = GammaInterferenceMonitor(gamma: gamma, alerts: EngineAlerts())
     model = AppModel(shade: shade, gamma: gamma)
     super.init()
   }
@@ -102,6 +107,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         guard let self else { return }
         let departed = await self.model.refresh()
         self.refreshTapConfig()
+        self.wireInterferenceHooks()
+        // Fork parity: the counter zeroes on every configure so unrelated
+        // events across a long session never add up to an offer.
+        // `suspendedForSession` survives.
+        self.interferenceMonitor.resetCounter()
         for id in departed {
           self.hud.cleanupDisplay(id)
         }
@@ -157,6 +167,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     Task {
       await model.refresh()
       refreshTapConfig()
+      wireInterferenceHooks()
     }
   }
 
@@ -174,6 +185,36 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     Task {
       await model.refresh()
       refreshTapConfig()
+      wireInterferenceHooks()
+    }
+  }
+
+  /// Hands every display's controller a pre-gamma-apply hook that runs the
+  /// interference check for that display. Idempotent — re-run after each
+  /// refresh so displays that just appeared get one (and so a hook never
+  /// outlives the display it names).
+  private func wireInterferenceHooks() {
+    for state in model.displays {
+      let displayID = state.id
+      let displayName = state.display.name
+      let persistenceKey = state.display.persistenceKey
+      let monitor = interferenceMonitor
+      let gamma = gammaController
+      state.controller.preGammaApplyHook = { [weak controller = state.controller] in
+        monitor.checkBeforeApply(displayID: displayID, displayName: displayName) {
+          // Accept: this display stops using gamma for good...
+          DisplayPrefs(persistenceKey: persistenceKey).avoidGamma = true
+          // ...hand its table back (per-display; `resetAllGamma` would drop
+          // every other display's dimming too)...
+          gamma.applyGammaScale(1.0, on: displayID)
+          // ...and re-apply the current brightness through the shade backend.
+          // `handleReconfigure` is the public door for that: it clears the
+          // software dedupe memo (which `setBrightness` alone would trip over,
+          // the value being unchanged) and re-runs the software leg, now
+          // routed to the shade. Async, so this returns to the alert at once.
+          Task { @MainActor in await controller?.handleReconfigure() }
+        }
+      }
     }
   }
 
