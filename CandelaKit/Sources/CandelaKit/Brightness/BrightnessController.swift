@@ -87,8 +87,21 @@ actor BrightnessWriteCoalescer {
   private var completedGeneration: UInt64 = 0
   private var waiters: [(generation: UInt64, continuation: CheckedContinuation<Void, Never>)] = []
 
-  init(writer: any DDCWriting) {
+  /// Quiet gap enforced after every hardware write before the next one is
+  /// sent. Measured on the MAG341C (task-7 fix rounds 2-3): the panel applies
+  /// VCP brightness only when the DDC/I2C bus goes quiet, so a fast drag whose
+  /// ~80 Hz ticks produce mostly-distinct raw values (which dedupe alone
+  /// passes through back-to-back) still saturates the bus and stalls the
+  /// visible change until mouseup. 40 ms guarantees an apply window after
+  /// each write (~14 writes/s with the ~30 ms transaction) — well above
+  /// human-perceptible brightness granularity. Intermediate values arriving
+  /// during the gap are superseded in the stream buffer, never sent; the
+  /// trailing final value always lands.
+  private let minimumQuietGap: Duration
+
+  init(writer: any DDCWriting, minimumQuietGap: Duration = .milliseconds(40)) {
     self.writer = writer
+    self.minimumQuietGap = minimumQuietGap
     let (stream, continuation) = AsyncStream.makeStream(
       of: PendingWrite.self, bufferingPolicy: .bufferingNewest(1)
     )
@@ -130,12 +143,23 @@ actor BrightnessWriteCoalescer {
       // write returns success. Skipping duplicates restores idle gaps whenever
       // the value holds still — the traffic shape the fork produces and the
       // monitor demonstrably tracks live.
-      if write.value != lastWrittenValue {
+      let wrote = write.value != lastWrittenValue
+      if wrote {
         _ = await writer.write(command: VCP.brightness, value: write.value)
         lastWrittenValue = write.value
       }
+      // Complete the generation BEFORE the quiet gap: the value is on the
+      // wire, so waitForPendingWrites need not ride out the sleep.
       completedGeneration = max(completedGeneration, write.generation)
       resumeSatisfiedWaiters()
+      // Sleeping here — after the write, before dequeuing the next element —
+      // is what makes the gap skip intermediates: values yielded during the
+      // sleep coalesce in the .bufferingNewest(1) buffer, and the next loop
+      // iteration dequeues whatever is newest once the gap has elapsed. A
+      // skipped duplicate put no traffic on the bus, so it needs no gap.
+      if wrote {
+        try? await Task.sleep(for: minimumQuietGap)
+      }
     }
   }
 

@@ -113,6 +113,25 @@ actor FakeDDC: DDCWriting {
   #expect(writes.map(\.value) == [44, 45])
 }
 
+/// During the post-write quiet gap, values arriving in the interim coalesce in
+/// the stream buffer; only the newest is sent once the gap elapses. Uses a
+/// deliberately huge injected gap so the assertion is about ordering, not
+/// wall-clock timing: after generation 1 completes the drain is inside its
+/// gap, and the two subsequent submits are back-to-back synchronous yields
+/// (no suspension point between them), so 20 is superseded before the drain
+/// can possibly dequeue it.
+@Test func coalescerQuietGapSkipsIntermediateValues() async {
+  let fake = FakeDDC()
+  let coalescer = BrightnessWriteCoalescer(writer: fake, minimumQuietGap: .milliseconds(500))
+  coalescer.submit(.init(value: 10, generation: 1))
+  await coalescer.waitUntilCompleted(through: 1) // write done; drain now sleeping the gap
+  coalescer.submit(.init(value: 20, generation: 2))
+  coalescer.submit(.init(value: 30, generation: 3)) // displaces 20 in the buffer
+  await coalescer.waitUntilCompleted(through: 3)
+  let writes = await fake.recordedWrites()
+  #expect(writes.map(\.value) == [10, 30]) // 20 never hit the bus
+}
+
 /// A wait issued before its write has drained must suspend until that write
 /// (or a newer one superseding it) lands — never resolve early against an
 /// idle-looking coalescer.
