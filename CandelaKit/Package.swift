@@ -8,7 +8,9 @@ let package = Package(
     .library(name: "CandelaKit", targets: ["CandelaKit"]),
   ],
   targets: [
-    .target(name: "CandelaKit"),
+    .target(name: "CandelaPrivateAPIs",
+            linkerSettings: [.linkedFramework("CoreDisplay")]),
+    .target(name: "CandelaKit", dependencies: ["CandelaPrivateAPIs"]),
     .testTarget(name: "CandelaKitTests", dependencies: ["CandelaKit"]),
   ]
 )
