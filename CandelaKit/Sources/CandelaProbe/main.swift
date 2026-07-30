@@ -28,7 +28,34 @@ case "set":
     let ok = await entry.writer.write(command: VCP.brightness, value: value)
     print("\(entry.display.name): write \(value) -> \(ok ? "ok" : "FAILED")")
   }
+case "ramp":
+  // Sweeps VCP 0x10 in-process with Task.sleep pacing — no UI, no coalescer.
+  // Isolates the monitor's DDC apply-path latency from everything app-side.
+  guard arguments.count == 5,
+        let from = Int(arguments[1]), let to = Int(arguments[2]),
+        let step = Int(arguments[3]), step > 0,
+        let intervalMs = Int(arguments[4]), intervalMs >= 0,
+        (0 ... 100).contains(from), (0 ... 100).contains(to)
+  else {
+    print("usage: candela-probe ramp <from 0-100> <to 0-100> <step >0> <intervalMs>")
+    exit(2)
+  }
+  for entry in found {
+    print("\(entry.display.name): ramp \(from) -> \(to) step \(step) every \(intervalMs) ms")
+    let start = ContinuousClock.now
+    let direction = from <= to ? step : -step
+    var value = from
+    while true {
+      let ok = await entry.writer.write(command: VCP.brightness, value: UInt16(value))
+      let elapsed = start.duration(to: .now)
+      print("  +\(elapsed) write \(value) -> \(ok ? "ok" : "FAILED")")
+      if value == to { break }
+      try? await Task.sleep(for: .milliseconds(intervalMs))
+      value = from <= to ? min(value + direction, to) : max(value + direction, to)
+    }
+    print("\(entry.display.name): ramp done in \(start.duration(to: .now))")
+  }
 default:
-  print("usage: candela-probe [list|get|set <value>]")
+  print("usage: candela-probe [list|get|set <value>|ramp <from> <to> <step> <intervalMs>]")
   exit(2)
 }
