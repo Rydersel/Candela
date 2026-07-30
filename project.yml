@@ -1,4 +1,7 @@
 name: Candela
+packages:
+  CandelaKit:
+    path: CandelaKit
 options:
   deploymentTarget:
     macOS: "14.0"
@@ -14,6 +17,8 @@ targets:
     type: application
     platform: macOS
     sources: [Candela]
+    dependencies:
+      - package: CandelaKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rydersel.Candela
