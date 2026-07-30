@@ -95,24 +95,32 @@ struct PanelView: View {
 }
 
 /// Section header for one display: name, an "HDR" state badge, and a trailing
-/// borderless HDR-mode menu. Everything is secondary-colored — the slider is
+/// HDR-mode cycling button. Everything is secondary-colored — the slider is
 /// the row's only emphasis, the way Control Center keeps section chrome quiet.
+///
+/// Badge and button report two different things on purpose: the badge is
+/// STATE (is HDR live right now, however it got there), the button is POLICY
+/// (which mode the user picked). They disagree legitimately — externally
+/// toggled HDR badges while the mode still reads "HDR Off".
 private struct DisplayHeaderRow: View {
   let controller: BrightnessController
   let displayName: String
 
-  private var hdrEngaged: Bool {
-    // `.alwaysOn` holds HDR by definition; boost only when it is actually
-    // engaged. The engine's live-HDR flag is internal to CandelaKit, so
-    // always-on is read from the mode alone.
-    controller.hdrBoostActive || controller.hdrMode == .alwaysOn
-  }
+  @State private var isHovering = false
 
   private var modeLabel: String {
     switch controller.hdrMode {
     case .off: return "HDR Off"
     case .boost: return "HDR Boost"
     case .alwaysOn: return "HDR On"
+    }
+  }
+
+  private var nextMode: HDRMode {
+    switch controller.hdrMode {
+    case .off: return .boost
+    case .boost: return .alwaysOn
+    case .alwaysOn: return .off
     }
   }
 
@@ -123,7 +131,7 @@ private struct DisplayHeaderRow: View {
         .foregroundStyle(.secondary)
         .lineLimit(1)
         .accessibilityHidden(true)  // the slider carries the display name
-      if hdrEngaged {
+      if controller.isHDREngaged {
         Text("HDR")
           .font(.system(size: 11, weight: .medium))
           .foregroundStyle(.secondary)
@@ -133,35 +141,60 @@ private struct DisplayHeaderRow: View {
           .accessibilityLabel("HDR engaged")
       }
       Spacer(minLength: 4)
-      hdrMenu
+      hdrModeButton
     }
   }
 
-  private var hdrMenu: some View {
-    Menu {
-      Picker("HDR", selection: Binding(
-        get: { controller.hdrMode },
-        set: { mode in Task { await controller.setHDRMode(mode) } }
-      )) {
-        Text("Off").tag(HDRMode.off)
-        Text("Boost").tag(HDRMode.boost)
-        Text("On").tag(HDRMode.alwaysOn)
-      }
-      .pickerStyle(.inline)
+  /// Cycling control, not a menu: the panel is hosted in an `NSMenu` item, and
+  /// a SwiftUI `Menu` inside that never opens — the enclosing menu owns event
+  /// tracking, so the nested one is dead on arrival (hardware round 1). Plain
+  /// buttons in the panel do work (the footer's quit button), so the three-way
+  /// choice advances Off → Boost → On → Off on click. The label always names
+  /// the CURRENT mode, matching the menu-bar guidance to keep control titles
+  /// short and state-revealing; the tooltip carries the "cycles" affordance.
+  private var hdrModeButton: some View {
+    Button {
+      Task { await controller.setHDRMode(nextMode) }
     } label: {
       Text(modeLabel)
         .font(.system(size: 12))
-        .foregroundStyle(.secondary)
     }
-    .menuStyle(.borderlessButton)
+    .buttonStyle(HDRModeButtonStyle(isHovering: isHovering))
+    .onHover { isHovering = $0 }
+    // The menu can close without a mouse-exit event (Escape, or clicking the
+    // status item), which would leave a phantom highlight on the next open.
+    .onDisappear { isHovering = false }
     .fixedSize()
     // Disable, don't hide, on non-HDR displays (design guidance: keep
     // controls visible so people learn what the app supports). `supportsHDR`
-    // is observation-tracked, so the menu enables live once the async
+    // is observation-tracked, so the button enables live once the async
     // capability refresh lands.
     .disabled(!controller.supportsHDR)
-    .help("HDR mode for \(displayName)")
+    .help("Cycle HDR mode for \(displayName)")
     .accessibilityLabel("\(displayName) HDR mode")
+    .accessibilityValue(modeLabel)
+  }
+}
+
+/// Same hover/press feedback language as `FooterIconButtonStyle`, with text
+/// metrics instead of a square icon frame.
+private struct HDRModeButtonStyle: ButtonStyle {
+  let isHovering: Bool
+
+  func makeBody(configuration: Configuration) -> some View {
+    let background: AnyShapeStyle = if configuration.isPressed {
+      AnyShapeStyle(.tertiary)
+    } else if isHovering {
+      AnyShapeStyle(.quaternary)
+    } else {
+      AnyShapeStyle(.clear)
+    }
+    return configuration.label
+      .foregroundStyle(isHovering ? .primary : .secondary)
+      .padding(.horizontal, 5)
+      .padding(.vertical, 2)
+      .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(background))
+      .contentShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
   }
 }
 

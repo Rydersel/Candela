@@ -85,6 +85,12 @@ public final class BrightnessController {
   /// disable itself on non-HDR displays.
   public var supportsHDR: Bool { cachedSupportsHDR }
 
+  /// Whether HDR is live on the display right now — published mirror of the
+  /// async-refreshed cache, same pattern as `supportsHDR`. The panel's badge
+  /// reads STATE from here; `hdrMode` is only the POLICY, so an externally
+  /// toggled HDR (mode still `.off`) still reports engaged.
+  public var isHDREngaged: Bool { cachedHDRActive }
+
   /// HDR state caches, refreshed by async tasks (init, mode changes, boost
   /// transitions, `noteHDRStateMayHaveChanged`) and only ever *read* on the
   /// synchronous keypress/drag paths — never awaited there.
@@ -404,6 +410,24 @@ public final class BrightnessController {
     lastAppliedSw = nil
   }
 
+  /// Native-entry brightness assert (hardware round 1): every door INTO the
+  /// native path ends by re-submitting the published value on the native leg.
+  /// Without it the display inherits whatever the DisplayServices register
+  /// happened to hold — on the MAG341C, a leftover 0.5 from an earlier session
+  /// — while the panel keeps showing the user's value.
+  ///
+  /// DIVERGENCE from the fork: the fork adopts that stale register instead and
+  /// lets its poller drag the slider to the hardware. Spec §5 makes the
+  /// controller the source of truth, so Candela pushes the other way. Going
+  /// through `applyPaths` (not a bare submit) also writes the echo slot, so the
+  /// poller reads the assert back as an echo rather than an external change.
+  ///
+  /// Boost engage asserts `.native(1.0)` from its own settle task and does not
+  /// route through here.
+  private func assertNativeEntryBrightness() {
+    applyPaths(brightness)
+  }
+
   private var switchingValue: Double {
     DimmingMath.switchingValue(fromPoint: prefs.combinedSwitchingPoint)
   }
@@ -450,6 +474,8 @@ public final class BrightnessController {
         guard hdrTransitionGeneration == generation else { return } // post-settle
         settleInProgress = false
         await refreshHDRCaches()
+        guard hdrTransitionGeneration == generation else { return }
+        assertNativeEntryBrightness()
       } else {
         // Engage failed (T8 carry-over, adjudicated M3 blocker): the mode was
         // committed optimistically above, so roll BOTH the published mirror
@@ -506,6 +532,7 @@ public final class BrightnessController {
       guard hdrTransitionGeneration == generation else { return }
       if !wasNative, usesNative {
         clearSoftwareLeg()
+        assertNativeEntryBrightness()
       }
     }
   }
@@ -515,9 +542,18 @@ public final class BrightnessController {
   /// Detecting an externally-toggled HDR entry runs the C1 clearing.
   public func noteHDRStateMayHaveChanged() async {
     let wasNative = usesNative
+    // Capture only — this is a state *observation*, not a transition, so it
+    // must not bump the token: an HDR toggle itself provokes a reconfigure,
+    // and superseding here would strand the very transition that caused it
+    // (its post-settle block would bail with `settleInProgress` stuck true).
+    // Guarding still applies: a transition that started during the refresh
+    // owns the state, so the entry work below is no longer ours to do.
+    let generation = hdrTransitionGeneration
     await refreshHDRCaches()
+    guard hdrTransitionGeneration == generation else { return }
     if !wasNative, usesNative {
       clearSoftwareLeg()
+      assertNativeEntryBrightness()
     }
   }
 

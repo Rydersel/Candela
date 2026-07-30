@@ -187,9 +187,14 @@ struct PathSelectionTests {
     let h = Harness(hdrEnabled: true) { prefs, _ in prefs.hdrMode = .alwaysOn }
     await h.prime()
     h.controller.setBrightness(0.75)
-    #expect(h.submitted == [.native(0.75)])
+    // `prime()` is itself a native entry (HDR already live at init), so it
+    // asserts the restored value first — hardware round 1's H3.
+    #expect(h.submitted == [.native(1.0), .native(0.75)])
     await h.controller.waitForPendingWrites()
-    #expect(h.native.targets() == [.native(0.75)])
+    // Landed targets: the coalescer may drop the entry assert (latest-wins),
+    // so assert the path, not the count.
+    #expect(h.native.targets().last == .native(0.75))
+    #expect(h.native.targets().allSatisfy { if case .native = $0 { true } else { false } })
     #expect(await h.ddc.recordedWrites().isEmpty)
     // The only gamma write is the C1 clearing when the cache flipped active.
     #expect(h.gamma.scales == [1.0])
@@ -312,6 +317,45 @@ struct PathSelectionTests {
     await h.controller.noteHDRStateMayHaveChanged()
     #expect(approx(h.gamma.scales.last ?? -1, 1.0))
     #expect(h.shade.removed.contains(Harness.displayID))
+  }
+
+  // MARK: Native-entry brightness assert (hardware round 1)
+
+  /// Entering the native path by an EXTERNAL toggle must re-assert the
+  /// published value on the native leg. Hardware round 1: with HDR toggled on
+  /// outside the app the MAG came up at the DisplayServices register's leftover
+  /// value (0.5 from an earlier probe run) because no entry door pushed.
+  @Test func externallyToggledHDREntryReassertsBrightnessOnNativeLeg() async {
+    let h = Harness { prefs, _ in prefs.hdrMode = .alwaysOn }
+    await h.prime() // HDR off: combined path
+    h.controller.setBrightness(0.25)
+    await h.hdr!.setHDR(displayID: Harness.displayID, enabled: true) // external toggle
+    await h.controller.noteHDRStateMayHaveChanged()
+    // Clearing first, assert last — the native leg carries the current value.
+    #expect(approx(h.gamma.scales.last ?? -1, 1.0))
+    #expect(h.submitted.last == .native(0.25))
+    #expect(h.controller.expectedNative().value == 0.25) // echo slot written
+  }
+
+  /// The `.alwaysOn` success arm asserts after the settle window: a write
+  /// during the ~2 s re-mode is lost, so the assert is the post-settle step.
+  @Test func alwaysOnEntryReassertsBrightnessAfterSettle() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    h.controller.setBrightness(0.25)
+    await h.controller.setHDRMode(.alwaysOn)
+    #expect(h.submitted.last == .native(0.25))
+    #expect(h.controller.isNativeActive())
+  }
+
+  /// The fourth door (`.off → .boost` with HDR already externally live) is a
+  /// native entry too, so it asserts alongside its C1 clearing.
+  @Test func boostEntryWithLiveHDRReassertsBrightnessOnNativeLeg() async {
+    let h = Harness(hdrEnabled: true)
+    await h.prime()
+    h.controller.setBrightness(0.25)
+    await h.controller.setHDRMode(.boost)
+    #expect(h.submitted.last == .native(0.25))
   }
 
   // MARK: C2 — refreshFromHardware combined-domain mapping (MUST-HAVE)
@@ -882,6 +926,19 @@ struct HDRModeEngageFailureTests {
     let unsupported = Harness(hdrSupported: false)
     await unsupported.prime()
     #expect(unsupported.controller.supportsHDR == false)
+  }
+
+  /// The panel's badge reports LIVE HDR, not the mode pref (hardware round 1:
+  /// an externally toggled HDR read as "HDR Off" with no badge), so
+  /// `isHDREngaged` must follow the cache even while the mode is `.off`.
+  @Test func isHDREngagedReflectsLiveHDRRegardlessOfMode() async {
+    let live = Harness(hdrEnabled: true) // externally toggled; mode stays .off
+    await live.prime()
+    #expect(live.controller.hdrMode == .off)
+    #expect(live.controller.isHDREngaged)
+    let dark = Harness()
+    await dark.prime()
+    #expect(dark.controller.isHDREngaged == false)
   }
 
   /// Fix round 2 (Important): `setHDRMode`'s body is a bare async func — never
