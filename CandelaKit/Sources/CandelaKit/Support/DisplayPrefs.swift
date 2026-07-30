@@ -1,10 +1,13 @@
 import Foundation
 
-/// How a display uses macOS HDR. `boost` engages HDR on a fresh brightness-up
-/// press at 100% and drops it on the way back down; `alwaysOn` keeps it engaged.
+/// How a display uses macOS HDR. `alwaysOn` keeps HDR engaged; `off` leaves the
+/// display's HDR state alone.
+///
+/// Raw value 1 was `boost` (removed 2026-07-30) — NEVER reuse it: displays that
+/// stored it must keep decoding to `.off` through `DisplayPrefs.hdrMode`'s
+/// unknown-value fallback.
 public enum HDRMode: Int, Sendable, CaseIterable {
   case off = 0
-  case boost = 1
   case alwaysOn = 2
 }
 
@@ -25,7 +28,8 @@ public final class DisplayPrefs: @unchecked Sendable {
   }
 
   /// Unknown stored raw values fall back to `.off` — an unset key reads 0,
-  /// which is `.off` already.
+  /// which is `.off` already. That fallback is also the migration path for the
+  /// retired `boost` raw value 1.
   public var hdrMode: HDRMode {
     get { HDRMode(rawValue: defaults.integer(forKey: key("hdrMode"))) ?? .off }
     set { defaults.set(newValue.rawValue, forKey: key("hdrMode")) }

@@ -211,7 +211,7 @@ final class AppModel {
         applierNative: NativeBrightnessApplier(
           displayID: found.id, apply: DisplayServices.setBrightness
         ),
-        // No HDR/shade/gamma backends: role .builtIn never routes boost or the
+        // No HDR/shade/gamma backends: role .builtIn never routes HDR or the
         // software leg, and `handleReconfigure` correctly no-ops on nils.
         hdr: nil,
         shade: nil,
@@ -248,12 +248,12 @@ final class AppModel {
         isNativeActive: { controller.isNativeActive() },
         // A starved adoption Task that fires late is discarded by
         // adoptExternal's generation check (review I9).
-        // Parked T6-minor-2: after a boost settle the expected-native slot and
+        // Parked T6-minor-2: after an HDR settle the expected-native slot and
         // the hardware can briefly disagree. The poller does NOT recover the
         // interim input — it CONVERGES PUBLISHED STATE ONTO THE RE-ASSERTED
-        // 1.0, i.e. anything the user typed inside the settle window is
+        // value, i.e. anything the user typed inside the settle window is
         // ratified over, not restored. Confirm against hardware verification
-        // items 6/7 before deciding whether that is acceptable.
+        // item 7 before deciding whether that is acceptable.
         adopt: { [weak self] value, generation in
           Task { @MainActor in
             let delta = controller.adoptExternal(value, generation: generation)

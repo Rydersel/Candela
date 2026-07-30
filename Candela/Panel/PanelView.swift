@@ -95,7 +95,7 @@ struct PanelView: View {
 }
 
 /// Section header for one display: name, an "HDR" state badge, and a trailing
-/// HDR-mode cycling button. Everything is secondary-colored — the slider is
+/// HDR-mode toggle button. Everything is secondary-colored — the slider is
 /// the row's only emphasis, the way Control Center keeps section chrome quiet.
 ///
 /// Badge and button report two different things on purpose: the badge is
@@ -111,17 +111,12 @@ private struct DisplayHeaderRow: View {
   private var modeLabel: String {
     switch controller.hdrMode {
     case .off: return "HDR Off"
-    case .boost: return "HDR Boost"
     case .alwaysOn: return "HDR On"
     }
   }
 
   private var nextMode: HDRMode {
-    switch controller.hdrMode {
-    case .off: return .boost
-    case .boost: return .alwaysOn
-    case .alwaysOn: return .off
-    }
+    controller.hdrMode == .off ? .alwaysOn : .off
   }
 
   var body: some View {
@@ -148,10 +143,10 @@ private struct DisplayHeaderRow: View {
   /// Cycling control, not a menu: the panel is hosted in an `NSMenu` item, and
   /// a SwiftUI `Menu` inside that never opens — the enclosing menu owns event
   /// tracking, so the nested one is dead on arrival (hardware round 1). Plain
-  /// buttons in the panel do work (the footer's quit button), so the three-way
-  /// choice advances Off → Boost → On → Off on click. The label always names
-  /// the CURRENT mode, matching the menu-bar guidance to keep control titles
-  /// short and state-revealing; the tooltip carries the "cycles" affordance.
+  /// buttons in the panel do work (the footer's quit button), so the mode
+  /// toggles Off ↔ On on click. The label always names the CURRENT mode,
+  /// matching the menu-bar guidance to keep control titles short and
+  /// state-revealing; the tooltip carries the "toggles" affordance.
   private var hdrModeButton: some View {
     Button {
       Task { await controller.setHDRMode(nextMode) }
@@ -170,7 +165,7 @@ private struct DisplayHeaderRow: View {
     // is observation-tracked, so the button enables live once the async
     // capability refresh lands.
     .disabled(!controller.supportsHDR)
-    .help("Cycle HDR mode for \(displayName)")
+    .help("Toggle HDR for \(displayName)")
     .accessibilityLabel("\(displayName) HDR mode")
     .accessibilityValue(modeLabel)
   }

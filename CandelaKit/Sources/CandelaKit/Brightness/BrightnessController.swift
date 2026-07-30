@@ -8,13 +8,13 @@ import os
 /// `log show --predicate 'subsystem == "com.rydersel.Candela"'`.
 let dragPerfLog = Logger(subsystem: "com.rydersel.Candela", category: "dragperf")
 
-/// Path-selection/HDR diagnostics (mode changes, boost engage/disengage,
-/// settle completion, cache refreshes).
+/// Path-selection/HDR diagnostics (mode changes, settle completion, cache
+/// refreshes).
 let pathLog = Logger(subsystem: "com.rydersel.Candela", category: "path")
 
 /// The non-DDC brightness endpoints a controller can route through. `hdr`,
 /// `shade` and `gamma` are optional: nil means the feature is degraded
-/// (spec §6) — HDR routing/boost never engages, or the software leg silently
+/// (spec §6) — HDR routing never engages, or the software leg silently
 /// drops. The native applier is required; when the DisplayServices shim is
 /// unavailable the app injects a closure that returns false. The DDC applier
 /// is not held here — it is built per submit from the controller's writer
@@ -63,12 +63,6 @@ public final class BrightnessController {
   /// plain UserDefaults and not observable). Change it via `setHDRMode`.
   public private(set) var hdrMode: HDRMode
 
-  /// True while boost mode holds HDR engaged. Computed (review I8): a stored
-  /// latch would miss externally-toggled HDR; the boost engage arm flips
-  /// `cachedHDRActive` optimistically/synchronously, so the engaging keypress
-  /// already reads true here for its HUD.
-  public var hdrBoostActive: Bool { hdrMode == .boost && cachedHDRActive }
-
   /// The fork's `usesNativeBrightness` gate (dossier §10): an HDR mode is set
   /// AND HDR is currently live. The second half is empirically load-bearing:
   /// with HDR off the MAG341C answers `DisplayServicesSetBrightness` with
@@ -91,8 +85,8 @@ public final class BrightnessController {
   /// toggled HDR (mode still `.off`) still reports engaged.
   public var isHDREngaged: Bool { cachedHDRActive }
 
-  /// HDR state caches, refreshed by async tasks (init, mode changes, boost
-  /// transitions, `noteHDRStateMayHaveChanged`) and only ever *read* on the
+  /// HDR state caches, refreshed by async tasks (init, mode changes,
+  /// `noteHDRStateMayHaveChanged`) and only ever *read* on the
   /// synchronous keypress/drag paths — never awaited there.
   private(set) var cachedHDRActive = false
   private(set) var cachedSupportsHDR = false
@@ -159,16 +153,12 @@ public final class BrightnessController {
   /// HDR settle window (ENGINEERING-NOTES: the display blanks and re-modes
   /// for ~2 s after an HDR toggle). Internal so tests can shrink it.
   @ObservationIgnored var settleDelay: Duration = .seconds(2)
-  /// The in-flight boost engage/disengage task; tests await it to observe
-  /// post-settle state deterministically.
-  @ObservationIgnored private(set) var hdrTransitionTask: Task<Void, Never>?
   /// Monotonic supersession token for `setHDRMode`'s post-await mutations
   /// (final review wave). Comparing `hdrMode` instead is ABA-prone: a parked
   /// `.alwaysOn` call resumes to find the mode back at `.alwaysOn` after an
   /// `.off` → `.alwaysOn` round trip and waves its stale rollback through,
   /// clobbering the transition that actually owns the state. Bumped by every
-  /// transition start (`beginHDRTransition`, plus the fourth door, which has
-  /// no settle window of its own).
+  /// transition start (`beginHDRTransition`).
   @ObservationIgnored private var hdrTransitionGeneration: UInt64 = 0
   /// Init-time HDR cache refresh; tests await it before priming so two
   /// refreshes can't interleave and double-run the C1 clearing.
@@ -241,7 +231,6 @@ public final class BrightnessController {
   }
 
   deinit {
-    hdrTransitionTask?.cancel()
     // Ends the coalescer's drain loop (after any pending write lands) so the
     // coalescer and its task don't outlive the controller.
     coalescer.finishSubmissions()
@@ -306,20 +295,19 @@ public final class BrightnessController {
   }
 
   //  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
-  /// One brightness-key step. The boost state machine consumes the press
-  /// first (fresh presses at the range ends toggle HDR, fork
-  /// `HDRBoost.consumeBrightnessKey`); otherwise one OSD-chiclet step (fork:
+  /// One brightness-key step: one OSD-chiclet step (fork:
   /// `Display.calcNewBrightness`): 16 chiclets, quarter-chiclet bias,
   /// ceil-snap so off-boundary values snap in the direction of travel.
   /// `isFine` steps a quarter chiclet (Opt+Shift). The plain chiclet math
   /// runs on EVERY path (M2 transplant, plan scope decision 2);
   /// `DimmingMath.stepCombined` is wired only behind the app-level
   /// `separateCombinedScale` default (review M39).
+  ///
+  /// `isFresh` (fresh press vs key-repeat) is plumbed from the key path but no
+  /// longer changes stepping — it was the HDR Boost gate's input, kept for the
+  /// media-key semantics that distinguish the two.
   @discardableResult
-  public func step(isUp: Bool, isFine: Bool, isFresh: Bool = true) -> Double {
-    if let boosted = consumeBoostKey(isUp: isUp, isFresh: isFresh) {
-      return boosted
-    }
+  public func step(isUp: Bool, isFine: Bool, isFresh _: Bool = true) -> Double {
     let value: Double
     if prefs.separateCombinedScale, !usesNative, !prefs.forceSoftware,
        !prefs.disableCombinedBrightness {
@@ -396,8 +384,8 @@ public final class BrightnessController {
   }
 
   /// C1 (MUST-HAVE): run on EVERY transition into the native path —
-  /// `setHDRMode(.alwaysOn)`, an externally-toggled HDR discovered by
-  /// `noteHDRStateMayHaveChanged`, and boost engage. Without it the screen
+  /// `setHDRMode(.alwaysOn)` and an externally-toggled HDR discovered by
+  /// `noteHDRStateMayHaveChanged`. Without it the screen
   /// stays dimmed by a gamma table HDR ignores (gamma is broken under HDR)
   /// and the sw dedupe blocks recovery. The fork does this via
   /// `setSwBrightness(1)` on every mode change. Candela deliberately does
@@ -421,9 +409,6 @@ public final class BrightnessController {
   /// controller the source of truth, so Candela pushes the other way. Going
   /// through `applyPaths` (not a bare submit) also writes the echo slot, so the
   /// poller reads the assert back as an echo rather than an external change.
-  ///
-  /// Boost engage asserts `.native(1.0)` from its own settle task and does not
-  /// route through here.
   private func assertNativeEntryBrightness() {
     applyPaths(brightness)
   }
@@ -448,7 +433,6 @@ public final class BrightnessController {
     guard role == .external else { return }
     let previous = hdrMode
     guard mode != previous else { return }
-    let wasEngaged = cachedHDRActive
     prefs.hdrMode = mode
     hdrMode = mode
     pathLog.log("hdrMode \(previous.rawValue) -> \(mode.rawValue) display=\(self.displayID)")
@@ -460,13 +444,11 @@ public final class BrightnessController {
       let generation = hdrTransitionGeneration
       let engaged = await backends.hdr?.setHDR(displayID: displayID, enabled: true) ?? false
       // Supersession guard (fix round 2; generation token final wave): this
-      // body is a bare async func — never stored in `hdrTransitionTask`, so
-      // `beginHDRTransition`'s cancel cannot reach it, and the panel spawns
-      // one unserialized Task per menu selection. If a newer transition
+      // body is a bare async func and the panel spawns one unserialized Task
+      // per mode change, so nothing serializes them. If a newer transition
       // started while we were suspended, it owns the state now; mutating it
       // here (stale rollback, clearing the newer transition's settle flag,
-      // re-firing applyPaths) would be the orphaned-continuation clobber
-      // class T6 closed for the boost tasks.
+      // re-firing applyPaths) would be an orphaned-continuation clobber.
       guard hdrTransitionGeneration == generation else { return }
       if engaged {
         cachedHDRActive = true
@@ -496,8 +478,9 @@ public final class BrightnessController {
         await refreshHDRCaches()
         applyPaths(brightness)
       }
-    } else if previous == .alwaysOn || (previous == .boost && wasEngaged) {
-      // Leaving the native path: drop HDR, wait out the settle, then re-apply
+    } else {
+      // Leaving the native path (`.alwaysOn` → `.off`, the only remaining exit
+      // now that Boost is gone): drop HDR, wait out the settle, then re-apply
       // the current value through the normal path. The duplicate memo is
       // reset first — hardware left HDR at its own brightness level, so the
       // last DDC value we recorded no longer reflects the register (I10).
@@ -515,25 +498,6 @@ public final class BrightnessController {
       coalescer.resetDuplicateState()
       applyPaths(brightness)
       await refreshHDRCaches()
-    } else {
-      // Fourth door into the native path (review fix round 1, minor 3):
-      // `.off → .boost` while HDR is already externally live. "Was native"
-      // must be judged against the PREVIOUS mode — `hdrMode` is already
-      // updated, and `cachedHDRActive` may already be true from an external
-      // toggle — so entering here runs the C1 clearing like every other door.
-      let wasNative = previous != .off && cachedHDRActive
-      // This door has no settle window, so it never calls `beginHDRTransition`
-      // — but it is still a transition, so it takes the token itself: it must
-      // supersede parked older calls, and its own post-await C1 clearing must
-      // not land after a newer transition took over.
-      hdrTransitionGeneration &+= 1
-      let generation = hdrTransitionGeneration
-      await refreshHDRCaches()
-      guard hdrTransitionGeneration == generation else { return }
-      if !wasNative, usesNative {
-        clearSoftwareLeg()
-        assertNativeEntryBrightness()
-      }
     }
   }
 
@@ -578,104 +542,15 @@ public final class BrightnessController {
     applySoftware(sw)
   }
 
-  /// Fork `HDRBoost.consumeBrightnessKey` (HDRControl.swift:86-128): a fresh
-  /// up-press at 100% engages HDR, a fresh down-press at 0 while engaged
-  /// disengages. Returns the HUD value when the press was consumed, nil to
-  /// step normally. Key-repeat NEVER toggles (fork contract) — the gate reads
-  /// only cached state, so it costs nothing on the keypress path.
-  private func consumeBoostKey(isUp: Bool, isFresh: Bool) -> Double? {
-    // The boost gate requires `.external` (Task 10): the built-in never
-    // routes HDR boost, so its steps must never consume a press.
-    guard role == .external, hdrMode == .boost, cachedSupportsHDR, isFresh else { return nil }
-    if !cachedHDRActive, isUp, brightness >= 0.999 {
-      engageBoost()
-      return 1.0
-    }
-    if cachedHDRActive, !isUp, brightness <= 0.001 {
-      disengageBoost()
-      return 1.0
-    }
-    return nil
-  }
-
-  private func engageBoost() {
-    pathLog.log("boost engage display=\(self.displayID)")
-    // Optimistic, synchronous flip (I8): the engaging press's HUD reads
-    // hdrBoostActive == true in this very turn. Reverted with a log if the
-    // spawned setHDR fails.
-    cachedHDRActive = true
-    clearSoftwareLeg() // C1, belt-and-braces
-    beginHDRTransition()
-    // Expected-native slot written at press time, not settle time (I15).
-    echo.withLock { state in
-      state.value = 1.0
-      state.generation += 1
-      state.converging = false
-    }
-    brightness = 1.0
-    persist(1.0)
-    let delay = settleDelay
-    hdrTransitionTask = Task { [weak self] in
-      guard let self, let hdr = self.backends.hdr, !Task.isCancelled else { return }
-      let engaged = await hdr.setHDR(displayID: self.displayID, enabled: true)
-      // Superseded by a newer transition: that transition owns the state now,
-      // so bail before ANY side effect — including the failure revert (the
-      // superseder already rewrote the caches this would clobber).
-      guard !Task.isCancelled else { return }
-      guard engaged else {
-        pathLog.error("boost engage failed: setHDR(true) returned false; reverting display=\(self.displayID)")
-        self.cachedHDRActive = false
-        self.settleInProgress = false
-        self.updateNativeActive()
-        return
-      }
-      // Settle window: the display blanks and re-modes for ~2 s; only then
-      // does the deferred native re-assert land (ENGINEERING-NOTES).
-      try? await Task.sleep(for: delay)
-      guard !Task.isCancelled else { return }
-      self.settleInProgress = false
-      self.submitHardware(.native(1.0), applier: self.backends.applierNative)
-      await self.refreshHDRCaches()
-    }
-  }
-
-  private func disengageBoost() {
-    pathLog.log("boost disengage display=\(self.displayID)")
-    cachedHDRActive = false // synchronous: native routing stops immediately
-    beginHDRTransition()
-    brightness = 1.0
-    persist(1.0)
-    // Hardware left HDR at its own brightness level — the duplicate memo's
-    // last DDC value no longer reflects the register (review I10).
-    coalescer.resetDuplicateState()
-    let delay = settleDelay
-    hdrTransitionTask = Task { [weak self] in
-      guard let self, !Task.isCancelled else { return }
-      _ = await self.backends.hdr?.setHDR(displayID: self.displayID, enabled: false)
-      // Superseded by a newer transition — no further side effects (see
-      // engageBoost's task).
-      guard !Task.isCancelled else { return }
-      // Settle window before the hardware re-apply: a DDC write mid-modeswitch
-      // is lost (ENGINEERING-NOTES).
-      try? await Task.sleep(for: delay)
-      guard !Task.isCancelled else { return }
-      self.settleInProgress = false
-      self.applyPaths(self.brightness)
-      await self.refreshHDRCaches()
-    }
-  }
-
   /// Marks an HDR transition's start: the poller gate drops and any queued
   /// adoption is invalidated (the native leg's echo expectations no longer
   /// hold while the display re-modes).
   ///
-  /// A new transition SUPERSEDES any in-flight settle task (review fix
-  /// round 1): without the cancel, an orphaned engage task would clear
-  /// `settleInProgress` mid-window and fire its deferred `.native(1.0)` after
-  /// the state machine has already moved on (e.g. disengage or a panel
-  /// `setHDRMode(.off)` inside the 2 s window).
+  /// Bumping the generation is what SUPERSEDES an older transition still
+  /// parked on its own await: without it, the older call would clear
+  /// `settleInProgress` mid-window and re-apply against state it no longer
+  /// owns.
   private func beginHDRTransition() {
-    hdrTransitionTask?.cancel()
     hdrTransitionGeneration &+= 1
     settleInProgress = true
     echo.withLock { state in

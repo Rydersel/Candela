@@ -295,19 +295,6 @@ struct PathSelectionTests {
     #expect(await h.hdr!.recordedSetCalls() == [true, false])
   }
 
-  /// Fix round 1, minor 3: the fourth door into the native path —
-  /// `.off → .boost` while HDR is already externally live — must run the C1
-  /// clearing too, or a stale scaled gamma table lingers installed under HDR.
-  @Test func enteringBoostWithExternallyLiveHDRRunsNativeEntryClearing() async {
-    let h = Harness(hdrEnabled: true) // hdrMode .off: external HDR, not native
-    await h.prime()
-    h.controller.setBrightness(0.25) // combined path: gamma dim active
-    #expect(approx(h.gamma.scales.last ?? -1, 0.575))
-    await h.controller.setHDRMode(.boost)
-    #expect(approx(h.gamma.scales.last ?? -1, 1.0))
-    #expect(h.shade.removed.contains(Harness.displayID))
-  }
-
   @Test func externallyToggledHDRRunsNativeEntryClearing() async {
     let h = Harness { prefs, _ in prefs.hdrMode = .alwaysOn }
     await h.prime() // HDR off: combined path
@@ -346,16 +333,6 @@ struct PathSelectionTests {
     await h.controller.setHDRMode(.alwaysOn)
     #expect(h.submitted.last == .native(0.25))
     #expect(h.controller.isNativeActive())
-  }
-
-  /// The fourth door (`.off → .boost` with HDR already externally live) is a
-  /// native entry too, so it asserts alongside its C1 clearing.
-  @Test func boostEntryWithLiveHDRReassertsBrightnessOnNativeLeg() async {
-    let h = Harness(hdrEnabled: true)
-    await h.prime()
-    h.controller.setBrightness(0.25)
-    await h.controller.setHDRMode(.boost)
-    #expect(h.submitted.last == .native(0.25))
   }
 
   // MARK: C2 — refreshFromHardware combined-domain mapping (MUST-HAVE)
@@ -420,126 +397,23 @@ struct PathSelectionTests {
     h.controller.setBrightness(0.75)
     #expect(h.controller.step(isUp: false, isFine: false) == 0.6875) // M2 16-chiclet math
   }
-}
 
-// MARK: - HDR boost state machine
+  /// HDR Boost removed (Ryder, 2026-07-30): a fresh press at either end of the
+  /// range is now just a step. No key path may touch a display's HDR state.
+  @Test func stepAtRangeEndsNeverTogglesHDR() async {
+    let top = Harness()
+    await top.prime()
+    top.controller.setBrightness(1.0)
+    #expect(top.controller.step(isUp: true, isFine: false, isFresh: true) == 1.0)
+    #expect(await top.hdr!.recordedSetCalls().isEmpty)
+    #expect(top.controller.hdrMode == .off)
 
-@MainActor
-@Suite("HDR boost")
-struct HDRBoostTests {
-  @Test func engageFromFullBrightnessOnFreshPressUp() async {
-    let h = Harness { prefs, _ in prefs.hdrMode = .boost }
-    await h.prime()
-    h.controller.setBrightness(1.0)
-    let submittedBefore = h.submitted.count
-    let returned = h.controller.step(isUp: true, isFine: false, isFresh: true)
-    #expect(returned == 1.0)
-    // I8: optimistic cache flip — the engaging press's HUD reads boost active.
-    #expect(h.controller.hdrBoostActive)
-    // I15: native-active only after the settle window (2 s default here).
-    #expect(h.controller.isNativeActive() == false)
-    // Expected-native slot written at press time.
-    #expect(h.controller.expectedNative().value == 1.0)
-    // No immediate hardware submit: the .native(1) re-assert is settle-deferred.
-    #expect(h.submitted.count == submittedBefore)
-    #expect(await eventually { await h.hdr!.recordedSetCalls() == [true] })
-  }
-
-  @Test func engageCompletesAfterSettle() async {
-    let h = Harness(settle: .milliseconds(10)) { prefs, _ in prefs.hdrMode = .boost }
-    await h.prime()
-    h.controller.setBrightness(1.0)
-    h.controller.step(isUp: true, isFine: false, isFresh: true)
-    await h.controller.hdrTransitionTask?.value
-    #expect(h.controller.isNativeActive())
-    #expect(h.submitted.last == .native(1.0))
-    #expect(h.controller.hdrBoostActive)
-  }
-
-  /// Fix round 1, important 1: a new HDR transition supersedes any in-flight
-  /// settle task. Without the cancel, the orphaned engage task clears
-  /// `settleInProgress` mid-exit-window and fires its deferred `.native(1.0)`
-  /// after the state machine has already left the native path.
-  @Test func exitBeforeSettleCancelsEngageTaskAndItsDeferredSubmit() async {
-    let h = Harness { prefs, _ in prefs.hdrMode = .boost } // settle: 2 s default
-    await h.prime()
-    h.controller.setBrightness(1.0)
-    h.controller.step(isUp: true, isFine: false, isFresh: true) // engage
-    // Let the engage task finish its pre-settle phase (setHDR(true)) so the
-    // stray submit could only be stopped by cancellation, not by luck.
-    #expect(await eventually { await h.hdr!.recordedSetCalls() == [true] })
-    h.controller.settleDelay = .milliseconds(10)
-    await h.controller.setHDRMode(.off) // exits boost-engaged; supersedes the settle
-    await h.controller.hdrTransitionTask?.value
-    try? await Task.sleep(for: .milliseconds(50)) // give a stray task time to misfire
-    #expect(!h.submitted.contains(.native(1.0)))
-    #expect(h.controller.isNativeActive() == false)
-    #expect(h.submitted.last == .ddc(raw: 100)) // exit re-applied via the normal path
-  }
-
-  @Test func keyRepeatNeverEngages() async {
-    let h = Harness { prefs, _ in prefs.hdrMode = .boost }
-    await h.prime()
-    h.controller.setBrightness(1.0)
-    _ = h.controller.step(isUp: true, isFine: false, isFresh: false)
-    #expect(await h.hdr!.recordedSetCalls().isEmpty)
-    #expect(h.controller.hdrBoostActive == false)
-  }
-
-  @Test func upBelowFullStepsNormally() async {
-    let h = Harness { prefs, _ in prefs.hdrMode = .boost }
-    await h.prime()
-    h.controller.setBrightness(0.5)
-    #expect(h.controller.step(isUp: true, isFine: false, isFresh: true) == 0.5625)
-    #expect(await h.hdr!.recordedSetCalls().isEmpty)
-  }
-
-  @Test func engageRevertsWhenSetHDRFails() async {
-    let h = Harness(settle: .milliseconds(5)) { prefs, _ in prefs.hdrMode = .boost }
-    await h.prime()
-    await h.hdr!.stubSetResult(false)
-    h.controller.setBrightness(1.0)
-    h.controller.step(isUp: true, isFine: false, isFresh: true)
-    await h.controller.hdrTransitionTask?.value
-    #expect(h.controller.hdrBoostActive == false)
-    #expect(h.controller.isNativeActive() == false)
-  }
-
-  @Test func disengageAtZeroOnFreshPressDown() async {
-    let h = Harness(hdrEnabled: true) { prefs, _ in prefs.hdrMode = .boost }
-    await h.prime()
-    h.controller.setBrightness(0.0) // native path: .native(0)
-    let submittedBefore = h.submitted.count
-    let resetsBefore = h.controller._duplicateResetCount()
-    let returned = h.controller.step(isUp: false, isFine: false, isFresh: true)
-    #expect(returned == 1.0)
-    #expect(h.controller.brightness == 1.0)
-    #expect(h.store.values[Harness.storageKey] == 1.0)
-    // I10: hardware left HDR at its own level — the duplicate memo was reset.
-    #expect(h.controller._duplicateResetCount() == resetsBefore + 1)
-    // The DDC re-assert is settle-deferred: no immediate hardware submit.
-    #expect(h.submitted.count == submittedBefore)
-    #expect(await eventually { await h.hdr!.recordedSetCalls() == [false] })
-  }
-
-  @Test func keyRepeatAtZeroNeverDisengages() async {
-    let h = Harness(hdrEnabled: true) { prefs, _ in prefs.hdrMode = .boost }
-    await h.prime()
-    h.controller.setBrightness(0.0)
-    _ = h.controller.step(isUp: false, isFine: false, isFresh: false)
-    #expect(h.controller.brightness == 0.0)
-    #expect(await h.hdr!.recordedSetCalls().isEmpty)
-  }
-
-  @Test func disengageReassertsThroughNormalPathAfterSettle() async {
-    let h = Harness(hdrEnabled: true, settle: .milliseconds(10)) { prefs, _ in prefs.hdrMode = .boost }
-    await h.prime()
-    h.controller.setBrightness(0.0)
-    h.controller.step(isUp: false, isFine: false, isFresh: true)
-    await h.controller.hdrTransitionTask?.value
-    // Back on the combined path at 1.0: DDC raw 100.
-    #expect(h.submitted.last == .ddc(raw: 100))
-    #expect(h.controller.isNativeActive() == false)
+    let bottom = Harness(hdrEnabled: true) { prefs, _ in prefs.hdrMode = .alwaysOn }
+    await bottom.prime()
+    bottom.controller.setBrightness(0.0)
+    #expect(bottom.controller.step(isUp: false, isFine: false, isFresh: true) == 0.0)
+    #expect(await bottom.hdr!.recordedSetCalls().isEmpty)
+    #expect(bottom.controller.hdrMode == .alwaysOn)
   }
 }
 
@@ -805,27 +679,6 @@ struct BuiltInRoleTests {
     #expect(await pureDDC.ddc.recordedWrites().isEmpty)
   }
 
-  /// `step` on the built-in never consults the boost gate: a fresh up-press
-  /// at 100% (the external engage row) and a fresh down-press at 0 with HDR
-  /// live (the external disengage row) both step normally — the fake
-  /// HDRToggling is never called.
-  @Test func builtInStepNeverConsultsBoostGate() async {
-    let h = Harness(role: .builtIn) { prefs, _ in prefs.hdrMode = .boost }
-    await h.prime()
-    h.controller.setBrightness(1.0)
-    let returned = h.controller.step(isUp: true, isFine: false, isFresh: true)
-    #expect(returned == 1.0)
-    #expect(h.controller.hdrBoostActive == false)
-    #expect(await h.hdr!.recordedSetCalls().isEmpty)
-
-    let low = Harness(hdrEnabled: true, role: .builtIn) { prefs, _ in prefs.hdrMode = .boost }
-    await low.prime()
-    low.controller.setBrightness(0.0)
-    _ = low.controller.step(isUp: false, isFine: false, isFresh: true)
-    #expect(low.controller.brightness == 0.0)
-    #expect(await low.hdr!.recordedSetCalls().isEmpty)
-  }
-
   /// Re-review T10-C: the migration/first-run/park-at-s block is bypassed
   /// entirely. A native read of 0.3 publishes 0.3 (an external role would
   /// park it at s = 0.5), the seeded store value is ignored, and nothing is
@@ -941,20 +794,23 @@ struct HDRModeEngageFailureTests {
     #expect(dark.controller.isHDREngaged == false)
   }
 
-  /// Fix round 2 (Important): `setHDRMode`'s body is a bare async func — never
-  /// stored in `hdrTransitionTask`, so `beginHDRTransition`'s cancel cannot
-  /// reach it, and the panel spawns one unserialized Task per menu selection.
+  /// Fix round 2 (Important): `setHDRMode`'s body is a bare async func and the
+  /// panel spawns one unserialized Task per mode change, so nothing serializes
+  /// overlapping calls but the generation token.
   /// A first `.alwaysOn` call parked on its engage await must NOT, when the
   /// engage finally fails, roll `hdrMode`/`prefs.hdrMode` back to its stale
   /// `previous` or fire `applyPaths` after a second call has retargeted — the
-  /// newer transition owns the state (the orphaned-continuation clobber class
-  /// T6 closed for the boost tasks).
+  /// newer transition owns the state.
+  ///
+  /// With only two modes left, A's `previous` and B's committed mode are both
+  /// `.off`, so the submit count carries the assertion: a stale rollback's
+  /// `applyPaths` is the observable. (The ABA row below still discriminates on
+  /// the mode itself.)
   @Test func overlappingSetHDRModeFailedEngageDoesNotClobberNewerTransition() async {
     let suiteName = "com.rydersel.Candela.tests.path.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
     defer { defaults.removePersistentDomain(forName: suiteName) }
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
-    prefs.hdrMode = .boost // a stale rollback would resurrect this
     let gated = GatedEngageHDR()
     let controller = BrightnessController(
       writer: FakeDDC(readResult: nil),
@@ -982,8 +838,8 @@ struct HDRModeEngageFailureTests {
     let submittedBeforeRelease = submitted.count
 
     // Let the first call's engage fail. Its rollback must observe the
-    // retarget and bail: mode/prefs stay .off (not the stale .boost), and no
-    // extra applyPaths fires against state the newer transition owns.
+    // retarget and bail: no extra applyPaths fires against state the newer
+    // transition owns.
     await gated.release()
     await first.value
     #expect(controller.hdrMode == .off)
@@ -1002,7 +858,6 @@ struct HDRModeEngageFailureTests {
     let defaults = UserDefaults(suiteName: suiteName)!
     defer { defaults.removePersistentDomain(forName: suiteName) }
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
-    prefs.hdrMode = .boost // a stale rollback would resurrect this
     // Only the FIRST engage is gated (and fails); the third transition's
     // engage passes straight through and succeeds.
     let gated = GatedEngageHDR(gateFirstEngageOnly: true)

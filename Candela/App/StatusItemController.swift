@@ -141,7 +141,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         let config = KeyRouterConfig(
           useFineScaleBrightness: UserDefaults.standard.bool(forKey: "useFineScaleBrightness")
         )
-        // isFresh feeds the HDR boost gate: key-repeat never toggles HDR.
+        // isFresh separates a fresh press from key-repeat for the engine.
         executor.execute(KeyRouter.route(press, config: config), isFresh: !press.isRepeat)
       }
     }

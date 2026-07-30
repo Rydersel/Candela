@@ -25,8 +25,6 @@ struct DisplayPrefsTests {
   @Test func hdrModeRoundTrips() {
     withSuite { defaults in
       let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
-      prefs.hdrMode = .boost
-      #expect(prefs.hdrMode == .boost)
       prefs.hdrMode = .alwaysOn
       #expect(prefs.hdrMode == .alwaysOn)
       prefs.hdrMode = .off
@@ -86,7 +84,7 @@ struct DisplayPrefsTests {
     withSuite { defaults in
       let first = DisplayPrefs(defaults: defaults, persistenceKey: "one")
       let second = DisplayPrefs(defaults: defaults, persistenceKey: "two")
-      first.hdrMode = .boost
+      first.hdrMode = .alwaysOn
       first.combinedSwitchingPoint = 4
       #expect(second.hdrMode == .off)
       #expect(second.combinedSwitchingPoint == 0)
@@ -101,11 +99,30 @@ struct DisplayPrefsTests {
     }
   }
 
+  /// HDR Boost was removed 2026-07-30; its raw value 1 is retired, so a display
+  /// that stored it decodes to `.off` through the unknown-value fallback.
+  @Test func storedBoostRawValueMigratesToOff() {
+    withSuite { defaults in
+      defaults.set(1, forKey: "hdrMode.pk")
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      #expect(prefs.hdrMode == .off)
+    }
+  }
+
+  /// The counterpart the migration has to preserve: raw values stayed stable,
+  /// so a stored `alwaysOn` survives the removal untouched.
+  @Test func storedAlwaysOnRawValueSurvivesTheBoostRemoval() {
+    withSuite { defaults in
+      defaults.set(2, forKey: "hdrMode.pk")
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      #expect(prefs.hdrMode == .alwaysOn)
+    }
+  }
+
   @Test func hdrModeIsExhaustivelyEnumerated() {
-    #expect(HDRMode.allCases == [.off, .boost, .alwaysOn])
+    #expect(HDRMode.allCases == [.off, .alwaysOn])
     #expect(HDRMode.off.rawValue == 0)
-    #expect(HDRMode.boost.rawValue == 1)
-    #expect(HDRMode.alwaysOn.rawValue == 2)
+    #expect(HDRMode.alwaysOn.rawValue == 2) // 1 is the retired `boost`
   }
 
   @Test func storedSwitchingPointFeedsTheSwitchingValue() {

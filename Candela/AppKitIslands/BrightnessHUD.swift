@@ -11,12 +11,12 @@ import AppKit
 protocol BrightnessHUDPresenting: AnyObject {
   // Protocol requirements cannot carry default arguments, so the requirement
   // spells out the full list and the extension below supplies the short form.
-  @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double, nameSuffix: String?, rainbow: Bool)
+  @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double, nameSuffix: String?)
 }
 
 extension BrightnessHUDPresenting {
   @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double) {
-    self.showBrightness(displayID: displayID, name: name, value: value, nameSuffix: nil, rainbow: false)
+    self.showBrightness(displayID: displayID, name: name, value: value, nameSuffix: nil)
   }
 }
 
@@ -59,7 +59,6 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     let leftIcon: NSImageView
     let rightIcon: NSImageView
     let fillBox: NSBox
-    let rainbowLayer: CALayer
   }
 
   private static let hudSize = NSSize(width: 314, height: 62)
@@ -82,13 +81,13 @@ final class BrightnessHUD: BrightnessHUDPresenting {
 
   // MARK: - BrightnessHUDPresenting
 
-  func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double, nameSuffix: String?, rainbow: Bool) {
-    self.showHUD(displayID: displayID, type: .brightness, name: name, value: Float(value), nameSuffix: nameSuffix, rainbow: rainbow)
+  func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double, nameSuffix: String?) {
+    self.showHUD(displayID: displayID, type: .brightness, name: name, value: Float(value), nameSuffix: nameSuffix)
   }
 
   // MARK: - Presentation
 
-  func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String, value: Float, maxValue: Float = 1, nameSuffix: String? = nil, rainbow: Bool = false) {
+  func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String, value: Float, maxValue: Float = 1, nameSuffix: String? = nil) {
     guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
       return
     }
@@ -101,7 +100,6 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     }
     let title = name.isEmpty ? screen.localizedName : name
     hud.nameLabel.stringValue = title + (nameSuffix ?? "")
-    hud.rainbowLayer.isHidden = !rainbow
     hud.leftIcon.image = Self.symbolImage(type.leftSymbolName, pointSize: Self.leftIconSize - 3)
     hud.rightIcon.image = Self.symbolImage(type.rightSymbolName, pointSize: Self.rightIconSize - 3)
     let normalized = CGFloat(min(max(maxValue > 0 ? value / maxValue : 0, 0), 1))
@@ -201,52 +199,11 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     fillBox.cornerRadius = Self.barHeight / 2
     effectView.addSubview(fillBox)
 
-    let rainbowLayer = Self.makeRainbowBorderLayer(bounds: NSRect(origin: .zero, size: size))
-    rainbowLayer.isHidden = true
-    effectView.layer?.addSublayer(rainbowLayer)
-
     // Do not drop this line: without it the panel has no content view and the HUD is invisible
     // (see docs/ENGINEERING-NOTES.md, "OSD / HUD").
     panel.contentView = rootView
 
-    return HUD(panel: panel, nameLabel: nameLabel, leftIcon: leftIcon, rightIcon: rightIcon, fillBox: fillBox, rainbowLayer: rainbowLayer)
-  }
-
-  /// An animated rainbow ring hugging the pill's border: a rotating conic gradient masked to a
-  /// rounded-rect stroke. Used by the HDR-boost mode (Milestone 3); hidden otherwise.
-  private static func makeRainbowBorderLayer(bounds: NSRect) -> CALayer {
-    let container = CALayer()
-    container.frame = bounds
-
-    let gradient = CAGradientLayer()
-    gradient.type = .conic
-    let side = max(bounds.width, bounds.height) * 1.2
-    gradient.frame = NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side)
-    gradient.startPoint = CGPoint(x: 0.5, y: 0.5)
-    gradient.endPoint = CGPoint(x: 1, y: 0.5)
-    gradient.colors = [
-      NSColor.systemRed.cgColor, NSColor.systemOrange.cgColor, NSColor.systemYellow.cgColor,
-      NSColor.systemGreen.cgColor, NSColor.systemTeal.cgColor, NSColor.systemBlue.cgColor,
-      NSColor.systemPurple.cgColor, NSColor.systemPink.cgColor, NSColor.systemRed.cgColor,
-    ]
-    container.addSublayer(gradient)
-
-    let ring = CAShapeLayer()
-    let lineWidth: CGFloat = 3
-    ring.path = CGPath(roundedRect: bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2), cornerWidth: self.cornerRadius - lineWidth / 2, cornerHeight: self.cornerRadius - lineWidth / 2, transform: nil)
-    ring.fillColor = NSColor.clear.cgColor
-    ring.strokeColor = NSColor.white.cgColor
-    ring.lineWidth = lineWidth
-    container.mask = ring
-
-    let spin = CABasicAnimation(keyPath: "transform.rotation.z")
-    spin.fromValue = 0
-    spin.toValue = 2 * CGFloat.pi
-    spin.duration = 2.5
-    spin.repeatCount = .infinity
-    gradient.add(spin, forKey: "spin")
-
-    return container
+    return HUD(panel: panel, nameLabel: nameLabel, leftIcon: leftIcon, rightIcon: rightIcon, fillBox: fillBox)
   }
 
   private func fadeOut(displayID: CGDirectDisplayID) {

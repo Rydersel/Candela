@@ -4,7 +4,7 @@ import Foundation
 
 /// How a `BrightnessController` routes its display's brightness (Task 10).
 /// `.builtIn` is a hard short-circuit: always the native leg, no DDC, no
-/// software/combined routing, no HDR boost gate, and no persistence — macOS
+/// software/combined routing, no HDR machinery, and no persistence — macOS
 /// owns built-in brightness across launches.
 public enum DisplayRole: Sendable {
   case external

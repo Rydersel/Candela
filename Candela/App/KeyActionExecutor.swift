@@ -17,28 +17,21 @@ final class KeyActionExecutor {
     self.hud = hud
   }
 
-  /// `isFresh` distinguishes a fresh keypress from key-repeat (review I18):
-  /// the HDR boost state machine toggles only on fresh presses at the range
-  /// ends, never on repeats.
+  /// `isFresh` distinguishes a fresh keypress from key-repeat (review I18) and
+  /// is plumbed down to `step` for the media-key semantics that separate the
+  /// two.
   func execute(_ action: KeyAction, isFresh: Bool = true) {
     switch action {
     case let .stepBrightness(isUp, isFine, scope):
       switch scope {
       case .allExternal:
         for (id, name, newValue) in model.stepBrightnessAllExternal(isUp: isUp, isFine: isFine, isFresh: isFresh) {
-          // Read after the step: the engaging keypress already reports boost
-          // active, so the HUD it triggers is the one that gets the rainbow.
-          let boosted = model.displays.first { $0.id == id }?.controller.hdrBoostActive ?? false
-          hud?.showBrightness(
-            displayID: id, name: name, value: newValue,
-            nameSuffix: boosted ? " · HDR" : nil, rainbow: boosted
-          )
+          hud?.showBrightness(displayID: id, name: name, value: newValue)
         }
       case .builtInOnly:
         // M2 deferral closed (Task 10): Ctrl-directed steps drive the
         // built-in panel through its native-path controller. HUD on the
-        // built-in display; no HDR suffix/rainbow — the built-in never
-        // routes boost.
+        // built-in display.
         if let (id, name, newValue) = model.stepBrightnessBuiltIn(
           isUp: isUp, isFine: isFine, isFresh: isFresh
         ) {
