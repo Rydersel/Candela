@@ -12,11 +12,19 @@ protocol BrightnessHUDPresenting: AnyObject {
   // Protocol requirements cannot carry default arguments, so the requirement
   // spells out the full list and the extension below supplies the short form.
   @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double, nameSuffix: String?)
+  /// Generic pill (M4): volume/contrast/mute. Exposed through the protocol so
+  /// the executor talks to a presenter, not the concrete panel.
+  @MainActor func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String,
+                          value: Float, maxValue: Float, nameSuffix: String?)
 }
 
 extension BrightnessHUDPresenting {
   @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double) {
     self.showBrightness(displayID: displayID, name: name, value: value, nameSuffix: nil)
+  }
+
+  @MainActor func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String, value: Float) {
+    self.showHUD(displayID: displayID, type: type, name: name, value: value, maxValue: 1, nameSuffix: nil)
   }
 }
 
