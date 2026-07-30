@@ -95,6 +95,24 @@ actor FakeDDC: DDCWriting {
   #expect(writes.allSatisfy { $0.command == VCP.brightness })
 }
 
+/// Consecutive submissions carrying the same raw value must produce a single
+/// hardware write (the value is already on the wire) while still completing
+/// their generations. Duplicate re-sends saturate the DDC/I2C bus during a
+/// drag and the monitor defers applying brightness until the bus quiets —
+/// the round-2 hardware defect.
+@Test func coalescerSkipsDuplicateValues() async {
+  let fake = FakeDDC()
+  let coalescer = BrightnessWriteCoalescer(writer: fake)
+  coalescer.submit(.init(value: 44, generation: 1))
+  await coalescer.waitUntilCompleted(through: 1)
+  coalescer.submit(.init(value: 44, generation: 2)) // duplicate: no new write
+  await coalescer.waitUntilCompleted(through: 2) // but its generation completes
+  coalescer.submit(.init(value: 45, generation: 3))
+  await coalescer.waitUntilCompleted(through: 3)
+  let writes = await fake.recordedWrites()
+  #expect(writes.map(\.value) == [44, 45])
+}
+
 /// A wait issued before its write has drained must suspend until that write
 /// (or a newer one superseding it) lands — never resolve early against an
 /// idle-looking coalescer.

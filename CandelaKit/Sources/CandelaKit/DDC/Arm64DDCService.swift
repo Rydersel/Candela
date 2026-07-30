@@ -1,4 +1,5 @@
 import CandelaPrivateAPIs
+import os
 
 /// Serializes DDC I/O for one display's IOAVService (spec §5: serial per-display actor).
 public actor Arm64DDCService: DDCWriting {
@@ -19,7 +20,11 @@ public actor Arm64DDCService: DDCWriting {
   }
 
   public func write(command: UInt8, value: UInt16) async -> Bool {
-    Arm64DDC.write(service: box.service, command: command, value: value)
+    // start/end pair also exposes the per-transaction duration (~30 ms).
+    dragPerfLog.log("ddc.write.start value=\(value)")
+    let ok = Arm64DDC.write(service: box.service, command: command, value: value)
+    dragPerfLog.log("ddc.write.end value=\(value) ok=\(ok)")
+    return ok
   }
 
   public func read(command: UInt8) async -> (current: UInt16, max: UInt16)? {

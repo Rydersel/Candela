@@ -1,4 +1,11 @@
 import Observation
+import os
+
+/// Drag-perf diagnostics: one log line per post-coalescing pipeline stage
+/// (coalescer receipt, DDC write start/end). Cheap (~30 Hz during a drag) and
+/// the fastest way to localize a "slider moves but hardware doesn't" report:
+/// `log show --predicate 'subsystem == "com.rydersel.Candela"'`.
+let dragPerfLog = Logger(subsystem: "com.rydersel.Candela", category: "dragperf")
 
 /// Single source of truth for one display's brightness (spec §5: every input
 /// funnels through here; every surface renders from `brightness`).
@@ -76,6 +83,7 @@ actor BrightnessWriteCoalescer {
 
   private let writer: any DDCWriting
   private nonisolated let continuation: AsyncStream<PendingWrite>.Continuation
+  private var lastWrittenValue: UInt16?
   private var completedGeneration: UInt64 = 0
   private var waiters: [(generation: UInt64, continuation: CheckedContinuation<Void, Never>)] = []
 
@@ -111,7 +119,21 @@ actor BrightnessWriteCoalescer {
 
   private func drain(_ stream: AsyncStream<PendingWrite>) async {
     for await write in stream {
-      _ = await writer.write(command: VCP.brightness, value: write.value)
+      dragPerfLog.log("coalescer.receive raw=\(write.value) gen=\(write.generation)")
+      // Never rewrite the value already on the wire (mirrors the MonitorControl
+      // fork's `writeDDCLastSavedValue` guard). Measured on hardware (MAG341C,
+      // task-7 fix round 2): a drag produces gesture ticks faster than the
+      // ~30 ms DDC transaction, so without this guard the drain re-sends the
+      // same raw value back-to-back, saturating the I2C bus for the whole
+      // drag — and the monitor defers *applying* VCP brightness until the bus
+      // quiets, i.e. nothing visibly changes until mouseup even though every
+      // write returns success. Skipping duplicates restores idle gaps whenever
+      // the value holds still — the traffic shape the fork produces and the
+      // monitor demonstrably tracks live.
+      if write.value != lastWrittenValue {
+        _ = await writer.write(command: VCP.brightness, value: write.value)
+        lastWrittenValue = write.value
+      }
       completedGeneration = max(completedGeneration, write.generation)
       resumeSatisfiedWaiters()
     }
