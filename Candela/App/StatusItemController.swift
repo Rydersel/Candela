@@ -27,6 +27,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   // as properties: the tap's thread and the executor must outlive launch.
   private var keyActionExecutor: KeyActionExecutor?
   private var mediaKeyTap: MediaKeyEventTap?
+  /// Stored (review M23) so the topology loop can `cleanupDisplay` departed
+  /// displays' HUD panels; the executor shares this same instance.
+  private let hud = BrightnessHUD()
+  /// Sleep/wake observation tokens (block-based observers stay registered
+  /// only while retained). Never removed — fork parity, app-lifetime.
+  private var sleepWakeObservers: [any NSObjectProtocol] = []
   private let log = Logger(subsystem: "com.rydersel.Candela", category: "keys")
 
   func applicationDidFinishLaunching(_: Notification) {
@@ -46,10 +52,47 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     item.menu = menu
     statusItem = item
 
+    // Reconfiguration intake: synchronous registration on the main thread is
+    // load-bearing — CG delivers the callback on the registering thread's
+    // run loop, and only the main thread has one that lives forever.
+    model.displayManager.activate()
+
+    // Sleep/wake stay app-side (NSWorkspace is AppKit) and forward to the
+    // engine's epoch intake. Both notification pairs, like the fork: a
+    // display sleep and a system sleep must each gate DDC writes.
+    let workspaceCenter = NSWorkspace.shared.notificationCenter
+    let displayManager = model.displayManager
+    for name in [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification] {
+      sleepWakeObservers.append(workspaceCenter.addObserver(forName: name, object: nil, queue: nil) { _ in
+        displayManager.noteSleep() // nonisolated + synchronous: safe from any queue
+      })
+    }
+    for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
+      sleepWakeObservers.append(workspaceCenter.addObserver(forName: name, object: nil, queue: nil) { _ in
+        displayManager.noteWake()
+      })
+    }
+
+    // Topology consumption loop — the stream's single consumer: after each
+    // debounced reconfiguration (or post-wake sober), re-discover displays,
+    // re-arm the media-key tap, and drop departed displays' HUD panels.
+    Task { [weak self] in
+      guard let stream = self?.model.displayManager.topologyChanges else { return }
+      for await _ in stream {
+        guard let self else { return }
+        // Task 6 augments this loop (handleReconfigure + HDR cache refresh)
+        let departed = await self.model.refresh()
+        self.refreshTapConfig()
+        for id in departed {
+          self.hud.cleanupDisplay(id)
+        }
+      }
+    }
+
     // Media keys: the tap delivers on its own thread; hop to the main actor,
     // route (pure, cheap), execute. Strong captures are fine — executor and
     // tap both live for the app's lifetime.
-    let executor = KeyActionExecutor(model: model, hud: BrightnessHUD())
+    let executor = KeyActionExecutor(model: model, hud: hud)
     keyActionExecutor = executor
     let tap = MediaKeyEventTap { press in
       Task { @MainActor in
@@ -74,9 +117,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // Warm the display list before the first open. Menu tracking can hold the
     // main run loop in event-tracking mode, which starves main-actor task
     // execution (see BrightnessController.setBrightness), so a refresh cannot
-    // be relied on to land while the menu is open. Launch here and close
-    // below are therefore the only two refresh triggers; AppModel.refresh()
-    // coalesces overlapping calls, so they never race the DDC bus.
+    // be relied on to land while the menu is open. Launch here, menu close
+    // below, and the topology loop above are therefore the only refresh
+    // triggers; AppModel.refresh() coalesces overlapping calls, so they
+    // never race the DDC bus.
     Task {
       await model.refresh()
       refreshTapConfig()
