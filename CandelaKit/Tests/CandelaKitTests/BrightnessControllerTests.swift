@@ -102,7 +102,10 @@ actor FakeDDC: DDCWriting {
   let controller = makeLegacyPathController(writer: fake)
   await controller.refreshFromHardware()
   #expect(controller.maxDDCValue == 120)
-  #expect(abs(controller.brightness - 0.25) < 0.001)
+  // M4: the read mirrors the write through the tuning's effective max, which
+  // clamps a read max above 100 to the fork's DDC_MAX_DETECT_LIMIT — so 30
+  // maps over [0, 100], not [0, 120] (old pre-tuning expectation: 0.25).
+  #expect(abs(controller.brightness - 0.3) < 0.001)
 }
 
 @MainActor

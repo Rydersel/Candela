@@ -213,11 +213,13 @@ public final class BrightnessController {
         // minimum" on the combined scale.
         initial = 1.0
       }
-      if !prefs.disableCombinedBrightness, initial < s {
+      if !prefs.disableCombinedBrightness, !prefs.forceSoftware, initial < s {
         // Park-at-s, every launch (review I12): the termination hook removes
         // software dimming at quit, so restoring a software-zone value would
         // show un-dimmed glass under a low slider. Publish only — the store
-        // keeps the saved value.
+        // keeps the saved value. forceSoftware displays are exempt (backlog
+        // #4): their whole range IS the software leg, so the rationale never
+        // applies and the park would silently raise brightness each launch.
         initial = s
       }
       brightness = initial
@@ -251,11 +253,26 @@ public final class BrightnessController {
     // Under the native path the DDC brightness register is locked by the
     // monitor (and unreadable); adopting it would corrupt combined state.
     guard !usesNative else { return }
-    guard let result = await writer.read(command: VCP.brightness), result.max > 0 else {
+    let tuning = prefs.tuning(for: .brightness)
+    guard !tuning.unavailableDDC else { return }
+    // Fork parity: reads use only the FIRST remap code.
+    guard let result = await writer.read(command: tuning.remapCodes.first ?? VCP.brightness),
+          result.max > 0
+    else {
       return
     }
     maxDDCValue = result.max
-    let raw = Double(min(result.current, result.max)) / Double(result.max)
+    // Read mirrors write (fork convDDCToValue): un-apply curve/invert through
+    // the same tuning, or a tuned readable panel adopts a corrupted
+    // brightness at every launch. Identical to M3 when the tuning is unset
+    // (curve 1.0, no invert, min 0, effective max = read max clamped to 100).
+    let raw = DimmingMath.ddcToValue(
+      result.current,
+      minDDC: Double(tuning.minDDCOverride),
+      maxDDC: Double(tuning.effectiveMaxDDC(readMax: Int(result.max))),
+      curve: tuning.curveMultiplier,
+      invert: tuning.invert
+    )
     if !prefs.disableCombinedBrightness {
       // C2 (dossier §7): a readable panel's DDC value lives in the upper
       // [s, 1] band of the combined scale — adopting current/max directly
@@ -313,12 +330,13 @@ public final class BrightnessController {
        !prefs.disableCombinedBrightness {
       value = DimmingMath.stepCombined(current: brightness, isUp: isUp, isFine: isFine)
     } else {
-      var stepSize: Double = (isUp ? 1 : -1) / 16.0
-      let delta = stepSize / 4
-      if isFine {
-        stepSize = delta
-      }
-      value = min(max(0, (((brightness + delta) / stepSize).rounded(.up)) * stepSize), 1)
+      // D3: one shared 16-chiclet step for brightness/volume/contrast
+      // (DimmingMath.stepValue). Fine is flat ±0.01 — fork PARITY for plain
+      // DDC externals (the fork's calcNewValue path, OtherDisplay.swift:509);
+      // it diverges from Candela M2's every-path grid math, and from the
+      // fork only on the native/forceSoftware paths, where the fork
+      // grid-snaps fine at 1/64 (0.0156 vs 0.01 per press — imperceptible).
+      value = DimmingMath.stepValue(current: brightness, isUp: isUp, isFine: isFine)
     }
     setBrightness(value)
     return value
@@ -344,19 +362,44 @@ public final class BrightnessController {
       applySoftware(value)
       return
     }
+    let tuning = prefs.tuning(for: .brightness)
     if !prefs.disableCombinedBrightness {
       let split = DimmingMath.combinedSplit(value: value, switching: switchingValue)
-      submitHardware(
-        .ddc(raw: DimmingMath.valueToDDC(split.ddc, minDDC: 0, maxDDC: Double(maxDDCValue))),
-        applier: DDCBrightnessApplier(writer: writer)
-      )
+      if !tuning.unavailableDDC {
+        submitHardware(
+          .ddc(raw: brightnessRaw(split.ddc, tuning: tuning)),
+          applier: brightnessApplier(tuning: tuning)
+        )
+      }
       applySoftware(split.sw)
       return
     }
+    guard !tuning.unavailableDDC else { return }
     submitHardware(
-      .ddc(raw: DimmingMath.valueToDDC(value, minDDC: 0, maxDDC: Double(maxDDCValue))),
-      applier: DDCBrightnessApplier(writer: writer)
+      .ddc(raw: brightnessRaw(value, tuning: tuning)),
+      applier: brightnessApplier(tuning: tuning)
     )
+  }
+
+  /// M4 tuning on the DDC leg: min/max overrides, 9-step curve, invert. The
+  /// effective max clamps the read max to 100 (fork DDC_MAX_DETECT_LIMIT) —
+  /// with the default read max of 100 this is byte-identical to M3.
+  private func brightnessRaw(_ portion: Double, tuning: CommandTuning) -> UInt16 {
+    DimmingMath.valueToDDC(
+      portion,
+      minDDC: Double(tuning.minDDCOverride),
+      maxDDC: Double(tuning.effectiveMaxDDC(readMax: Int(maxDDCValue))),
+      curve: tuning.curveMultiplier,
+      invert: tuning.invert
+    )
+  }
+
+  /// `DDCBrightnessApplier` stays for the untuned leg (D1); a remap forces
+  /// the command-generic applier because the write must fan out to every code.
+  private func brightnessApplier(tuning: CommandTuning) -> any BrightnessApplying {
+    tuning.remapCodes.isEmpty
+      ? DDCBrightnessApplier(writer: writer)
+      : DDCCommandApplier(writer: writer, command: VCP.brightness, remapCodes: tuning.remapCodes)
   }
 
   private func submitHardware(_ target: HardwareTarget, applier: any BrightnessApplying) {
@@ -437,6 +480,29 @@ public final class BrightnessController {
     hdrMode = mode
     pathLog.log("hdrMode \(previous.rawValue) -> \(mode.rawValue) display=\(self.displayID)")
     if mode == .alwaysOn {
+      if cachedHDRActive {
+        // Backlog #8: HDR is already live (externally toggled while mode was
+        // .off) — no setHDR, no settle window (the state change already
+        // happened; a 2 s window would just gate the poller off for nothing).
+        // Generation bump at door entry (R3): a user-initiated transition
+        // START supersedes any parked stale continuation; deliberately NOT
+        // beginHDRTransition() — there is no re-mode, so settleInProgress
+        // stays untouched.
+        clearSoftwareLeg()
+        hdrTransitionGeneration &+= 1
+        let generation = hdrTransitionGeneration
+        await refreshHDRCaches()
+        guard hdrTransitionGeneration == generation else { return }
+        if cachedHDRActive {
+          assertNativeEntryBrightness()
+          return
+        }
+        // Stale cache (R3): HDR was externally disabled between the panel's
+        // last refresh and this call. Fall through to the normal engage arm
+        // below — committing `.alwaysOn` without engaging (and with no
+        // rollback) would persist a lying mode. clearSoftwareLeg re-runs
+        // there harmlessly.
+      }
       // Entering the native path: C1 clearing, then engage HDR and hold the
       // poller off until the settle window ends.
       clearSoftwareLeg()
@@ -476,6 +542,7 @@ public final class BrightnessController {
         hdrMode = previous
         settleInProgress = false
         await refreshHDRCaches()
+        guard hdrTransitionGeneration == generation else { return } // backlog #1: same fence as the success arm
         applyPaths(brightness)
       }
     } else {
