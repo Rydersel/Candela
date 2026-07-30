@@ -1,0 +1,28 @@
+name: Candela
+options:
+  deploymentTarget:
+    macOS: "14.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+targets:
+  Candela:
+    type: application
+    platform: macOS
+    sources: [Candela]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rydersel.Candela
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+    info:
+      path: Candela/Info.plist
+      properties:
+        LSUIElement: true
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSHumanReadableCopyright: "MIT licensed."

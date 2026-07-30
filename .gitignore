@@ -1,0 +1,5 @@
+.DS_Store
+/Candela.xcodeproj
+/DerivedData
+.build/
+*.xcuserstate
