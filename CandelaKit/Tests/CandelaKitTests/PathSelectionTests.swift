@@ -283,6 +283,19 @@ struct PathSelectionTests {
     #expect(await h.hdr!.recordedSetCalls() == [true, false])
   }
 
+  /// Fix round 1, minor 3: the fourth door into the native path —
+  /// `.off → .boost` while HDR is already externally live — must run the C1
+  /// clearing too, or a stale scaled gamma table lingers installed under HDR.
+  @Test func enteringBoostWithExternallyLiveHDRRunsNativeEntryClearing() async {
+    let h = Harness(hdrEnabled: true) // hdrMode .off: external HDR, not native
+    await h.prime()
+    h.controller.setBrightness(0.25) // combined path: gamma dim active
+    #expect(approx(h.gamma.scales.last ?? -1, 0.575))
+    await h.controller.setHDRMode(.boost)
+    #expect(approx(h.gamma.scales.last ?? -1, 1.0))
+    #expect(h.shade.removed.contains(Harness.displayID))
+  }
+
   @Test func externallyToggledHDRRunsNativeEntryClearing() async {
     let h = Harness { prefs, _ in prefs.hdrMode = .alwaysOn }
     await h.prime() // HDR off: combined path
@@ -390,6 +403,27 @@ struct HDRBoostTests {
     #expect(h.controller.isNativeActive())
     #expect(h.submitted.last == .native(1.0))
     #expect(h.controller.hdrBoostActive)
+  }
+
+  /// Fix round 1, important 1: a new HDR transition supersedes any in-flight
+  /// settle task. Without the cancel, the orphaned engage task clears
+  /// `settleInProgress` mid-exit-window and fires its deferred `.native(1.0)`
+  /// after the state machine has already left the native path.
+  @Test func exitBeforeSettleCancelsEngageTaskAndItsDeferredSubmit() async {
+    let h = Harness { prefs, _ in prefs.hdrMode = .boost } // settle: 2 s default
+    await h.prime()
+    h.controller.setBrightness(1.0)
+    h.controller.step(isUp: true, isFine: false, isFresh: true) // engage
+    // Let the engage task finish its pre-settle phase (setHDR(true)) so the
+    // stray submit could only be stopped by cancellation, not by luck.
+    #expect(await eventually { await h.hdr!.recordedSetCalls() == [true] })
+    h.controller.settleDelay = .milliseconds(10)
+    await h.controller.setHDRMode(.off) // exits boost-engaged; supersedes the settle
+    await h.controller.hdrTransitionTask?.value
+    try? await Task.sleep(for: .milliseconds(50)) // give a stray task time to misfire
+    #expect(!h.submitted.contains(.native(1.0)))
+    #expect(h.controller.isNativeActive() == false)
+    #expect(h.submitted.last == .ddc(raw: 100)) // exit re-applied via the normal path
   }
 
   @Test func keyRepeatNeverEngages() async {

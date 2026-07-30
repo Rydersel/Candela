@@ -400,7 +400,16 @@ public final class BrightnessController {
       applyPaths(brightness)
       await refreshHDRCaches()
     } else {
+      // Fourth door into the native path (review fix round 1, minor 3):
+      // `.off → .boost` while HDR is already externally live. "Was native"
+      // must be judged against the PREVIOUS mode — `hdrMode` is already
+      // updated, and `cachedHDRActive` may already be true from an external
+      // toggle — so entering here runs the C1 clearing like every other door.
+      let wasNative = previous != .off && cachedHDRActive
       await refreshHDRCaches()
+      if !wasNative, usesNative {
+        clearSoftwareLeg()
+      }
     }
   }
 
@@ -472,8 +481,12 @@ public final class BrightnessController {
     persist(1.0)
     let delay = settleDelay
     hdrTransitionTask = Task { [weak self] in
-      guard let self, let hdr = self.backends.hdr else { return }
+      guard let self, let hdr = self.backends.hdr, !Task.isCancelled else { return }
       let engaged = await hdr.setHDR(displayID: self.displayID, enabled: true)
+      // Superseded by a newer transition: that transition owns the state now,
+      // so bail before ANY side effect — including the failure revert (the
+      // superseder already rewrote the caches this would clobber).
+      guard !Task.isCancelled else { return }
       guard engaged else {
         pathLog.error("boost engage failed: setHDR(true) returned false; reverting display=\(self.displayID)")
         self.cachedHDRActive = false
@@ -502,8 +515,11 @@ public final class BrightnessController {
     coalescer.resetDuplicateState()
     let delay = settleDelay
     hdrTransitionTask = Task { [weak self] in
-      guard let self else { return }
+      guard let self, !Task.isCancelled else { return }
       _ = await self.backends.hdr?.setHDR(displayID: self.displayID, enabled: false)
+      // Superseded by a newer transition — no further side effects (see
+      // engageBoost's task).
+      guard !Task.isCancelled else { return }
       // Settle window before the hardware re-apply: a DDC write mid-modeswitch
       // is lost (ENGINEERING-NOTES).
       try? await Task.sleep(for: delay)
@@ -517,7 +533,14 @@ public final class BrightnessController {
   /// Marks an HDR transition's start: the poller gate drops and any queued
   /// adoption is invalidated (the native leg's echo expectations no longer
   /// hold while the display re-modes).
+  ///
+  /// A new transition SUPERSEDES any in-flight settle task (review fix
+  /// round 1): without the cancel, an orphaned engage task would clear
+  /// `settleInProgress` mid-window and fire its deferred `.native(1.0)` after
+  /// the state machine has already moved on (e.g. disengage or a panel
+  /// `setHDRMode(.off)` inside the 2 s window).
   private func beginHDRTransition() {
+    hdrTransitionTask?.cancel()
     settleInProgress = true
     echo.withLock { state in
       state.value = nil
