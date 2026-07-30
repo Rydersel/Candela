@@ -55,6 +55,7 @@ enum HUDType {
 final class BrightnessHUD: BrightnessHUDPresenting {
   private struct HUD {
     let panel: NSPanel
+    let effectView: NSVisualEffectView
     let nameLabel: NSTextField
     let leftIcon: NSImageView
     let rightIcon: NSImageView
@@ -120,6 +121,11 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     var fillFrame = hud.fillBox.frame
     fillFrame.size.width = max(Self.barHeight, Self.barWidth * normalized)
     hud.fillBox.frame = fillFrame
+    // Layer colors don't track appearance changes; refresh the hairline border
+    // against whatever the system looks like right now.
+    hud.effectView.effectiveAppearance.performAsCurrentDrawingAppearance {
+      hud.effectView.layer?.borderColor = NSColor.separatorColor.cgColor
+    }
     // Vertical position is measured from the full frame, not `visibleFrame`:
     // with the menu bar auto-hidden `visibleFrame` reaches the top of the
     // screen, and the pill would then sit exactly where the bar reveals itself.
@@ -177,29 +183,32 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     effectView.material = .hudWindow
     effectView.blendingMode = .behindWindow
     effectView.state = .active
-    effectView.appearance = NSAppearance(named: .vibrantDark)
+    // The fork forces `.vibrantDark`; the native pill adapts to the system
+    // appearance, and so do we (Ryder, 2026-07-30): dynamic semantic colors
+    // everywhere, and `.hudWindow` supplies the light/dark material itself.
+    // The one non-dynamic spot is the layer border — CGColor resolves at set
+    // time, so `showHUD` refreshes it against the current appearance.
     effectView.wantsLayer = true
     effectView.layer?.cornerRadius = Self.cornerRadius
     effectView.layer?.masksToBounds = true
     effectView.layer?.borderWidth = 0.5
-    effectView.layer?.borderColor = NSColor.white.withAlphaComponent(0.2).cgColor
     rootView.addSubview(effectView)
 
     let nameLabel = NSTextField(labelWithString: "")
     nameLabel.frame = NSRect(x: Self.margin, y: size.height - 26, width: size.width - Self.margin * 2, height: 16)
     nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-    nameLabel.textColor = NSColor.white.withAlphaComponent(0.95)
+    nameLabel.textColor = .labelColor
     nameLabel.lineBreakMode = .byTruncatingTail
     effectView.addSubview(nameLabel)
 
     let leftIcon = NSImageView(frame: NSRect(x: Self.margin, y: Self.barY - (Self.leftIconSize - Self.barHeight) / 2, width: Self.leftIconSize, height: Self.leftIconSize))
     leftIcon.imageScaling = .scaleProportionallyDown
-    leftIcon.contentTintColor = NSColor.white.withAlphaComponent(0.9)
+    leftIcon.contentTintColor = .secondaryLabelColor
     effectView.addSubview(leftIcon)
 
     let rightIcon = NSImageView(frame: NSRect(x: size.width - Self.margin - Self.rightIconSize, y: Self.barY - (Self.rightIconSize - Self.barHeight) / 2, width: Self.rightIconSize, height: Self.rightIconSize))
     rightIcon.imageScaling = .scaleProportionallyDown
-    rightIcon.contentTintColor = NSColor.white.withAlphaComponent(0.9)
+    rightIcon.contentTintColor = .secondaryLabelColor
     effectView.addSubview(rightIcon)
 
     let barBackground = NSBox(frame: NSRect(x: Self.barX, y: Self.barY, width: Self.barWidth, height: Self.barHeight))
@@ -208,14 +217,14 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     // box. `borderWidth = 0` is the custom-box equivalent (Apple's suggested `transparent` would
     // also suppress the fill, which is the only thing we draw here).
     barBackground.borderWidth = 0
-    barBackground.fillColor = NSColor.white.withAlphaComponent(0.25)
+    barBackground.fillColor = .quaternaryLabelColor
     barBackground.cornerRadius = Self.barHeight / 2
     effectView.addSubview(barBackground)
 
     let fillBox = NSBox(frame: NSRect(x: Self.barX, y: Self.barY, width: Self.barHeight, height: Self.barHeight))
     fillBox.boxType = .custom
     fillBox.borderWidth = 0
-    fillBox.fillColor = .white
+    fillBox.fillColor = .labelColor
     fillBox.cornerRadius = Self.barHeight / 2
     effectView.addSubview(fillBox)
 
@@ -223,7 +232,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     // (see docs/ENGINEERING-NOTES.md, "OSD / HUD").
     panel.contentView = rootView
 
-    return HUD(panel: panel, nameLabel: nameLabel, leftIcon: leftIcon, rightIcon: rightIcon, fillBox: fillBox)
+    return HUD(panel: panel, effectView: effectView, nameLabel: nameLabel, leftIcon: leftIcon, rightIcon: rightIcon, fillBox: fillBox)
   }
 
   private func fadeOut(displayID: CGDirectDisplayID) {
