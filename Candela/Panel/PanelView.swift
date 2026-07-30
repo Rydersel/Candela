@@ -1,27 +1,53 @@
+import AppKit
 import CandelaKit
 import SwiftUI
 
+/// Control-Center-style menu-bar panel: one titled section per display
+/// (13 pt semibold secondary header above a full-width capsule slider), a
+/// hairline separator, and a footer row with app-level actions. Layout
+/// metrics (280 pt width, 14 pt content insets) match the fork's MenuLayout.
 struct PanelView: View {
   @Environment(AppModel.self) private var model
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      if model.displays.isEmpty {
-        Text("No controllable displays")
-          .foregroundStyle(.secondary)
-      }
-      ForEach(model.displays) { state in
-        VStack(alignment: .leading, spacing: 8) {
-          Text(state.display.name)
-            .font(.system(size: 13, weight: .semibold))
+    VStack(spacing: 0) {
+      VStack(alignment: .leading, spacing: 14) {
+        if model.displays.isEmpty {
+          Text("No controllable displays")
+            .font(.system(size: 13))
             .foregroundStyle(.secondary)
-          DisplaySliderRow(controller: state.controller)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+        }
+        ForEach(model.displays) { state in
+          VStack(alignment: .leading, spacing: 8) {
+            Text(state.display.name)
+              .font(.system(size: 13, weight: .semibold))
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .accessibilityHidden(true)  // the slider carries the display name
+            DisplaySliderRow(controller: state.controller, displayName: state.display.name)
+          }
         }
       }
+      .padding(.horizontal, 14)
+      .padding(.vertical, 12)
+      Divider()
+      footer
     }
-    .padding(14)
     .frame(width: 280)
     .task { await model.refresh() }
+  }
+
+  private var footer: some View {
+    HStack {
+      Spacer()
+      FooterIconButton(systemImage: "xmark.circle", help: "Quit Candela") {
+        NSApplication.shared.terminate(nil)
+      }
+    }
+    .padding(.horizontal, 10)
+    .frame(height: 32)
   }
 }
 
@@ -30,11 +56,55 @@ struct PanelView: View {
 /// streams are safe to feed directly.
 private struct DisplaySliderRow: View {
   let controller: BrightnessController
+  let displayName: String
 
   var body: some View {
-    CandelaSlider(value: Binding(
-      get: { controller.brightness },
-      set: { controller.setBrightness($0) }
-    ))
+    CandelaSlider(
+      value: Binding(
+        get: { controller.brightness },
+        set: { controller.setBrightness($0) }
+      ),
+      accessibilityLabel: "\(displayName) brightness"
+    )
+  }
+}
+
+/// Footer action button: 22 pt secondary-colored SF Symbol that brightens and
+/// gains a subtle rounded background on hover, with a distinct pressed state.
+private struct FooterIconButton: View {
+  let systemImage: String
+  let help: String
+  let action: () -> Void
+
+  @State private var isHovering = false
+
+  var body: some View {
+    Button(action: action) {
+      Image(systemName: systemImage)
+        .font(.system(size: 14, weight: .medium))
+        .frame(width: 22, height: 22)
+    }
+    .buttonStyle(FooterIconButtonStyle(isHovering: isHovering))
+    .onHover { isHovering = $0 }
+    .help(help)
+    .accessibilityLabel(help)
+  }
+}
+
+private struct FooterIconButtonStyle: ButtonStyle {
+  let isHovering: Bool
+
+  func makeBody(configuration: Configuration) -> some View {
+    let background: AnyShapeStyle = if configuration.isPressed {
+      AnyShapeStyle(.tertiary)
+    } else if isHovering {
+      AnyShapeStyle(.quaternary)
+    } else {
+      AnyShapeStyle(.clear)
+    }
+    return configuration.label
+      .foregroundStyle(isHovering ? .primary : .secondary)
+      .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(background))
+      .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
   }
 }
