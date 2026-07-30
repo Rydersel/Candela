@@ -58,6 +58,21 @@ public final class BrightnessController {
     )
   }
 
+  /// One OSD-chiclet step (fork: `Display.calcNewBrightness`): 16 chiclets,
+  /// quarter-chiclet bias, ceil-snap so off-boundary values snap in the
+  /// direction of travel. `isFine` steps a quarter chiclet (Opt+Shift).
+  @discardableResult
+  public func step(isUp: Bool, isFine: Bool) -> Double {
+    var stepSize: Double = (isUp ? 1 : -1) / 16.0
+    let delta = stepSize / 4
+    if isFine {
+      stepSize = delta
+    }
+    let value = min(max(0, (((brightness + delta) / stepSize).rounded(.up)) * stepSize), 1)
+    setBrightness(value)
+    return value
+  }
+
   public func waitForPendingWrites() async {
     await coalescer.waitUntilCompleted(through: issuedGeneration)
   }
