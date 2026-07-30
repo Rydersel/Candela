@@ -548,6 +548,150 @@ struct ExternalAdoptionTests {
     #expect(after.generation == before + 1)
     #expect(after.value == 0.6)
   }
+
+  @Test func adoptReturnsThePublishedDelta() async {
+    let h = Harness()
+    h.controller.setBrightness(0.5)
+    let generation = h.controller.expectedNative().generation
+    let delta = h.controller.adoptExternal(0.9, generation: generation)
+    #expect(approx(delta, 0.4 / 3, tolerance: 1e-6))
+    #expect(approx(delta, h.controller.brightness - 0.5, tolerance: 1e-9))
+  }
+
+  @Test func adoptReturnsTheSnappedDelta() async {
+    let h = Harness()
+    h.controller.setBrightness(0.5)
+    let generation = h.controller.expectedNative().generation
+    let delta = h.controller.adoptExternal(0.505, generation: generation)
+    #expect(approx(delta, 0.005, tolerance: 1e-9))
+  }
+
+  @Test func staleAdoptionReturnsZeroDelta() async {
+    let h = Harness()
+    h.controller.setBrightness(0.5)
+    let generation = h.controller.expectedNative().generation
+    let delta = h.controller.adoptExternal(0.9, generation: generation &+ 1)
+    #expect(delta == 0)
+  }
+}
+
+// MARK: - Cross-display sync fan-out (Task 11; fork AppDelegate.swift:238-253)
+
+@MainActor
+@Suite("Brightness sync fan-out")
+struct BrightnessSyncTests {
+  /// Source + a combined-path external + a built-in, mirroring the app's
+  /// `displays + [builtIn]` iteration.
+  private func makeTrio() -> (source: Harness, external: Harness, builtIn: Harness) {
+    (
+      Harness(),
+      Harness(),
+      Harness(withHDR: false, role: .builtIn, readNative: { _ in 0.6 })
+    )
+  }
+
+  @Test func deltaStepsEveryOtherControllerWhenSyncIsOn() async {
+    let (source, external, builtIn) = makeTrio()
+    source.controller.setBrightness(0.5)
+    external.controller.setBrightness(0.75)
+    builtIn.controller.setBrightness(0.6)
+    let controllers = [source.controller, external.controller, builtIn.controller]
+
+    BrightnessSync.fanOut(delta: 0.05, from: source.controller, to: controllers, isEnabled: true)
+
+    #expect(source.controller.brightness == 0.5) // never steps itself
+    #expect(approx(external.controller.brightness, 0.8))
+    #expect(approx(builtIn.controller.brightness, 0.65))
+  }
+
+  @Test func syncOffStepsNoOne() async {
+    let (source, external, builtIn) = makeTrio()
+    source.controller.setBrightness(0.5)
+    external.controller.setBrightness(0.75)
+    builtIn.controller.setBrightness(0.6)
+
+    BrightnessSync.fanOut(
+      delta: 0.05,
+      from: source.controller,
+      to: [source.controller, external.controller, builtIn.controller],
+      isEnabled: false
+    )
+
+    #expect(external.controller.brightness == 0.75)
+    #expect(builtIn.controller.brightness == 0.6)
+  }
+
+  @Test func zeroDeltaStepsNoOne() async {
+    let (source, external, builtIn) = makeTrio()
+    external.controller.setBrightness(0.75)
+    builtIn.controller.setBrightness(0.6)
+
+    BrightnessSync.fanOut(
+      delta: 0,
+      from: source.controller,
+      to: [source.controller, external.controller, builtIn.controller],
+      isEnabled: true
+    )
+
+    #expect(external.controller.brightness == 0.75)
+    #expect(builtIn.controller.brightness == 0.6)
+  }
+
+  /// Fork-faithful: the replicated step goes through each target's own funnel,
+  /// so a combined-path display writes DDC and the built-in writes native.
+  @Test func eachTargetAppliesTheStepThroughItsOwnPath() async {
+    let (source, external, builtIn) = makeTrio()
+    external.controller.setBrightness(0.75)
+    builtIn.controller.setBrightness(0.6)
+    let externalBefore = external.submitted.count
+    let builtInBefore = builtIn.submitted.count
+
+    BrightnessSync.fanOut(
+      delta: 0.05,
+      from: source.controller,
+      to: [source.controller, external.controller, builtIn.controller],
+      isEnabled: true
+    )
+
+    // 0.8 combined -> (0.8 - 0.5) / 0.5 = 0.6 of the DDC band.
+    #expect(external.submitted.count == externalBefore + 1)
+    #expect(external.submitted.last == .ddc(raw: 60))
+    #expect(builtIn.submitted.count == builtInBefore + 1)
+    #expect(builtIn.submitted.last == .native(0.65))
+  }
+
+  /// No feedback loop by construction: a native target records the replicated
+  /// write in its expected-echo slot, so the poller reads it back as an echo.
+  @Test func nativeTargetRecordsTheReplicatedWriteAsAnEcho() async {
+    let (source, _, builtIn) = makeTrio()
+    builtIn.controller.setBrightness(0.6)
+    let before = builtIn.controller.expectedNative().generation
+
+    BrightnessSync.fanOut(
+      delta: 0.05,
+      from: source.controller,
+      to: [source.controller, builtIn.controller],
+      isEnabled: true
+    )
+
+    let slot = builtIn.controller.expectedNative()
+    #expect(slot.value.map { approx($0, 0.65) } == true)
+    #expect(slot.generation == before + 1)
+  }
+
+  @Test func deltaIsClampedByTheTargetFunnel() async {
+    let (source, external, _) = makeTrio()
+    external.controller.setBrightness(0.98)
+
+    BrightnessSync.fanOut(
+      delta: 0.05,
+      from: source.controller,
+      to: [source.controller, external.controller],
+      isEnabled: true
+    )
+
+    #expect(external.controller.brightness == 1.0)
+  }
 }
 
 // MARK: - Migration + first run (scope decision 4; I12/I13)

@@ -250,8 +250,21 @@ final class AppModel {
         // adoptExternal's generation check (review I9).
         // Parked T6-minor-2: settle re-assert may briefly diverge slot vs
         // hardware; poller easing self-corrects.
-        adopt: { value, generation in
-          Task { @MainActor in controller.adoptExternal(value, generation: generation) }
+        adopt: { [weak self] value, generation in
+          Task { @MainActor in
+            let delta = controller.adoptExternal(value, generation: generation)
+            guard let self else { return }
+            // Display set read at fan-out time, not at target-build time: a
+            // refresh between ticks must not replicate onto a departed
+            // controller. The built-in is added explicitly — it lives in its
+            // own slot, outside `displays` (re-review T10-A).
+            BrightnessSync.fanOut(
+              delta: delta,
+              from: controller,
+              to: self.displays.map(\.controller) + [self.builtIn?.controller].compactMap { $0 },
+              isEnabled: UserDefaults.standard.bool(forKey: "enableBrightnessSync")
+            )
+          }
         },
         isConverging: { controller.isConvergingFromExternal() }
       )

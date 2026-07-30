@@ -649,11 +649,17 @@ public final class BrightnessController {
   /// with a 0.005 signed minimum step. Never submits a hardware write: the
   /// hardware already holds the external value, and writing back would fight
   /// its author.
-  public func adoptExternal(_ value: Double, generation: UInt64) {
+  ///
+  /// Returns the delta actually applied to published state — the eased step,
+  /// not the full observed change, and 0 when the adoption was discarded as
+  /// stale. `BrightnessSync` fans that delta out to the other displays.
+  @discardableResult
+  public func adoptExternal(_ value: Double, generation: UInt64) -> Double {
     // Generation check first (I9): an adoption queued before a local write
     // (e.g. during a starved drag) is stale — discard it entirely.
     let current = echo.withLock { $0.generation }
-    guard current == generation else { return }
+    guard current == generation else { return 0 }
+    let previous = brightness
     let clamped = min(max(value, 0), 1)
     let diff = clamped - brightness
     let eased: Double
@@ -677,6 +683,7 @@ public final class BrightnessController {
       state.value = eased
       state.converging = !snapped
     }
+    return eased - previous
   }
 
   /// Poller echo check: the last locally-originated native value (or the
