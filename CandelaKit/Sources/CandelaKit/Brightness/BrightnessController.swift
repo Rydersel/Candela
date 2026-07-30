@@ -77,6 +77,7 @@ public final class BrightnessController {
     }
   }
 
+  //  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
   /// One OSD-chiclet step (fork: `Display.calcNewBrightness`): 16 chiclets,
   /// quarter-chiclet bias, ceil-snap so off-boundary values snap in the
   /// direction of travel. `isFine` steps a quarter chiclet (Opt+Shift).

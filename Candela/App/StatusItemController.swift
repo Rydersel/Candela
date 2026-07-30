@@ -1,5 +1,6 @@
 import AppKit
 import CandelaKit
+import os
 import SwiftUI
 
 /// AppKit escape hatch for the menu-bar panel (spec §9 risk item): the panel
@@ -26,6 +27,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   // as properties: the tap's thread and the executor must outlive launch.
   private var keyActionExecutor: KeyActionExecutor?
   private var mediaKeyTap: MediaKeyEventTap?
+  private let log = Logger(subsystem: "com.rydersel.Candela", category: "keys")
 
   func applicationDidFinishLaunching(_: Notification) {
     let hostingView = PanelHostingView(rootView: PanelRoot(model: model))
@@ -92,7 +94,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
   private func startMediaKeyTap() {
     guard let mediaKeyTap else { return }
-    try? mediaKeyTap.start(config: model.tapConfig)
+    do {
+      try mediaKeyTap.start(config: model.tapConfig)
+    } catch {
+      log.error("media-key tap failed to start: \(error) — keys disabled until relaunch")
+    }
   }
 
   /// Re-arms/disarms brightness keys after display topology changes — the M2
