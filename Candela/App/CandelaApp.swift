@@ -1,12 +1,14 @@
-import SwiftUI
 import CandelaKit
+import SwiftUI
 
 @main
 struct CandelaApp: App {
+  @State private var model = AppModel()
+
   var body: some Scene {
     MenuBarExtra("Candela", systemImage: "sun.max") {
-      Text("Candela scaffold — VCP 0x\(String(CandelaKit.VCP.brightness, radix: 16))")
-        .padding()
+      PanelView()
+        .environment(model)
     }
     .menuBarExtraStyle(.window)
   }
