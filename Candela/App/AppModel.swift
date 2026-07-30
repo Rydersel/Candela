@@ -1,5 +1,6 @@
 import CandelaKit
 import CoreGraphics
+import Foundation
 import Observation
 
 @MainActor @Observable
@@ -11,6 +12,28 @@ final class AppModel {
   }
 
   private(set) var displays: [DisplayState] = []
+
+  /// Accessibility grant state, owned here so the panel banner observes it
+  /// through the model already in the SwiftUI environment (and clears live
+  /// when the grant appears while the panel is open).
+  let accessibility = AccessibilityPermission()
+
+  var accessibilityGranted: Bool { accessibility.isGranted }
+
+  func stepBrightnessAllExternal(isUp: Bool, isFine: Bool) -> [(id: CGDirectDisplayID, name: String, newValue: Double)] {
+    displays.map { state in
+      (state.id, state.display.name, state.controller.step(isUp: isUp, isFine: isFine))
+    }
+  }
+
+  /// Watch brightness keys only when an external display is present (fork:
+  /// updateMediaKeyTap's disengage rule). Volume keys arrive with Milestone 4.
+  var tapConfig: MediaKeyEventTap.WatchConfig {
+    .init(
+      watchedKeys: displays.isEmpty ? [] : [.brightnessUp, .brightnessDown],
+      interceptAlternateBrightnessKeys: !UserDefaults.standard.bool(forKey: "disableAltBrightnessKeys")
+    )
+  }
 
   /// The in-flight refresh, if any. Overlapping callers piggyback on it
   /// instead of starting a second pass: each pass runs discovery, and two
