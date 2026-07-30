@@ -16,11 +16,14 @@ final class AppModel {
   /// The built-in panel, in its own slot — deliberately NOT inside `displays`
   /// (re-review T10-A): `stepBrightnessAllExternal`, `tapConfig`, and the
   /// panel's external iteration all walk `displays` and must stay
-  /// external-only, because plain brightness key presses must never step the
-  /// MacBook panel (fork rule; the built-in is driven by macOS's own keys or
-  /// Ctrl-directed steps). `DisplayState.display` reuses `ExternalDisplay` as
-  /// a plain id/name/persistenceKey value carrier despite the name — renaming
-  /// the struct is M4 cleanup.
+  /// external-only — those three are about *externals* specifically (Shift-Cmd
+  /// "all external" steps, the fork's disengage rule, the external display
+  /// list), not about sparing the MacBook panel. A plain brightness press does
+  /// step the built-in when the pointer is on it (fork parity, `.affected`);
+  /// it reaches it through `stepBrightness(displayIDs:)`, which resolves both
+  /// slots. `DisplayState.display` reuses `ExternalDisplay` as a plain
+  /// id/name/persistenceKey value carrier despite the name — renaming the
+  /// struct is M4 cleanup.
   private(set) var builtIn: DisplayState?
 
   /// Epoch authority for reconfiguration/sleep/wake. Owned here so refresh
@@ -62,23 +65,28 @@ final class AppModel {
     }
   }
 
-  /// Steps one display by ID, resolving either slot (an external, or the
-  /// built-in in its own slot). Backs the `.affected` scope — the display the
-  /// user is working on, which the executor resolves from the pointer. Returns
-  /// nil when the ID is not a display we control.
+  /// Steps the given displays, resolving each ID against either slot (an
+  /// external, or the built-in in its own slot). Backs the `.affected` scope —
+  /// the display the user is working on plus, when it drives a mirror set, the
+  /// set's members (the executor does that expansion). IDs we don't control are
+  /// skipped, so the result may be shorter than the input (empty when none
+  /// resolve).
   ///
   /// Resolving-by-pointer is the fork's default; picking the *focused* display
   /// instead (fork `useFocusInsteadOfMouse`) is an M5 preference, and lands in
   /// the executor's resolution step, not here.
-  func stepBrightness(displayID: CGDirectDisplayID, isUp: Bool, isFine: Bool, isFresh: Bool) -> (id: CGDirectDisplayID, name: String, newValue: Double)? {
-    let slot = displays.first { $0.id == displayID } ?? builtIn.flatMap { $0.id == displayID ? $0 : nil }
-    guard let slot else { return nil }
-    return (slot.id, slot.display.name,
-            slot.controller.step(isUp: isUp, isFine: isFine, isFresh: isFresh))
+  func stepBrightness(displayIDs: [CGDirectDisplayID], isUp: Bool, isFine: Bool, isFresh: Bool) -> [(id: CGDirectDisplayID, name: String, newValue: Double)] {
+    displayIDs.compactMap { displayID in
+      let slot = displays.first { $0.id == displayID } ?? builtIn.flatMap { $0.id == displayID ? $0 : nil }
+      guard let slot else { return nil }
+      return (slot.id, slot.display.name,
+              slot.controller.step(isUp: isUp, isFine: isFine, isFresh: isFresh))
+    }
   }
 
   /// Steps the built-in panel (Ctrl-directed keys only — plain presses target
-  /// externals). Returns nil when no built-in display is online.
+  /// the pointer's display, which may well be the built-in). Returns nil when
+  /// no built-in display is online.
   func stepBrightnessBuiltIn(isUp: Bool, isFine: Bool, isFresh: Bool) -> (id: CGDirectDisplayID, name: String, newValue: Double)? {
     guard let builtIn else { return nil }
     return (builtIn.id, builtIn.display.name,

@@ -27,17 +27,23 @@ final class KeyActionExecutor {
       case .affected:
         // Fork parity (DisplayManager.getAffectedDisplays): an unmodified
         // brightness press acts on the display the user is working on — the
-        // one under the pointer — not on every external at once. Only that
-        // display steps, and only it shows a HUD.
-        if let displayID = Self.pointerDisplayID(),
-           let (id, name, newValue) = model.stepBrightness(
-             displayID: displayID, isUp: isUp, isFine: isFine, isFresh: isFresh
-           )
-        {
-          showHUD(id: id, name: name, value: newValue)
+        // one under the pointer — not on every external at once. That display
+        // steps, plus (same as the fork) every display mirroring it when it
+        // drives a mirror set: the members show the same picture, so stepping
+        // only the master would leave the set visibly mismatched. Each stepped
+        // display shows its own HUD.
+        let affected = Self.pointerDisplayID().map(Self.expandToMirrorSet) ?? []
+        let stepped = model.stepBrightness(
+          displayIDs: affected, isUp: isUp, isFine: isFine, isFresh: isFresh
+        )
+        if !stepped.isEmpty {
+          for (id, name, newValue) in stepped {
+            showHUD(id: id, name: name, value: newValue)
+          }
         } else {
-          // The pointer sits on a display we don't control (or no screen
-          // claimed it / it reported no display ID). Rather than swallow the
+          // Nothing resolved: the pointer sits on a display we don't control
+          // (and neither is anything mirroring it), or no screen claimed the
+          // pointer / it reported no display ID. Rather than swallow the
           // press, fall back to the previous behavior and step every external
           // — losing the targeting is better than losing the keypress.
           stepAllExternal(isUp: isUp, isFine: isFine, isFresh: isFresh)
@@ -92,5 +98,26 @@ final class KeyActionExecutor {
       return nil
     }
     return screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+  }
+
+  /// `displayID` plus, when it is the master of a mirror set, every online
+  /// display mirroring it (fork: the mirror-set expansion inside
+  /// `getAffectedDisplays`). A mirrored member is never the pointer's display
+  /// in practice, but the master's ID is what the pointer resolves to, and the
+  /// members need the same step. Non-mirrored displays expand to themselves.
+  private static func expandToMirrorSet(_ displayID: CGDirectDisplayID) -> [CGDirectDisplayID] {
+    guard CGDisplayIsInHWMirrorSet(displayID) != 0 || CGDisplayIsInMirrorSet(displayID) != 0,
+          CGDisplayMirrorsDisplay(displayID) == kCGNullDirectDisplay
+    else {
+      return [displayID]
+    }
+    var onlineDisplayIDs = [CGDirectDisplayID](repeating: 0, count: 16)
+    var displayCount: UInt32 = 0
+    guard CGGetOnlineDisplayList(16, &onlineDisplayIDs, &displayCount) == .success else {
+      return [displayID]
+    }
+    let members = onlineDisplayIDs.prefix(Int(displayCount))
+      .filter { CGDisplayMirrorsDisplay($0) == displayID }
+    return [displayID] + members
   }
 }

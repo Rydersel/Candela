@@ -71,18 +71,19 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   private static let barX: CGFloat = BrightnessHUD.margin + BrightnessHUD.leftIconSize + 9
   private static let barWidth: CGFloat = BrightnessHUD.hudSize.width - BrightnessHUD.barX - BrightnessHUD.rightIconSize - BrightnessHUD.margin - 9
   private static let screenMargin: CGFloat = 20
-  /// Extra clearance added to the fallback allowance so the pill sits clearly
-  /// below a revealed menu bar rather than hugging it. Ryder eyeballed this
-  /// against the native macOS OSD pill.
+  /// Extra clearance added on top of the menu-bar allowance so the pill sits
+  /// clearly below the bar rather than hugging it. Ryder eyeballed this against
+  /// the native macOS OSD pill.
   private static let menuBarClearance: CGFloat = 10
 
-  /// Vertical space to keep free at the top of `screen` for the menu bar.
-  /// While the bar is showing, the frame/visibleFrame difference measures it
-  /// exactly and wins the `max`; while it is auto-hidden that difference
-  /// collapses (often to 0), so we reserve the bar's own thickness instead —
-  /// the space it will occupy the moment it reveals.
+  /// Vertical space to keep free at the top of `screen`: the menu bar, plus
+  /// clearance. While the bar is showing, the frame/visibleFrame difference
+  /// measures it exactly and wins the `max`; while it is auto-hidden that
+  /// difference collapses (often to 0), so we reserve the bar's own thickness
+  /// instead — the space it will occupy the moment it reveals. The clearance
+  /// applies either way, so it sits outside the `max`.
   private static func menuBarAllowance(for screen: NSScreen) -> CGFloat {
-    max(screen.frame.maxY - screen.visibleFrame.maxY, NSStatusBar.system.thickness + self.menuBarClearance)
+    max(screen.frame.maxY - screen.visibleFrame.maxY, NSStatusBar.system.thickness) + self.menuBarClearance
   }
 
   private var huds: [CGDirectDisplayID: HUD] = [:]
