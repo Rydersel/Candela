@@ -21,8 +21,22 @@ import SwiftUI
 /// accessibility all run through the same SwiftUI machinery as before.
 @MainActor
 final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegate {
-  private let model = AppModel()
+  // Software-dimming islands: constructed here (AppKit lives in the app
+  // target) and injected into AppModel, which threads them into every
+  // display's BrightnessController.
+  private let shadeOverlay: ShadeOverlay
+  private let gammaController: GammaController
+  private let model: AppModel
   private var statusItem: NSStatusItem?
+
+  override init() {
+    let shade = ShadeOverlay()
+    let gamma = GammaController()
+    shadeOverlay = shade
+    gammaController = gamma
+    model = AppModel(shade: shade, gamma: gamma)
+    super.init()
+  }
   // Media-key pipeline (tap → router → executor → controllers + HUD). Stored
   // as properties: the tap's thread and the executor must outlive launch.
   private var keyActionExecutor: KeyActionExecutor?
@@ -36,6 +50,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   private let log = Logger(subsystem: "com.rydersel.Candela", category: "keys")
 
   func applicationDidFinishLaunching(_: Notification) {
+    // Crash-while-dimmed protection (T5 contract): hand the gamma tables back
+    // to the OS ONCE before any applyGammaScale — a previous run may have
+    // died with a scaled table installed, and capturing that as the baseline
+    // would bake the dimming in permanently.
+    gammaController.resetAllGamma()
+
     let hostingView = PanelHostingView(rootView: PanelRoot(model: model))
     hostingView.frame.size = hostingView.fittingSize
 
@@ -80,11 +100,23 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       guard let stream = self?.model.displayManager.topologyChanges else { return }
       for await _ in stream {
         guard let self else { return }
-        // Task 6 augments this loop (handleReconfigure + HDR cache refresh)
         let departed = await self.model.refresh()
         self.refreshTapConfig()
         for id in departed {
           self.hud.cleanupDisplay(id)
+        }
+        // HDR state may have changed under the 2 s cache (mode switches
+        // themselves trigger reconfiguration) — drop it BEFORE the
+        // per-display re-evaluation so fresh state is read.
+        await self.model.hdrToggling.displaysReconfigured()
+        // Gamma reset once per event, before any recapture (T5 ordering:
+        // reset → recapture → re-apply; recapture must see an OS-owned
+        // table). Done here rather than per display so a later display's
+        // reset cannot wipe an earlier display's just-reapplied dim.
+        self.gammaController.resetAllGamma()
+        for state in self.model.displays {
+          await state.controller.noteHDRStateMayHaveChanged()
+          await state.controller.handleReconfigure()
         }
       }
     }
@@ -99,7 +131,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         let config = KeyRouterConfig(
           useFineScaleBrightness: UserDefaults.standard.bool(forKey: "useFineScaleBrightness")
         )
-        executor.execute(KeyRouter.route(press, config: config))
+        // isFresh feeds the HDR boost gate: key-repeat never toggles HDR.
+        executor.execute(KeyRouter.route(press, config: config), isFresh: !press.isRepeat)
       }
     }
     mediaKeyTap = tap
@@ -125,6 +158,14 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       await model.refresh()
       refreshTapConfig()
     }
+  }
+
+  /// Review M24: remove software dimming at quit — otherwise the display
+  /// stays dark with nothing left running to undo it. The DDC register stays
+  /// at its last level (truthful contract; full hardware restore is M4).
+  func applicationWillTerminate(_: Notification) {
+    gammaController.resetAllGamma()
+    shadeOverlay.removeAllShades()
   }
 
   func menuDidClose(_: NSMenu) {

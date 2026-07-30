@@ -1,5 +1,37 @@
+import Foundation
 import Testing
 @testable import CandelaKit
+
+/// Construction helper for the suites that predate Task 6 path selection:
+/// combined dimming disabled and no HDR/software backends, so brightness maps
+/// onto the full DDC range — the M1/M2 shape these tests were written against.
+/// (The combined/native/software paths get their own coverage in
+/// PathSelectionTests.swift.)
+@MainActor
+func makeLegacyPathController(
+  writer: any DDCWriting,
+  store: (any BrightnessStoring)? = nil,
+  storageKey: String? = nil
+) -> BrightnessController {
+  // One shared suite: the only key ever written is the app-level
+  // combined-disable flag, always with the same value, so cross-test reuse
+  // (and parallel test execution) is safe.
+  let defaults = UserDefaults(suiteName: "com.rydersel.Candela.tests.legacy-path")!
+  defaults.set(true, forKey: "disableCombinedBrightness")
+  return BrightnessController(
+    writer: writer,
+    backends: BrightnessBackends(
+      applierNative: NativeBrightnessApplier(displayID: 1) { _, _ in false },
+      hdr: nil,
+      shade: nil,
+      gamma: nil
+    ),
+    prefs: DisplayPrefs(defaults: defaults, persistenceKey: "legacy"),
+    displayID: 1,
+    store: store,
+    storageKey: storageKey
+  )
+}
 
 /// Records writes; serves a canned read.
 actor FakeDDC: DDCWriting {
@@ -25,7 +57,7 @@ actor FakeDDC: DDCWriting {
 @MainActor
 @Test func setBrightnessWritesScaledDDCValue() async {
   let fake = FakeDDC()
-  let controller = BrightnessController(writer: fake)
+  let controller = makeLegacyPathController(writer: fake)
   await controller.refreshFromHardware() // learns max = 100
   controller.setBrightness(0.75)
   await controller.waitForPendingWrites()
@@ -38,7 +70,7 @@ actor FakeDDC: DDCWriting {
 @MainActor
 @Test func setBrightnessClampsToUnitRange() async {
   let fake = FakeDDC()
-  let controller = BrightnessController(writer: fake)
+  let controller = makeLegacyPathController(writer: fake)
   controller.setBrightness(1.7)
   #expect(controller.brightness == 1.0)
   controller.setBrightness(-0.3)
@@ -51,7 +83,7 @@ actor FakeDDC: DDCWriting {
 @MainActor
 @Test func rapidSetsCoalesceToLatestValue() async {
   let fake = FakeDDC()
-  let controller = BrightnessController(writer: fake)
+  let controller = makeLegacyPathController(writer: fake)
   await controller.refreshFromHardware()
   for step in 1 ... 50 {
     controller.setBrightness(Double(step) / 50)
@@ -65,7 +97,7 @@ actor FakeDDC: DDCWriting {
 @MainActor
 @Test func refreshFromHardwareAdoptsCurrentAndMax() async {
   let fake = FakeDDC(readResult: (current: 30, max: 120))
-  let controller = BrightnessController(writer: fake)
+  let controller = makeLegacyPathController(writer: fake)
   await controller.refreshFromHardware()
   #expect(controller.maxDDCValue == 120)
   #expect(abs(controller.brightness - 0.25) < 0.001)
@@ -74,10 +106,12 @@ actor FakeDDC: DDCWriting {
 @MainActor
 @Test func refreshFailureKeepsDefaults() async {
   let fake = FakeDDC(readResult: nil)
-  let controller = BrightnessController(writer: fake)
+  let controller = makeLegacyPathController(writer: fake)
   await controller.refreshFromHardware()
   #expect(controller.maxDDCValue == 100)
-  #expect(controller.brightness == 0.5)
+  // First-run rule (Task 6, review I13): with no saved value the controller
+  // starts at full brightness, and a failed read leaves that untouched.
+  #expect(controller.brightness == 1.0)
 }
 
 // Coalescer-level contract tests (latest-wins, no-main-actor drain,

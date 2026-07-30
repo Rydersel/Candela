@@ -52,6 +52,34 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(clampSwitchingPoint(newValue), forKey: key("combinedSwitchingPoint")) }
   }
 
+  // MARK: - App-level defaults
+
+  // Shared across displays (no persistence suffix), but surfaced here so the
+  // engine reads every dimming preference through one object. They mirror the
+  // fork's global PrefKeys of the same names.
+
+  /// Disable the combined software+hardware scale: brightness maps onto the
+  /// DDC range alone, with no software-dimming zone (fork `.disableCombinedBrightness`).
+  public var disableCombinedBrightness: Bool {
+    get { defaults.bool(forKey: "disableCombinedBrightness") }
+    set { defaults.set(newValue, forKey: "disableCombinedBrightness") }
+  }
+
+  /// Let software dimming reach fully black instead of stopping at 15% of the
+  /// panel's output (fork `.allowZeroSwBrightness`, "can blank the display").
+  public var allowZeroSwBrightness: Bool {
+    get { defaults.bool(forKey: "allowZeroSwBrightness") }
+    set { defaults.set(newValue, forKey: "allowZeroSwBrightness") }
+  }
+
+  /// Step brightness keys on the separate combined scale
+  /// (`DimmingMath.stepCombined`, 32 chiclets) instead of the plain 16-chiclet
+  /// transplant, when the combined path is active (fork `.separateCombinedScale`).
+  public var separateCombinedScale: Bool {
+    get { defaults.bool(forKey: "separateCombinedScale") }
+    set { defaults.set(newValue, forKey: "separateCombinedScale") }
+  }
+
   private func key(_ name: String) -> String {
     "\(name).\(persistenceKey)"
   }

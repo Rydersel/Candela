@@ -17,12 +17,15 @@ final class KeyActionExecutor {
     self.hud = hud
   }
 
-  func execute(_ action: KeyAction) {
+  /// `isFresh` distinguishes a fresh keypress from key-repeat (review I18):
+  /// the HDR boost state machine toggles only on fresh presses at the range
+  /// ends, never on repeats.
+  func execute(_ action: KeyAction, isFresh: Bool = true) {
     switch action {
     case let .stepBrightness(isUp, isFine, scope):
       switch scope {
       case .allExternal:
-        for (id, name, newValue) in model.stepBrightnessAllExternal(isUp: isUp, isFine: isFine) {
+        for (id, name, newValue) in model.stepBrightnessAllExternal(isUp: isUp, isFine: isFine, isFresh: isFresh) {
           hud?.showBrightness(displayID: id, name: name, value: newValue)
         }
       case .builtInOnly:
@@ -32,7 +35,7 @@ final class KeyActionExecutor {
       // Fork fall-through: when mirroring is not applicable (single display),
       // Cmd+BrightnessDown acts as a normal brightness-down step.
       if !Mirroring.engageMirror() {
-        execute(.stepBrightness(isUp: false, isFine: isFine, scope: .allExternal))
+        execute(.stepBrightness(isUp: false, isFine: isFine, scope: .allExternal), isFresh: isFresh)
       }
     case .stepContrast:
       log.log("contrast keys arrive with Milestone 4")

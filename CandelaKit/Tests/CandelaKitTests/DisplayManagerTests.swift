@@ -172,7 +172,7 @@ private actor GatedDDC: DDCWriting {
 @Test func writeSubmittedBeforeSleepNeverLandsButWaitReturns() async {
   let writer = GatedDDC()
   let manager = DisplayManager(debounce: testDebounce)
-  let controller = BrightnessController(writer: writer)
+  let controller = makeLegacyPathController(writer: writer)
   controller.setEpochProvider({ manager.currentEpoch() }, isCurrent: { manager.isEpochCurrent($0) })
 
   controller.setBrightness(0.3) // raw 30 — parks the drain inside the writer

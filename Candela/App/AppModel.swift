@@ -18,6 +18,17 @@ final class AppModel {
   /// it and consumes its topology stream.
   let displayManager = DisplayManager()
 
+  /// One HDR service shared by every display's controller (MPDisplayMgr
+  /// enumeration + its 2 s state cache live behind one actor).
+  let hdrToggling: any HDRToggling
+
+  /// Software-dimming islands (AppKit lives in the app target behind
+  /// CandelaKit protocols). Constructed by StatusItemController and injected
+  /// here — implementer's choice per the Task 6 brief, so tests can hand the
+  /// model fakes (or nil for "feature degraded").
+  @ObservationIgnored private let shade: (any ShadeRendering)?
+  @ObservationIgnored private let gamma: (any GammaApplying)?
+
   /// Accessibility grant state, owned here so the panel banner observes it
   /// through the model already in the SwiftUI environment (and clears live
   /// when the grant appears while the panel is open).
@@ -25,9 +36,19 @@ final class AppModel {
 
   var accessibilityGranted: Bool { accessibility.isGranted }
 
-  func stepBrightnessAllExternal(isUp: Bool, isFine: Bool) -> [(id: CGDirectDisplayID, name: String, newValue: Double)] {
+  init(
+    shade: (any ShadeRendering)? = nil,
+    gamma: (any GammaApplying)? = nil,
+    hdrToggling: (any HDRToggling)? = nil
+  ) {
+    self.shade = shade
+    self.gamma = gamma
+    self.hdrToggling = hdrToggling ?? MonitorPanelService()
+  }
+
+  func stepBrightnessAllExternal(isUp: Bool, isFine: Bool, isFresh: Bool) -> [(id: CGDirectDisplayID, name: String, newValue: Double)] {
     displays.map { state in
-      (state.id, state.display.name, state.controller.step(isUp: isUp, isFine: isFine))
+      (state.id, state.display.name, state.controller.step(isUp: isUp, isFine: isFine, isFresh: isFresh))
     }
   }
 
@@ -87,10 +108,26 @@ final class AppModel {
         controller.rebind(writer: entry.writer)
         return DisplayState(display: entry.display, controller: controller)
       }
+      let persistenceKey = entry.display.persistenceKey
       let controller = BrightnessController(
         writer: entry.writer,
+        backends: BrightnessBackends(
+          // T3 handoff: the applier's closure runs inside the coalescer's
+          // single drain, which already serializes per display — pass the
+          // shim directly, no extra queue.
+          applierNative: NativeBrightnessApplier(
+            displayID: entry.display.id, apply: DisplayServices.setBrightness
+          ),
+          hdr: hdrToggling,
+          shade: shade,
+          gamma: gamma
+        ),
+        prefs: DisplayPrefs(persistenceKey: persistenceKey),
+        displayID: entry.display.id,
         store: UserDefaultsBrightnessStore(),
-        storageKey: "brightness.\(entry.display.persistenceKey)"
+        // M3 key; the M2 key is read once for migration, then ignored.
+        storageKey: "combinedBrightness.\(persistenceKey)",
+        legacyKey: "brightness.\(persistenceKey)"
       )
       appeared.append(controller)
       return DisplayState(display: entry.display, controller: controller)

@@ -5,7 +5,7 @@ import Testing
 @Suite("Chiclet step math")
 struct BrightnessStepTests {
   private func makeController(brightness: Double) -> BrightnessController {
-    let controller = BrightnessController(writer: FakeDDC())
+    let controller = makeLegacyPathController(writer: FakeDDC())
     controller.setBrightness(brightness)
     return controller
   }
@@ -50,7 +50,7 @@ struct BrightnessStepTests {
 
   @Test func stepPublishesAndSubmitsWrite() async {
     let writer = FakeDDC()
-    let c = BrightnessController(writer: writer)
+    let c = makeLegacyPathController(writer: writer)
     c.setBrightness(0.5)
     c.step(isUp: true, isFine: false)
     #expect(c.brightness == 0.5625)

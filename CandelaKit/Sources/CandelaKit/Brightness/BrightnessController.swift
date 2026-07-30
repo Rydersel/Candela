@@ -1,3 +1,4 @@
+import CoreGraphics
 import Observation
 import os
 
@@ -7,17 +8,84 @@ import os
 /// `log show --predicate 'subsystem == "com.rydersel.Candela"'`.
 let dragPerfLog = Logger(subsystem: "com.rydersel.Candela", category: "dragperf")
 
+/// Path-selection/HDR diagnostics (mode changes, boost engage/disengage,
+/// settle completion, cache refreshes).
+let pathLog = Logger(subsystem: "com.rydersel.Candela", category: "path")
+
+/// The non-DDC brightness endpoints a controller can route through. `hdr`,
+/// `shade` and `gamma` are optional: nil means the feature is degraded
+/// (spec §6) — HDR routing/boost never engages, or the software leg silently
+/// drops. The native applier is required; when the DisplayServices shim is
+/// unavailable the app injects a closure that returns false. The DDC applier
+/// is not held here — it is built per submit from the controller's writer
+/// (Task 3), so `rebind(writer:)` takes effect on the very next write.
+public struct BrightnessBackends {
+  let applierNative: any BrightnessApplying
+  let hdr: (any HDRToggling)?
+  let shade: (any ShadeRendering)?
+  let gamma: (any GammaApplying)?
+
+  public init(
+    applierNative: any BrightnessApplying,
+    hdr: (any HDRToggling)?,
+    shade: (any ShadeRendering)?,
+    gamma: (any GammaApplying)?
+  ) {
+    self.applierNative = applierNative
+    self.hdr = hdr
+    self.shade = shade
+    self.gamma = gamma
+  }
+}
+
 /// Single source of truth for one display's brightness (spec §5: every input
 /// funnels through here; every surface renders from `brightness`).
+///
+/// Task 6 path selection (fork order, dossier dimming-math §2/§10), evaluated
+/// synchronously from cached state on every `setBrightness`:
+/// 1. native (HDR mode set AND HDR live) → `.native` hardware leg, full range;
+/// 2. force-software → software leg only, full range;
+/// 3. combined (default) → `DimmingMath.combinedSplit` across both legs;
+/// 4. combined disabled → `.ddc` hardware leg, full range.
 @MainActor @Observable
 public final class BrightnessController {
-  public private(set) var brightness: Double = 0.5
+  public private(set) var brightness: Double = 1.0
   public private(set) var maxDDCValue: UInt16 = 100
+
+  /// Mirror of `prefs.hdrMode`, published for the panel (`DisplayPrefs` is
+  /// plain UserDefaults and not observable). Change it via `setHDRMode`.
+  public private(set) var hdrMode: HDRMode
+
+  /// True while boost mode holds HDR engaged. Computed (review I8): a stored
+  /// latch would miss externally-toggled HDR; the boost engage arm flips
+  /// `cachedHDRActive` optimistically/synchronously, so the engaging keypress
+  /// already reads true here for its HUD.
+  public var hdrBoostActive: Bool { hdrMode == .boost && cachedHDRActive }
+
+  /// The fork's `usesNativeBrightness` gate (dossier §10): an HDR mode is set
+  /// AND HDR is currently live. The second half is empirically load-bearing:
+  /// with HDR off the MAG341C answers `DisplayServicesSetBrightness` with
+  /// SUCCESS but changes nothing, so native must never be routed on mode alone.
+  private var usesNative: Bool { hdrMode != .off && cachedHDRActive }
+
+  /// HDR state caches, refreshed by async tasks (init, mode changes, boost
+  /// transitions, `noteHDRStateMayHaveChanged`) and only ever *read* on the
+  /// synchronous keypress/drag paths — never awaited there.
+  private(set) var cachedHDRActive = false
+  private(set) var cachedSupportsHDR = false
+
+  /// True from an HDR transition's start until its ~2 s settle window ends;
+  /// gates `isNativeActive()` (reviews I5/I15) so the poller stays away while
+  /// the display blanks and re-modes.
+  @ObservationIgnored private var settleInProgress = false
 
   /// Mutable so `rebind(writer:)` can swap in the writer a replugged display
   /// gets from rediscovery; the DDC applier is built per submit, so a swap
   /// takes effect on the very next write.
   @ObservationIgnored private var writer: any DDCWriting
+  @ObservationIgnored private let backends: BrightnessBackends
+  @ObservationIgnored private let prefs: DisplayPrefs
+  @ObservationIgnored private let displayID: CGDirectDisplayID
   private let coalescer: BrightnessWriteCoalescer
   @ObservationIgnored private var issuedGeneration: UInt64 = 0
   /// Read at submit time to stamp each `PendingWrite.epoch`. Default `{ 0 }`
@@ -26,39 +94,142 @@ public final class BrightnessController {
   @ObservationIgnored private var epochProvider: @Sendable () -> UInt64 = { 0 }
   /// Last-written brightness is the only truth on write-only DDC panels, so it
   /// is persisted here and restored at init — without it the panel opens at
-  /// the 0.5 default on every launch.
+  /// the default on every launch.
   private let store: (any BrightnessStoring)?
   private let storageKey: String?
 
-  public init(writer: any DDCWriting, store: (any BrightnessStoring)? = nil, storageKey: String? = nil) {
+  /// Software-leg dedupe memo — the fork's `.SwBrightness` skip, critical at
+  /// 60 Hz drag rates because every software apply reprograms the gamma table
+  /// or shade. In-memory only, deliberately not pref-persisted like the
+  /// fork's (review M35): a fresh controller always applies its first value.
+  @ObservationIgnored private var lastAppliedSw: Double?
+
+  /// Gamma-interference hook (Task 9 wires the monitor): invoked ONLY when
+  /// the gamma backend — not the shade — is about to apply and the sw dedupe
+  /// did not skip. The C1 clearing's restore-to-1.0 bypasses it on purpose:
+  /// it is a restore, not a dim, and must never be suspected as interference.
+  @ObservationIgnored public var preGammaApplyHook: (@MainActor () -> Void)?
+
+  /// Expected-native echo slot (Task 7 contract; reviews I9/I15). One lock
+  /// backs all three nonisolated poller accessors:
+  /// - `value`/`generation`: every local native-leg write stores its value at
+  ///   press/call time and bumps the generation, so adoptions queued before a
+  ///   local write are discarded as stale (I9);
+  /// - `nativeActive`: false from an HDR transition's start, true only when
+  ///   the settle window has completed (I5/I15);
+  /// - `converging`: an external adoption is still easing toward its target,
+  ///   so the poller must not discard reads as echoes until the snap (M33).
+  private struct EchoState: Sendable {
+    var value: Double?
+    var generation: UInt64 = 0
+    var nativeActive = false
+    var converging = false
+  }
+
+  private nonisolated let echo = OSAllocatedUnfairLock(initialState: EchoState())
+
+  /// HDR settle window (ENGINEERING-NOTES: the display blanks and re-modes
+  /// for ~2 s after an HDR toggle). Internal so tests can shrink it.
+  @ObservationIgnored var settleDelay: Duration = .seconds(2)
+  /// The in-flight boost engage/disengage task; tests await it to observe
+  /// post-settle state deterministically.
+  @ObservationIgnored private(set) var hdrTransitionTask: Task<Void, Never>?
+  /// Init-time HDR cache refresh; tests await it before priming so two
+  /// refreshes can't interleave and double-run the C1 clearing.
+  @ObservationIgnored private(set) var initialHDRRefresh: Task<Void, Never>?
+  /// Test seam: observes every hardware submit before the coalescer's own
+  /// duplicate-skip (the boundary-walk tests assert at the submit level).
+  @ObservationIgnored var _onSubmit: ((HardwareTarget) -> Void)?
+
+  public init(
+    writer: any DDCWriting,
+    backends: BrightnessBackends,
+    prefs: DisplayPrefs,
+    displayID: CGDirectDisplayID,
+    store: (any BrightnessStoring)? = nil,
+    storageKey: String? = nil,
+    legacyKey: String? = nil
+  ) {
     self.writer = writer
+    self.backends = backends
+    self.prefs = prefs
+    self.displayID = displayID
     self.store = store
     self.storageKey = storageKey
     self.coalescer = BrightnessWriteCoalescer()
+    self.hdrMode = prefs.hdrMode
+
+    // Migration + first-run (scope decision 4; reviews I12/I13).
+    let s = DimmingMath.switchingValue(fromPoint: prefs.combinedSwitchingPoint)
+    var initial: Double
     if let store, let storageKey, let saved = store.savedBrightness(for: storageKey) {
-      brightness = min(max(saved, 0), 1)
+      initial = min(max(saved, 0), 1)
+    } else if let store, let storageKey, let legacyKey,
+              let legacy = store.savedBrightness(for: legacyKey) {
+      // One-time M2 → M3 migration: the legacy value was pure-DDC, which is
+      // the upper [s, 1] band of the combined scale. The legacy key is left
+      // in place and ignored from here on.
+      initial = s + min(max(legacy, 0), 1) * (1 - s)
+      store.saveBrightness(initial, for: storageKey)
+    } else {
+      // Fresh display (review I13): the fork's rule is s + convDDCToValue(100)
+      // * (1 - s) = 1.0. The 0.5 property default would mean "hardware
+      // minimum" on the combined scale.
+      initial = 1.0
+    }
+    if !prefs.disableCombinedBrightness, initial < s {
+      // Park-at-s, every launch (review I12): the termination hook removes
+      // software dimming at quit, so restoring a software-zone value would
+      // show un-dimmed glass under a low slider. Publish only — the store
+      // keeps the saved value.
+      initial = s
+    }
+    brightness = initial
+
+    if backends.hdr != nil {
+      initialHDRRefresh = Task { [weak self] in
+        await self?.noteHDRStateMayHaveChanged()
+      }
     }
   }
 
   deinit {
+    hdrTransitionTask?.cancel()
     // Ends the coalescer's drain loop (after any pending write lands) so the
     // coalescer and its task don't outlive the controller.
     coalescer.finishSubmissions()
   }
 
+  // MARK: - Hardware readback
+
   public func refreshFromHardware() async {
+    // Under the native path the DDC brightness register is locked by the
+    // monitor (and unreadable); adopting it would corrupt combined state.
+    guard !usesNative else { return }
     guard let result = await writer.read(command: VCP.brightness), result.max > 0 else {
       return
     }
     maxDDCValue = result.max
-    brightness = Double(min(result.current, result.max)) / Double(result.max)
-    // A readable panel's hardware value is truth, so the store must adopt it
-    // too — otherwise the saved number goes stale and the next launch restores
-    // an outdated brightness.
-    if let store, let storageKey {
-      store.saveBrightness(brightness, for: storageKey)
+    let raw = Double(min(result.current, result.max)) / Double(result.max)
+    if !prefs.disableCombinedBrightness {
+      // C2 (dossier §7): a readable panel's DDC value lives in the upper
+      // [s, 1] band of the combined scale — adopting current/max directly
+      // would map DDC 50% to "combined 0.5", i.e. DDC 0, corrupting the
+      // store. DDC 0 is consistent with ANY software-zone value, so a zero
+      // read keeps the saved value.
+      guard result.current > 0 else { return }
+      let s = switchingValue
+      brightness = s + raw * (1 - s)
+    } else {
+      brightness = raw
     }
+    // A readable panel's hardware value is truth, so the store must adopt it
+    // too — otherwise the saved number goes stale and the next launch
+    // restores an outdated brightness.
+    persist(brightness)
   }
+
+  // MARK: - Brightness input
 
   /// Synchronous by design: state updates immediately, hardware writes
   /// coalesce latest-wins — a 60 Hz slider drag must never queue stale DDC
@@ -67,46 +238,370 @@ public final class BrightnessController {
   /// The hardware write must not require the main actor for any step after
   /// this call returns: during a slider drag the main run loop sits in
   /// event-tracking mode, which starves main-actor task execution until
-  /// mouseup — a drain loop started here with `Task {}` (which inherits
-  /// MainActor isolation) would never run mid-drag, and even
-  /// `Task { await coalescer.submit(...) }` needs a main-actor turn just to
-  /// start its body. So the handoff is a synchronous, nonisolated store into
-  /// a lock-protected slot; the coalescer drains on the global executor.
+  /// mouseup — so the handoff is a synchronous, nonisolated store into a
+  /// lock-protected slot; the coalescer drains on the global executor. The
+  /// software leg runs inline right here (also synchronous): that immediacy
+  /// is the drag-smoothness payoff of software dimming.
   public func setBrightness(_ value: Double) {
     let clamped = min(max(value, 0), 1)
     brightness = clamped
-    issuedGeneration += 1
-    // DDCBrightnessApplier is a cheap two-word struct built per submit — NOT
-    // held at init — so a `rebind(writer:)` takes effect on the very next
-    // write. (Path selection between DDC and native targets is Task 6.)
-    coalescer.submit(
-      .init(
-        target: .ddc(raw: UInt16((clamped * Double(maxDDCValue)).rounded())),
-        applier: DDCBrightnessApplier(writer: writer),
-        epoch: epochProvider(),
-        generation: issuedGeneration
-      )
-    )
-    if let store, let storageKey {
-      store.saveBrightness(clamped, for: storageKey)
-    }
+    applyPaths(clamped)
+    persist(clamped)
   }
 
   //  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
-  /// One OSD-chiclet step (fork: `Display.calcNewBrightness`): 16 chiclets,
-  /// quarter-chiclet bias, ceil-snap so off-boundary values snap in the
-  /// direction of travel. `isFine` steps a quarter chiclet (Opt+Shift).
+  /// One brightness-key step. The boost state machine consumes the press
+  /// first (fresh presses at the range ends toggle HDR, fork
+  /// `HDRBoost.consumeBrightnessKey`); otherwise one OSD-chiclet step (fork:
+  /// `Display.calcNewBrightness`): 16 chiclets, quarter-chiclet bias,
+  /// ceil-snap so off-boundary values snap in the direction of travel.
+  /// `isFine` steps a quarter chiclet (Opt+Shift). The plain chiclet math
+  /// runs on EVERY path (M2 transplant, plan scope decision 2);
+  /// `DimmingMath.stepCombined` is wired only behind the app-level
+  /// `separateCombinedScale` default (review M39).
   @discardableResult
-  public func step(isUp: Bool, isFine: Bool) -> Double {
-    var stepSize: Double = (isUp ? 1 : -1) / 16.0
-    let delta = stepSize / 4
-    if isFine {
-      stepSize = delta
+  public func step(isUp: Bool, isFine: Bool, isFresh: Bool = true) -> Double {
+    if let boosted = consumeBoostKey(isUp: isUp, isFresh: isFresh) {
+      return boosted
     }
-    let value = min(max(0, (((brightness + delta) / stepSize).rounded(.up)) * stepSize), 1)
+    let value: Double
+    if prefs.separateCombinedScale, !usesNative, !prefs.forceSoftware,
+       !prefs.disableCombinedBrightness {
+      value = DimmingMath.stepCombined(current: brightness, isUp: isUp, isFine: isFine)
+    } else {
+      var stepSize: Double = (isUp ? 1 : -1) / 16.0
+      let delta = stepSize / 4
+      if isFine {
+        stepSize = delta
+      }
+      value = min(max(0, (((brightness + delta) / stepSize).rounded(.up)) * stepSize), 1)
+    }
     setBrightness(value)
     return value
   }
+
+  // MARK: - Path selection
+
+  /// The four-way fork contract (dossier §2/§10), decided synchronously from
+  /// cached state — `cachedHDRActive` is never awaited on the drag path.
+  private func applyPaths(_ value: Double) {
+    if usesNative {
+      // Local native-leg write: record the expected echo at call time (I15)
+      // and invalidate any queued adoption (I9).
+      echo.withLock { state in
+        state.value = value
+        state.generation += 1
+        state.converging = false
+      }
+      submitHardware(.native(Float(value)), applier: backends.applierNative)
+      return
+    }
+    if prefs.forceSoftware {
+      applySoftware(value)
+      return
+    }
+    if !prefs.disableCombinedBrightness {
+      let split = DimmingMath.combinedSplit(value: value, switching: switchingValue)
+      submitHardware(
+        .ddc(raw: DimmingMath.valueToDDC(split.ddc, minDDC: 0, maxDDC: Double(maxDDCValue))),
+        applier: DDCBrightnessApplier(writer: writer)
+      )
+      applySoftware(split.sw)
+      return
+    }
+    submitHardware(
+      .ddc(raw: DimmingMath.valueToDDC(value, minDDC: 0, maxDDC: Double(maxDDCValue))),
+      applier: DDCBrightnessApplier(writer: writer)
+    )
+  }
+
+  private func submitHardware(_ target: HardwareTarget, applier: any BrightnessApplying) {
+    _onSubmit?(target)
+    issuedGeneration += 1
+    coalescer.submit(
+      .init(target: target, applier: applier, epoch: epochProvider(), generation: issuedGeneration)
+    )
+  }
+
+  /// The software leg, inline and synchronous on the main actor. `sw` is the
+  /// raw 0…1 software value; the backend receives the transformed physical
+  /// multiplier (dossier §3: the transform applies before any gamma/shade
+  /// write). Deduped on the last-applied sw value.
+  private func applySoftware(_ sw: Double) {
+    guard lastAppliedSw != sw else { return }
+    lastAppliedSw = sw
+    let transformed = DimmingMath.swTransform(sw, allowZero: prefs.allowZeroSwBrightness, reverse: false)
+    if prefs.avoidGamma {
+      backends.shade?.setShadeAlpha(DimmingMath.shadeAlpha(fromValue: transformed), on: displayID)
+    } else if let gamma = backends.gamma {
+      preGammaApplyHook?()
+      gamma.applyGammaScale(transformed, on: displayID)
+    }
+  }
+
+  /// C1 (MUST-HAVE): run on EVERY transition into the native path —
+  /// `setHDRMode(.alwaysOn)`, an externally-toggled HDR discovered by
+  /// `noteHDRStateMayHaveChanged`, and boost engage. Without it the screen
+  /// stays dimmed by a gamma table HDR ignores (gamma is broken under HDR)
+  /// and the sw dedupe blocks recovery. The fork does this via
+  /// `setSwBrightness(1)` on every mode change. Candela deliberately does
+  /// NOT mirror the fork's clearing of the user's forceSw/avoidGamma prefs
+  /// on entering always-on — those are per-display user choices (documented
+  /// divergence).
+  private func clearSoftwareLeg() {
+    backends.shade?.removeShade(for: displayID)
+    backends.gamma?.applyGammaScale(1.0, on: displayID)
+    lastAppliedSw = nil
+  }
+
+  private var switchingValue: Double {
+    DimmingMath.switchingValue(fromPoint: prefs.combinedSwitchingPoint)
+  }
+
+  private func persist(_ value: Double) {
+    if let store, let storageKey {
+      store.saveBrightness(value, for: storageKey)
+    }
+  }
+
+  // MARK: - HDR state machine
+
+  /// Panel entry point for the per-display HDR mode.
+  public func setHDRMode(_ mode: HDRMode) async {
+    let previous = hdrMode
+    guard mode != previous else { return }
+    let wasEngaged = cachedHDRActive
+    prefs.hdrMode = mode
+    hdrMode = mode
+    pathLog.log("hdrMode \(previous.rawValue) -> \(mode.rawValue) display=\(self.displayID)")
+    if mode == .alwaysOn {
+      // Entering the native path: C1 clearing, then engage HDR and hold the
+      // poller off until the settle window ends.
+      clearSoftwareLeg()
+      beginHDRTransition()
+      let engaged = await backends.hdr?.setHDR(displayID: displayID, enabled: true) ?? false
+      if engaged {
+        cachedHDRActive = true
+        try? await Task.sleep(for: settleDelay)
+      }
+      settleInProgress = false
+      await refreshHDRCaches()
+    } else if previous == .alwaysOn || (previous == .boost && wasEngaged) {
+      // Leaving the native path: drop HDR, wait out the settle, then re-apply
+      // the current value through the normal path. The duplicate memo is
+      // reset first — hardware left HDR at its own brightness level, so the
+      // last DDC value we recorded no longer reflects the register (I10).
+      cachedHDRActive = false
+      beginHDRTransition()
+      _ = await backends.hdr?.setHDR(displayID: displayID, enabled: false)
+      try? await Task.sleep(for: settleDelay)
+      settleInProgress = false
+      coalescer.resetDuplicateState()
+      applyPaths(brightness)
+      await refreshHDRCaches()
+    } else {
+      await refreshHDRCaches()
+    }
+  }
+
+  /// Re-evaluates the cached HDR state (Task 4's topology loop calls this for
+  /// every surviving display after `HDRToggling.displaysReconfigured()`).
+  /// Detecting an externally-toggled HDR entry runs the C1 clearing.
+  public func noteHDRStateMayHaveChanged() async {
+    let wasNative = usesNative
+    await refreshHDRCaches()
+    if !wasNative, usesNative {
+      clearSoftwareLeg()
+    }
+  }
+
+  /// Reconfigure re-apply (review I11): the WindowServer rebuilt display
+  /// state, so re-capture the gamma baseline (the app-side loop calls
+  /// `resetAllGamma()` once per event BEFORE this, so the table is OS-owned —
+  /// the T5 ordering contract), re-pin shade frames, and re-run the software
+  /// leg for the current value. Skipped under the native path per C1.
+  public func handleReconfigure() async {
+    backends.gamma?.recaptureDefaultTable(on: displayID)
+    backends.shade?.repinFrames()
+    lastAppliedSw = nil
+    guard !usesNative else { return }
+    let sw: Double
+    if prefs.forceSoftware {
+      sw = brightness
+    } else if !prefs.disableCombinedBrightness {
+      sw = DimmingMath.combinedSplit(value: brightness, switching: switchingValue).sw
+    } else {
+      return // pure-DDC path has no software leg to re-apply
+    }
+    applySoftware(sw)
+  }
+
+  /// Fork `HDRBoost.consumeBrightnessKey` (HDRControl.swift:86-128): a fresh
+  /// up-press at 100% engages HDR, a fresh down-press at 0 while engaged
+  /// disengages. Returns the HUD value when the press was consumed, nil to
+  /// step normally. Key-repeat NEVER toggles (fork contract) — the gate reads
+  /// only cached state, so it costs nothing on the keypress path.
+  private func consumeBoostKey(isUp: Bool, isFresh: Bool) -> Double? {
+    guard hdrMode == .boost, cachedSupportsHDR, isFresh else { return nil }
+    if !cachedHDRActive, isUp, brightness >= 0.999 {
+      engageBoost()
+      return 1.0
+    }
+    if cachedHDRActive, !isUp, brightness <= 0.001 {
+      disengageBoost()
+      return 1.0
+    }
+    return nil
+  }
+
+  private func engageBoost() {
+    pathLog.log("boost engage display=\(self.displayID)")
+    // Optimistic, synchronous flip (I8): the engaging press's HUD reads
+    // hdrBoostActive == true in this very turn. Reverted with a log if the
+    // spawned setHDR fails.
+    cachedHDRActive = true
+    clearSoftwareLeg() // C1, belt-and-braces
+    beginHDRTransition()
+    // Expected-native slot written at press time, not settle time (I15).
+    echo.withLock { state in
+      state.value = 1.0
+      state.generation += 1
+      state.converging = false
+    }
+    brightness = 1.0
+    persist(1.0)
+    let delay = settleDelay
+    hdrTransitionTask = Task { [weak self] in
+      guard let self, let hdr = self.backends.hdr else { return }
+      let engaged = await hdr.setHDR(displayID: self.displayID, enabled: true)
+      guard engaged else {
+        pathLog.error("boost engage failed: setHDR(true) returned false; reverting display=\(self.displayID)")
+        self.cachedHDRActive = false
+        self.settleInProgress = false
+        self.updateNativeActive()
+        return
+      }
+      // Settle window: the display blanks and re-modes for ~2 s; only then
+      // does the deferred native re-assert land (ENGINEERING-NOTES).
+      try? await Task.sleep(for: delay)
+      guard !Task.isCancelled else { return }
+      self.settleInProgress = false
+      self.submitHardware(.native(1.0), applier: self.backends.applierNative)
+      await self.refreshHDRCaches()
+    }
+  }
+
+  private func disengageBoost() {
+    pathLog.log("boost disengage display=\(self.displayID)")
+    cachedHDRActive = false // synchronous: native routing stops immediately
+    beginHDRTransition()
+    brightness = 1.0
+    persist(1.0)
+    // Hardware left HDR at its own brightness level — the duplicate memo's
+    // last DDC value no longer reflects the register (review I10).
+    coalescer.resetDuplicateState()
+    let delay = settleDelay
+    hdrTransitionTask = Task { [weak self] in
+      guard let self else { return }
+      _ = await self.backends.hdr?.setHDR(displayID: self.displayID, enabled: false)
+      // Settle window before the hardware re-apply: a DDC write mid-modeswitch
+      // is lost (ENGINEERING-NOTES).
+      try? await Task.sleep(for: delay)
+      guard !Task.isCancelled else { return }
+      self.settleInProgress = false
+      self.applyPaths(self.brightness)
+      await self.refreshHDRCaches()
+    }
+  }
+
+  /// Marks an HDR transition's start: the poller gate drops and any queued
+  /// adoption is invalidated (the native leg's echo expectations no longer
+  /// hold while the display re-modes).
+  private func beginHDRTransition() {
+    settleInProgress = true
+    echo.withLock { state in
+      state.value = nil
+      state.generation += 1
+      state.nativeActive = false
+      state.converging = false
+    }
+  }
+
+  private func refreshHDRCaches() async {
+    if let hdr = backends.hdr {
+      cachedSupportsHDR = await hdr.supportsHDR(displayID: displayID)
+      cachedHDRActive = await hdr.isHDREnabled(displayID: displayID)
+    } else {
+      cachedSupportsHDR = false
+      cachedHDRActive = false
+    }
+    updateNativeActive()
+  }
+
+  private func updateNativeActive() {
+    let active = usesNative && !settleInProgress
+    echo.withLock { $0.nativeActive = active }
+  }
+
+  // MARK: - Poller contract (Task 7)
+
+  /// Poller entry: eases the published value toward an externally-observed
+  /// native brightness (Control Center, ambient) instead of jumping —
+  /// dossier §10's asymptotic rule: snap within 0.01, else 1/3 of the gap
+  /// with a 0.005 signed minimum step. Never submits a hardware write: the
+  /// hardware already holds the external value, and writing back would fight
+  /// its author.
+  public func adoptExternal(_ value: Double, generation: UInt64) {
+    // Generation check first (I9): an adoption queued before a local write
+    // (e.g. during a starved drag) is stale — discard it entirely.
+    let current = echo.withLock { $0.generation }
+    guard current == generation else { return }
+    let clamped = min(max(value, 0), 1)
+    let diff = clamped - brightness
+    let eased: Double
+    let snapped: Bool
+    if abs(diff) < 0.01 {
+      eased = clamped
+      snapped = true
+    } else if diff > 0 {
+      eased = brightness + max(diff / 3, 0.005)
+      snapped = false
+    } else {
+      eased = brightness + min(diff / 3, -0.005)
+      snapped = false
+    }
+    brightness = eased
+    // DIVERGENCE (review M36): the fork persists the raw read; Candela
+    // persists the eased value so published and stored state never diverge.
+    persist(eased)
+    echo.withLock { state in
+      guard state.generation == generation else { return }
+      state.value = eased
+      state.converging = !snapped
+    }
+  }
+
+  /// Poller echo check: the last locally-originated native value (or the
+  /// adoption currently converging), generation-tagged so the poller can
+  /// hand the generation back to `adoptExternal` (review I9).
+  public nonisolated func expectedNative() -> (value: Double?, generation: UInt64) {
+    echo.withLock { ($0.value, $0.generation) }
+  }
+
+  /// Poller gate: true only when the native path is active AND any HDR settle
+  /// window has completed (reviews I5, I15).
+  public nonisolated func isNativeActive() -> Bool {
+    echo.withLock { $0.nativeActive }
+  }
+
+  /// True while an external adoption is still easing toward its target: the
+  /// poller must keep polling (and not discard reads as echoes) until the
+  /// snap fires (review M33).
+  public nonisolated func isConvergingFromExternal() -> Bool {
+    echo.withLock { $0.converging }
+  }
+
+  // MARK: - Plumbing
 
   public func waitForPendingWrites() async {
     await coalescer.waitUntilCompleted(through: issuedGeneration)
@@ -125,14 +620,18 @@ public final class BrightnessController {
   /// Installs the display-reconfiguration epoch pair: `provider` is read at
   /// submit time to stamp each `PendingWrite`; `isCurrent` gates the drain so
   /// a write issued before a reconfiguration never lands on rebuilt hardware.
-  /// (Task 4 wires DisplayManager's real pair; until then the `{ 0 }` /
-  /// accept-all defaults apply.)
   public func setEpochProvider(
     _ provider: @escaping @Sendable () -> UInt64,
     isCurrent: @escaping @Sendable (UInt64) -> Bool
   ) {
     epochProvider = provider
     coalescer.setEpochGate(isCurrent)
+  }
+
+  /// Test seam: observes the coalescer's duplicate-memo reset counter (the
+  /// disengage contract "duplicate memo reset recorded" is asserted with it).
+  nonisolated func _duplicateResetCount() -> UInt64 {
+    coalescer.duplicateResetCount()
   }
 }
 
@@ -233,6 +732,12 @@ actor BrightnessWriteCoalescer {
     // Bumping `resets` invalidates any apply currently in flight — see the
     // `lastApplied` comment.
     lastApplied.withLock { $0 = (nil, $0.resets + 1) }
+  }
+
+  /// Test seam: the `resets` version counter (bumps once per
+  /// `resetDuplicateState`).
+  nonisolated func duplicateResetCount() -> UInt64 {
+    lastApplied.withLock { $0.resets }
   }
 
   /// Synchronous and nonisolated on purpose — see the type comment.

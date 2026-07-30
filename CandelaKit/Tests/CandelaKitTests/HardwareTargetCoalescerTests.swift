@@ -301,7 +301,7 @@ actor GatedApplier: BrightnessApplying {
 @MainActor
 @Test func controllerStaleEpochWriteSkipsHardwareButWaitReturns() async {
   let fake = FakeDDC()
-  let controller = BrightnessController(writer: fake)
+  let controller = makeLegacyPathController(writer: fake)
   let gate = FakeEpochGate()
   controller.setEpochProvider({ 1 }, isCurrent: gate.isCurrent)
   gate.setCurrent(false)
@@ -317,7 +317,7 @@ actor GatedApplier: BrightnessApplying {
 @Test func rebindSwapsWriterAndResetsDuplicateState() async {
   let first = FakeDDC()
   let second = FakeDDC()
-  let controller = BrightnessController(writer: first)
+  let controller = makeLegacyPathController(writer: first)
   controller.setBrightness(0.4)
   await controller.waitForPendingWrites()
   #expect(await first.recordedWrites().map(\.value) == [40])
