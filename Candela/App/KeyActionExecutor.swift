@@ -24,10 +24,26 @@ final class KeyActionExecutor {
     switch action {
     case let .stepBrightness(isUp, isFine, scope):
       switch scope {
-      case .allExternal:
-        for (id, name, newValue) in model.stepBrightnessAllExternal(isUp: isUp, isFine: isFine, isFresh: isFresh) {
-          hud?.showBrightness(displayID: id, name: name, value: newValue)
+      case .affected:
+        // Fork parity (DisplayManager.getAffectedDisplays): an unmodified
+        // brightness press acts on the display the user is working on — the
+        // one under the pointer — not on every external at once. Only that
+        // display steps, and only it shows a HUD.
+        if let displayID = Self.pointerDisplayID(),
+           let (id, name, newValue) = model.stepBrightness(
+             displayID: displayID, isUp: isUp, isFine: isFine, isFresh: isFresh
+           )
+        {
+          showHUD(id: id, name: name, value: newValue)
+        } else {
+          // The pointer sits on a display we don't control (or no screen
+          // claimed it / it reported no display ID). Rather than swallow the
+          // press, fall back to the previous behavior and step every external
+          // — losing the targeting is better than losing the keypress.
+          stepAllExternal(isUp: isUp, isFine: isFine, isFresh: isFresh)
         }
+      case .allExternal:
+        stepAllExternal(isUp: isUp, isFine: isFine, isFresh: isFresh)
       case .builtInOnly:
         // M2 deferral closed (Task 10): Ctrl-directed steps drive the
         // built-in panel through its native-path controller. HUD on the
@@ -40,9 +56,10 @@ final class KeyActionExecutor {
       }
     case let .toggleMirroringOrStepDown(isFine):
       // Fork fall-through: when mirroring is not applicable (single display),
-      // Cmd+BrightnessDown acts as a normal brightness-down step.
+      // Cmd+BrightnessDown acts as a normal brightness-down step — and a plain
+      // step is `.affected`, same as rule 6.
       if !Mirroring.engageMirror() {
-        execute(.stepBrightness(isUp: false, isFine: isFine, scope: .allExternal), isFresh: isFresh)
+        execute(.stepBrightness(isUp: false, isFine: isFine, scope: .affected), isFresh: isFresh)
       }
     case .stepContrast:
       log.log("contrast keys arrive with Milestone 4")
@@ -53,5 +70,27 @@ final class KeyActionExecutor {
     case .none:
       break
     }
+  }
+
+  private func stepAllExternal(isUp: Bool, isFine: Bool, isFresh: Bool) {
+    for (id, name, newValue) in model.stepBrightnessAllExternal(isUp: isUp, isFine: isFine, isFresh: isFresh) {
+      showHUD(id: id, name: name, value: newValue)
+    }
+  }
+
+  private func showHUD(id: CGDirectDisplayID, name: String, value: Double) {
+    hud?.showBrightness(displayID: id, name: name, value: value)
+  }
+
+  /// The display under the mouse pointer (fork: `getCurrentDisplay(byFocus:
+  /// false)`). Nil when no screen contains the pointer, or the screen that
+  /// does carries no `NSScreenNumber`. Targeting the *focused* display instead
+  /// is an M5 preference (fork's `useFocusInsteadOfMouse`), and belongs here.
+  private static func pointerDisplayID() -> CGDirectDisplayID? {
+    let location = NSEvent.mouseLocation
+    guard let screen = NSScreen.screens.first(where: { NSMouseInRect(location, $0.frame, false) }) else {
+      return nil
+    }
+    return screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
   }
 }

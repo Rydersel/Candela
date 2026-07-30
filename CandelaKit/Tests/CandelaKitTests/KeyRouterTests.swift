@@ -15,13 +15,13 @@ struct KeyRouterTests {
 
   // Plain steps
   @Test func plainBrightnessUp() {
-    #expect(route(.brightnessUp) == .stepBrightness(isUp: true, isFine: false, scope: .allExternal))
+    #expect(route(.brightnessUp) == .stepBrightness(isUp: true, isFine: false, scope: .affected))
   }
   @Test func plainBrightnessDown() {
-    #expect(route(.brightnessDown) == .stepBrightness(isUp: false, isFine: false, scope: .allExternal))
+    #expect(route(.brightnessDown) == .stepBrightness(isUp: false, isFine: false, scope: .affected))
   }
   @Test func repeatStillSteps() {
-    #expect(route(.brightnessUp, isRepeat: true) == .stepBrightness(isUp: true, isFine: false, scope: .allExternal))
+    #expect(route(.brightnessUp, isRepeat: true) == .stepBrightness(isUp: true, isFine: false, scope: .affected))
   }
   @Test func keyUpDoesNothing() {
     #expect(route(.brightnessUp, pressed: false) == .none)
@@ -29,14 +29,14 @@ struct KeyRouterTests {
 
   // Fine steps + inversion pref
   @Test func optShiftIsFine() {
-    #expect(route(.brightnessUp, [.option, .shift]) == .stepBrightness(isUp: true, isFine: true, scope: .allExternal))
+    #expect(route(.brightnessUp, [.option, .shift]) == .stepBrightness(isUp: true, isFine: true, scope: .affected))
   }
   @Test func fineScalePrefInvertsPlain() {
-    #expect(route(.brightnessUp, fineScalePref: true) == .stepBrightness(isUp: true, isFine: true, scope: .allExternal))
+    #expect(route(.brightnessUp, fineScalePref: true) == .stepBrightness(isUp: true, isFine: true, scope: .affected))
   }
   @Test func fineScalePrefInvertsOptShift() {
     #expect(route(.brightnessUp, [.option, .shift], fineScalePref: true)
-      == .stepBrightness(isUp: true, isFine: false, scope: .allExternal))
+      == .stepBrightness(isUp: true, isFine: false, scope: .affected))
   }
 
   // Mirroring (rule 1)
@@ -47,7 +47,7 @@ struct KeyRouterTests {
     #expect(route(.brightnessDown, isRepeat: true, [.command]) == .none)
   }
   @Test func cmdBrightnessUpIsNotMirroring() {
-    #expect(route(.brightnessUp, [.command]) == .stepBrightness(isUp: true, isFine: false, scope: .allExternal))
+    #expect(route(.brightnessUp, [.command]) == .stepBrightness(isUp: true, isFine: false, scope: .affected))
   }
   @Test func ctrlCmdBrightnessDownIsDirectedNotMirroring() {
     #expect(route(.brightnessDown, [.control, .command])
@@ -63,7 +63,7 @@ struct KeyRouterTests {
   }
   @Test func optionShiftIsFineStepNotDeepLink() {
     #expect(route(.brightnessDown, [.option, .shift])
-      == .stepBrightness(isUp: false, isFine: true, scope: .allExternal))
+      == .stepBrightness(isUp: false, isFine: true, scope: .affected))
   }
 
   // Directed (rule 4)

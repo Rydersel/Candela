@@ -71,6 +71,19 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   private static let barX: CGFloat = BrightnessHUD.margin + BrightnessHUD.leftIconSize + 9
   private static let barWidth: CGFloat = BrightnessHUD.hudSize.width - BrightnessHUD.barX - BrightnessHUD.rightIconSize - BrightnessHUD.margin - 9
   private static let screenMargin: CGFloat = 20
+  /// Extra clearance added to the fallback allowance so the pill sits clearly
+  /// below a revealed menu bar rather than hugging it. Ryder eyeballed this
+  /// against the native macOS OSD pill.
+  private static let menuBarClearance: CGFloat = 10
+
+  /// Vertical space to keep free at the top of `screen` for the menu bar.
+  /// While the bar is showing, the frame/visibleFrame difference measures it
+  /// exactly and wins the `max`; while it is auto-hidden that difference
+  /// collapses (often to 0), so we reserve the bar's own thickness instead —
+  /// the space it will occupy the moment it reveals.
+  private static func menuBarAllowance(for screen: NSScreen) -> CGFloat {
+    max(screen.frame.maxY - screen.visibleFrame.maxY, NSStatusBar.system.thickness + self.menuBarClearance)
+  }
 
   private var huds: [CGDirectDisplayID: HUD] = [:]
   private var fadeTimers: [CGDirectDisplayID: Timer] = [:]
@@ -106,8 +119,14 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     var fillFrame = hud.fillBox.frame
     fillFrame.size.width = max(Self.barHeight, Self.barWidth * normalized)
     hud.fillBox.frame = fillFrame
-    let frame = screen.visibleFrame
-    hud.panel.setFrameOrigin(NSPoint(x: frame.maxX - Self.hudSize.width - Self.screenMargin, y: frame.maxY - Self.hudSize.height - Self.screenMargin))
+    // Vertical position is measured from the full frame, not `visibleFrame`:
+    // with the menu bar auto-hidden `visibleFrame` reaches the top of the
+    // screen, and the pill would then sit exactly where the bar reveals itself.
+    // `menuBarAllowance` reserves that strip unconditionally.
+    hud.panel.setFrameOrigin(NSPoint(
+      x: screen.visibleFrame.maxX - Self.hudSize.width - Self.screenMargin,
+      y: screen.frame.maxY - Self.menuBarAllowance(for: screen) - Self.hudSize.height - Self.screenMargin
+    ))
     self.fadeTimers[displayID]?.invalidate()
     self.fadeGenerations[displayID, default: 0] &+= 1
     // A bare `alphaValue = 1` loses to an in-flight fade: NSWindow's animator

@@ -62,6 +62,21 @@ final class AppModel {
     }
   }
 
+  /// Steps one display by ID, resolving either slot (an external, or the
+  /// built-in in its own slot). Backs the `.affected` scope — the display the
+  /// user is working on, which the executor resolves from the pointer. Returns
+  /// nil when the ID is not a display we control.
+  ///
+  /// Resolving-by-pointer is the fork's default; picking the *focused* display
+  /// instead (fork `useFocusInsteadOfMouse`) is an M5 preference, and lands in
+  /// the executor's resolution step, not here.
+  func stepBrightness(displayID: CGDirectDisplayID, isUp: Bool, isFine: Bool, isFresh: Bool) -> (id: CGDirectDisplayID, name: String, newValue: Double)? {
+    let slot = displays.first { $0.id == displayID } ?? builtIn.flatMap { $0.id == displayID ? $0 : nil }
+    guard let slot else { return nil }
+    return (slot.id, slot.display.name,
+            slot.controller.step(isUp: isUp, isFine: isFine, isFresh: isFresh))
+  }
+
   /// Steps the built-in panel (Ctrl-directed keys only — plain presses target
   /// externals). Returns nil when no built-in display is online.
   func stepBrightnessBuiltIn(isUp: Bool, isFine: Bool, isFresh: Bool) -> (id: CGDirectDisplayID, name: String, newValue: Double)? {
