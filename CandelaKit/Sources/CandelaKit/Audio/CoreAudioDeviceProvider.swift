@@ -4,9 +4,7 @@ import os
 
 /// Minimal CoreAudio wrapper (D4) — SimplyCoreAudio is archived, and this is
 /// the whole surface Candela needs from it.
-public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sendable {
-  // @unchecked: the mutable state (change handler + device snapshot) lives
-  // behind OSAllocatedUnfairLocks; the CoreAudio property API is thread-safe C.
+public final class CoreAudioDeviceProvider: AudioDeviceProviding, Sendable {
   private let handlerLock = OSAllocatedUnfairLock<(@Sendable () -> Void)?>(initialState: nil)
   private let listenerInstalled = OSAllocatedUnfairLock(initialState: false)
   private let listenerQueue = DispatchQueue(label: "com.rydersel.Candela.audio-listener")
@@ -38,14 +36,24 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, @unchecked Sen
       return true
     }
     guard install else { return }
+    // Prime off the caller's thread so the first defaultOutputDevice() never
+    // pays a HAL round-trip on the MainActor (review T5-Q4).
+    listenerQueue.async { [weak self] in
+      guard let self else { return }
+      let fresh = self.readDefaultOutputDevice()
+      self.snapshot.withLock { $0 = .some(fresh) }
+    }
     var address = Self.defaultOutputAddress
     AudioObjectAddPropertyListenerBlock(
       AudioObjectID(kAudioObjectSystemObject), &address, listenerQueue
     ) { [weak self] _, _ in
       guard let self else { return }
       // Snapshot on the listener queue BEFORE notifying, so the notified
-      // MainActor re-arm reads the cache instead of blocking on HAL.
-      self.snapshot.withLock { $0 = .some(self.readDefaultOutputDevice()) }
+      // MainActor re-arm reads the cache instead of blocking on HAL. The HAL
+      // read stays OUTSIDE the lock — holding it across ~ms of coreaudiod IPC
+      // would stall any concurrent reader (review T5-Q1).
+      let fresh = self.readDefaultOutputDevice()
+      self.snapshot.withLock { $0 = .some(fresh) }
       self.handlerLock.withLock { $0 }?()
     }
   }

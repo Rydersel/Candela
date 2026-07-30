@@ -18,6 +18,10 @@ public struct AudioOutputDevice: Sendable, Equatable {
 }
 
 public protocol AudioDeviceProviding: Sendable {
+  /// Freshness contract (review T5-Q3): implementations may serve a cached
+  /// snapshot that refreshes on device-change events — install the change
+  /// handler before trusting repeated reads, or the value can be stale for
+  /// the object's lifetime.
   func defaultOutputDevice() -> AudioOutputDevice?
   /// Fires on default-output-device change (any thread). Pass nil to clear.
   func setOnDefaultOutputChange(_ handler: (@Sendable () -> Void)?)
