@@ -19,22 +19,29 @@ let pathLog = Logger(subsystem: "com.rydersel.Candela", category: "path")
 /// unavailable the app injects a closure that returns false. The DDC applier
 /// is not held here — it is built per submit from the controller's writer
 /// (Task 3), so `rebind(writer:)` takes effect on the very next write.
+/// `readNative` is the native readback (re-review T10-B): role `.builtIn`
+/// seeds from it at init and reads it in `refreshFromHardware` instead of DDC
+/// (fork: `AppleDisplay.getAppleBrightness`); the app passes
+/// `DisplayServices.getBrightness`, tests inject.
 public struct BrightnessBackends {
   let applierNative: any BrightnessApplying
   let hdr: (any HDRToggling)?
   let shade: (any ShadeRendering)?
   let gamma: (any GammaApplying)?
+  let readNative: (@Sendable (CGDirectDisplayID) -> Float?)?
 
   public init(
     applierNative: any BrightnessApplying,
     hdr: (any HDRToggling)?,
     shade: (any ShadeRendering)?,
-    gamma: (any GammaApplying)?
+    gamma: (any GammaApplying)?,
+    readNative: (@Sendable (CGDirectDisplayID) -> Float?)? = nil
   ) {
     self.applierNative = applierNative
     self.hdr = hdr
     self.shade = shade
     self.gamma = gamma
+    self.readNative = readNative
   }
 }
 
@@ -66,7 +73,11 @@ public final class BrightnessController {
   /// AND HDR is currently live. The second half is empirically load-bearing:
   /// with HDR off the MAG341C answers `DisplayServicesSetBrightness` with
   /// SUCCESS but changes nothing, so native must never be routed on mode alone.
-  private var usesNative: Bool { hdrMode != .off && cachedHDRActive }
+  /// Role `.builtIn` is constitutively native (Task 10): the built-in panel
+  /// has no DDC wire and no combined/software routing — every path-selection
+  /// consumer (applyPaths, step's combined math, handleReconfigure) short-
+  /// circuits to the native leg through this one gate.
+  private var usesNative: Bool { role == .builtIn || (hdrMode != .off && cachedHDRActive) }
 
   /// HDR state caches, refreshed by async tasks (init, mode changes, boost
   /// transitions, `noteHDRStateMayHaveChanged`) and only ever *read* on the
@@ -86,6 +97,9 @@ public final class BrightnessController {
   @ObservationIgnored private let backends: BrightnessBackends
   @ObservationIgnored private let prefs: DisplayPrefs
   @ObservationIgnored private let displayID: CGDirectDisplayID
+  /// Explicitly nonisolated (immutable, Sendable) so `isNativeActive()` can
+  /// answer from the poller's nonisolated context without an executor hop.
+  @ObservationIgnored private nonisolated let role: DisplayRole
   private let coalescer: BrightnessWriteCoalescer
   @ObservationIgnored private var issuedGeneration: UInt64 = 0
   /// Read at submit time to stamp each `PendingWrite.epoch`. Default `{ 0 }`
@@ -146,6 +160,7 @@ public final class BrightnessController {
     backends: BrightnessBackends,
     prefs: DisplayPrefs,
     displayID: CGDirectDisplayID,
+    role: DisplayRole = .external,
     store: (any BrightnessStoring)? = nil,
     storageKey: String? = nil,
     legacyKey: String? = nil
@@ -154,37 +169,47 @@ public final class BrightnessController {
     self.backends = backends
     self.prefs = prefs
     self.displayID = displayID
+    self.role = role
     self.store = store
     self.storageKey = storageKey
     self.coalescer = BrightnessWriteCoalescer()
     self.hdrMode = prefs.hdrMode
 
-    // Migration + first-run (scope decision 4; reviews I12/I13).
-    let s = DimmingMath.switchingValue(fromPoint: prefs.combinedSwitchingPoint)
-    var initial: Double
-    if let store, let storageKey, let saved = store.savedBrightness(for: storageKey) {
-      initial = min(max(saved, 0), 1)
-    } else if let store, let storageKey, let legacyKey,
-              let legacy = store.savedBrightness(for: legacyKey) {
-      // One-time M2 → M3 migration: the legacy value was pure-DDC, which is
-      // the upper [s, 1] band of the combined scale. The legacy key is left
-      // in place and ignored from here on.
-      initial = s + min(max(legacy, 0), 1) * (1 - s)
-      store.saveBrightness(initial, for: storageKey)
+    if role == .builtIn {
+      // Role `.builtIn` bypasses the migration/first-run/park-at-s block
+      // entirely (re-review T10-C): macOS owns built-in brightness across
+      // launches, and a literal shared init would park a MacBook panel at s
+      // every launch. Seed from a live native read instead (fallback 1.0);
+      // never write the store.
+      brightness = Double(min(max(backends.readNative?(displayID) ?? 1.0, 0), 1))
     } else {
-      // Fresh display (review I13): the fork's rule is s + convDDCToValue(100)
-      // * (1 - s) = 1.0. The 0.5 property default would mean "hardware
-      // minimum" on the combined scale.
-      initial = 1.0
+      // Migration + first-run (scope decision 4; reviews I12/I13).
+      let s = DimmingMath.switchingValue(fromPoint: prefs.combinedSwitchingPoint)
+      var initial: Double
+      if let store, let storageKey, let saved = store.savedBrightness(for: storageKey) {
+        initial = min(max(saved, 0), 1)
+      } else if let store, let storageKey, let legacyKey,
+                let legacy = store.savedBrightness(for: legacyKey) {
+        // One-time M2 → M3 migration: the legacy value was pure-DDC, which is
+        // the upper [s, 1] band of the combined scale. The legacy key is left
+        // in place and ignored from here on.
+        initial = s + min(max(legacy, 0), 1) * (1 - s)
+        store.saveBrightness(initial, for: storageKey)
+      } else {
+        // Fresh display (review I13): the fork's rule is s + convDDCToValue(100)
+        // * (1 - s) = 1.0. The 0.5 property default would mean "hardware
+        // minimum" on the combined scale.
+        initial = 1.0
+      }
+      if !prefs.disableCombinedBrightness, initial < s {
+        // Park-at-s, every launch (review I12): the termination hook removes
+        // software dimming at quit, so restoring a software-zone value would
+        // show un-dimmed glass under a low slider. Publish only — the store
+        // keeps the saved value.
+        initial = s
+      }
+      brightness = initial
     }
-    if !prefs.disableCombinedBrightness, initial < s {
-      // Park-at-s, every launch (review I12): the termination hook removes
-      // software dimming at quit, so restoring a software-zone value would
-      // show un-dimmed glass under a low slider. Publish only — the store
-      // keeps the saved value.
-      initial = s
-    }
-    brightness = initial
 
     if backends.hdr != nil {
       initialHDRRefresh = Task { [weak self] in
@@ -203,6 +228,15 @@ public final class BrightnessController {
   // MARK: - Hardware readback
 
   public func refreshFromHardware() async {
+    if role == .builtIn {
+      // The built-in panel has no DDC wire — the native read is the only
+      // truth (fork: `AppleDisplay.getAppleBrightness`). Publish only; no
+      // store (macOS owns built-in brightness across launches).
+      if let value = backends.readNative?(displayID) {
+        brightness = Double(min(max(value, 0), 1))
+      }
+      return
+    }
     // Under the native path the DDC brightness register is locked by the
     // monitor (and unreadable); adopting it would corrupt combined state.
     guard !usesNative else { return }
@@ -451,7 +485,9 @@ public final class BrightnessController {
   /// step normally. Key-repeat NEVER toggles (fork contract) — the gate reads
   /// only cached state, so it costs nothing on the keypress path.
   private func consumeBoostKey(isUp: Bool, isFresh: Bool) -> Double? {
-    guard hdrMode == .boost, cachedSupportsHDR, isFresh else { return nil }
+    // The boost gate requires `.external` (Task 10): the built-in never
+    // routes HDR boost, so its steps must never consume a press.
+    guard role == .external, hdrMode == .boost, cachedSupportsHDR, isFresh else { return nil }
     if !cachedHDRActive, isUp, brightness >= 0.999 {
       engageBoost()
       return 1.0
@@ -612,9 +648,11 @@ public final class BrightnessController {
   }
 
   /// Poller gate: true only when the native path is active AND any HDR settle
-  /// window has completed (reviews I5, I15).
+  /// window has completed (reviews I5, I15). Constitutively true for role
+  /// `.builtIn` (Task 10): the built-in is always on the native path and no
+  /// HDR settle machinery ever runs for it.
   public nonisolated func isNativeActive() -> Bool {
-    echo.withLock { $0.nativeActive }
+    role == .builtIn || echo.withLock { $0.nativeActive }
   }
 
   /// True while an external adoption is still easing toward its target: the

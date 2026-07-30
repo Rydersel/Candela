@@ -13,6 +13,16 @@ final class AppModel {
 
   private(set) var displays: [DisplayState] = []
 
+  /// The built-in panel, in its own slot — deliberately NOT inside `displays`
+  /// (re-review T10-A): `stepBrightnessAllExternal`, `tapConfig`, and the
+  /// panel's external iteration all walk `displays` and must stay
+  /// external-only, because plain brightness key presses must never step the
+  /// MacBook panel (fork rule; the built-in is driven by macOS's own keys or
+  /// Ctrl-directed steps). `DisplayState.display` reuses `ExternalDisplay` as
+  /// a plain id/name/persistenceKey value carrier despite the name — renaming
+  /// the struct is M4 cleanup.
+  private(set) var builtIn: DisplayState?
+
   /// Epoch authority for reconfiguration/sleep/wake. Owned here so refresh
   /// can wire every controller's epoch pair; StatusItemController activates
   /// it and consumes its topology stream.
@@ -52,8 +62,17 @@ final class AppModel {
     }
   }
 
-  /// Watch brightness keys only when an external display is present (fork:
-  /// updateMediaKeyTap's disengage rule). Volume keys arrive with Milestone 4.
+  /// Steps the built-in panel (Ctrl-directed keys only — plain presses target
+  /// externals). Returns nil when no built-in display is online.
+  func stepBrightnessBuiltIn(isUp: Bool, isFine: Bool, isFresh: Bool) -> (id: CGDirectDisplayID, name: String, newValue: Double)? {
+    guard let builtIn else { return nil }
+    return (builtIn.id, builtIn.display.name,
+            builtIn.controller.step(isUp: isUp, isFine: isFine, isFresh: isFresh))
+  }
+
+  /// Watch brightness keys only when an EXTERNAL display is present (fork:
+  /// updateMediaKeyTap's disengage rule) — with only the built-in, macOS
+  /// handles its own keys. Volume keys arrive with Milestone 4.
   var tapConfig: MediaKeyEventTap.WatchConfig {
     .init(
       watchedKeys: displays.isEmpty ? [] : [.brightnessUp, .brightnessDown],
@@ -141,6 +160,7 @@ final class AppModel {
       appeared.append(controller)
       return DisplayState(display: entry.display, controller: controller)
     }
+    refreshBuiltIn()
     // Every controller — kept and appeared — gets the live epoch pair, so
     // each submit is stamped with the current epoch and the drain refuses
     // targets stamped before a reconfiguration/sleep.
@@ -150,6 +170,10 @@ final class AppModel {
         isCurrent: { [displayManager] in displayManager.isEpochCurrent($0) }
       )
     }
+    builtIn?.controller.setEpochProvider(
+      { [displayManager] in displayManager.currentEpoch() },
+      isCurrent: { [displayManager] in displayManager.isEpochCurrent($0) }
+    )
     for controller in appeared {
       await controller.refreshFromHardware()
     }
@@ -160,8 +184,48 @@ final class AppModel {
       await controller.waitForPendingWrites()
       await controller.refreshFromHardware()
     }
+    // Resync the built-in from its native read (cheap; a freshly created
+    // controller already seeded from the same read at init).
+    await builtIn?.controller.refreshFromHardware()
     restartPoller()
     return Array(existing.keys)
+  }
+
+  /// Reconciles the built-in slot against discovery. Same identity rule as
+  /// externals: a still-present built-in keeps its controller (fresh
+  /// DisplayState for the name); no writer rebind — there is no DDC wire, the
+  /// writer is a permanent `NoopDDCWriter`.
+  private func refreshBuiltIn() {
+    guard let found = BuiltInDisplayDiscovery.discover() else {
+      builtIn = nil
+      return
+    }
+    let display = ExternalDisplay(id: found.id, name: found.name, persistenceKey: "builtIn")
+    if let existing = builtIn, existing.id == found.id {
+      builtIn = DisplayState(display: display, controller: existing.controller)
+      return
+    }
+    let controller = BrightnessController(
+      writer: NoopDDCWriter(), // no DDC wire; always-fails stub (re-review T10-D)
+      backends: BrightnessBackends(
+        applierNative: NativeBrightnessApplier(
+          displayID: found.id, apply: DisplayServices.setBrightness
+        ),
+        // No HDR/shade/gamma backends: role .builtIn never routes boost or the
+        // software leg, and `handleReconfigure` correctly no-ops on nils.
+        hdr: nil,
+        shade: nil,
+        gamma: nil,
+        readNative: DisplayServices.getBrightness(for:)
+      ),
+      prefs: DisplayPrefs(persistenceKey: "builtIn"), // role .builtIn ignores prefs
+      displayID: found.id,
+      role: .builtIn
+      // store/storageKey/legacyKey stay nil (re-review T10-E): macOS owns
+      // built-in brightness across launches; the controller seeds from a
+      // native read at init.
+    )
+    builtIn = DisplayState(display: display, controller: controller)
   }
 
   /// Rebuilds the native-brightness poll job for the current display set
@@ -169,11 +233,14 @@ final class AppModel {
   /// so the only way to stay in sync on the native path is to look).
   private func restartPoller() {
     pollerTask?.cancel()
-    guard !displays.isEmpty else {
+    guard !displays.isEmpty || builtIn != nil else {
       pollerTask = nil
       return
     }
-    let targets = displays.map { state -> BrightnessPoller.Target in
+    // Built-in first: its `isNativeActive()` is constitutively true for role
+    // .builtIn, so CC-sync polls the MacBook panel from the very first tick.
+    let states = (builtIn.map { [$0] } ?? []) + displays
+    let targets = states.map { state -> BrightnessPoller.Target in
       let controller = state.controller
       return BrightnessPoller.Target(
         displayID: state.id,

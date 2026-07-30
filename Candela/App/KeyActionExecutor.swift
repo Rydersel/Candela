@@ -3,9 +3,9 @@ import CandelaKit
 import os
 
 /// Executes routed media-key actions (spec Appendix A): steps brightness
-/// through the controllers, presents the HUD, toggles mirroring, and opens
-/// Displays settings. The M3/M4 actions (built-in brightness, contrast) log
-/// and no-op for now.
+/// through the controllers (external or Ctrl-directed built-in), presents the
+/// HUD, toggles mirroring, and opens Displays settings. The M4 action
+/// (contrast) logs and no-ops for now.
 @MainActor
 final class KeyActionExecutor {
   private let model: AppModel
@@ -35,7 +35,15 @@ final class KeyActionExecutor {
           )
         }
       case .builtInOnly:
-        log.log("directed built-in brightness arrives with Milestone 3")
+        // M2 deferral closed (Task 10): Ctrl-directed steps drive the
+        // built-in panel through its native-path controller. HUD on the
+        // built-in display; no HDR suffix/rainbow — the built-in never
+        // routes boost.
+        if let (id, name, newValue) = model.stepBrightnessBuiltIn(
+          isUp: isUp, isFine: isFine, isFresh: isFresh
+        ) {
+          hud?.showBrightness(displayID: id, name: name, value: newValue)
+        }
       }
     case let .toggleMirroringOrStepDown(isFine):
       // Fork fall-through: when mirroring is not applicable (single display),

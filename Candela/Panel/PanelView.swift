@@ -4,8 +4,10 @@ import SwiftUI
 
 /// Control-Center-style menu-bar panel: one titled section per display
 /// (13 pt semibold secondary header above a full-width capsule slider), a
-/// hairline separator, and a footer row with app-level actions. Layout
-/// metrics (280 pt width, 14 pt content insets) match the fork's MenuLayout.
+/// hairline separator, and a footer row with app-level actions. The built-in
+/// panel, when present, gets the first section (built-in-first ordering lives
+/// here in the view — `model.displays` stays external-only). Layout metrics
+/// (280 pt width, 14 pt content insets) match the fork's MenuLayout.
 struct PanelView: View {
   @Environment(AppModel.self) private var model
 
@@ -16,12 +18,28 @@ struct PanelView: View {
         Divider()
       }
       VStack(alignment: .leading, spacing: 14) {
-        if model.displays.isEmpty {
+        if model.displays.isEmpty, model.builtIn == nil {
+          // Empty state only when there is nothing at all to control — a
+          // present built-in section IS a controllable display.
           Text("No controllable displays")
             .font(.system(size: 13))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
+        }
+        if let builtIn = model.builtIn {
+          // Name header only — no HDR badge/menu chrome: the built-in never
+          // routes HDR (role .builtIn), and the section stays as quiet as
+          // Control Center keeps its module headers. The slider drives the
+          // native path, so Control Center's own slider follows live.
+          VStack(alignment: .leading, spacing: 8) {
+            Text(builtIn.display.name)
+              .font(.system(size: 13, weight: .semibold))
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .accessibilityHidden(true) // the slider carries the display name
+            DisplaySliderRow(controller: builtIn.controller, displayName: builtIn.display.name)
+          }
         }
         ForEach(model.displays) { state in
           VStack(alignment: .leading, spacing: 8) {

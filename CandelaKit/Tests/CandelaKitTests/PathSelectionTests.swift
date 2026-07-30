@@ -119,7 +119,11 @@ private final class Harness {
     hdrEnabled: Bool = false,
     settle: Duration = .seconds(2),
     seed: [String: Double] = [:],
-    configure: (DisplayPrefs, UserDefaults) -> Void = { _, _ in }
+    role: DisplayRole = .external,
+    configure: (DisplayPrefs, UserDefaults) -> Void = { _, _ in },
+    // Last (after the closure) so existing trailing-closure call sites keep
+    // matching `configure` under the forward-scan rule.
+    readNative: (@Sendable (CGDirectDisplayID) -> Float?)? = nil
   ) {
     suiteName = "com.rydersel.Candela.tests.path.\(UUID().uuidString)"
     defaults = UserDefaults(suiteName: suiteName)!
@@ -132,9 +136,12 @@ private final class Harness {
     configure(prefs, defaults)
     controller = BrightnessController(
       writer: ddc,
-      backends: BrightnessBackends(applierNative: native, hdr: hdr, shade: shade, gamma: gamma),
+      backends: BrightnessBackends(
+        applierNative: native, hdr: hdr, shade: shade, gamma: gamma, readNative: readNative
+      ),
       prefs: prefs,
       displayID: Self.displayID,
+      role: role,
       store: store,
       storageKey: Self.storageKey,
       legacyKey: Self.legacyKey
@@ -582,5 +589,100 @@ struct MigrationTests {
       defaults.set(true, forKey: "disableCombinedBrightness")
     }
     #expect(h.controller.brightness == 0.25)
+  }
+}
+
+// MARK: - Built-in display role (Task 10)
+
+@MainActor
+@Suite("Built-in role")
+struct BuiltInRoleTests {
+  /// Role `.builtIn` short-circuits the four-way fork: ALWAYS the native leg,
+  /// regardless of forceSoftware/combined/disableCombined prefs.
+  @Test func builtInRoutesNativeRegardlessOfPrefs() async {
+    let forced = Harness(role: .builtIn) { prefs, _ in prefs.forceSoftware = true }
+    forced.controller.setBrightness(0.6)
+    #expect(forced.submitted == [.native(0.6)])
+    await forced.controller.waitForPendingWrites()
+    #expect(forced.native.targets() == [.native(0.6)])
+    #expect(await forced.ddc.recordedWrites().isEmpty)
+    #expect(forced.gamma.scales.isEmpty)
+    #expect(forced.shade.alphaCalls.isEmpty)
+
+    let pureDDC = Harness(role: .builtIn) { _, defaults in
+      defaults.set(true, forKey: "disableCombinedBrightness")
+    }
+    pureDDC.controller.setBrightness(0.6)
+    #expect(pureDDC.submitted == [.native(0.6)])
+    #expect(await pureDDC.ddc.recordedWrites().isEmpty)
+  }
+
+  /// `step` on the built-in never consults the boost gate: a fresh up-press
+  /// at 100% (the external engage row) and a fresh down-press at 0 with HDR
+  /// live (the external disengage row) both step normally — the fake
+  /// HDRToggling is never called.
+  @Test func builtInStepNeverConsultsBoostGate() async {
+    let h = Harness(role: .builtIn) { prefs, _ in prefs.hdrMode = .boost }
+    await h.prime()
+    h.controller.setBrightness(1.0)
+    let returned = h.controller.step(isUp: true, isFine: false, isFresh: true)
+    #expect(returned == 1.0)
+    #expect(h.controller.hdrBoostActive == false)
+    #expect(await h.hdr!.recordedSetCalls().isEmpty)
+
+    let low = Harness(hdrEnabled: true, role: .builtIn) { prefs, _ in prefs.hdrMode = .boost }
+    await low.prime()
+    low.controller.setBrightness(0.0)
+    _ = low.controller.step(isUp: false, isFine: false, isFresh: true)
+    #expect(low.controller.brightness == 0.0)
+    #expect(await low.hdr!.recordedSetCalls().isEmpty)
+  }
+
+  /// Re-review T10-C: the migration/first-run/park-at-s block is bypassed
+  /// entirely. A native read of 0.3 publishes 0.3 (an external role would
+  /// park it at s = 0.5), the seeded store value is ignored, and nothing is
+  /// ever written to the store.
+  @Test func builtInSeedsFromNativeReadWithoutParkOrStoreWrite() async {
+    let h = Harness(seed: [Harness.storageKey: 0.25], role: .builtIn, readNative: { _ in 0.3 })
+    #expect(approx(h.controller.brightness, 0.3, tolerance: 1e-6))
+    #expect(h.store.values == [Harness.storageKey: 0.25]) // untouched — no store write
+
+    // Legacy-key migration is bypassed too (an external role would write the
+    // combined value to the M3 key); with no native read the seed falls back
+    // to 1.0.
+    let legacy = Harness(seed: [Harness.legacyKey: 0.6], role: .builtIn)
+    #expect(legacy.controller.brightness == 1.0)
+    #expect(legacy.store.values == [Harness.legacyKey: 0.6])
+  }
+
+  /// `refreshFromHardware` reads via the injected `readNative` — never DDC
+  /// (the harness's readable DDC (50, 100) would map to 0.75 under the
+  /// external combined rule).
+  @Test func builtInRefreshFromHardwareAdoptsInjectedNativeRead() async {
+    let nativeValue = OSAllocatedUnfairLock<Float?>(initialState: 0.9)
+    let h = Harness(
+      ddcRead: (current: 50, max: 100), role: .builtIn,
+      readNative: { _ in nativeValue.withLock { $0 } }
+    )
+    #expect(approx(h.controller.brightness, 0.9, tolerance: 1e-6))
+    nativeValue.withLock { $0 = 0.42 }
+    await h.controller.refreshFromHardware()
+    #expect(approx(h.controller.brightness, 0.42, tolerance: 1e-6))
+    #expect(h.store.values.isEmpty)
+  }
+
+  /// The poller gate is constitutively true for the built-in role — no HDR
+  /// settle machinery ever runs, and the native path is always active.
+  @Test func builtInIsNativeActiveConstitutively() async {
+    let h = Harness(withHDR: false, role: .builtIn)
+    #expect(h.controller.isNativeActive())
+  }
+
+  /// Re-review T10-D: the public stub writer always fails, so any DDC path
+  /// reached by mistake degrades instead of touching hardware.
+  @Test func noopDDCWriterAlwaysFails() async {
+    let writer = NoopDDCWriter()
+    #expect(await writer.write(command: VCP.brightness, value: 50) == false)
+    #expect(await writer.read(command: VCP.brightness) == nil)
   }
 }
