@@ -5,8 +5,12 @@
 
 /// Which displays a brightness step targets.
 public enum BrightnessScope: Sendable, Equatable {
-  case allExternal // default, and Ctrl+Cmd directed
-  case builtInOnly // Ctrl directed (executor no-ops until M3)
+  /// The display the user is working on — resolved app-side (the engine has
+  /// no window server). Fork parity: `DisplayManager.getAffectedDisplays`
+  /// targets the current display by default, not every screen.
+  case affected
+  case allExternal // Ctrl+Cmd directed, and the app-side fallback when no display resolves
+  case builtInOnly // Ctrl directed — steps the built-in panel (Task 10)
 }
 
 /// What the executor (Task 5) should do for a routed media-key press.
@@ -64,7 +68,9 @@ public enum KeyRouter {
     }
 
     // Rule 6: plain brightness step. Repeats DO fire here — holding the key
-    // steps repeatedly.
-    return .stepBrightness(isUp: isUp, isFine: isFine, scope: .allExternal)
+    // steps repeatedly. Scope is `.affected`: an unmodified press acts on the
+    // display the user is working on, matching the fork's default. Ctrl+Cmd
+    // (rule 4) stays the explicit "every external" gesture.
+    return .stepBrightness(isUp: isUp, isFine: isFine, scope: .affected)
   }
 }

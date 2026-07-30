@@ -16,25 +16,27 @@ struct BrightnessPersistenceTests {
   @Test func restoresSavedValueAtInit() {
     let store = MemoryStore()
     store.values["brightness.test-display"] = 0.8125
-    let c = BrightnessController(writer: FakeDDC(), store: store, storageKey: "brightness.test-display")
+    let c = makeLegacyPathController(writer: FakeDDC(), store: store, storageKey: "brightness.test-display")
     #expect(c.brightness == 0.8125)
   }
 
-  @Test func defaultsToHalfWithoutSavedValue() {
-    let c = BrightnessController(writer: FakeDDC(), store: MemoryStore(), storageKey: "brightness.x")
-    #expect(c.brightness == 0.5)
+  @Test func defaultsToFullWithoutSavedValue() {
+    // Task 6 first-run rule (review I13): post-M3, 0.5 means "hardware
+    // minimum" on the combined scale, so a fresh display starts at 1.0.
+    let c = makeLegacyPathController(writer: FakeDDC(), store: MemoryStore(), storageKey: "brightness.x")
+    #expect(c.brightness == 1.0)
   }
 
   @Test func savesOnSetBrightness() {
     let store = MemoryStore()
-    let c = BrightnessController(writer: FakeDDC(), store: store, storageKey: "brightness.x")
+    let c = makeLegacyPathController(writer: FakeDDC(), store: store, storageKey: "brightness.x")
     c.setBrightness(0.25)
     #expect(store.values["brightness.x"] == 0.25)
   }
 
   @Test func savesOnStep() {
     let store = MemoryStore()
-    let c = BrightnessController(writer: FakeDDC(), store: store, storageKey: "brightness.x")
+    let c = makeLegacyPathController(writer: FakeDDC(), store: store, storageKey: "brightness.x")
     c.setBrightness(0.5)
     c.step(isUp: true, isFine: false)
     #expect(store.values["brightness.x"] == 0.5625)

@@ -1,0 +1,1057 @@
+import CoreGraphics
+import Foundation
+import os
+import Testing
+@testable import CandelaKit
+
+// MARK: - Fakes
+
+/// Scriptable HDR backend; records every `setHDR` call.
+actor FakeHDR: HDRToggling {
+  private(set) var setCalls: [Bool] = []
+  private var supports: Bool
+  private var enabled: Bool
+  private var setResult = true
+
+  init(supports: Bool = true, enabled: Bool = false) {
+    self.supports = supports
+    self.enabled = enabled
+  }
+
+  func supportsHDR(displayID _: CGDirectDisplayID) -> Bool { supports }
+  func isHDREnabled(displayID _: CGDirectDisplayID) -> Bool { enabled }
+
+  @discardableResult
+  func setHDR(displayID _: CGDirectDisplayID, enabled: Bool) -> Bool {
+    setCalls.append(enabled)
+    if setResult {
+      self.enabled = enabled
+    }
+    return setResult
+  }
+
+  func displaysReconfigured() {}
+
+  func stubSetResult(_ value: Bool) { setResult = value }
+  func recordedSetCalls() -> [Bool] { setCalls }
+}
+
+@MainActor
+final class FakeShade: ShadeRendering {
+  private(set) var alphaCalls: [(alpha: Double, id: CGDirectDisplayID)] = []
+  private(set) var removed: [CGDirectDisplayID] = []
+  private(set) var removedAllCount = 0
+  private(set) var repinCount = 0
+
+  func setShadeAlpha(_ alpha: Double, on displayID: CGDirectDisplayID) {
+    alphaCalls.append((alpha, displayID))
+  }
+
+  func removeShade(for displayID: CGDirectDisplayID) { removed.append(displayID) }
+  func removeAllShades() { removedAllCount += 1 }
+  func repinFrames() { repinCount += 1 }
+}
+
+@MainActor
+final class FakeGamma: GammaApplying {
+  private(set) var scales: [Double] = []
+  private(set) var recaptured: [CGDirectDisplayID] = []
+  private(set) var resetCount = 0
+
+  @discardableResult
+  func applyGammaScale(_ scale: Double, on _: CGDirectDisplayID) -> Bool {
+    scales.append(scale)
+    return true
+  }
+
+  func verifyTableIntact(on _: CGDirectDisplayID) -> Bool { true }
+  func recaptureDefaultTable(on displayID: CGDirectDisplayID) { recaptured.append(displayID) }
+  func resetAllGamma() { resetCount += 1 }
+}
+
+/// Records every target applied through the native leg (post-coalescing).
+/// Copies share the lock's heap storage, so the harness copy observes the
+/// controller's writes.
+struct FakeNativeApplier: BrightnessApplying {
+  private let recorded = OSAllocatedUnfairLock<[HardwareTarget]>(initialState: [])
+
+  func apply(_ target: HardwareTarget) async -> Bool {
+    recorded.withLock { $0.append(target) }
+    return true
+  }
+
+  func targets() -> [HardwareTarget] { recorded.withLock { $0 } }
+}
+
+/// In-memory store; tests touch it only from the main actor.
+final class PathMemoryStore: BrightnessStoring, @unchecked Sendable {
+  var values: [String: Double] = [:]
+  func savedBrightness(for key: String) -> Double? { values[key] }
+  func saveBrightness(_ value: Double, for key: String) { values[key] = value }
+}
+
+// MARK: - Harness
+
+@MainActor
+private final class Harness {
+  static let displayID: CGDirectDisplayID = 7
+  static let storageKey = "combinedBrightness.t"
+  static let legacyKey = "brightness.t"
+
+  let ddc: FakeDDC
+  let native = FakeNativeApplier()
+  let hdr: FakeHDR?
+  let shade = FakeShade()
+  let gamma = FakeGamma()
+  let store = PathMemoryStore()
+  // nonisolated(unsafe): accessed from the nonisolated deinit only for
+  // cleanup; UserDefaults is documented thread-safe.
+  nonisolated(unsafe) let defaults: UserDefaults
+  let prefs: DisplayPrefs
+  let controller: BrightnessController
+  private(set) var submitted: [HardwareTarget] = []
+  private nonisolated let suiteName: String
+
+  init(
+    ddcRead: (current: UInt16, max: UInt16)? = nil,
+    withHDR: Bool = true,
+    hdrSupported: Bool = true,
+    hdrEnabled: Bool = false,
+    settle: Duration = .seconds(2),
+    seed: [String: Double] = [:],
+    role: DisplayRole = .external,
+    configure: (DisplayPrefs, UserDefaults) -> Void = { _, _ in },
+    // Last (after the closure) so existing trailing-closure call sites keep
+    // matching `configure` under the forward-scan rule.
+    readNative: (@Sendable (CGDirectDisplayID) -> Float?)? = nil
+  ) {
+    suiteName = "com.rydersel.Candela.tests.path.\(UUID().uuidString)"
+    defaults = UserDefaults(suiteName: suiteName)!
+    prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
+    ddc = FakeDDC(readResult: ddcRead)
+    hdr = withHDR ? FakeHDR(supports: hdrSupported, enabled: hdrEnabled) : nil
+    for (key, value) in seed {
+      store.values[key] = value
+    }
+    configure(prefs, defaults)
+    controller = BrightnessController(
+      writer: ddc,
+      backends: BrightnessBackends(
+        applierNative: native, hdr: hdr, shade: shade, gamma: gamma, readNative: readNative
+      ),
+      prefs: prefs,
+      displayID: Self.displayID,
+      role: role,
+      store: store,
+      storageKey: Self.storageKey,
+      legacyKey: Self.legacyKey
+    )
+    controller.settleDelay = settle
+    controller._onSubmit = { [weak self] target in self?.submitted.append(target) }
+  }
+
+  /// Makes the HDR caches deterministic: awaits the init-time refresh first so
+  /// it cannot race a second refresh (both seeing `wasNative == false` would
+  /// double-run the C1 clearing), then re-reads the fake's current state.
+  func prime() async {
+    await controller.initialHDRRefresh?.value
+    await controller.noteHDRStateMayHaveChanged()
+  }
+
+  deinit {
+    defaults.removePersistentDomain(forName: suiteName)
+  }
+}
+
+private func approx(_ a: Double, _ b: Double, tolerance: Double = 1e-9) -> Bool {
+  abs(a - b) <= tolerance
+}
+
+/// Polls until `condition` holds or ~1 s elapses. The HDR transition task runs
+/// on the main actor, so each sleep suspension lets it make progress.
+@MainActor
+private func eventually(_ condition: @MainActor () async -> Bool) async -> Bool {
+  for _ in 0 ..< 200 {
+    if await condition() { return true }
+    try? await Task.sleep(for: .milliseconds(5))
+  }
+  return await condition()
+}
+
+// MARK: - Path routing (the 4-row fork contract, s = 0.5 defaults)
+
+@MainActor
+@Suite("Path selection")
+struct PathSelectionTests {
+  @Test func nativePathUnderHDRSubmitsNativeOnly() async {
+    let h = Harness(hdrEnabled: true) { prefs, _ in prefs.hdrMode = .alwaysOn }
+    await h.prime()
+    h.controller.setBrightness(0.75)
+    // `prime()` is itself a native entry (HDR already live at init), so it
+    // asserts the restored value first — hardware round 1's H3.
+    #expect(h.submitted == [.native(1.0), .native(0.75)])
+    await h.controller.waitForPendingWrites()
+    // Landed targets: the coalescer may drop the entry assert (latest-wins),
+    // so assert the path, not the count.
+    #expect(h.native.targets().last == .native(0.75))
+    #expect(h.native.targets().allSatisfy { if case .native = $0 { true } else { false } })
+    #expect(await h.ddc.recordedWrites().isEmpty)
+    // The only gamma write is the C1 clearing when the cache flipped active.
+    #expect(h.gamma.scales == [1.0])
+  }
+
+  @Test func forceSoftwareAppliesSoftwareOnlyFullRange() async {
+    let h = Harness { prefs, _ in prefs.forceSoftware = true }
+    h.controller.setBrightness(0.75)
+    #expect(h.submitted.isEmpty)
+    // sw = v = 0.75, transformed 0.75 * 0.85 + 0.15 = 0.7875
+    #expect(h.gamma.scales.count == 1 && approx(h.gamma.scales[0], 0.7875))
+  }
+
+  @Test func combinedPathSplitsAcrossBothLegs() async {
+    let h = Harness()
+    h.controller.setBrightness(0.75)
+    // (0.75 - 0.5) / 0.5 = 0.5 DDC portion -> raw 50; sw 1 -> gamma 1.0
+    #expect(h.submitted == [.ddc(raw: 50)])
+    #expect(h.gamma.scales.count == 1 && approx(h.gamma.scales[0], 1.0))
+  }
+
+  @Test func combinedDisabledIsPureDDCFullRange() async {
+    let h = Harness { _, defaults in defaults.set(true, forKey: "disableCombinedBrightness") }
+    h.controller.setBrightness(0.75)
+    #expect(h.submitted == [.ddc(raw: 75)])
+    #expect(h.gamma.scales.isEmpty)
+    #expect(h.shade.alphaCalls.isEmpty)
+  }
+
+  @Test func avoidGammaRoutesSoftwareLegThroughShade() async {
+    let h = Harness { prefs, _ in prefs.avoidGamma = true }
+    h.controller.setBrightness(0.25)
+    // sw 0.5 -> transformed 0.575 -> alpha 1 - 0.575^1.5
+    let expectedAlpha = 1.0 - pow(0.575, 1.5)
+    #expect(h.gamma.scales.isEmpty)
+    #expect(h.shade.alphaCalls.count == 1 && approx(h.shade.alphaCalls[0].alpha, expectedAlpha))
+    #expect(h.shade.alphaCalls[0].id == Harness.displayID)
+  }
+
+  /// Submit-level walk across the boundary (before the coalescer's own
+  /// dedupe): every call produces a DDC submit; the sw leg dedupes on the
+  /// last-applied value. The memo starts EMPTY on a fresh controller
+  /// (in-memory, deliberately not pref-persisted — review M35).
+  @Test func combinedBoundaryWalk() async {
+    let h = Harness()
+    for value in [1.0, 0.75, 0.5, 0.25, 0.0] {
+      h.controller.setBrightness(value)
+    }
+    #expect(h.submitted == [.ddc(raw: 100), .ddc(raw: 50), .ddc(raw: 0), .ddc(raw: 0), .ddc(raw: 0)])
+    // sw values 1 (applied), 1 (skip), 1 (skip), 0.5, 0 -> transformed 1.0, 0.575, 0.15
+    #expect(h.gamma.scales.count == 3)
+    #expect(approx(h.gamma.scales[0], 1.0))
+    #expect(approx(h.gamma.scales[1], 0.575))
+    #expect(approx(h.gamma.scales[2], 0.15))
+  }
+
+  @Test func softwareLegDedupesIdenticalValues() async {
+    let h = Harness()
+    h.controller.setBrightness(0.25)
+    h.controller.setBrightness(0.25)
+    #expect(h.gamma.scales.count == 1)
+  }
+
+  @Test func preGammaApplyHookFiresOnlyOnNonDeduplicatedGammaApplies() async {
+    let h = Harness()
+    var hookFires = 0
+    h.controller.preGammaApplyHook = { hookFires += 1 }
+    h.controller.setBrightness(0.25)
+    h.controller.setBrightness(0.25) // deduped: no hook
+    #expect(hookFires == 1)
+    let shaded = Harness { prefs, _ in prefs.avoidGamma = true }
+    var shadeHookFires = 0
+    shaded.controller.preGammaApplyHook = { shadeHookFires += 1 }
+    shaded.controller.setBrightness(0.25) // shade backend: no hook
+    #expect(shadeHookFires == 0)
+  }
+
+  // MARK: C1 — native-entry clearing (MUST-HAVE)
+
+  @Test func enteringAlwaysOnClearsSoftwareLegAndInvalidatesMemo() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    h.controller.setBrightness(0.25) // gamma dim active (0.575)
+    #expect(h.gamma.scales.count == 1 && approx(h.gamma.scales[0], 0.575))
+    await h.controller.setHDRMode(.alwaysOn)
+    // C1: shade removed, gamma restored to 1.0.
+    #expect(h.shade.removed.contains(Harness.displayID))
+    #expect(approx(h.gamma.scales.last ?? -1, 1.0))
+    let scalesAfterEntry = h.gamma.scales.count
+    // Under HDR, brightness routes native with no software apply.
+    h.controller.setBrightness(0.25)
+    #expect(h.submitted.last == .native(0.25))
+    #expect(h.gamma.scales.count == scalesAfterEntry)
+    // Memo was invalidated at entry: after leaving HDR the same sw value
+    // re-applies instead of being dedupe-skipped (the recovery C1 protects).
+    await h.controller.setHDRMode(.off)
+    #expect(approx(h.gamma.scales.last ?? -1, 0.575))
+    #expect(await h.hdr!.recordedSetCalls() == [true, false])
+  }
+
+  @Test func externallyToggledHDRRunsNativeEntryClearing() async {
+    let h = Harness { prefs, _ in prefs.hdrMode = .alwaysOn }
+    await h.prime() // HDR off: combined path
+    h.controller.setBrightness(0.25)
+    #expect(h.gamma.scales.count == 1 && approx(h.gamma.scales[0], 0.575))
+    await h.hdr!.setHDR(displayID: Harness.displayID, enabled: true) // external toggle
+    await h.controller.noteHDRStateMayHaveChanged()
+    #expect(approx(h.gamma.scales.last ?? -1, 1.0))
+    #expect(h.shade.removed.contains(Harness.displayID))
+  }
+
+  // MARK: Native-entry brightness assert (hardware round 1)
+
+  /// Entering the native path by an EXTERNAL toggle must re-assert the
+  /// published value on the native leg. Hardware round 1: with HDR toggled on
+  /// outside the app the MAG came up at the DisplayServices register's leftover
+  /// value (0.5 from an earlier probe run) because no entry door pushed.
+  @Test func externallyToggledHDREntryReassertsBrightnessOnNativeLeg() async {
+    let h = Harness { prefs, _ in prefs.hdrMode = .alwaysOn }
+    await h.prime() // HDR off: combined path
+    h.controller.setBrightness(0.25)
+    await h.hdr!.setHDR(displayID: Harness.displayID, enabled: true) // external toggle
+    await h.controller.noteHDRStateMayHaveChanged()
+    // Clearing first, assert last — the native leg carries the current value.
+    #expect(approx(h.gamma.scales.last ?? -1, 1.0))
+    #expect(h.submitted.last == .native(0.25))
+    #expect(h.controller.expectedNative().value == 0.25) // echo slot written
+  }
+
+  /// The `.alwaysOn` success arm asserts after the settle window: a write
+  /// during the ~2 s re-mode is lost, so the assert is the post-settle step.
+  @Test func alwaysOnEntryReassertsBrightnessAfterSettle() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    h.controller.setBrightness(0.25)
+    await h.controller.setHDRMode(.alwaysOn)
+    #expect(h.submitted.last == .native(0.25))
+    #expect(h.controller.isNativeActive())
+  }
+
+  // MARK: C2 — refreshFromHardware combined-domain mapping (MUST-HAVE)
+
+  @Test func refreshMapsReadableDDCIntoCombinedDomain() async {
+    let h = Harness(ddcRead: (current: 50, max: 100))
+    await h.controller.refreshFromHardware()
+    // v = s + (current/max)(1 - s) = 0.5 + 0.5 * 0.5 = 0.75
+    #expect(approx(h.controller.brightness, 0.75))
+    #expect(approx(h.store.values[Harness.storageKey] ?? -1, 0.75))
+  }
+
+  @Test func refreshKeepsSavedValueOnDDCZero() async {
+    let h = Harness(ddcRead: (current: 0, max: 100))
+    h.controller.setBrightness(0.3)
+    await h.controller.refreshFromHardware()
+    // DDC 0 is consistent with any software-zone value: keep the saved 0.3.
+    #expect(approx(h.controller.brightness, 0.3))
+    #expect(approx(h.store.values[Harness.storageKey] ?? -1, 0.3))
+  }
+
+  @Test func refreshAdoptsRawWhenCombinedDisabled() async {
+    let h = Harness(ddcRead: (current: 50, max: 100)) { _, defaults in
+      defaults.set(true, forKey: "disableCombinedBrightness")
+    }
+    await h.controller.refreshFromHardware()
+    #expect(approx(h.controller.brightness, 0.5))
+  }
+
+  // MARK: Reconfigure
+
+  @Test func reconfigureRecapturesAndReappliesSoftwareLeg() async {
+    let h = Harness()
+    h.controller.setBrightness(0.25)
+    #expect(h.gamma.scales.count == 1)
+    await h.controller.handleReconfigure()
+    #expect(h.gamma.recaptured == [Harness.displayID])
+    #expect(h.shade.repinCount == 1)
+    // Memo invalidated + re-applied: same 0.575 lands again.
+    #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 0.575))
+  }
+
+  @Test func reconfigureSkipsSoftwareLegWhenNativeActive() async {
+    let h = Harness(hdrEnabled: true) { prefs, _ in prefs.hdrMode = .alwaysOn }
+    await h.prime()
+    let scalesBefore = h.gamma.scales.count
+    await h.controller.handleReconfigure()
+    #expect(h.gamma.recaptured == [Harness.displayID])
+    #expect(h.gamma.scales.count == scalesBefore) // no re-apply under native (C1)
+  }
+
+  // MARK: separateCombinedScale stepping (M39)
+
+  @Test func separateCombinedScaleUsesCombinedChicletMath() async {
+    let h = Harness { _, defaults in defaults.set(true, forKey: "separateCombinedScale") }
+    h.controller.setBrightness(0.75)
+    #expect(h.controller.step(isUp: false, isFine: false) == 0.71875)
+  }
+
+  @Test func plainStepKeepsM2ChicletMathOnCombinedPath() async {
+    let h = Harness()
+    h.controller.setBrightness(0.75)
+    #expect(h.controller.step(isUp: false, isFine: false) == 0.6875) // M2 16-chiclet math
+  }
+
+  /// HDR Boost removed (Ryder, 2026-07-30): a fresh press at either end of the
+  /// range is now just a step. No key path may touch a display's HDR state.
+  @Test func stepAtRangeEndsNeverTogglesHDR() async {
+    let top = Harness()
+    await top.prime()
+    top.controller.setBrightness(1.0)
+    #expect(top.controller.step(isUp: true, isFine: false, isFresh: true) == 1.0)
+    #expect(await top.hdr!.recordedSetCalls().isEmpty)
+    #expect(top.controller.hdrMode == .off)
+
+    let bottom = Harness(hdrEnabled: true) { prefs, _ in prefs.hdrMode = .alwaysOn }
+    await bottom.prime()
+    bottom.controller.setBrightness(0.0)
+    #expect(bottom.controller.step(isUp: false, isFine: false, isFresh: true) == 0.0)
+    #expect(await bottom.hdr!.recordedSetCalls().isEmpty)
+    #expect(bottom.controller.hdrMode == .alwaysOn)
+  }
+}
+
+// MARK: - External adoption (echo slot, Task 7 contract)
+
+@MainActor
+@Suite("External adoption")
+struct ExternalAdoptionTests {
+  @Test func adoptEasesAsymptoticallyAndUpdatesSlot() async {
+    let h = Harness()
+    h.controller.setBrightness(0.5)
+    let submittedBefore = h.submitted.count
+    let generation = h.controller.expectedNative().generation
+    h.controller.adoptExternal(0.9, generation: generation)
+    // 0.5 + (0.9 - 0.5) / 3
+    #expect(approx(h.controller.brightness, 0.5 + 0.4 / 3, tolerance: 1e-6))
+    #expect(approx(h.store.values[Harness.storageKey] ?? -1, h.controller.brightness))
+    #expect(h.controller.expectedNative().value == h.controller.brightness)
+    #expect(h.controller.isConvergingFromExternal())
+    // Adoption never submits hardware writes.
+    #expect(h.submitted.count == submittedBefore)
+    #expect(h.native.targets().isEmpty)
+  }
+
+  @Test func adoptSnapsWithinTolerance() async {
+    let h = Harness()
+    h.controller.setBrightness(0.5)
+    let generation = h.controller.expectedNative().generation
+    h.controller.adoptExternal(0.505, generation: generation)
+    #expect(h.controller.brightness == 0.505)
+    #expect(h.controller.isConvergingFromExternal() == false)
+  }
+
+  @Test func staleGenerationIsDiscardedEntirely() async {
+    let h = Harness()
+    h.controller.setBrightness(0.5)
+    let generation = h.controller.expectedNative().generation
+    h.controller.adoptExternal(0.9, generation: generation &+ 1)
+    #expect(h.controller.brightness == 0.5)
+    #expect(h.controller.expectedNative().value == nil)
+    #expect(h.controller.isConvergingFromExternal() == false)
+  }
+
+  @Test func localNativeWriteBumpsGeneration() async {
+    let h = Harness(hdrEnabled: true) { prefs, _ in prefs.hdrMode = .alwaysOn }
+    await h.prime()
+    let before = h.controller.expectedNative().generation
+    h.controller.setBrightness(0.6)
+    let after = h.controller.expectedNative()
+    #expect(after.generation == before + 1)
+    #expect(after.value == 0.6)
+  }
+
+  @Test func adoptReturnsThePublishedDelta() async {
+    let h = Harness()
+    h.controller.setBrightness(0.5)
+    let generation = h.controller.expectedNative().generation
+    let delta = h.controller.adoptExternal(0.9, generation: generation)
+    #expect(approx(delta, 0.4 / 3, tolerance: 1e-6))
+    #expect(approx(delta, h.controller.brightness - 0.5, tolerance: 1e-9))
+  }
+
+  @Test func adoptReturnsTheSnappedDelta() async {
+    let h = Harness()
+    h.controller.setBrightness(0.5)
+    let generation = h.controller.expectedNative().generation
+    let delta = h.controller.adoptExternal(0.505, generation: generation)
+    #expect(approx(delta, 0.005, tolerance: 1e-9))
+  }
+
+  @Test func staleAdoptionReturnsZeroDelta() async {
+    let h = Harness()
+    h.controller.setBrightness(0.5)
+    let generation = h.controller.expectedNative().generation
+    let delta = h.controller.adoptExternal(0.9, generation: generation &+ 1)
+    #expect(delta == 0)
+  }
+}
+
+// MARK: - Cross-display sync fan-out (Task 11; fork AppDelegate.swift:238-253)
+
+@MainActor
+@Suite("Brightness sync fan-out")
+struct BrightnessSyncTests {
+  /// Source + a combined-path external + a built-in, mirroring the app's
+  /// `displays + [builtIn]` iteration.
+  private func makeTrio() -> (source: Harness, external: Harness, builtIn: Harness) {
+    (
+      Harness(),
+      Harness(),
+      Harness(withHDR: false, role: .builtIn, readNative: { _ in 0.6 })
+    )
+  }
+
+  @Test func deltaStepsEveryOtherControllerWhenSyncIsOn() async {
+    let (source, external, builtIn) = makeTrio()
+    source.controller.setBrightness(0.5)
+    external.controller.setBrightness(0.75)
+    builtIn.controller.setBrightness(0.6)
+    let controllers = [source.controller, external.controller, builtIn.controller]
+
+    BrightnessSync.fanOut(delta: 0.05, from: source.controller, to: controllers, isEnabled: true)
+
+    #expect(source.controller.brightness == 0.5) // never steps itself
+    #expect(approx(external.controller.brightness, 0.8))
+    #expect(approx(builtIn.controller.brightness, 0.65))
+  }
+
+  @Test func syncOffStepsNoOne() async {
+    let (source, external, builtIn) = makeTrio()
+    source.controller.setBrightness(0.5)
+    external.controller.setBrightness(0.75)
+    builtIn.controller.setBrightness(0.6)
+
+    BrightnessSync.fanOut(
+      delta: 0.05,
+      from: source.controller,
+      to: [source.controller, external.controller, builtIn.controller],
+      isEnabled: false
+    )
+
+    #expect(external.controller.brightness == 0.75)
+    #expect(builtIn.controller.brightness == 0.6)
+  }
+
+  @Test func zeroDeltaStepsNoOne() async {
+    let (source, external, builtIn) = makeTrio()
+    external.controller.setBrightness(0.75)
+    builtIn.controller.setBrightness(0.6)
+
+    BrightnessSync.fanOut(
+      delta: 0,
+      from: source.controller,
+      to: [source.controller, external.controller, builtIn.controller],
+      isEnabled: true
+    )
+
+    #expect(external.controller.brightness == 0.75)
+    #expect(builtIn.controller.brightness == 0.6)
+  }
+
+  /// Fork-faithful: the replicated step goes through each target's own funnel,
+  /// so a combined-path display writes DDC and the built-in writes native.
+  @Test func eachTargetAppliesTheStepThroughItsOwnPath() async {
+    let (source, external, builtIn) = makeTrio()
+    external.controller.setBrightness(0.75)
+    builtIn.controller.setBrightness(0.6)
+    let externalBefore = external.submitted.count
+    let builtInBefore = builtIn.submitted.count
+
+    BrightnessSync.fanOut(
+      delta: 0.05,
+      from: source.controller,
+      to: [source.controller, external.controller, builtIn.controller],
+      isEnabled: true
+    )
+
+    // 0.8 combined -> (0.8 - 0.5) / 0.5 = 0.6 of the DDC band.
+    #expect(external.submitted.count == externalBefore + 1)
+    #expect(external.submitted.last == .ddc(raw: 60))
+    #expect(builtIn.submitted.count == builtInBefore + 1)
+    #expect(builtIn.submitted.last == .native(0.65))
+  }
+
+  /// No feedback loop by construction: a native target records the replicated
+  /// write in its expected-echo slot, so the poller reads it back as an echo.
+  @Test func nativeTargetRecordsTheReplicatedWriteAsAnEcho() async {
+    let (source, _, builtIn) = makeTrio()
+    builtIn.controller.setBrightness(0.6)
+    let before = builtIn.controller.expectedNative().generation
+
+    BrightnessSync.fanOut(
+      delta: 0.05,
+      from: source.controller,
+      to: [source.controller, builtIn.controller],
+      isEnabled: true
+    )
+
+    let slot = builtIn.controller.expectedNative()
+    #expect(slot.value.map { approx($0, 0.65) } == true)
+    #expect(slot.generation == before + 1)
+  }
+
+  @Test func deltaIsClampedByTheTargetFunnel() async {
+    let (source, external, _) = makeTrio()
+    external.controller.setBrightness(0.98)
+
+    BrightnessSync.fanOut(
+      delta: 0.05,
+      from: source.controller,
+      to: [source.controller, external.controller],
+      isEnabled: true
+    )
+
+    #expect(external.controller.brightness == 1.0)
+  }
+}
+
+// MARK: - Migration + first run (scope decision 4; I12/I13)
+
+@MainActor
+@Suite("Migration and first run")
+struct MigrationTests {
+  @Test func migratesLegacyKeyIntoCombinedDomain() async {
+    let h = Harness(seed: [Harness.legacyKey: 0.6])
+    // s + old * (1 - s) = 0.5 + 0.6 * 0.5 = 0.8, written to the M3 key once.
+    #expect(approx(h.controller.brightness, 0.8))
+    #expect(approx(h.store.values[Harness.storageKey] ?? -1, 0.8))
+    #expect(h.store.values[Harness.legacyKey] == 0.6) // legacy key left, ignored
+  }
+
+  @Test func combinedKeyWinsOverLegacyKey() async {
+    let h = Harness(seed: [Harness.storageKey: 0.7, Harness.legacyKey: 0.2])
+    #expect(h.controller.brightness == 0.7)
+    #expect(h.store.values[Harness.storageKey] == 0.7) // untouched
+  }
+
+  @Test func firstRunInitializesToFullBrightness() async {
+    // I13: post-M3 a 0.5 default would mean "hardware minimum"; the fork's
+    // fresh-display rule is s + convDDCToValue(100)(1 - s) = 1.0.
+    let h = Harness()
+    #expect(h.controller.brightness == 1.0)
+  }
+
+  @Test func valueBelowSwitchingPointParksAtBoundary() async {
+    // I12: the termination hook removes dimming at quit, so a relaunch below
+    // s would show un-dimmed glass with a low slider. Publish s; no write.
+    let h = Harness(seed: [Harness.storageKey: 0.25])
+    #expect(h.controller.brightness == 0.5)
+    #expect(h.store.values[Harness.storageKey] == 0.25) // store untouched
+  }
+
+  @Test func parkAtBoundaryDoesNotApplyWhenCombinedDisabled() async {
+    let h = Harness(seed: [Harness.storageKey: 0.25]) { _, defaults in
+      defaults.set(true, forKey: "disableCombinedBrightness")
+    }
+    #expect(h.controller.brightness == 0.25)
+  }
+}
+
+// MARK: - Built-in display role (Task 10)
+
+@MainActor
+@Suite("Built-in role")
+struct BuiltInRoleTests {
+  /// Role `.builtIn` short-circuits the four-way fork: ALWAYS the native leg,
+  /// regardless of forceSoftware/combined/disableCombined prefs.
+  @Test func builtInRoutesNativeRegardlessOfPrefs() async {
+    let forced = Harness(role: .builtIn) { prefs, _ in prefs.forceSoftware = true }
+    forced.controller.setBrightness(0.6)
+    #expect(forced.submitted == [.native(0.6)])
+    await forced.controller.waitForPendingWrites()
+    #expect(forced.native.targets() == [.native(0.6)])
+    #expect(await forced.ddc.recordedWrites().isEmpty)
+    #expect(forced.gamma.scales.isEmpty)
+    #expect(forced.shade.alphaCalls.isEmpty)
+
+    let pureDDC = Harness(role: .builtIn) { _, defaults in
+      defaults.set(true, forKey: "disableCombinedBrightness")
+    }
+    pureDDC.controller.setBrightness(0.6)
+    #expect(pureDDC.submitted == [.native(0.6)])
+    #expect(await pureDDC.ddc.recordedWrites().isEmpty)
+  }
+
+  /// Re-review T10-C: the migration/first-run/park-at-s block is bypassed
+  /// entirely. A native read of 0.3 publishes 0.3 (an external role would
+  /// park it at s = 0.5), the seeded store value is ignored, and nothing is
+  /// ever written to the store.
+  @Test func builtInSeedsFromNativeReadWithoutParkOrStoreWrite() async {
+    let h = Harness(seed: [Harness.storageKey: 0.25], role: .builtIn, readNative: { _ in 0.3 })
+    #expect(approx(h.controller.brightness, 0.3, tolerance: 1e-6))
+    #expect(h.store.values == [Harness.storageKey: 0.25]) // untouched — no store write
+
+    // Legacy-key migration is bypassed too (an external role would write the
+    // combined value to the M3 key); with no native read the seed falls back
+    // to 1.0.
+    let legacy = Harness(seed: [Harness.legacyKey: 0.6], role: .builtIn)
+    #expect(legacy.controller.brightness == 1.0)
+    #expect(legacy.store.values == [Harness.legacyKey: 0.6])
+  }
+
+  /// `refreshFromHardware` reads via the injected `readNative` — never DDC
+  /// (the harness's readable DDC (50, 100) would map to 0.75 under the
+  /// external combined rule).
+  @Test func builtInRefreshFromHardwareAdoptsInjectedNativeRead() async {
+    let nativeValue = OSAllocatedUnfairLock<Float?>(initialState: 0.9)
+    let h = Harness(
+      ddcRead: (current: 50, max: 100), role: .builtIn,
+      readNative: { _ in nativeValue.withLock { $0 } }
+    )
+    #expect(approx(h.controller.brightness, 0.9, tolerance: 1e-6))
+    nativeValue.withLock { $0 = 0.42 }
+    await h.controller.refreshFromHardware()
+    #expect(approx(h.controller.brightness, 0.42, tolerance: 1e-6))
+    #expect(h.store.values.isEmpty)
+  }
+
+  /// The poller gate is constitutively true for the built-in role — no HDR
+  /// settle machinery ever runs, and the native path is always active.
+  @Test func builtInIsNativeActiveConstitutively() async {
+    let h = Harness(withHDR: false, role: .builtIn)
+    #expect(h.controller.isNativeActive())
+  }
+
+  /// Re-review T10-D: the public stub writer always fails, so any DDC path
+  /// reached by mistake degrades instead of touching hardware.
+  @Test func noopDDCWriterAlwaysFails() async {
+    let writer = NoopDDCWriter()
+    #expect(await writer.write(command: VCP.brightness, value: 50) == false)
+    #expect(await writer.read(command: VCP.brightness) == nil)
+  }
+
+  /// T10 fix round 1 (minor): `setHDRMode` is role-fenced — a public-API call
+  /// on a built-in controller is a full no-op: no pref write under the builtIn
+  /// key, no published-mode change, no HDR toggling.
+  @Test func setHDRModeOnBuiltInIsNoOp() async {
+    let h = Harness(role: .builtIn)
+    await h.prime()
+    await h.controller.setHDRMode(.alwaysOn)
+    #expect(h.controller.hdrMode == .off)
+    #expect(h.prefs.hdrMode == .off) // pref never written
+    #expect(await h.hdr!.recordedSetCalls().isEmpty)
+  }
+}
+
+// MARK: - alwaysOn engage failure (T8 carry-over, fixed in T10 round 1)
+
+@MainActor
+@Suite("HDR mode engage failure")
+struct HDRModeEngageFailureTests {
+  /// The `.alwaysOn` arm commits the mode optimistically before engaging; on
+  /// `engaged == false` it must roll `hdrMode`/`prefs.hdrMode` back to the
+  /// previous mode and re-apply the current value through the normal path —
+  /// otherwise a display that can't engage HDR is stranded un-dimmed (the C1
+  /// clearing already ran) with a lying `.alwaysOn` persisted across launches.
+  @Test func alwaysOnEngageFailureRollsBackModeAndReappliesSoftwareLeg() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    await h.hdr!.stubSetResult(false)
+    h.controller.setBrightness(0.25) // combined: gamma dim 0.575 active
+    #expect(h.gamma.scales.count == 1 && approx(h.gamma.scales[0], 0.575))
+    await h.controller.setHDRMode(.alwaysOn)
+    // Mode and pref rolled back to the previous mode.
+    #expect(h.controller.hdrMode == .off)
+    #expect(h.prefs.hdrMode == .off)
+    // C1 clearing ran (1.0), then the rollback re-applied the current value's
+    // software leg (0.575 again) — the screen is not stranded un-dimmed.
+    #expect(h.gamma.scales.count == 3)
+    #expect(approx(h.gamma.scales[1], 1.0))
+    #expect(approx(h.gamma.scales[2], 0.575))
+    // Back on the combined path: the re-apply also submitted the DDC leg.
+    #expect(h.submitted.last == .ddc(raw: 0))
+    #expect(h.controller.isNativeActive() == false)
+  }
+
+  /// `supportsHDR` mirrors the async-refreshed capability cache (the panel
+  /// disables the HDR menu on non-HDR displays with it).
+  @Test func supportsHDRReflectsCachedCapability() async {
+    let supported = Harness()
+    await supported.prime()
+    #expect(supported.controller.supportsHDR)
+    let unsupported = Harness(hdrSupported: false)
+    await unsupported.prime()
+    #expect(unsupported.controller.supportsHDR == false)
+  }
+
+  /// The panel's badge reports LIVE HDR, not the mode pref (hardware round 1:
+  /// an externally toggled HDR read as "HDR Off" with no badge), so
+  /// `isHDREngaged` must follow the cache even while the mode is `.off`.
+  @Test func isHDREngagedReflectsLiveHDRRegardlessOfMode() async {
+    let live = Harness(hdrEnabled: true) // externally toggled; mode stays .off
+    await live.prime()
+    #expect(live.controller.hdrMode == .off)
+    #expect(live.controller.isHDREngaged)
+    let dark = Harness()
+    await dark.prime()
+    #expect(dark.controller.isHDREngaged == false)
+  }
+
+  /// Fix round 2 (Important): `setHDRMode`'s body is a bare async func and the
+  /// panel spawns one unserialized Task per mode change, so nothing serializes
+  /// overlapping calls but the generation token.
+  /// A first `.alwaysOn` call parked on its engage await must NOT, when the
+  /// engage finally fails, roll `hdrMode`/`prefs.hdrMode` back to its stale
+  /// `previous` or fire `applyPaths` after a second call has retargeted — the
+  /// newer transition owns the state.
+  ///
+  /// With only two modes left, A's `previous` and B's committed mode are both
+  /// `.off`, so the submit count carries the assertion: a stale rollback's
+  /// `applyPaths` is the observable. (The ABA row below still discriminates on
+  /// the mode itself.)
+  @Test func overlappingSetHDRModeFailedEngageDoesNotClobberNewerTransition() async {
+    let suiteName = "com.rydersel.Candela.tests.path.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
+    let gated = GatedEngageHDR()
+    let controller = BrightnessController(
+      writer: FakeDDC(readResult: nil),
+      backends: BrightnessBackends(
+        applierNative: FakeNativeApplier(), hdr: gated, shade: FakeShade(), gamma: FakeGamma()
+      ),
+      prefs: prefs,
+      displayID: 7
+    )
+    controller.settleDelay = .milliseconds(5)
+    var submitted: [HardwareTarget] = []
+    controller._onSubmit = { submitted.append($0) }
+    await controller.initialHDRRefresh?.value
+    controller.setBrightness(0.75)
+
+    // First call commits .alwaysOn, then parks inside the gated engage.
+    let first = Task { await controller.setHDRMode(.alwaysOn) }
+    #expect(await eventually { await gated.engageCallCount() == 1 })
+    #expect(controller.hdrMode == .alwaysOn)
+
+    // Second call retargets while the first is parked (the exit arm's
+    // setHDR(false) passes straight through the gate) and now owns the state.
+    await controller.setHDRMode(.off)
+    #expect(controller.hdrMode == .off)
+    let submittedBeforeRelease = submitted.count
+
+    // Let the first call's engage fail. Its rollback must observe the
+    // retarget and bail: no extra applyPaths fires against state the newer
+    // transition owns.
+    await gated.release()
+    await first.value
+    #expect(controller.hdrMode == .off)
+    #expect(prefs.hdrMode == .off)
+    #expect(submitted.count == submittedBeforeRelease)
+  }
+
+  /// Final wave: the supersession token must be a MONOTONIC GENERATION, not
+  /// the mode. `hdrMode` is ABA-prone — a parked `.alwaysOn` call resumes to
+  /// find the mode back at `.alwaysOn` after an `.off` → `.alwaysOn` round
+  /// trip, so a `hdrMode == mode` comparison waves its stale rollback through
+  /// and the THIRD transition's committed mode/prefs are clobbered by the
+  /// first's `previous`.
+  @Test func overlappingSetHDRModeABADoesNotClobberThirdTransition() async {
+    let suiteName = "com.rydersel.Candela.tests.path.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
+    // Only the FIRST engage is gated (and fails); the third transition's
+    // engage passes straight through and succeeds.
+    let gated = GatedEngageHDR(gateFirstEngageOnly: true)
+    let controller = BrightnessController(
+      writer: FakeDDC(readResult: nil),
+      backends: BrightnessBackends(
+        applierNative: FakeNativeApplier(), hdr: gated, shade: FakeShade(), gamma: FakeGamma()
+      ),
+      prefs: prefs,
+      displayID: 7
+    )
+    controller.settleDelay = .milliseconds(5)
+    var submitted: [HardwareTarget] = []
+    controller._onSubmit = { submitted.append($0) }
+    await controller.initialHDRRefresh?.value
+    controller.setBrightness(0.75)
+
+    // A: commits .alwaysOn, then parks inside the gated engage.
+    let first = Task { await controller.setHDRMode(.alwaysOn) }
+    #expect(await eventually { await gated.engageCallCount() == 1 })
+    #expect(controller.hdrMode == .alwaysOn)
+
+    // B then C: the mode leaves .alwaysOn and comes back — the ABA a mode
+    // comparison cannot see. C completes normally (its engage succeeds).
+    await controller.setHDRMode(.off)
+    await controller.setHDRMode(.alwaysOn)
+    #expect(await gated.engageCallCount() == 2)
+    #expect(controller.hdrMode == .alwaysOn)
+    #expect(prefs.hdrMode == .alwaysOn)
+    let submittedBeforeRelease = submitted.count
+
+    // A's engage now fails. Its generation is two transitions stale, so the
+    // rollback must not run: C's mode/prefs survive and no applyPaths fires.
+    await gated.release()
+    await first.value
+    #expect(controller.hdrMode == .alwaysOn)
+    #expect(prefs.hdrMode == .alwaysOn)
+    #expect(submitted.count == submittedBeforeRelease)
+  }
+
+  /// Final wave: the EXIT arm has the same bare-async-func exposure as the
+  /// engage arm (T10 round 2 flagged it and left it out of scope). A `.off`
+  /// transition parked on its disengage must not, once it resumes, clear the
+  /// settle flag of the transition that retargeted past it or fire its
+  /// `applyPaths` against state that transition owns.
+  @Test func overlappingSetHDRModeExitArmDoesNotClobberNewerTransition() async {
+    let suiteName = "com.rydersel.Candela.tests.path.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
+    prefs.hdrMode = .alwaysOn
+    let gated = GatedTransitionHDR()
+    let controller = BrightnessController(
+      writer: FakeDDC(readResult: nil),
+      backends: BrightnessBackends(
+        applierNative: FakeNativeApplier(), hdr: gated, shade: FakeShade(), gamma: FakeGamma()
+      ),
+      prefs: prefs,
+      displayID: 7
+    )
+    controller.settleDelay = .milliseconds(5)
+    var submitted: [HardwareTarget] = []
+    controller._onSubmit = { submitted.append($0) }
+    await controller.initialHDRRefresh?.value
+    controller.setBrightness(0.75)
+
+    // A: leaves the native path and parks inside the gated disengage.
+    let first = Task { await controller.setHDRMode(.off) }
+    #expect(await eventually { await gated.disengageCallCount() == 1 })
+    #expect(controller.hdrMode == .off)
+
+    // B: retargets back to .alwaysOn and parks inside its own engage, so its
+    // settle window is still open (settleInProgress true, poller gate shut)
+    // when A resumes.
+    let second = Task { await controller.setHDRMode(.alwaysOn) }
+    #expect(await eventually { await gated.engageCallCount() == 1 })
+    #expect(controller.hdrMode == .alwaysOn)
+    #expect(controller.isNativeActive() == false)
+    let submittedBeforeRelease = submitted.count
+
+    await gated.releaseDisengage()
+    await first.value
+    // A's post-sleep block belongs to a superseded transition: no applyPaths,
+    // and B's settle flag survives (the fake keeps reporting HDR live, so a
+    // stale `settleInProgress = false` + cache refresh would re-open the
+    // poller gate mid-transition).
+    #expect(submitted.count == submittedBeforeRelease)
+    #expect(controller.isNativeActive() == false)
+
+    await gated.releaseEngage()
+    await second.value
+  }
+}
+
+/// HDRToggling fake whose ENGAGE calls (`enabled == true`) suspend until
+/// `release()` and then fail; disengage calls pass straight through. Lets a
+/// test park one `setHDRMode(.alwaysOn)` mid-engage while another call
+/// retargets the controller.
+///
+/// With `gateFirstEngageOnly`, only the FIRST engage is gated; later engages
+/// succeed immediately — that lets a test park one call while two further
+/// transitions run to completion (the ABA case).
+actor GatedEngageHDR: HDRToggling {
+  private var engageWaiters: [CheckedContinuation<Void, Never>] = []
+  private var released = false
+  private var engageCalls = 0
+  private var enabledState = false
+  private let gateFirstEngageOnly: Bool
+
+  init(gateFirstEngageOnly: Bool = false) {
+    self.gateFirstEngageOnly = gateFirstEngageOnly
+  }
+
+  func supportsHDR(displayID _: CGDirectDisplayID) -> Bool { true }
+  func isHDREnabled(displayID _: CGDirectDisplayID) -> Bool { enabledState }
+
+  @discardableResult
+  func setHDR(displayID _: CGDirectDisplayID, enabled: Bool) async -> Bool {
+    guard enabled else {
+      enabledState = false
+      return true
+    }
+    engageCalls += 1
+    if gateFirstEngageOnly, engageCalls > 1 {
+      enabledState = true
+      return true
+    }
+    if !released {
+      await withCheckedContinuation { engageWaiters.append($0) }
+    }
+    return false // the gated engage always fails once released
+  }
+
+  func displaysReconfigured() {}
+
+  func engageCallCount() -> Int { engageCalls }
+
+  func release() {
+    released = true
+    for waiter in engageWaiters {
+      waiter.resume()
+    }
+    engageWaiters.removeAll()
+  }
+}
+
+/// HDRToggling fake with an independently released gate on EACH direction, so
+/// a test can park an exit transition on its disengage while a later
+/// transition parks on its engage (holding its settle window open).
+/// `isHDREnabled` stays true throughout — a display whose readback still
+/// reports HDR live mid-transition, which is exactly why the settle window
+/// exists and what makes a stale `settleInProgress = false` observable through
+/// the poller gate.
+actor GatedTransitionHDR: HDRToggling {
+  private var engageWaiters: [CheckedContinuation<Void, Never>] = []
+  private var disengageWaiters: [CheckedContinuation<Void, Never>] = []
+  private var engageReleased = false
+  private var disengageReleased = false
+  private var engageCalls = 0
+  private var disengageCalls = 0
+
+  func supportsHDR(displayID _: CGDirectDisplayID) -> Bool { true }
+  func isHDREnabled(displayID _: CGDirectDisplayID) -> Bool { true }
+
+  @discardableResult
+  func setHDR(displayID _: CGDirectDisplayID, enabled: Bool) async -> Bool {
+    if enabled {
+      engageCalls += 1
+      if !engageReleased {
+        await withCheckedContinuation { engageWaiters.append($0) }
+      }
+    } else {
+      disengageCalls += 1
+      if !disengageReleased {
+        await withCheckedContinuation { disengageWaiters.append($0) }
+      }
+    }
+    return true
+  }
+
+  func displaysReconfigured() {}
+
+  func engageCallCount() -> Int { engageCalls }
+  func disengageCallCount() -> Int { disengageCalls }
+
+  func releaseEngage() {
+    engageReleased = true
+    for waiter in engageWaiters { waiter.resume() }
+    engageWaiters.removeAll()
+  }
+
+  func releaseDisengage() {
+    disengageReleased = true
+    for waiter in disengageWaiters { waiter.resume() }
+    disengageWaiters.removeAll()
+  }
+}

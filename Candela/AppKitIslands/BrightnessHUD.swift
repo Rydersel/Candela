@@ -9,7 +9,15 @@ import AppKit
 /// `BrightnessHUDPresenting`, so the engine can announce a value change without
 /// knowing anything about windows.
 protocol BrightnessHUDPresenting: AnyObject {
-  @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double)
+  // Protocol requirements cannot carry default arguments, so the requirement
+  // spells out the full list and the extension below supplies the short form.
+  @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double, nameSuffix: String?)
+}
+
+extension BrightnessHUDPresenting {
+  @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double) {
+    self.showBrightness(displayID: displayID, name: name, value: value, nameSuffix: nil)
+  }
 }
 
 enum HUDType {
@@ -47,11 +55,11 @@ enum HUDType {
 final class BrightnessHUD: BrightnessHUDPresenting {
   private struct HUD {
     let panel: NSPanel
+    let effectView: NSVisualEffectView
     let nameLabel: NSTextField
     let leftIcon: NSImageView
     let rightIcon: NSImageView
     let fillBox: NSBox
-    let rainbowLayer: CALayer
   }
 
   private static let hudSize = NSSize(width: 314, height: 62)
@@ -64,19 +72,37 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   private static let barX: CGFloat = BrightnessHUD.margin + BrightnessHUD.leftIconSize + 9
   private static let barWidth: CGFloat = BrightnessHUD.hudSize.width - BrightnessHUD.barX - BrightnessHUD.rightIconSize - BrightnessHUD.margin - 9
   private static let screenMargin: CGFloat = 20
+  /// Extra clearance added on top of the menu-bar allowance so the pill sits
+  /// clearly below the bar rather than hugging it. Ryder eyeballed this against
+  /// the native macOS OSD pill.
+  private static let menuBarClearance: CGFloat = 10
+
+  /// Vertical space to keep free at the top of `screen`: the menu bar, plus
+  /// clearance. While the bar is showing, the frame/visibleFrame difference
+  /// measures it exactly and wins the `max`; while it is auto-hidden that
+  /// difference collapses (often to 0), so we reserve the bar's own thickness
+  /// instead — the space it will occupy the moment it reveals. The clearance
+  /// applies either way, so it sits outside the `max`.
+  private static func menuBarAllowance(for screen: NSScreen) -> CGFloat {
+    max(screen.frame.maxY - screen.visibleFrame.maxY, NSStatusBar.system.thickness) + self.menuBarClearance
+  }
 
   private var huds: [CGDirectDisplayID: HUD] = [:]
   private var fadeTimers: [CGDirectDisplayID: Timer] = [:]
+  /// Monotonic per display, bumped by every `showHUD` and by `cleanupDisplay`.
+  /// A fade's completion handler compares the generation it captured against
+  /// the current one and stays out of the way if a newer show has happened.
+  private var fadeGenerations: [CGDirectDisplayID: UInt64] = [:]
 
   // MARK: - BrightnessHUDPresenting
 
-  func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double) {
-    self.showHUD(displayID: displayID, type: .brightness, name: name, value: Float(value))
+  func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double, nameSuffix: String?) {
+    self.showHUD(displayID: displayID, type: .brightness, name: name, value: Float(value), nameSuffix: nameSuffix)
   }
 
   // MARK: - Presentation
 
-  func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String, value: Float, maxValue: Float = 1, nameSuffix: String? = nil, rainbow: Bool = false) {
+  func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String, value: Float, maxValue: Float = 1, nameSuffix: String? = nil) {
     guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
       return
     }
@@ -89,17 +115,34 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     }
     let title = name.isEmpty ? screen.localizedName : name
     hud.nameLabel.stringValue = title + (nameSuffix ?? "")
-    hud.rainbowLayer.isHidden = !rainbow
     hud.leftIcon.image = Self.symbolImage(type.leftSymbolName, pointSize: Self.leftIconSize - 3)
     hud.rightIcon.image = Self.symbolImage(type.rightSymbolName, pointSize: Self.rightIconSize - 3)
     let normalized = CGFloat(min(max(maxValue > 0 ? value / maxValue : 0, 0), 1))
     var fillFrame = hud.fillBox.frame
     fillFrame.size.width = max(Self.barHeight, Self.barWidth * normalized)
     hud.fillBox.frame = fillFrame
-    let frame = screen.visibleFrame
-    hud.panel.setFrameOrigin(NSPoint(x: frame.maxX - Self.hudSize.width - Self.screenMargin, y: frame.maxY - Self.hudSize.height - Self.screenMargin))
+    // Layer colors don't track appearance changes; refresh the hairline border
+    // against whatever the system looks like right now.
+    hud.effectView.effectiveAppearance.performAsCurrentDrawingAppearance {
+      hud.effectView.layer?.borderColor = NSColor.separatorColor.cgColor
+    }
+    // Vertical position is measured from the full frame, not `visibleFrame`:
+    // with the menu bar auto-hidden `visibleFrame` reaches the top of the
+    // screen, and the pill would then sit exactly where the bar reveals itself.
+    // `menuBarAllowance` reserves that strip unconditionally.
+    hud.panel.setFrameOrigin(NSPoint(
+      x: screen.visibleFrame.maxX - Self.hudSize.width - Self.screenMargin,
+      y: screen.frame.maxY - Self.menuBarAllowance(for: screen) - Self.hudSize.height - Self.screenMargin
+    ))
     self.fadeTimers[displayID]?.invalidate()
-    hud.panel.alphaValue = 1
+    self.fadeGenerations[displayID, default: 0] &+= 1
+    // A bare `alphaValue = 1` loses to an in-flight fade: NSWindow's animator
+    // keeps driving alpha toward 0 and would then order the panel out mid-show.
+    // A zero-duration group replaces that animation and lands on 1 immediately.
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0
+      hud.panel.animator().alphaValue = 1
+    }
     hud.panel.orderFrontRegardless()
     // The timer body is `@Sendable`-typed but provably runs on the main run loop (we add it to
     // `RunLoop.main` below), so hopping actors would only add latency to the fade.
@@ -140,29 +183,32 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     effectView.material = .hudWindow
     effectView.blendingMode = .behindWindow
     effectView.state = .active
-    effectView.appearance = NSAppearance(named: .vibrantDark)
+    // The fork forces `.vibrantDark`; the native pill adapts to the system
+    // appearance, and so do we (Ryder, 2026-07-30): dynamic semantic colors
+    // everywhere, and `.hudWindow` supplies the light/dark material itself.
+    // The one non-dynamic spot is the layer border — CGColor resolves at set
+    // time, so `showHUD` refreshes it against the current appearance.
     effectView.wantsLayer = true
     effectView.layer?.cornerRadius = Self.cornerRadius
     effectView.layer?.masksToBounds = true
     effectView.layer?.borderWidth = 0.5
-    effectView.layer?.borderColor = NSColor.white.withAlphaComponent(0.2).cgColor
     rootView.addSubview(effectView)
 
     let nameLabel = NSTextField(labelWithString: "")
     nameLabel.frame = NSRect(x: Self.margin, y: size.height - 26, width: size.width - Self.margin * 2, height: 16)
     nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-    nameLabel.textColor = NSColor.white.withAlphaComponent(0.95)
+    nameLabel.textColor = .labelColor
     nameLabel.lineBreakMode = .byTruncatingTail
     effectView.addSubview(nameLabel)
 
     let leftIcon = NSImageView(frame: NSRect(x: Self.margin, y: Self.barY - (Self.leftIconSize - Self.barHeight) / 2, width: Self.leftIconSize, height: Self.leftIconSize))
     leftIcon.imageScaling = .scaleProportionallyDown
-    leftIcon.contentTintColor = NSColor.white.withAlphaComponent(0.9)
+    leftIcon.contentTintColor = .secondaryLabelColor
     effectView.addSubview(leftIcon)
 
     let rightIcon = NSImageView(frame: NSRect(x: size.width - Self.margin - Self.rightIconSize, y: Self.barY - (Self.rightIconSize - Self.barHeight) / 2, width: Self.rightIconSize, height: Self.rightIconSize))
     rightIcon.imageScaling = .scaleProportionallyDown
-    rightIcon.contentTintColor = NSColor.white.withAlphaComponent(0.9)
+    rightIcon.contentTintColor = .secondaryLabelColor
     effectView.addSubview(rightIcon)
 
     let barBackground = NSBox(frame: NSRect(x: Self.barX, y: Self.barY, width: Self.barWidth, height: Self.barHeight))
@@ -171,76 +217,41 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     // box. `borderWidth = 0` is the custom-box equivalent (Apple's suggested `transparent` would
     // also suppress the fill, which is the only thing we draw here).
     barBackground.borderWidth = 0
-    barBackground.fillColor = NSColor.white.withAlphaComponent(0.25)
+    barBackground.fillColor = .quaternaryLabelColor
     barBackground.cornerRadius = Self.barHeight / 2
     effectView.addSubview(barBackground)
 
     let fillBox = NSBox(frame: NSRect(x: Self.barX, y: Self.barY, width: Self.barHeight, height: Self.barHeight))
     fillBox.boxType = .custom
     fillBox.borderWidth = 0
-    fillBox.fillColor = .white
+    fillBox.fillColor = .labelColor
     fillBox.cornerRadius = Self.barHeight / 2
     effectView.addSubview(fillBox)
-
-    let rainbowLayer = Self.makeRainbowBorderLayer(bounds: NSRect(origin: .zero, size: size))
-    rainbowLayer.isHidden = true
-    effectView.layer?.addSublayer(rainbowLayer)
 
     // Do not drop this line: without it the panel has no content view and the HUD is invisible
     // (see docs/ENGINEERING-NOTES.md, "OSD / HUD").
     panel.contentView = rootView
 
-    return HUD(panel: panel, nameLabel: nameLabel, leftIcon: leftIcon, rightIcon: rightIcon, fillBox: fillBox, rainbowLayer: rainbowLayer)
-  }
-
-  /// An animated rainbow ring hugging the pill's border: a rotating conic gradient masked to a
-  /// rounded-rect stroke. Used by the HDR-boost mode (Milestone 3); hidden otherwise.
-  private static func makeRainbowBorderLayer(bounds: NSRect) -> CALayer {
-    let container = CALayer()
-    container.frame = bounds
-
-    let gradient = CAGradientLayer()
-    gradient.type = .conic
-    let side = max(bounds.width, bounds.height) * 1.2
-    gradient.frame = NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side)
-    gradient.startPoint = CGPoint(x: 0.5, y: 0.5)
-    gradient.endPoint = CGPoint(x: 1, y: 0.5)
-    gradient.colors = [
-      NSColor.systemRed.cgColor, NSColor.systemOrange.cgColor, NSColor.systemYellow.cgColor,
-      NSColor.systemGreen.cgColor, NSColor.systemTeal.cgColor, NSColor.systemBlue.cgColor,
-      NSColor.systemPurple.cgColor, NSColor.systemPink.cgColor, NSColor.systemRed.cgColor,
-    ]
-    container.addSublayer(gradient)
-
-    let ring = CAShapeLayer()
-    let lineWidth: CGFloat = 3
-    ring.path = CGPath(roundedRect: bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2), cornerWidth: self.cornerRadius - lineWidth / 2, cornerHeight: self.cornerRadius - lineWidth / 2, transform: nil)
-    ring.fillColor = NSColor.clear.cgColor
-    ring.strokeColor = NSColor.white.cgColor
-    ring.lineWidth = lineWidth
-    container.mask = ring
-
-    let spin = CABasicAnimation(keyPath: "transform.rotation.z")
-    spin.fromValue = 0
-    spin.toValue = 2 * CGFloat.pi
-    spin.duration = 2.5
-    spin.repeatCount = .infinity
-    gradient.add(spin, forKey: "spin")
-
-    return container
+    return HUD(panel: panel, effectView: effectView, nameLabel: nameLabel, leftIcon: leftIcon, rightIcon: rightIcon, fillBox: fillBox)
   }
 
   private func fadeOut(displayID: CGDirectDisplayID) {
     guard let panel = self.huds[displayID]?.panel else {
       return
     }
+    let generation = self.fadeGenerations[displayID] ?? 0
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0.3
       panel.animator().alphaValue = 0
-    } completionHandler: {
+    } completionHandler: { [weak self] in
       // The completion handler is `@Sendable`-typed but fires on the main thread, where the panel
       // it orders out already lives.
       MainActor.assumeIsolated {
+        // A show that arrived mid-fade already restored alpha and bumped the
+        // generation; ordering out here would hide a visible HUD.
+        guard let self, self.fadeGenerations[displayID] == generation else {
+          return
+        }
         panel.orderOut(nil)
       }
     }
@@ -249,6 +260,9 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   func cleanupDisplay(_ displayID: CGDirectDisplayID) {
     self.fadeTimers[displayID]?.invalidate()
     self.fadeTimers.removeValue(forKey: displayID)
+    // Kept (not removed) so generations never repeat for a display that comes
+    // back, which would let a stale completion match a fresh show.
+    self.fadeGenerations[displayID, default: 0] &+= 1
     if let hud = self.huds[displayID] {
       hud.panel.close()
       self.huds.removeValue(forKey: displayID)
