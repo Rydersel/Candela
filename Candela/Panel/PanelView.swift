@@ -36,7 +36,6 @@ struct PanelView: View {
       footer
     }
     .frame(width: 280)
-    .task { await model.refresh() }
   }
 
   private var footer: some View {
@@ -86,6 +85,11 @@ private struct FooterIconButton: View {
     }
     .buttonStyle(FooterIconButtonStyle(isHovering: isHovering))
     .onHover { isHovering = $0 }
+    // The menu can close without a trailing mouse-exit event (e.g. Escape or
+    // clicking the status item), which would leave a phantom hover highlight
+    // on the next open. The menu item's view leaves the window on close, so
+    // onDisappear fires and clears it.
+    .onDisappear { isHovering = false }
     .help(help)
     .accessibilityLabel(help)
   }

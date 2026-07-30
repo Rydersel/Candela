@@ -16,7 +16,7 @@ import SwiftUI
 /// put exactly like every other NSMenu-based status item.
 ///
 /// The SwiftUI panel is unchanged: `PanelView` renders inside an
-/// `NSHostingView` used as the menu item's view, so `.task`, gestures, and
+/// `NSHostingView` used as the menu item's view, so state, gestures, and
 /// accessibility all run through the same SwiftUI machinery as before.
 @MainActor
 final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -42,17 +42,16 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
     // Warm the display list before the first open. Menu tracking can hold the
     // main run loop in event-tracking mode, which starves main-actor task
-    // execution (see BrightnessController.setBrightness), so PanelView's
-    // `.task` refresh is not guaranteed to land while the menu is open.
-    // Refreshing at launch (and after every close, below) keeps the panel
-    // populated with a current display list regardless.
+    // execution (see BrightnessController.setBrightness), so a refresh cannot
+    // be relied on to land while the menu is open. Launch here and close
+    // below are therefore the only two refresh triggers; AppModel.refresh()
+    // coalesces overlapping calls, so they never race the DDC bus.
     Task { await model.refresh() }
   }
 
   func menuDidClose(_: NSMenu) {
     // Re-discover displays and re-read hardware once tracking has ended and
-    // the run loop is back in default mode, so the next open starts fresh
-    // even if the in-panel `.task` refresh starved during tracking.
+    // the run loop is back in default mode, so the next open starts fresh.
     Task { await model.refresh() }
   }
 }
