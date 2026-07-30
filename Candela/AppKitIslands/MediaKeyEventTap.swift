@@ -49,16 +49,19 @@ final class MediaKeyEventTap {
   /// CF objects backing a live tap. All three CF types are thread-safe; the
   /// lock (accessed via `withLockUnchecked` because they are not `Sendable`
   /// in Swift's eyes) serializes the *references*: main actor writes
-  /// port+source (and retains the trampoline block) after `tapCreate`, the
-  /// tap thread writes its run loop just before `CFRunLoopRun()`, and the
-  /// callback and `stop()`/`deinit` read from the same box.
+  /// port+source after `tapCreate`, the tap thread writes its run loop just
+  /// before `CFRunLoopRun()`, and the callback and `stop()`/`deinit` read
+  /// from the same box.
+  ///
+  /// The trampoline block is deliberately NOT stored here: the tap thread's
+  /// closure retains it instead (see `start()`). If the box held the only
+  /// strong reference, teardown would release the block while the tap thread
+  /// could still be executing it via the unretained `refcon` bit-cast —
+  /// use-after-free at the C boundary.
   private struct TapRuntime {
     var port: CFMachPort?
     var source: CFRunLoopSource?
     var runLoop: CFRunLoop?
-    /// Retains the trampoline block for the tap's lifetime — the `refcon`
-    /// pointer handed to the C callback is unretained.
-    var callback: EventTapCallback?
   }
 
   private(set) var isRunning = false
@@ -92,9 +95,9 @@ final class MediaKeyEventTap {
     stop()
     configLock.withLock { $0 = config }
 
-    // Capture locals, not self: the trampoline is stored in the runtime box
-    // (owned by self), so capturing self would build a retain cycle — and the
-    // callback needs nothing MainActor anyway.
+    // Capture locals, not self: the trampoline lives for the tap thread's
+    // lifetime, so capturing self would pin the controller alive with it —
+    // and the callback needs nothing MainActor anyway.
     let configLock = self.configLock
     let runtime = self.runtime
     let onPress = self.onPress
@@ -142,7 +145,6 @@ final class MediaKeyEventTap {
     runtime.withLockUnchecked { state in
       state.port = port
       state.source = source
-      state.callback = callback
     }
 
     // nonisolated(unsafe): CFRunLoopSource is not Sendable in Swift's eyes,
@@ -151,15 +153,33 @@ final class MediaKeyEventTap {
     // thread-safe regardless).
     nonisolated(unsafe) let threadSource = source
     let thread = Thread {
-      // The run loop reference can only be obtained on the tap thread itself,
-      // so it is written into the shared box off-main, before CFRunLoopRun.
-      let runLoop = CFRunLoopGetCurrent()
-      runtime.withLockUnchecked { $0.runLoop = runLoop }
-      // If stop() already invalidated the source in the meantime, the loop
-      // has no sources and CFRunLoopRun returns immediately — the thread
-      // exits instead of spinning orphaned.
-      CFRunLoopAddSource(runLoop, threadSource, .commonModes)
-      CFRunLoopRun()
+      // The thread closure retains the trampoline block (`callback`) for the
+      // thread's whole lifetime. That is exactly the window callbacks can
+      // execute in: the C side holds only an unretained bit-cast, the thread
+      // cannot exit `CFRunLoopRun()` while a callback is running on it, and
+      // no callback dispatches after the source/port are invalidated — so
+      // teardown can never free the block under a mid-flight callback.
+      withExtendedLifetime(callback) {
+        // The run loop reference can only be obtained on the tap thread
+        // itself, so it is written into the shared box off-main, before
+        // CFRunLoopRun. Generation guard: only claim the box if it still owns
+        // THIS start's source — a rapid start()→start() (or a stop() racing
+        // thread spin-up) must not let a stale thread overwrite the new
+        // thread's run loop or run an already-torn-down tap.
+        let runLoop = CFRunLoopGetCurrent()
+        let current = runtime.withLockUnchecked { state -> Bool in
+          guard state.source === threadSource else { return false }
+          state.runLoop = runLoop
+          return true
+        }
+        guard current else { return }
+        // If stop() invalidates the source between the guard above and here,
+        // adding an invalidated source is a no-op, the loop has no sources,
+        // and CFRunLoopRun returns immediately — the thread exits instead of
+        // spinning orphaned.
+        CFRunLoopAddSource(runLoop, threadSource, .commonModes)
+        CFRunLoopRun()
+      }
     }
     thread.name = "MediaKeyEventTap"
     thread.start()
@@ -180,8 +200,9 @@ final class MediaKeyEventTap {
   }
 
   /// Nonisolated so `deinit` (which is nonisolated) can share it with
-  /// `stop()`. Clearing the box also releases the trampoline block, breaking
-  /// the box → block → box retain cycle.
+  /// `stop()`. Invalidating source+port ends callback dispatch; the tap
+  /// thread then exits `CFRunLoopRun()` and releases the trampoline block it
+  /// retains (see `start()`), so teardown never frees the block itself.
   private nonisolated static func teardown(_ runtime: OSAllocatedUnfairLock<TapRuntime>) {
     let old = runtime.withLockUnchecked { state -> TapRuntime in
       let old = state
