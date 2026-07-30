@@ -77,3 +77,34 @@ actor FakeDDC: DDCWriting {
   #expect(controller.maxDDCValue == 100)
   #expect(controller.brightness == 0.5)
 }
+
+/// Deliberately NOT @MainActor: submission is synchronous and the drain runs
+/// on the global executor, so writes must land without this test ever taking
+/// a main-actor turn — the property that keeps DDC writes flowing while the
+/// main run loop is stuck in event-tracking mode during a slider drag.
+@Test func coalescerDrainsWithoutMainActorParticipation() async {
+  let fake = FakeDDC()
+  let coalescer = BrightnessWriteCoalescer(writer: fake)
+  for step in 1 ... 20 {
+    coalescer.submit(.init(value: UInt16(step), generation: UInt64(step)))
+  }
+  await coalescer.waitUntilCompleted(through: 20)
+  let writes = await fake.recordedWrites()
+  #expect(!writes.isEmpty)
+  #expect(writes.last?.value == 20) // latest value always lands last
+  #expect(writes.allSatisfy { $0.command == VCP.brightness })
+}
+
+/// A wait issued before its write has drained must suspend until that write
+/// (or a newer one superseding it) lands — never resolve early against an
+/// idle-looking coalescer.
+@Test func coalescerWaitCoversSupersededGenerations() async {
+  let fake = FakeDDC()
+  let coalescer = BrightnessWriteCoalescer(writer: fake)
+  coalescer.submit(.init(value: 10, generation: 1))
+  coalescer.submit(.init(value: 90, generation: 2)) // may displace generation 1 in the buffer
+  await coalescer.waitUntilCompleted(through: 1) // satisfied even if 1 was dropped
+  await coalescer.waitUntilCompleted(through: 2)
+  let writes = await fake.recordedWrites()
+  #expect(writes.last?.value == 90)
+}
