@@ -933,24 +933,146 @@ struct HDRModeEngageFailureTests {
     #expect(prefs.hdrMode == .off)
     #expect(submitted.count == submittedBeforeRelease)
   }
+
+  /// Final wave: the supersession token must be a MONOTONIC GENERATION, not
+  /// the mode. `hdrMode` is ABA-prone — a parked `.alwaysOn` call resumes to
+  /// find the mode back at `.alwaysOn` after an `.off` → `.alwaysOn` round
+  /// trip, so a `hdrMode == mode` comparison waves its stale rollback through
+  /// and the THIRD transition's committed mode/prefs are clobbered by the
+  /// first's `previous`.
+  @Test func overlappingSetHDRModeABADoesNotClobberThirdTransition() async {
+    let suiteName = "com.rydersel.Candela.tests.path.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
+    prefs.hdrMode = .boost // a stale rollback would resurrect this
+    // Only the FIRST engage is gated (and fails); the third transition's
+    // engage passes straight through and succeeds.
+    let gated = GatedEngageHDR(gateFirstEngageOnly: true)
+    let controller = BrightnessController(
+      writer: FakeDDC(readResult: nil),
+      backends: BrightnessBackends(
+        applierNative: FakeNativeApplier(), hdr: gated, shade: FakeShade(), gamma: FakeGamma()
+      ),
+      prefs: prefs,
+      displayID: 7
+    )
+    controller.settleDelay = .milliseconds(5)
+    var submitted: [HardwareTarget] = []
+    controller._onSubmit = { submitted.append($0) }
+    await controller.initialHDRRefresh?.value
+    controller.setBrightness(0.75)
+
+    // A: commits .alwaysOn, then parks inside the gated engage.
+    let first = Task { await controller.setHDRMode(.alwaysOn) }
+    #expect(await eventually { await gated.engageCallCount() == 1 })
+    #expect(controller.hdrMode == .alwaysOn)
+
+    // B then C: the mode leaves .alwaysOn and comes back — the ABA a mode
+    // comparison cannot see. C completes normally (its engage succeeds).
+    await controller.setHDRMode(.off)
+    await controller.setHDRMode(.alwaysOn)
+    #expect(await gated.engageCallCount() == 2)
+    #expect(controller.hdrMode == .alwaysOn)
+    #expect(prefs.hdrMode == .alwaysOn)
+    let submittedBeforeRelease = submitted.count
+
+    // A's engage now fails. Its generation is two transitions stale, so the
+    // rollback must not run: C's mode/prefs survive and no applyPaths fires.
+    await gated.release()
+    await first.value
+    #expect(controller.hdrMode == .alwaysOn)
+    #expect(prefs.hdrMode == .alwaysOn)
+    #expect(submitted.count == submittedBeforeRelease)
+  }
+
+  /// Final wave: the EXIT arm has the same bare-async-func exposure as the
+  /// engage arm (T10 round 2 flagged it and left it out of scope). A `.off`
+  /// transition parked on its disengage must not, once it resumes, clear the
+  /// settle flag of the transition that retargeted past it or fire its
+  /// `applyPaths` against state that transition owns.
+  @Test func overlappingSetHDRModeExitArmDoesNotClobberNewerTransition() async {
+    let suiteName = "com.rydersel.Candela.tests.path.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
+    prefs.hdrMode = .alwaysOn
+    let gated = GatedTransitionHDR()
+    let controller = BrightnessController(
+      writer: FakeDDC(readResult: nil),
+      backends: BrightnessBackends(
+        applierNative: FakeNativeApplier(), hdr: gated, shade: FakeShade(), gamma: FakeGamma()
+      ),
+      prefs: prefs,
+      displayID: 7
+    )
+    controller.settleDelay = .milliseconds(5)
+    var submitted: [HardwareTarget] = []
+    controller._onSubmit = { submitted.append($0) }
+    await controller.initialHDRRefresh?.value
+    controller.setBrightness(0.75)
+
+    // A: leaves the native path and parks inside the gated disengage.
+    let first = Task { await controller.setHDRMode(.off) }
+    #expect(await eventually { await gated.disengageCallCount() == 1 })
+    #expect(controller.hdrMode == .off)
+
+    // B: retargets back to .alwaysOn and parks inside its own engage, so its
+    // settle window is still open (settleInProgress true, poller gate shut)
+    // when A resumes.
+    let second = Task { await controller.setHDRMode(.alwaysOn) }
+    #expect(await eventually { await gated.engageCallCount() == 1 })
+    #expect(controller.hdrMode == .alwaysOn)
+    #expect(controller.isNativeActive() == false)
+    let submittedBeforeRelease = submitted.count
+
+    await gated.releaseDisengage()
+    await first.value
+    // A's post-sleep block belongs to a superseded transition: no applyPaths,
+    // and B's settle flag survives (the fake keeps reporting HDR live, so a
+    // stale `settleInProgress = false` + cache refresh would re-open the
+    // poller gate mid-transition).
+    #expect(submitted.count == submittedBeforeRelease)
+    #expect(controller.isNativeActive() == false)
+
+    await gated.releaseEngage()
+    await second.value
+  }
 }
 
 /// HDRToggling fake whose ENGAGE calls (`enabled == true`) suspend until
 /// `release()` and then fail; disengage calls pass straight through. Lets a
 /// test park one `setHDRMode(.alwaysOn)` mid-engage while another call
 /// retargets the controller.
+///
+/// With `gateFirstEngageOnly`, only the FIRST engage is gated; later engages
+/// succeed immediately — that lets a test park one call while two further
+/// transitions run to completion (the ABA case).
 actor GatedEngageHDR: HDRToggling {
   private var engageWaiters: [CheckedContinuation<Void, Never>] = []
   private var released = false
   private var engageCalls = 0
+  private var enabledState = false
+  private let gateFirstEngageOnly: Bool
+
+  init(gateFirstEngageOnly: Bool = false) {
+    self.gateFirstEngageOnly = gateFirstEngageOnly
+  }
 
   func supportsHDR(displayID _: CGDirectDisplayID) -> Bool { true }
-  func isHDREnabled(displayID _: CGDirectDisplayID) -> Bool { false }
+  func isHDREnabled(displayID _: CGDirectDisplayID) -> Bool { enabledState }
 
   @discardableResult
   func setHDR(displayID _: CGDirectDisplayID, enabled: Bool) async -> Bool {
-    guard enabled else { return true }
+    guard enabled else {
+      enabledState = false
+      return true
+    }
     engageCalls += 1
+    if gateFirstEngageOnly, engageCalls > 1 {
+      enabledState = true
+      return true
+    }
     if !released {
       await withCheckedContinuation { engageWaiters.append($0) }
     }
@@ -967,5 +1089,57 @@ actor GatedEngageHDR: HDRToggling {
       waiter.resume()
     }
     engageWaiters.removeAll()
+  }
+}
+
+/// HDRToggling fake with an independently released gate on EACH direction, so
+/// a test can park an exit transition on its disengage while a later
+/// transition parks on its engage (holding its settle window open).
+/// `isHDREnabled` stays true throughout — a display whose readback still
+/// reports HDR live mid-transition, which is exactly why the settle window
+/// exists and what makes a stale `settleInProgress = false` observable through
+/// the poller gate.
+actor GatedTransitionHDR: HDRToggling {
+  private var engageWaiters: [CheckedContinuation<Void, Never>] = []
+  private var disengageWaiters: [CheckedContinuation<Void, Never>] = []
+  private var engageReleased = false
+  private var disengageReleased = false
+  private var engageCalls = 0
+  private var disengageCalls = 0
+
+  func supportsHDR(displayID _: CGDirectDisplayID) -> Bool { true }
+  func isHDREnabled(displayID _: CGDirectDisplayID) -> Bool { true }
+
+  @discardableResult
+  func setHDR(displayID _: CGDirectDisplayID, enabled: Bool) async -> Bool {
+    if enabled {
+      engageCalls += 1
+      if !engageReleased {
+        await withCheckedContinuation { engageWaiters.append($0) }
+      }
+    } else {
+      disengageCalls += 1
+      if !disengageReleased {
+        await withCheckedContinuation { disengageWaiters.append($0) }
+      }
+    }
+    return true
+  }
+
+  func displaysReconfigured() {}
+
+  func engageCallCount() -> Int { engageCalls }
+  func disengageCallCount() -> Int { disengageCalls }
+
+  func releaseEngage() {
+    engageReleased = true
+    for waiter in engageWaiters { waiter.resume() }
+    engageWaiters.removeAll()
+  }
+
+  func releaseDisengage() {
+    disengageReleased = true
+    for waiter in disengageWaiters { waiter.resume() }
+    disengageWaiters.removeAll()
   }
 }

@@ -248,8 +248,12 @@ final class AppModel {
         isNativeActive: { controller.isNativeActive() },
         // A starved adoption Task that fires late is discarded by
         // adoptExternal's generation check (review I9).
-        // Parked T6-minor-2: settle re-assert may briefly diverge slot vs
-        // hardware; poller easing self-corrects.
+        // Parked T6-minor-2: after a boost settle the expected-native slot and
+        // the hardware can briefly disagree. The poller does NOT recover the
+        // interim input — it CONVERGES PUBLISHED STATE ONTO THE RE-ASSERTED
+        // 1.0, i.e. anything the user typed inside the settle window is
+        // ratified over, not restored. Confirm against hardware verification
+        // items 6/7 before deciding whether that is acceptable.
         adopt: { [weak self] value, generation in
           Task { @MainActor in
             let delta = controller.adoptExternal(value, generation: generation)

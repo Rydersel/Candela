@@ -102,7 +102,9 @@ public final class BrightnessController {
   @ObservationIgnored private var writer: any DDCWriting
   @ObservationIgnored private let backends: BrightnessBackends
   @ObservationIgnored private let prefs: DisplayPrefs
-  @ObservationIgnored private let displayID: CGDirectDisplayID
+  /// Module-internal (not private) so in-module collaborators — `BrightnessSync`'s
+  /// fan-out log — can name the display a controller belongs to.
+  @ObservationIgnored let displayID: CGDirectDisplayID
   /// Explicitly nonisolated (immutable, Sendable) so `isNativeActive()` can
   /// answer from the poller's nonisolated context without an executor hop.
   @ObservationIgnored private nonisolated let role: DisplayRole
@@ -154,6 +156,14 @@ public final class BrightnessController {
   /// The in-flight boost engage/disengage task; tests await it to observe
   /// post-settle state deterministically.
   @ObservationIgnored private(set) var hdrTransitionTask: Task<Void, Never>?
+  /// Monotonic supersession token for `setHDRMode`'s post-await mutations
+  /// (final review wave). Comparing `hdrMode` instead is ABA-prone: a parked
+  /// `.alwaysOn` call resumes to find the mode back at `.alwaysOn` after an
+  /// `.off` → `.alwaysOn` round trip and waves its stale rollback through,
+  /// clobbering the transition that actually owns the state. Bumped by every
+  /// transition start (`beginHDRTransition`, plus the fourth door, which has
+  /// no settle window of its own).
+  @ObservationIgnored private var hdrTransitionGeneration: UInt64 = 0
   /// Init-time HDR cache refresh; tests await it before priming so two
   /// refreshes can't interleave and double-run the C1 clearing.
   @ObservationIgnored private(set) var initialHDRRefresh: Task<Void, Never>?
@@ -423,20 +433,21 @@ public final class BrightnessController {
       // poller off until the settle window ends.
       clearSoftwareLeg()
       beginHDRTransition()
+      let generation = hdrTransitionGeneration
       let engaged = await backends.hdr?.setHDR(displayID: displayID, enabled: true) ?? false
-      // Supersession guard (fix round 2): this body is a bare async func —
-      // never stored in `hdrTransitionTask`, so `beginHDRTransition`'s cancel
-      // cannot reach it, and the panel spawns one unserialized Task per menu
-      // selection. If `hdrMode` moved while we were suspended, a newer
-      // setHDRMode owns the state now; mutating it here (stale rollback,
-      // clearing the newer transition's settle flag, re-firing applyPaths)
-      // would be the orphaned-continuation clobber class T6 closed for the
-      // boost tasks.
-      guard hdrMode == mode else { return }
+      // Supersession guard (fix round 2; generation token final wave): this
+      // body is a bare async func — never stored in `hdrTransitionTask`, so
+      // `beginHDRTransition`'s cancel cannot reach it, and the panel spawns
+      // one unserialized Task per menu selection. If a newer transition
+      // started while we were suspended, it owns the state now; mutating it
+      // here (stale rollback, clearing the newer transition's settle flag,
+      // re-firing applyPaths) would be the orphaned-continuation clobber
+      // class T6 closed for the boost tasks.
+      guard hdrTransitionGeneration == generation else { return }
       if engaged {
         cachedHDRActive = true
         try? await Task.sleep(for: settleDelay)
-        guard hdrMode == mode else { return } // supersession guard, post-settle
+        guard hdrTransitionGeneration == generation else { return } // post-settle
         settleInProgress = false
         await refreshHDRCaches()
       } else {
@@ -466,8 +477,14 @@ public final class BrightnessController {
       // last DDC value we recorded no longer reflects the register (I10).
       cachedHDRActive = false
       beginHDRTransition()
+      let generation = hdrTransitionGeneration
       _ = await backends.hdr?.setHDR(displayID: displayID, enabled: false)
+      // Same supersession fence as the engage arm (final wave): the exit arm's
+      // post-await block clears `settleInProgress` and fires `applyPaths`, both
+      // of which belong to whichever transition is current.
+      guard hdrTransitionGeneration == generation else { return }
       try? await Task.sleep(for: settleDelay)
+      guard hdrTransitionGeneration == generation else { return } // post-settle
       settleInProgress = false
       coalescer.resetDuplicateState()
       applyPaths(brightness)
@@ -479,7 +496,14 @@ public final class BrightnessController {
       // updated, and `cachedHDRActive` may already be true from an external
       // toggle — so entering here runs the C1 clearing like every other door.
       let wasNative = previous != .off && cachedHDRActive
+      // This door has no settle window, so it never calls `beginHDRTransition`
+      // — but it is still a transition, so it takes the token itself: it must
+      // supersede parked older calls, and its own post-await C1 clearing must
+      // not land after a newer transition took over.
+      hdrTransitionGeneration &+= 1
+      let generation = hdrTransitionGeneration
       await refreshHDRCaches()
+      guard hdrTransitionGeneration == generation else { return }
       if !wasNative, usesNative {
         clearSoftwareLeg()
       }
@@ -616,6 +640,7 @@ public final class BrightnessController {
   /// `setHDRMode(.off)` inside the 2 s window).
   private func beginHDRTransition() {
     hdrTransitionTask?.cancel()
+    hdrTransitionGeneration &+= 1
     settleInProgress = true
     echo.withLock { state in
       state.value = nil

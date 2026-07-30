@@ -1,3 +1,4 @@
+// Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
 // include/MonitorPanel.h — private MonitorPanel.framework interfaces.
 // Loaded via dlopen + NSClassFromString at runtime; never linked.
 // Copied from the fork's Bridging-Header.h:29-41. Do not add selectors

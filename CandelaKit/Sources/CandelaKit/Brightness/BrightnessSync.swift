@@ -1,5 +1,7 @@
 //  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
 
+import os
+
 /// Cross-display brightness sync (fork `AppDelegate.job`,
 /// AppDelegate.swift:238-253): a change observed on a native source — Control
 /// Center, the ambient-light sensor, a TouchBar slider — replicates onto every
@@ -24,6 +26,12 @@ public enum BrightnessSync {
   ) {
     guard delta != 0, isEnabled else { return }
     for target in controllers where target !== source {
+      // Diagnostics for "the other display followed/didn't follow" reports:
+      // the same `path` category as the controller's own mode/settle lines, so
+      // one predicate shows the source's adoption and every replication.
+      pathLog.log(
+        "sync fan-out delta=\(delta, format: .fixed(precision: 4)) from=\(source.displayID) to=\(target.displayID)"
+      )
       target.setBrightness(target.brightness + delta)
     }
   }
