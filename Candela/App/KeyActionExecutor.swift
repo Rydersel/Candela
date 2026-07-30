@@ -67,8 +67,12 @@ final class KeyActionExecutor {
       if !Mirroring.engageMirror() {
         execute(.stepBrightness(isUp: false, isFine: isFine, scope: .affected), isFresh: isFresh)
       }
-    case .stepContrast:
-      log.log("contrast keys arrive with Milestone 4")
+    case .stepContrast, .stepVolume, .toggleMute, .volumeKeyUp:
+      log.log("volume/contrast execution arrives later in Milestone 4 (task 10)")
+    case .openSoundSettings:
+      NSWorkspace.shared.open(
+        URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension")!
+      )
     case .openDisplaysSettings:
       NSWorkspace.shared.open(
         URL(string: "x-apple.systempreferences:com.apple.Displays-Settings.extension")!

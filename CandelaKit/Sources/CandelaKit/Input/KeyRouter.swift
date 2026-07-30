@@ -22,13 +22,21 @@ public enum KeyAction: Sendable, Equatable {
   case openDisplaysSettings // Option-only, fresh press
   case stepBrightness(isUp: Bool, isFine: Bool, scope: BrightnessScope)
   case stepContrast(isUp: Bool, isFine: Bool) // Ctrl+Opt+Cmd (executor no-ops until M4)
+  case stepVolume(isUp: Bool, isFine: Bool)
+  case toggleMute // fresh press only; repeats swallowed
+  case openSoundSettings // Option-only on a volume/mute key, fresh press
+  /// Volume up/down released: the executor plays the feedback sound (fork:
+  /// key-up only, once per event).
+  case volumeKeyUp
   case none // swallowed, nothing to do (keyups, repeats of one-shot combos)
 }
 
 public enum KeyRouter {
   public static func route(_ press: MediaKeyPress, config: KeyRouterConfig) -> KeyAction {
-    let isBrightnessKey = press.key == .brightnessUp || press.key == .brightnessDown
-    guard isBrightnessKey else { return .none } // volume/mute inert until M4
+    let isVolumeKey = press.key == .volumeUp || press.key == .volumeDown
+    if isVolumeKey || press.key == .mute {
+      return routeVolume(press, config: config, isVolumeKey: isVolumeKey)
+    }
     guard press.isPressed else { return .none }
     let isUp = press.key == .brightnessUp
 
@@ -72,5 +80,27 @@ public enum KeyRouter {
     // display the user is working on, matching the fork's default. Ctrl+Cmd
     // (rule 4) stays the explicit "every external" gesture.
     return .stepBrightness(isUp: isUp, isFine: isFine, scope: .affected)
+  }
+
+  /// Volume/mute rules (fork MediaKeyTapManager.handle, Appendix A). Target
+  /// resolution is app-side (`multiKeyboardVolume`) — the router only decides
+  /// WHAT, never WHICH display.
+  private static func routeVolume(
+    _ press: MediaKeyPress, config: KeyRouterConfig, isVolumeKey: Bool
+  ) -> KeyAction {
+    guard press.isPressed else {
+      // Key release: the feedback-sound trigger — volume steps only ("the
+      // mute key should not respond to press + hold or keyup", fork verbatim).
+      return isVolumeKey ? .volumeKeyUp : .none
+    }
+    if press.modifiers == [.option] {
+      return press.isRepeat ? .none : .openSoundSettings
+    }
+    if press.key == .mute {
+      return press.isRepeat ? .none : .toggleMute
+    }
+    var isFine = press.modifiers.isSuperset(of: [.option, .shift])
+    if config.useFineScaleVolume { isFine.toggle() }
+    return .stepVolume(isUp: press.key == .volumeUp, isFine: isFine)
   }
 }

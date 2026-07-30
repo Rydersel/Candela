@@ -1,5 +1,4 @@
-/// The media keys Candela can route. Volume/mute are declared for the full
-/// key domain but stay inert until M4 (the M2 tap does not watch them).
+/// The media keys Candela can route.
 public enum MediaKey: Sendable, Hashable {
   case brightnessUp
   case brightnessDown
@@ -39,8 +38,11 @@ public struct MediaKeyPress: Sendable {
 public struct KeyRouterConfig: Sendable {
   /// Inverts coarse/fine meaning for brightness keys (fork: useFineScaleBrightness).
   public var useFineScaleBrightness: Bool
+  /// Inverts coarse/fine meaning for volume keys (fork: useFineScaleVolume).
+  public var useFineScaleVolume: Bool
 
-  public init(useFineScaleBrightness: Bool = false) {
+  public init(useFineScaleBrightness: Bool = false, useFineScaleVolume: Bool = false) {
     self.useFineScaleBrightness = useFineScaleBrightness
+    self.useFineScaleVolume = useFineScaleVolume
   }
 }
