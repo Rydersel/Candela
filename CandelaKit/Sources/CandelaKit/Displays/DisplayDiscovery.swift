@@ -13,7 +13,9 @@ public enum DisplayDiscovery {
       return Arm64DDC.getServiceMatches(displayIDs: Array(externalIDs))
         .filter { !$0.dummy && !$0.discouraged && $0.service != nil }
         .map { match in
-          (ExternalDisplay(id: match.displayID, name: displayName(from: match.serviceDetails, displayID: match.displayID)),
+          (ExternalDisplay(id: match.displayID,
+                           name: displayName(from: match.serviceDetails, displayID: match.displayID),
+                           persistenceKey: persistenceKey(from: match.serviceDetails)),
            Arm64DDCService.create(service: match.service))
         }
     #else
@@ -23,5 +25,19 @@ public enum DisplayDiscovery {
 
   static func displayName(from service: Arm64DDC.IOregService, displayID: CGDirectDisplayID) -> String {
     service.productName.isEmpty ? "Display \(displayID)" : service.productName
+  }
+
+  /// Known limitation: two identical monitors (same model/firmware) can share
+  /// an EDID UUID, and the fallback triple collides even more easily when the
+  /// serial is 0 — twins would then share saved brightness. The fork
+  /// disambiguated with CGDirectDisplayID at the cost of stability across
+  /// ports/reboots. Single-monitor dev hardware can't test this; revisit if a
+  /// multi-monitor user reports it.
+  static func persistenceKey(from service: Arm64DDC.IOregService) -> String {
+    if !service.edidUUID.isEmpty {
+      return service.edidUUID
+    }
+    let name = service.productName.filter { !$0.isWhitespace }
+    return "\(name)-\(service.manufacturerID)-\(service.serialNumber)"
   }
 }

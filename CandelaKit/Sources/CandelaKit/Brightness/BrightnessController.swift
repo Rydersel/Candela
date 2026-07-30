@@ -17,10 +17,20 @@ public final class BrightnessController {
   private let writer: any DDCWriting
   private let coalescer: BrightnessWriteCoalescer
   @ObservationIgnored private var issuedGeneration: UInt64 = 0
+  /// Last-written brightness is the only truth on write-only DDC panels, so it
+  /// is persisted here and restored at init — without it the panel opens at
+  /// the 0.5 default on every launch.
+  private let store: (any BrightnessStoring)?
+  private let storageKey: String?
 
-  public init(writer: any DDCWriting) {
+  public init(writer: any DDCWriting, store: (any BrightnessStoring)? = nil, storageKey: String? = nil) {
     self.writer = writer
+    self.store = store
+    self.storageKey = storageKey
     self.coalescer = BrightnessWriteCoalescer(writer: writer)
+    if let store, let storageKey, let saved = store.savedBrightness(for: storageKey) {
+      brightness = min(max(saved, 0), 1)
+    }
   }
 
   deinit {
@@ -35,6 +45,12 @@ public final class BrightnessController {
     }
     maxDDCValue = result.max
     brightness = Double(min(result.current, result.max)) / Double(result.max)
+    // A readable panel's hardware value is truth, so the store must adopt it
+    // too — otherwise the saved number goes stale and the next launch restores
+    // an outdated brightness.
+    if let store, let storageKey {
+      store.saveBrightness(brightness, for: storageKey)
+    }
   }
 
   /// Synchronous by design: state updates immediately, hardware writes
@@ -56,6 +72,9 @@ public final class BrightnessController {
     coalescer.submit(
       .init(value: UInt16((clamped * Double(maxDDCValue)).rounded()), generation: issuedGeneration)
     )
+    if let store, let storageKey {
+      store.saveBrightness(clamped, for: storageKey)
+    }
   }
 
   /// One OSD-chiclet step (fork: `Display.calcNewBrightness`): 16 chiclets,

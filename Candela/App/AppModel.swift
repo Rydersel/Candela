@@ -49,7 +49,11 @@ final class AppModel {
         // writer discovery just created for this display is discarded unused.
         return DisplayState(display: entry.display, controller: controller)
       }
-      let controller = BrightnessController(writer: entry.writer)
+      let controller = BrightnessController(
+        writer: entry.writer,
+        store: UserDefaultsBrightnessStore(),
+        storageKey: "brightness.\(entry.display.persistenceKey)"
+      )
       appeared.append(controller)
       return DisplayState(display: entry.display, controller: controller)
     }
