@@ -18,14 +18,14 @@ public final class BrightnessController {
   private let coalescer: BrightnessWriteCoalescer
   @ObservationIgnored private var issuedGeneration: UInt64 = 0
 
-  public init(writer: any DDCWriting, minimumWriteInterval: Duration = .milliseconds(15)) {
+  public init(writer: any DDCWriting) {
     self.writer = writer
-    self.coalescer = BrightnessWriteCoalescer(writer: writer, minimumWriteInterval: minimumWriteInterval)
+    self.coalescer = BrightnessWriteCoalescer(writer: writer)
   }
 
   deinit {
-    // Ends the coalescer's drain loop (after any in-progress ramp lands) so
-    // the coalescer and its task don't outlive the controller.
+    // Ends the coalescer's drain loop (after any pending write lands) so the
+    // coalescer and its task don't outlive the controller.
     coalescer.finishSubmissions()
   }
 
@@ -37,9 +37,9 @@ public final class BrightnessController {
     brightness = Double(min(result.current, result.max)) / Double(result.max)
   }
 
-  /// Synchronous by design: state updates immediately, hardware writes ease
-  /// toward the latest target — a 60 Hz slider drag must never queue stale
-  /// DDC writes (each write holds the DDC actor for ~20 ms, more on retries).
+  /// Synchronous by design: state updates immediately, hardware writes
+  /// coalesce latest-wins — a 60 Hz slider drag must never queue stale DDC
+  /// writes (each write holds the DDC actor for ~20 ms, more on retries).
   ///
   /// The hardware write must not require the main actor for any step after
   /// this call returns: during a slider drag the main run loop sits in
@@ -63,25 +63,25 @@ public final class BrightnessController {
   }
 }
 
-/// Drains brightness writes to hardware off the main actor with eased
-/// stepping: instead of jumping to the newest target (which the MAG341C
-/// renders as visible chunks — hardware-verified via `candela-probe ramp`,
-/// task-7 round 4: 1-unit-step ramps at ~15-25 ms cadence are user-rated
-/// smooth, coarse jumps are not), the drain writes a monotonic sequence of
-/// intermediate values from the last value sent toward the CURRENT newest
-/// target — the same play-through-intermediates approach as the MonitorControl
-/// fork's smooth-brightness mode and BetterDisplay.
+/// Drains brightness writes to hardware off the main actor, coalescing
+/// latest-wins: every write jumps straight to the newest target, as fast as
+/// the DDC transaction allows (its internal per-cycle sleeps are the only
+/// pacing). Deliberate product decision (task-7 round 6): eased intermediate
+/// stepping made drags "feel slower" on the MAG341C — the panel's DDC
+/// apply-path is the bottleneck, and the real smoothness fix is M3 software
+/// dimming, not write-shaping.
 ///
 /// Submission is a synchronous, nonisolated store into an
 /// `OSAllocatedUnfairLock`-protected slot (newest-wins, the slot *is* the
 /// pending-target buffer) — storing never requires an executor hop, so a
 /// @MainActor caller can submit while the run loop is stuck in event-tracking
-/// mode (the round-1 defect). The single drain loop re-reads that slot before
-/// every step, so a mid-ramp submission redirects the ramp instead of queuing
-/// behind it. Each submitted target carries a monotonic generation;
-/// `waitUntilCompleted(through:)` suspends until the ramp has REACHED a target
-/// with at least that generation (a newer target superseding an older one
-/// completes the older generation too — latest-wins).
+/// mode (the round-1 defect). The single drain loop dequeues the newest
+/// target, so intermediates that arrive while a write is in flight are
+/// dropped and the final value always lands. Each submitted target carries a
+/// monotonic generation; `waitUntilCompleted(through:)` suspends until a
+/// target with at least that generation has been written or skipped (a newer
+/// target superseding an older, dropped one completes the older generation
+/// too — latest-wins).
 actor BrightnessWriteCoalescer {
   struct PendingWrite: Sendable {
     let value: UInt16
@@ -104,26 +104,15 @@ actor BrightnessWriteCoalescer {
   /// Newest-wins handoff slot shared with (nonisolated, synchronous) `submit`.
   private nonisolated let submissionLock = OSAllocatedUnfairLock(initialState: SubmissionState())
 
-  /// Last raw value actually written to hardware — the ramp origin. `nil`
-  /// until the first write: the MAG341C is a write-only DDC panel (every read
-  /// returns zeros), so the panel's actual brightness is unknowable at init
-  /// and there is no truthful ramp origin. The first target is therefore
-  /// written directly (one jump); easing applies from there on.
+  /// Last raw value actually written to hardware, for the duplicate-skip
+  /// (round 2): re-sending the value already on the wire saturates the
+  /// DDC/I2C bus for nothing. `nil` until the first write.
   private var lastSentRaw: UInt16?
   private var completedGeneration: UInt64 = 0
   private var waiters: [(generation: UInt64, continuation: CheckedContinuation<Void, Never>)] = []
 
-  /// Minimum spacing between write STARTS. The DDC transaction itself takes
-  /// ~20-30 ms (internal usleep per write cycle), so with the 15 ms default
-  /// the effective cadence is ~25-35 ms/step — the cadence the user rated
-  /// smooth on the MAG341C ramp test. Injectable (use `.zero`) so logic tests
-  /// stay wall-clock-free.
-  private let minimumWriteInterval: Duration
-  private var lastWriteStart: ContinuousClock.Instant?
-
-  init(writer: any DDCWriting, minimumWriteInterval: Duration = .milliseconds(15)) {
+  init(writer: any DDCWriting) {
     self.writer = writer
-    self.minimumWriteInterval = minimumWriteInterval
     // Detached so the drain loop starts on the global executor regardless of
     // where the controller was created; a plain `Task {}` here could inherit
     // isolation from the initializing context.
@@ -143,7 +132,7 @@ actor BrightnessWriteCoalescer {
     parked?.resume()
   }
 
-  /// Ends the drain loop once every already-submitted target has been reached.
+  /// Ends the drain loop once every already-submitted target has landed.
   nonisolated func finishSubmissions() {
     let parked = submissionLock.withLock { state -> CheckedContinuation<Void, Never>? in
       state.finished = true
@@ -154,57 +143,25 @@ actor BrightnessWriteCoalescer {
     parked?.resume()
   }
 
-  /// Suspends until the ramp has reached a target with generation >=
-  /// `generation` (or a superseding one). Returns immediately for generation 0
-  /// (nothing was ever submitted).
+  /// Suspends until a target with generation >= `generation` has been written
+  /// (or skipped as a duplicate, or superseded). Returns immediately for
+  /// generation 0 (nothing was ever submitted).
   func waitUntilCompleted(through generation: UInt64) async {
     guard generation > completedGeneration else { return }
     await withCheckedContinuation { waiters.append((generation, $0)) }
   }
 
   private func drain() async {
-    while var target = await nextTarget() {
+    while let target = await nextTarget() {
       dragPerfLog.log("coalescer.target raw=\(target.value) gen=\(target.generation)")
-      ramp: while true {
-        // Re-read the newest submission before every step so a mid-ramp
-        // target change redirects the ramp instead of queuing behind it.
-        if let newer = takePendingTarget() {
-          target = newer
-          dragPerfLog.log("coalescer.target raw=\(target.value) gen=\(target.generation)")
-        }
-        guard let origin = lastSentRaw else {
-          // First-ever write: jump directly (no truthful ramp origin on a
-          // write-only panel — see `lastSentRaw`).
-          await pacedWrite(target.value)
-          lastSentRaw = target.value
-          complete(target.generation)
-          break ramp
-        }
-        if target.value == origin {
-          // Duplicate-skip (kept from round 2): the value is already on the
-          // wire — no bus traffic, but the generation completes because the
-          // ramp has trivially reached it.
-          complete(target.generation)
-          break ramp
-        }
-        // Adaptive easing: an eighth of the remaining distance per write
-        // (recomputed each step, so big jumps start coarse and refine as
-        // they approach), floored at 1 so small deltas play through every
-        // intermediate value, capped at the remainder to land exactly.
-        let remaining = Int(target.value) - Int(origin)
-        let magnitude = abs(remaining)
-        let step = min(max(1, magnitude / 8), magnitude)
-        let next = UInt16(Int(origin) + (remaining > 0 ? step : -step))
-        await pacedWrite(next)
-        lastSentRaw = next
-        if next == target.value {
-          // Reached the target: complete its generation. Waiters on
-          // superseded generations resolve here too (this generation is,
-          // by monotonicity, at least theirs).
-          complete(target.generation)
-          break ramp
-        }
+      // Duplicate-skip (round 2): never rewrite the value already on the
+      // wire — duplicate re-sends saturate the bus for nothing. The
+      // generation still completes.
+      if target.value != lastSentRaw {
+        _ = await writer.write(command: VCP.brightness, value: target.value)
+        lastSentRaw = target.value
       }
+      complete(target.generation)
     }
     // Drain exits only after `finishSubmissions` with the slot empty, and
     // every dequeued target completed its generation above — no waiter can
@@ -244,27 +201,6 @@ actor BrightnessWriteCoalescer {
         }
       }
     }
-  }
-
-  /// Non-blocking dequeue for mid-ramp redirect checks.
-  private func takePendingTarget() -> PendingWrite? {
-    submissionLock.withLock { state -> PendingWrite? in
-      let pending = state.pending
-      state.pending = nil
-      return pending
-    }
-  }
-
-  /// Writes one value, enforcing `minimumWriteInterval` between write starts.
-  private func pacedWrite(_ value: UInt16) async {
-    if let lastStart = lastWriteStart {
-      // Spacing write STARTS (not end-to-start) means the ~20-30 ms
-      // transaction usually absorbs the whole interval — this only adds
-      // delay when a transaction returns unusually fast.
-      try? await Task.sleep(until: lastStart + minimumWriteInterval, clock: .continuous)
-    }
-    lastWriteStart = ContinuousClock.now
-    _ = await writer.write(command: VCP.brightness, value: value)
   }
 
   private func complete(_ generation: UInt64) {
