@@ -11,6 +11,10 @@ struct PanelView: View {
 
   var body: some View {
     VStack(spacing: 0) {
+      if !model.accessibilityGranted {
+        accessibilityBanner
+        Divider()
+      }
       VStack(alignment: .leading, spacing: 14) {
         if model.displays.isEmpty {
           Text("No controllable displays")
@@ -36,6 +40,32 @@ struct PanelView: View {
       footer
     }
     .frame(width: 280)
+  }
+
+  /// Visually quiet Accessibility banner (spec §6: banner, not alert):
+  /// 13 pt secondary text with a small trailing link button, matching the
+  /// panel's section typography so it reads as information, not alarm. Shown
+  /// only while the grant is missing; clears live via observation when
+  /// `AccessibilityPermission`'s polling notices the grant.
+  private var accessibilityBanner: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "exclamationmark.triangle")
+        .font(.system(size: 12))
+        .foregroundStyle(.secondary)
+      Text("Keyboard control needs Accessibility access")
+        .font(.system(size: 13))
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+      Spacer(minLength: 8)
+      Button("Open Settings…") {
+        AccessibilityPermission.openSystemSettings()
+      }
+      .buttonStyle(.link)
+      .font(.system(size: 12))
+      .fixedSize()
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 10)
   }
 
   private var footer: some View {

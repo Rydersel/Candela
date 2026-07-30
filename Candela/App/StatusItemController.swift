@@ -1,5 +1,6 @@
 import AppKit
 import CandelaKit
+import os
 import SwiftUI
 
 /// AppKit escape hatch for the menu-bar panel (spec §9 risk item): the panel
@@ -22,6 +23,11 @@ import SwiftUI
 final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegate {
   private let model = AppModel()
   private var statusItem: NSStatusItem?
+  // Media-key pipeline (tap → router → executor → controllers + HUD). Stored
+  // as properties: the tap's thread and the executor must outlive launch.
+  private var keyActionExecutor: KeyActionExecutor?
+  private var mediaKeyTap: MediaKeyEventTap?
+  private let log = Logger(subsystem: "com.rydersel.Candela", category: "keys")
 
   func applicationDidFinishLaunching(_: Notification) {
     let hostingView = PanelHostingView(rootView: PanelRoot(model: model))
@@ -40,19 +46,66 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     item.menu = menu
     statusItem = item
 
+    // Media keys: the tap delivers on its own thread; hop to the main actor,
+    // route (pure, cheap), execute. Strong captures are fine — executor and
+    // tap both live for the app's lifetime.
+    let executor = KeyActionExecutor(model: model, hud: BrightnessHUD())
+    keyActionExecutor = executor
+    let tap = MediaKeyEventTap { press in
+      Task { @MainActor in
+        let config = KeyRouterConfig(
+          useFineScaleBrightness: UserDefaults.standard.bool(forKey: "useFineScaleBrightness")
+        )
+        executor.execute(KeyRouter.route(press, config: config))
+      }
+    }
+    mediaKeyTap = tap
+
+    let permission = model.accessibility
+    permission.promptIfNeeded()
+    if permission.isGranted {
+      startMediaKeyTap()
+    } else {
+      permission.startPolling { [weak self] in
+        self?.startMediaKeyTap()
+      }
+    }
+
     // Warm the display list before the first open. Menu tracking can hold the
     // main run loop in event-tracking mode, which starves main-actor task
     // execution (see BrightnessController.setBrightness), so a refresh cannot
     // be relied on to land while the menu is open. Launch here and close
     // below are therefore the only two refresh triggers; AppModel.refresh()
     // coalesces overlapping calls, so they never race the DDC bus.
-    Task { await model.refresh() }
+    Task {
+      await model.refresh()
+      refreshTapConfig()
+    }
   }
 
   func menuDidClose(_: NSMenu) {
     // Re-discover displays and re-read hardware once tracking has ended and
     // the run loop is back in default mode, so the next open starts fresh.
-    Task { await model.refresh() }
+    Task {
+      await model.refresh()
+      refreshTapConfig()
+    }
+  }
+
+  private func startMediaKeyTap() {
+    guard let mediaKeyTap else { return }
+    do {
+      try mediaKeyTap.start(config: model.tapConfig)
+    } catch {
+      log.error("media-key tap failed to start: \(error) — keys disabled until relaunch")
+    }
+  }
+
+  /// Re-arms/disarms brightness keys after display topology changes — the M2
+  /// slice of the fork's updateMediaKeyTap. No-op unless the tap is running.
+  private func refreshTapConfig() {
+    guard let mediaKeyTap, mediaKeyTap.isRunning else { return }
+    mediaKeyTap.update(config: model.tapConfig)
   }
 }
 
