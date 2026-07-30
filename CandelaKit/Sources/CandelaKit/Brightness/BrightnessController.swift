@@ -424,9 +424,19 @@ public final class BrightnessController {
       clearSoftwareLeg()
       beginHDRTransition()
       let engaged = await backends.hdr?.setHDR(displayID: displayID, enabled: true) ?? false
+      // Supersession guard (fix round 2): this body is a bare async func —
+      // never stored in `hdrTransitionTask`, so `beginHDRTransition`'s cancel
+      // cannot reach it, and the panel spawns one unserialized Task per menu
+      // selection. If `hdrMode` moved while we were suspended, a newer
+      // setHDRMode owns the state now; mutating it here (stale rollback,
+      // clearing the newer transition's settle flag, re-firing applyPaths)
+      // would be the orphaned-continuation clobber class T6 closed for the
+      // boost tasks.
+      guard hdrMode == mode else { return }
       if engaged {
         cachedHDRActive = true
         try? await Task.sleep(for: settleDelay)
+        guard hdrMode == mode else { return } // supersession guard, post-settle
         settleInProgress = false
         await refreshHDRCaches()
       } else {
@@ -437,6 +447,9 @@ public final class BrightnessController {
         // misreport permanently. The C1 clearing already ran, so after the
         // caches settle, re-apply the current value through the normal path;
         // without it the screen is stranded un-dimmed under a low slider.
+        // No `resetDuplicateState()` here (deliberate asymmetry vs the
+        // disengage arm): a failed engage means no mode switch occurred, so
+        // the last recorded DDC value still reflects the register.
         pathLog.error(
           "setHDRMode(.alwaysOn) engage failed: rolling back to \(previous.rawValue) display=\(self.displayID)"
         )

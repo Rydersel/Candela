@@ -739,4 +739,89 @@ struct HDRModeEngageFailureTests {
     await unsupported.prime()
     #expect(unsupported.controller.supportsHDR == false)
   }
+
+  /// Fix round 2 (Important): `setHDRMode`'s body is a bare async func — never
+  /// stored in `hdrTransitionTask`, so `beginHDRTransition`'s cancel cannot
+  /// reach it, and the panel spawns one unserialized Task per menu selection.
+  /// A first `.alwaysOn` call parked on its engage await must NOT, when the
+  /// engage finally fails, roll `hdrMode`/`prefs.hdrMode` back to its stale
+  /// `previous` or fire `applyPaths` after a second call has retargeted — the
+  /// newer transition owns the state (the orphaned-continuation clobber class
+  /// T6 closed for the boost tasks).
+  @Test func overlappingSetHDRModeFailedEngageDoesNotClobberNewerTransition() async {
+    let suiteName = "com.rydersel.Candela.tests.path.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
+    prefs.hdrMode = .boost // a stale rollback would resurrect this
+    let gated = GatedEngageHDR()
+    let controller = BrightnessController(
+      writer: FakeDDC(readResult: nil),
+      backends: BrightnessBackends(
+        applierNative: FakeNativeApplier(), hdr: gated, shade: FakeShade(), gamma: FakeGamma()
+      ),
+      prefs: prefs,
+      displayID: 7
+    )
+    controller.settleDelay = .milliseconds(5)
+    var submitted: [HardwareTarget] = []
+    controller._onSubmit = { submitted.append($0) }
+    await controller.initialHDRRefresh?.value
+    controller.setBrightness(0.75)
+
+    // First call commits .alwaysOn, then parks inside the gated engage.
+    let first = Task { await controller.setHDRMode(.alwaysOn) }
+    #expect(await eventually { await gated.engageCallCount() == 1 })
+    #expect(controller.hdrMode == .alwaysOn)
+
+    // Second call retargets while the first is parked (the exit arm's
+    // setHDR(false) passes straight through the gate) and now owns the state.
+    await controller.setHDRMode(.off)
+    #expect(controller.hdrMode == .off)
+    let submittedBeforeRelease = submitted.count
+
+    // Let the first call's engage fail. Its rollback must observe the
+    // retarget and bail: mode/prefs stay .off (not the stale .boost), and no
+    // extra applyPaths fires against state the newer transition owns.
+    await gated.release()
+    await first.value
+    #expect(controller.hdrMode == .off)
+    #expect(prefs.hdrMode == .off)
+    #expect(submitted.count == submittedBeforeRelease)
+  }
+}
+
+/// HDRToggling fake whose ENGAGE calls (`enabled == true`) suspend until
+/// `release()` and then fail; disengage calls pass straight through. Lets a
+/// test park one `setHDRMode(.alwaysOn)` mid-engage while another call
+/// retargets the controller.
+actor GatedEngageHDR: HDRToggling {
+  private var engageWaiters: [CheckedContinuation<Void, Never>] = []
+  private var released = false
+  private var engageCalls = 0
+
+  func supportsHDR(displayID _: CGDirectDisplayID) -> Bool { true }
+  func isHDREnabled(displayID _: CGDirectDisplayID) -> Bool { false }
+
+  @discardableResult
+  func setHDR(displayID _: CGDirectDisplayID, enabled: Bool) async -> Bool {
+    guard enabled else { return true }
+    engageCalls += 1
+    if !released {
+      await withCheckedContinuation { engageWaiters.append($0) }
+    }
+    return false // the gated engage always fails once released
+  }
+
+  func displaysReconfigured() {}
+
+  func engageCallCount() -> Int { engageCalls }
+
+  func release() {
+    released = true
+    for waiter in engageWaiters {
+      waiter.resume()
+    }
+    engageWaiters.removeAll()
+  }
 }
