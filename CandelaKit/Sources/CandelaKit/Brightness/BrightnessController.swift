@@ -14,9 +14,16 @@ public final class BrightnessController {
   public private(set) var brightness: Double = 0.5
   public private(set) var maxDDCValue: UInt16 = 100
 
-  private let writer: any DDCWriting
+  /// Mutable so `rebind(writer:)` can swap in the writer a replugged display
+  /// gets from rediscovery; the DDC applier is built per submit, so a swap
+  /// takes effect on the very next write.
+  @ObservationIgnored private var writer: any DDCWriting
   private let coalescer: BrightnessWriteCoalescer
   @ObservationIgnored private var issuedGeneration: UInt64 = 0
+  /// Read at submit time to stamp each `PendingWrite.epoch`. Default `{ 0 }`
+  /// pairs with the coalescer's accept-everything default gate, so call sites
+  /// that never install an epoch pair keep the M1 behavior.
+  @ObservationIgnored private var epochProvider: @Sendable () -> UInt64 = { 0 }
   /// Last-written brightness is the only truth on write-only DDC panels, so it
   /// is persisted here and restored at init — without it the panel opens at
   /// the 0.5 default on every launch.
@@ -27,7 +34,7 @@ public final class BrightnessController {
     self.writer = writer
     self.store = store
     self.storageKey = storageKey
-    self.coalescer = BrightnessWriteCoalescer(writer: writer)
+    self.coalescer = BrightnessWriteCoalescer()
     if let store, let storageKey, let saved = store.savedBrightness(for: storageKey) {
       brightness = min(max(saved, 0), 1)
     }
@@ -69,8 +76,16 @@ public final class BrightnessController {
     let clamped = min(max(value, 0), 1)
     brightness = clamped
     issuedGeneration += 1
+    // DDCBrightnessApplier is a cheap two-word struct built per submit — NOT
+    // held at init — so a `rebind(writer:)` takes effect on the very next
+    // write. (Path selection between DDC and native targets is Task 6.)
     coalescer.submit(
-      .init(value: UInt16((clamped * Double(maxDDCValue)).rounded()), generation: issuedGeneration)
+      .init(
+        target: .ddc(raw: UInt16((clamped * Double(maxDDCValue)).rounded())),
+        applier: DDCBrightnessApplier(writer: writer),
+        epoch: epochProvider(),
+        generation: issuedGeneration
+      )
     )
     if let store, let storageKey {
       store.saveBrightness(clamped, for: storageKey)
@@ -96,15 +111,39 @@ public final class BrightnessController {
   public func waitForPendingWrites() async {
     await coalescer.waitUntilCompleted(through: issuedGeneration)
   }
+
+  /// Swaps the stored DDC writer (used by both the hardware write leg and
+  /// `refreshFromHardware`) after a display replug/rediscovery. The replugged
+  /// hardware is in a state we didn't write, so the coalescer's duplicate
+  /// memo is reset — otherwise re-asserting the current value would be
+  /// skipped as a duplicate forever.
+  public func rebind(writer: any DDCWriting) {
+    self.writer = writer
+    coalescer.resetDuplicateState()
+  }
+
+  /// Installs the display-reconfiguration epoch pair: `provider` is read at
+  /// submit time to stamp each `PendingWrite`; `isCurrent` gates the drain so
+  /// a write issued before a reconfiguration never lands on rebuilt hardware.
+  /// (Task 4 wires DisplayManager's real pair; until then the `{ 0 }` /
+  /// accept-all defaults apply.)
+  public func setEpochProvider(
+    _ provider: @escaping @Sendable () -> UInt64,
+    isCurrent: @escaping @Sendable (UInt64) -> Bool
+  ) {
+    epochProvider = provider
+    coalescer.setEpochGate(isCurrent)
+  }
 }
 
-/// Drains brightness writes to hardware off the main actor, coalescing
+/// Drains hardware brightness targets off the main actor, coalescing
 /// latest-wins: every write jumps straight to the newest target, as fast as
-/// the DDC transaction allows (its internal per-cycle sleeps are the only
-/// pacing). Deliberate product decision (task-7 round 6): eased intermediate
-/// stepping made drags "feel slower" on the MAG341C — the panel's DDC
-/// apply-path is the bottleneck, and the real smoothness fix is M3 software
-/// dimming, not write-shaping.
+/// the hardware transaction allows (a DDC write's internal per-cycle sleeps
+/// are the only pacing). Each target carries its own applier (DDC or native),
+/// so one coalescer serves every hardware path. Deliberate product decision
+/// (task-7 round 6): eased intermediate stepping made drags "feel slower" on
+/// the MAG341C — the panel's DDC apply-path is the bottleneck, and the real
+/// smoothness fix is M3 software dimming, not write-shaping.
 ///
 /// Submission is a synchronous, nonisolated store into an
 /// `OSAllocatedUnfairLock`-protected slot (newest-wins, the slot *is* the
@@ -114,12 +153,19 @@ public final class BrightnessController {
 /// target, so intermediates that arrive while a write is in flight are
 /// dropped and the final value always lands. Each submitted target carries a
 /// monotonic generation; `waitUntilCompleted(through:)` suspends until a
-/// target with at least that generation has been written or skipped (a newer
+/// target with at least that generation has been applied or skipped (a newer
 /// target superseding an older, dropped one completes the older generation
 /// too — latest-wins).
 actor BrightnessWriteCoalescer {
   struct PendingWrite: Sendable {
-    let value: UInt16
+    let target: HardwareTarget
+    /// Carried per write so one coalescer serves any hardware path — and so
+    /// a controller-level `rebind(writer:)` takes effect on the next
+    /// submitted write (the applier is rebuilt at submit, not held here).
+    let applier: any BrightnessApplying
+    /// Display-reconfiguration epoch stamped at submit time; the drain skips
+    /// targets whose epoch is no longer current.
+    let epoch: UInt64
     let generation: UInt64
   }
 
@@ -135,23 +181,48 @@ actor BrightnessWriteCoalescer {
     case park
   }
 
-  private let writer: any DDCWriting
   /// Newest-wins handoff slot shared with (nonisolated, synchronous) `submit`.
   private nonisolated let submissionLock = OSAllocatedUnfairLock(initialState: SubmissionState())
 
-  /// Last raw value actually written to hardware, for the duplicate-skip
+  /// Epoch gate consulted by the drain before applying. Lock-protected slot
+  /// (same pattern as the submission slot) because the real checker is wired
+  /// after construction via `setEpochGate`; the default accepts every epoch,
+  /// which preserves M1 behavior for call sites without epochs.
+  private nonisolated let epochGate: OSAllocatedUnfairLock<@Sendable (UInt64) -> Bool>
+
+  /// Last target actually applied to hardware, for the duplicate-skip
   /// (round 2): re-sending the value already on the wire saturates the
-  /// DDC/I2C bus for nothing. `nil` until the first write.
-  private var lastSentRaw: UInt16?
+  /// DDC/I2C bus for nothing. Compared via `HardwareTarget` `Equatable` —
+  /// targets are what hit hardware, so the same target carried by a
+  /// different applier is still a duplicate. `nil` until the first
+  /// successful apply. Lives in a lock (not actor state) so
+  /// `resetDuplicateState()` can clear it synchronously from any context.
+  private nonisolated let lastApplied = OSAllocatedUnfairLock<HardwareTarget?>(initialState: nil)
+
   private var completedGeneration: UInt64 = 0
   private var waiters: [(generation: UInt64, continuation: CheckedContinuation<Void, Never>)] = []
 
-  init(writer: any DDCWriting) {
-    self.writer = writer
+  init(isEpochCurrent: @escaping @Sendable (UInt64) -> Bool = { _ in true }) {
+    self.epochGate = OSAllocatedUnfairLock(initialState: isEpochCurrent)
     // Detached so the drain loop starts on the global executor regardless of
     // where the controller was created; a plain `Task {}` here could inherit
     // isolation from the initializing context.
     Task.detached { await self.drain() }
+  }
+
+  /// Installs the epoch checker post-init (nonisolated, synchronous — safe
+  /// from the main actor without an executor hop). Governs every target
+  /// drained after it lands in the slot.
+  nonisolated func setEpochGate(_ isCurrent: @escaping @Sendable (UInt64) -> Bool) {
+    epochGate.withLock { $0 = isCurrent }
+  }
+
+  /// Clears the duplicate memo (nonisolated, synchronous). A replugged
+  /// monitor or an HDR exit returns hardware to a state we didn't write, so
+  /// the memo must be clearable — otherwise the next write to the same value
+  /// would be skipped forever (review I10).
+  nonisolated func resetDuplicateState() {
+    lastApplied.withLock { $0 = nil }
   }
 
   /// Synchronous and nonisolated on purpose — see the type comment.
@@ -179,29 +250,40 @@ actor BrightnessWriteCoalescer {
   }
 
   /// Suspends until a target with generation >= `generation` has been written
-  /// (or skipped as a duplicate, or superseded). Returns immediately for
-  /// generation 0 (nothing was ever submitted).
+  /// (or skipped as a duplicate or stale-epoch, or superseded). Returns
+  /// immediately for generation 0 (nothing was ever submitted).
   func waitUntilCompleted(through generation: UInt64) async {
     guard generation > completedGeneration else { return }
     await withCheckedContinuation { waiters.append((generation, $0)) }
   }
 
   private func drain() async {
-    while let target = await nextTarget() {
-      dragPerfLog.log("coalescer.target raw=\(target.value) gen=\(target.generation)")
-      // Duplicate-skip (round 2): never rewrite the value already on the
-      // wire — duplicate re-sends saturate the bus for nothing. The
-      // generation still completes.
-      if target.value != lastSentRaw {
-        // Only a *successful* write means the value is on the wire. Advancing
-        // `lastSentRaw` after a failed write would make the next identical
-        // target look like a duplicate and get skipped, leaving brightness
-        // stuck at the old level until the user moved to a different value.
-        if await writer.write(command: VCP.brightness, value: target.value) {
-          lastSentRaw = target.value
+    while let write = await nextTarget() {
+      dragPerfLog.log(
+        "coalescer.target \(String(describing: write.target), privacy: .public) gen=\(write.generation)"
+      )
+      // Epoch gate: a target stamped before a display reconfiguration must
+      // not land on rebuilt hardware — skip the applier, but still COMPLETE
+      // the generation below (the M1 deadlock rule: every dequeued target
+      // completes, so no waiter is ever left suspended). `lastApplied` does
+      // not advance on a skip: the skipped target never hit hardware.
+      let isEpochCurrent = epochGate.withLock { $0 }
+      if isEpochCurrent(write.epoch) {
+        // Duplicate-skip (round 2): never rewrite the target already on the
+        // wire — duplicate re-sends saturate the bus for nothing. The
+        // generation still completes.
+        if write.target != lastApplied.withLock({ $0 }) {
+          // Only a *successful* apply means the value is on the hardware.
+          // Advancing `lastApplied` after a failed apply would make the next
+          // identical target look like a duplicate and get skipped, leaving
+          // brightness stuck at the old level until the user moved to a
+          // different value.
+          if await write.applier.apply(write.target) {
+            lastApplied.withLock { $0 = write.target }
+          }
         }
       }
-      complete(target.generation)
+      complete(write.generation)
     }
     // Drain exits only after `finishSubmissions` with the slot empty, and
     // every dequeued target completed its generation above — no waiter can
