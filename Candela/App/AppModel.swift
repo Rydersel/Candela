@@ -68,6 +68,15 @@ final class AppModel {
   /// wire (e.g. a discarded coalescer's tail-write racing a fresh read).
   @ObservationIgnored private var refreshTask: Task<[CGDirectDisplayID], Never>?
 
+  /// The CC-sync poll job. Cancelled and recreated after every refresh: its
+  /// targets capture a fixed controller set, so a departed display's target
+  /// must never outlive the pass that dropped it.
+  @ObservationIgnored private var pollerTask: Task<Void, Never>?
+
+  deinit {
+    pollerTask?.cancel()
+  }
+
   /// Returns the IDs of displays that departed in this pass (for HUD panel
   /// cleanup). A piggybacked caller — one that joined an already-running
   /// pass — gets `[]`, not that pass's result: only the caller that started
@@ -151,6 +160,44 @@ final class AppModel {
       await controller.waitForPendingWrites()
       await controller.refreshFromHardware()
     }
+    restartPoller()
     return Array(existing.keys)
+  }
+
+  /// Rebuilds the native-brightness poll job for the current display set
+  /// (spec §5 CC-sync: Control Center and ambient changes bypass us entirely,
+  /// so the only way to stay in sync on the native path is to look).
+  private func restartPoller() {
+    pollerTask?.cancel()
+    guard !displays.isEmpty else {
+      pollerTask = nil
+      return
+    }
+    let targets = displays.map { state -> BrightnessPoller.Target in
+      let controller = state.controller
+      return BrightnessPoller.Target(
+        displayID: state.id,
+        expected: { controller.expectedNative() },
+        isNativeActive: { controller.isNativeActive() },
+        // A starved adoption Task that fires late is discarded by
+        // adoptExternal's generation check (review I9).
+        // Parked T6-minor-2: settle re-assert may briefly diverge slot vs
+        // hardware; poller easing self-corrects.
+        adopt: { value, generation in
+          Task { @MainActor in controller.adoptExternal(value, generation: generation) }
+        },
+        isConverging: { controller.isConvergingFromExternal() }
+      )
+    }
+    let poller = BrightnessPoller(
+      targets: targets,
+      read: { id in DisplayServices.getBrightness(for: id).map(Double.init) },
+      // Current-epoch-against-itself is false exactly while the manager is
+      // suspended (mid-reconfigure burst or asleep) — the poller's skip rule.
+      isEpochCurrent: { [displayManager] in
+        displayManager.isEpochCurrent(displayManager.currentEpoch())
+      }
+    )
+    pollerTask = Task { await poller.run() }
   }
 }
