@@ -52,6 +52,8 @@ actor FakeDDC: DDCWriting {
   }
 
   func recordedWrites() async -> [(command: UInt8, value: UInt16)] { writes }
+
+  func setReadResult(_ result: (current: UInt16, max: UInt16)?) { readResult = result }
 }
 
 @MainActor
