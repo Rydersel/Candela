@@ -738,6 +738,55 @@ public final class BrightnessController {
     coalescer.setEpochGate(isCurrent)
   }
 
+  // MARK: - Startup/wake/quit restore (D5)
+
+  /// Wake-restore prerequisite: without the memo reset, repeat passes are
+  /// duplicate-skipped and never hit the wire.
+  public func resetWriteMemo() {
+    coalescer.resetDuplicateState()
+  }
+
+  /// D5's "stored (= ever-touched)" gate for the restore pass's brightness
+  /// leg (fork isTouched; review R4): true once a session ever published a
+  /// value for this display. Fresh displays publish an ASSUMED default (1.0)
+  /// over an empty store — a restore pass must never write that.
+  /// `AppModel.performRestorePass` checks this instead of reaching into the
+  /// store. (A successful `.read` also persists, marking the command
+  /// ever-touched — harmless: the restored value came from the panel itself.)
+  public var hasStoredValue: Bool {
+    guard let store, let storageKey else { return false }
+    return store.savedBrightness(for: storageKey) != nil
+  }
+
+  /// Re-asserts the current value on whatever path is live (the restore
+  /// pass's brightness leg). Routed through `applyPaths`, not a bare submit,
+  /// so the echo slot stays honest for the poller; the software leg re-apply
+  /// dedupes to a no-op.
+  public func reassertHardware() {
+    applyPaths(brightness)
+  }
+
+  /// Quit restore: write the register's FULL-RANGE equivalent of the
+  /// published value — software dimming is being torn down at quit, so
+  /// leaving the combined-mode DDC floor would strand the monitor dark
+  /// (StatusItemController's M4 note). Best-effort: skipped under the native
+  /// path (DDC is dead there) and for forceSoftware/disabled displays.
+  /// Synchronous by design (backlog flag 8, endorsed): callable straight from
+  /// `applicationWillTerminate` — the submit is a nonisolated lock store and
+  /// the coalescer drains off-actor, so the quit path's barrier (Task 10)
+  /// only has to keep the process alive until the write lands, never block
+  /// the main thread on DDC I/O.
+  public func restoreFullRangeDDC() {
+    guard role == .external, !usesNative, !prefs.forceSoftware else { return }
+    let tuning = prefs.tuning(for: .brightness)
+    guard !tuning.unavailableDDC else { return }
+    coalescer.resetDuplicateState()
+    submitHardware(
+      .ddc(raw: brightnessRaw(brightness, tuning: tuning)),
+      applier: brightnessApplier(tuning: tuning)
+    )
+  }
+
   /// Test seam: observes the coalescer's duplicate-memo reset counter (the
   /// disengage contract "duplicate memo reset recorded" is asserted with it).
   nonisolated func _duplicateResetCount() -> UInt64 {
