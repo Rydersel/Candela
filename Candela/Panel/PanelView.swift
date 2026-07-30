@@ -155,6 +155,11 @@ private struct DisplayHeaderRow: View {
     }
     .menuStyle(.borderlessButton)
     .fixedSize()
+    // Disable, don't hide, on non-HDR displays (design guidance: keep
+    // controls visible so people learn what the app supports). `supportsHDR`
+    // is observation-tracked, so the menu enables live once the async
+    // capability refresh lands.
+    .disabled(!controller.supportsHDR)
     .help("HDR mode for \(displayName)")
     .accessibilityLabel("\(displayName) HDR mode")
   }

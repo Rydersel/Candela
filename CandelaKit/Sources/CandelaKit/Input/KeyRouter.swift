@@ -6,7 +6,7 @@
 /// Which displays a brightness step targets.
 public enum BrightnessScope: Sendable, Equatable {
   case allExternal // default, and Ctrl+Cmd directed
-  case builtInOnly // Ctrl directed (executor no-ops until M3)
+  case builtInOnly // Ctrl directed — steps the built-in panel (Task 10)
 }
 
 /// What the executor (Task 5) should do for a routed media-key press.

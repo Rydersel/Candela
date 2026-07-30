@@ -685,4 +685,58 @@ struct BuiltInRoleTests {
     #expect(await writer.write(command: VCP.brightness, value: 50) == false)
     #expect(await writer.read(command: VCP.brightness) == nil)
   }
+
+  /// T10 fix round 1 (minor): `setHDRMode` is role-fenced — a public-API call
+  /// on a built-in controller is a full no-op: no pref write under the builtIn
+  /// key, no published-mode change, no HDR toggling.
+  @Test func setHDRModeOnBuiltInIsNoOp() async {
+    let h = Harness(role: .builtIn)
+    await h.prime()
+    await h.controller.setHDRMode(.alwaysOn)
+    #expect(h.controller.hdrMode == .off)
+    #expect(h.prefs.hdrMode == .off) // pref never written
+    #expect(await h.hdr!.recordedSetCalls().isEmpty)
+  }
+}
+
+// MARK: - alwaysOn engage failure (T8 carry-over, fixed in T10 round 1)
+
+@MainActor
+@Suite("HDR mode engage failure")
+struct HDRModeEngageFailureTests {
+  /// The `.alwaysOn` arm commits the mode optimistically before engaging; on
+  /// `engaged == false` it must roll `hdrMode`/`prefs.hdrMode` back to the
+  /// previous mode and re-apply the current value through the normal path —
+  /// otherwise a display that can't engage HDR is stranded un-dimmed (the C1
+  /// clearing already ran) with a lying `.alwaysOn` persisted across launches.
+  @Test func alwaysOnEngageFailureRollsBackModeAndReappliesSoftwareLeg() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    await h.hdr!.stubSetResult(false)
+    h.controller.setBrightness(0.25) // combined: gamma dim 0.575 active
+    #expect(h.gamma.scales.count == 1 && approx(h.gamma.scales[0], 0.575))
+    await h.controller.setHDRMode(.alwaysOn)
+    // Mode and pref rolled back to the previous mode.
+    #expect(h.controller.hdrMode == .off)
+    #expect(h.prefs.hdrMode == .off)
+    // C1 clearing ran (1.0), then the rollback re-applied the current value's
+    // software leg (0.575 again) — the screen is not stranded un-dimmed.
+    #expect(h.gamma.scales.count == 3)
+    #expect(approx(h.gamma.scales[1], 1.0))
+    #expect(approx(h.gamma.scales[2], 0.575))
+    // Back on the combined path: the re-apply also submitted the DDC leg.
+    #expect(h.submitted.last == .ddc(raw: 0))
+    #expect(h.controller.isNativeActive() == false)
+  }
+
+  /// `supportsHDR` mirrors the async-refreshed capability cache (the panel
+  /// disables the HDR menu on non-HDR displays with it).
+  @Test func supportsHDRReflectsCachedCapability() async {
+    let supported = Harness()
+    await supported.prime()
+    #expect(supported.controller.supportsHDR)
+    let unsupported = Harness(hdrSupported: false)
+    await unsupported.prime()
+    #expect(unsupported.controller.supportsHDR == false)
+  }
 }

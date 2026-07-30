@@ -79,6 +79,12 @@ public final class BrightnessController {
   /// circuits to the native leg through this one gate.
   private var usesNative: Bool { role == .builtIn || (hdrMode != .off && cachedHDRActive) }
 
+  /// Whether the display reports HDR capability — a published mirror of the
+  /// async-refreshed cache (T10 fix round 1). Computed off the stored cache,
+  /// so SwiftUI reads are observation-tracked and the panel's HDR menu can
+  /// disable itself on non-HDR displays.
+  public var supportsHDR: Bool { cachedSupportsHDR }
+
   /// HDR state caches, refreshed by async tasks (init, mode changes, boost
   /// transitions, `noteHDRStateMayHaveChanged`) and only ever *read* on the
   /// synchronous keypress/drag paths — never awaited there.
@@ -402,6 +408,10 @@ public final class BrightnessController {
 
   /// Panel entry point for the per-display HDR mode.
   public func setHDRMode(_ mode: HDRMode) async {
+    // Role fence (T10 fix round 1, minor): HDR modes are external-display
+    // machinery — the built-in is constitutively native already, and a call
+    // here would persist a meaningless mode under the builtIn prefs key.
+    guard role == .external else { return }
     let previous = hdrMode
     guard mode != previous else { return }
     let wasEngaged = cachedHDRActive
@@ -417,9 +427,25 @@ public final class BrightnessController {
       if engaged {
         cachedHDRActive = true
         try? await Task.sleep(for: settleDelay)
+        settleInProgress = false
+        await refreshHDRCaches()
+      } else {
+        // Engage failed (T8 carry-over, adjudicated M3 blocker): the mode was
+        // committed optimistically above, so roll BOTH the published mirror
+        // and the pref back — otherwise a display that can't engage HDR
+        // persists a lying `.alwaysOn` across launches and the badge/menu
+        // misreport permanently. The C1 clearing already ran, so after the
+        // caches settle, re-apply the current value through the normal path;
+        // without it the screen is stranded un-dimmed under a low slider.
+        pathLog.error(
+          "setHDRMode(.alwaysOn) engage failed: rolling back to \(previous.rawValue) display=\(self.displayID)"
+        )
+        prefs.hdrMode = previous
+        hdrMode = previous
+        settleInProgress = false
+        await refreshHDRCaches()
+        applyPaths(brightness)
       }
-      settleInProgress = false
-      await refreshHDRCaches()
     } else if previous == .alwaysOn || (previous == .boost && wasEngaged) {
       // Leaving the native path: drop HDR, wait out the settle, then re-apply
       // the current value through the normal path. The duplicate memo is
