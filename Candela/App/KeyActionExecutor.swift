@@ -26,7 +26,13 @@ final class KeyActionExecutor {
       switch scope {
       case .allExternal:
         for (id, name, newValue) in model.stepBrightnessAllExternal(isUp: isUp, isFine: isFine, isFresh: isFresh) {
-          hud?.showBrightness(displayID: id, name: name, value: newValue)
+          // Read after the step: the engaging keypress already reports boost
+          // active, so the HUD it triggers is the one that gets the rainbow.
+          let boosted = model.displays.first { $0.id == id }?.controller.hdrBoostActive ?? false
+          hud?.showBrightness(
+            displayID: id, name: name, value: newValue,
+            nameSuffix: boosted ? " · HDR" : nil, rainbow: boosted
+          )
         }
       case .builtInOnly:
         log.log("directed built-in brightness arrives with Milestone 3")

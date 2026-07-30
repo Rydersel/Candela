@@ -25,11 +25,7 @@ struct PanelView: View {
         }
         ForEach(model.displays) { state in
           VStack(alignment: .leading, spacing: 8) {
-            Text(state.display.name)
-              .font(.system(size: 13, weight: .semibold))
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
-              .accessibilityHidden(true)  // the slider carries the display name
+            DisplayHeaderRow(controller: state.controller, displayName: state.display.name)
             DisplaySliderRow(controller: state.controller, displayName: state.display.name)
           }
         }
@@ -77,6 +73,72 @@ struct PanelView: View {
     }
     .padding(.horizontal, 10)
     .frame(height: 32)
+  }
+}
+
+/// Section header for one display: name, an "HDR" state badge, and a trailing
+/// borderless HDR-mode menu. Everything is secondary-colored — the slider is
+/// the row's only emphasis, the way Control Center keeps section chrome quiet.
+private struct DisplayHeaderRow: View {
+  let controller: BrightnessController
+  let displayName: String
+
+  private var hdrEngaged: Bool {
+    // `.alwaysOn` holds HDR by definition; boost only when it is actually
+    // engaged. The engine's live-HDR flag is internal to CandelaKit, so
+    // always-on is read from the mode alone.
+    controller.hdrBoostActive || controller.hdrMode == .alwaysOn
+  }
+
+  private var modeLabel: String {
+    switch controller.hdrMode {
+    case .off: return "HDR Off"
+    case .boost: return "HDR Boost"
+    case .alwaysOn: return "HDR On"
+    }
+  }
+
+  var body: some View {
+    HStack(spacing: 6) {
+      Text(displayName)
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .accessibilityHidden(true)  // the slider carries the display name
+      if hdrEngaged {
+        Text("HDR")
+          .font(.system(size: 11, weight: .medium))
+          .foregroundStyle(.secondary)
+          .padding(.horizontal, 4)
+          .padding(.vertical, 1)
+          .background(RoundedRectangle(cornerRadius: 3, style: .continuous).fill(.quaternary))
+          .accessibilityLabel("HDR engaged")
+      }
+      Spacer(minLength: 4)
+      hdrMenu
+    }
+  }
+
+  private var hdrMenu: some View {
+    Menu {
+      Picker("HDR", selection: Binding(
+        get: { controller.hdrMode },
+        set: { mode in Task { await controller.setHDRMode(mode) } }
+      )) {
+        Text("Off").tag(HDRMode.off)
+        Text("Boost").tag(HDRMode.boost)
+        Text("On").tag(HDRMode.alwaysOn)
+      }
+      .pickerStyle(.inline)
+    } label: {
+      Text(modeLabel)
+        .font(.system(size: 12))
+        .foregroundStyle(.secondary)
+    }
+    .menuStyle(.borderlessButton)
+    .fixedSize()
+    .help("HDR mode for \(displayName)")
+    .accessibilityLabel("\(displayName) HDR mode")
   }
 }
 

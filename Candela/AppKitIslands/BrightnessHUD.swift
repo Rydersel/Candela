@@ -9,7 +9,15 @@ import AppKit
 /// `BrightnessHUDPresenting`, so the engine can announce a value change without
 /// knowing anything about windows.
 protocol BrightnessHUDPresenting: AnyObject {
-  @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double)
+  // Protocol requirements cannot carry default arguments, so the requirement
+  // spells out the full list and the extension below supplies the short form.
+  @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double, nameSuffix: String?, rainbow: Bool)
+}
+
+extension BrightnessHUDPresenting {
+  @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double) {
+    self.showBrightness(displayID: displayID, name: name, value: value, nameSuffix: nil, rainbow: false)
+  }
 }
 
 enum HUDType {
@@ -67,11 +75,15 @@ final class BrightnessHUD: BrightnessHUDPresenting {
 
   private var huds: [CGDirectDisplayID: HUD] = [:]
   private var fadeTimers: [CGDirectDisplayID: Timer] = [:]
+  /// Monotonic per display, bumped by every `showHUD` and by `cleanupDisplay`.
+  /// A fade's completion handler compares the generation it captured against
+  /// the current one and stays out of the way if a newer show has happened.
+  private var fadeGenerations: [CGDirectDisplayID: UInt64] = [:]
 
   // MARK: - BrightnessHUDPresenting
 
-  func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double) {
-    self.showHUD(displayID: displayID, type: .brightness, name: name, value: Float(value))
+  func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double, nameSuffix: String?, rainbow: Bool) {
+    self.showHUD(displayID: displayID, type: .brightness, name: name, value: Float(value), nameSuffix: nameSuffix, rainbow: rainbow)
   }
 
   // MARK: - Presentation
@@ -99,7 +111,14 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     let frame = screen.visibleFrame
     hud.panel.setFrameOrigin(NSPoint(x: frame.maxX - Self.hudSize.width - Self.screenMargin, y: frame.maxY - Self.hudSize.height - Self.screenMargin))
     self.fadeTimers[displayID]?.invalidate()
-    hud.panel.alphaValue = 1
+    self.fadeGenerations[displayID, default: 0] &+= 1
+    // A bare `alphaValue = 1` loses to an in-flight fade: NSWindow's animator
+    // keeps driving alpha toward 0 and would then order the panel out mid-show.
+    // A zero-duration group replaces that animation and lands on 1 immediately.
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0
+      hud.panel.animator().alphaValue = 1
+    }
     hud.panel.orderFrontRegardless()
     // The timer body is `@Sendable`-typed but provably runs on the main run loop (we add it to
     // `RunLoop.main` below), so hopping actors would only add latency to the fade.
@@ -234,13 +253,19 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     guard let panel = self.huds[displayID]?.panel else {
       return
     }
+    let generation = self.fadeGenerations[displayID] ?? 0
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0.3
       panel.animator().alphaValue = 0
-    } completionHandler: {
+    } completionHandler: { [weak self] in
       // The completion handler is `@Sendable`-typed but fires on the main thread, where the panel
       // it orders out already lives.
       MainActor.assumeIsolated {
+        // A show that arrived mid-fade already restored alpha and bumped the
+        // generation; ordering out here would hide a visible HUD.
+        guard let self, self.fadeGenerations[displayID] == generation else {
+          return
+        }
         panel.orderOut(nil)
       }
     }
@@ -249,6 +274,9 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   func cleanupDisplay(_ displayID: CGDirectDisplayID) {
     self.fadeTimers[displayID]?.invalidate()
     self.fadeTimers.removeValue(forKey: displayID)
+    // Kept (not removed) so generations never repeat for a display that comes
+    // back, which would let a stale completion match a fresh show.
+    self.fadeGenerations[displayID, default: 0] &+= 1
     if let hud = self.huds[displayID] {
       hud.panel.close()
       self.huds.removeValue(forKey: displayID)
