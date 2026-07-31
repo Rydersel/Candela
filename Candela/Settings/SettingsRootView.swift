@@ -26,6 +26,17 @@ struct SettingsRootView: View {
         .navigationSplitViewColumnWidth(min: 190, ideal: 200, max: 240)
     } detail: {
       detail
+        .toolbar {
+          // `.navigationTitle` renders at the LEADING edge of the detail
+          // column, which reads as a stray label rather than a window title.
+          // A principal item centres it over the toolbar, the way System
+          // Settings titles its panes. The navigation title stays for the
+          // window's own name (Window menu, accessibility).
+          ToolbarItem(placement: .principal) {
+            Text(currentTitle)
+              .font(.headline)
+          }
+        }
     }
     // Replaces the fork-era fixed `.frame(width: 620)`.
     //
@@ -50,6 +61,29 @@ struct SettingsRootView: View {
       if SettingsSelectionPolicy.resolve(selectedDisplayKey: key, connectedKeys: connected) == nil {
         selection = .pane(.general)
       }
+    }
+  }
+
+  /// The title shown centred in the toolbar. Resolved here rather than read
+  /// back from the panes, so every destination titles itself the same way.
+  /// Display destinations use the display's own name, not a pane label.
+  private var currentTitle: String {
+    switch selection {
+    case let .pane(id):
+      // The registry holds a LocalizedStringKey for the sidebar row; the
+      // window needs a plain String, and these four are the same words.
+      switch id {
+      case .general: "General"
+      case .menuBar: "Menu Bar"
+      case .keyboard: "Keyboard"
+      case .about: "About"
+      }
+    case let .display(key):
+      model.allControlledStates
+        .first { $0.display.persistenceKey == key }
+        .map(\.display.name) ?? "General"
+    case .none:
+      "General"
     }
   }
 
