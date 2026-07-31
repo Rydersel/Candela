@@ -15,6 +15,10 @@ struct SettingsSymbolTile: View {
       .overlay(
         Image(systemName: symbol)
           .font(.system(size: 10, weight: .semibold))
+          // The one deliberate non-semantic color in the window. The glyph sits
+          // on a saturated tint in BOTH appearances, so it stays white in both
+          // — exactly what System Settings does. A semantic label color would
+          // go dark on the tint in light mode and lose all contrast.
           .foregroundStyle(.white)
       )
       .accessibilityHidden(true)
@@ -28,6 +32,11 @@ struct SettingsSidebar: View {
   @Environment(AppModel.self) private var model
 
   var body: some View {
+    // Display rows show the user's chosen name, and `DisplayPrefs` is plain
+    // UserDefaults with no observation — so without this the sidebar would keep
+    // showing the old name after a rename until something else forced a
+    // re-render.
+    let _ = model.prefsRevision
     List(selection: $selection) {
       Section {
         ForEach(SettingsRegistry.panes) { pane in
@@ -43,14 +52,10 @@ struct SettingsSidebar: View {
       Section("Displays") {
         // Built-in first, matching `AppModel.allControlledStates`.
         if let builtIn = model.builtIn {
-          displayRow(key: builtIn.display.persistenceKey,
-                     name: builtIn.display.name,
-                     controller: builtIn.controller)
+          displayRow(display: builtIn.display, controller: builtIn.controller)
         }
         ForEach(model.displays) { state in
-          displayRow(key: state.display.persistenceKey,
-                     name: state.display.name,
-                     controller: state.controller)
+          displayRow(display: state.display, controller: state.controller)
         }
         if model.displays.isEmpty {
           // Preserves what the deleted Displays pane told the user. Without
@@ -81,10 +86,21 @@ struct SettingsSidebar: View {
   /// alone. It is hidden from accessibility for the same reason: a percentage
   /// announced on every row is noise, and it is not actionable from here.
   @ViewBuilder
-  private func displayRow(key: String, name: String, controller: BrightnessController) -> some View {
+  private func displayRow(display: ExternalDisplay, controller: BrightnessController) -> some View {
+    // The SAME resolution the panel uses, so a rename moves the sidebar, the
+    // panel header, the slider's accessibility label and the HUD together. The
+    // detail pane's navigation title deliberately does NOT follow — it stays
+    // the hardware name, so renaming does not relabel the window you are
+    // editing the name in.
+    let name = DisplayOrdering.title(
+      friendlyName: DisplayPrefs(persistenceKey: display.persistenceKey).friendlyName,
+      hardwareName: display.name
+    )
     Label {
       VStack(alignment: .leading, spacing: 3) {
-        Text(verbatim: name) // hardware name — never a lookup key
+        Text(verbatim: name) // a display's name — never a lookup key
+          .lineLimit(1)
+          .truncationMode(.tail)
         Capsule()
           .fill(.quaternary)
           .frame(height: 3)
@@ -100,6 +116,6 @@ struct SettingsSidebar: View {
     } icon: {
       SettingsSymbolTile(symbol: "display", tint: .blue)
     }
-    .tag(SettingsDestination.display(key))
+    .tag(SettingsDestination.display(display.persistenceKey))
   }
 }
