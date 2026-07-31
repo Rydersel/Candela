@@ -2,15 +2,36 @@ import CandelaKit
 import CoreGraphics
 import Foundation
 
-let arguments = Array(CommandLine.arguments.dropFirst())
-let found = DisplayDiscovery.discover()
+var arguments = Array(CommandLine.arguments.dropFirst())
+
+// Backlog #2: `--display <id>` narrows every subcommand to one display —
+// without it, `native set`/`hdr on` fan out to the built-in and every
+// external on a multi-monitor desk. Parsed once here, ahead of the switch,
+// so the DDC subcommands inherit it for free.
+var displayFilter: CGDirectDisplayID?
+if let flagIndex = arguments.firstIndex(of: "--display") {
+  guard flagIndex + 1 < arguments.count, let id = UInt32(arguments[flagIndex + 1]) else {
+    print("usage: --display <CGDirectDisplayID> (see `candela-probe list`)")
+    exit(2)
+  }
+  displayFilter = id
+  arguments.removeSubrange(flagIndex ... flagIndex + 1)
+}
+
+let found = DisplayDiscovery.discover().filter { displayFilter == nil || $0.display.id == displayFilter }
 
 let usage = """
-usage: candela-probe <subcommand>
+usage: candela-probe [--display <id>] <subcommand>
+  --display <id>                          limit any subcommand to one display
   list                                    online DDC-capable external displays
   get                                     DDC read of VCP 0x10
   set <0-100>                             DDC write of VCP 0x10
   ramp <from> <to> <step> <intervalMs>    DDC brightness sweep
+  volume get|set <0-100>                  DDC read/write of VCP 0x62
+  contrast get|set <0-100>                DDC read/write of VCP 0x12
+  mute on|off                             DDC write of VCP 0x8D (1=mute, 2=unmute)
+  vcp get <hex>|set <hex> <0-65535>       raw VCP prober
+  audio devices                           default CoreAudio output + native-volume check
   native get                              DisplayServicesGetBrightness per display
   native set <0-1>                        DisplayServicesSetBrightness + read-back
   hdr status                              MonitorPanel hasHDRModes / preferHDRModes
@@ -36,19 +57,42 @@ let online: [ProbeDisplay] = {
     let ddcName = found.first { $0.display.id == id }?.display.name
     let fallback = CGDisplayIsBuiltin(id) != 0 ? "Built-in Display" : "Display \(id)"
     return ProbeDisplay(id: id, name: "\(ddcName ?? fallback) [\(id)]")
-  }
+  }.filter { displayFilter == nil || $0.id == displayFilter }
 }()
+
+/// Appended to the "nothing to work on" messages so an unknown `--display` id
+/// reads as a bad argument rather than as absent hardware.
+let filterNote = displayFilter.map { " (filtered to --display \($0); `candela-probe list` shows the ids)" } ?? ""
 
 func requireDDCDisplays() {
   guard found.isEmpty else { return }
-  print("No DDC-capable external displays found. (Is the display in HDR mode? DDC is locked while HDR is on.)")
+  print("No DDC-capable external displays found.\(filterNote) (Is the display in HDR mode? DDC is locked while HDR is on.)")
   exit(1)
 }
 
 func requireOnlineDisplays() {
   guard online.isEmpty else { return }
-  print("No online displays found.")
+  print("No online displays found.\(filterNote)")
   exit(1)
+}
+
+/// Generic DDC read/write over `found`, shared by volume/contrast/mute/vcp.
+func ddcGet(code: UInt8, label: String) async {
+  requireDDCDisplays()
+  for entry in found {
+    let result = await entry.writer.read(command: code)
+    // A read failure is normal on write-only panels (e.g. the MAG 341C, which
+    // ACKs every write and returns all-zeros for every read) — not a tool fault.
+    print("\(entry.display.name): \(label) \(result.map { "\($0.current)/\($0.max)" } ?? "read failed (panel may be write-only, or DDC is locked by HDR)")")
+  }
+}
+
+func ddcSet(code: UInt8, value: UInt16, label: String) async {
+  requireDDCDisplays()
+  for entry in found {
+    let ok = await entry.writer.write(command: code, value: value)
+    print("\(entry.display.name): \(label) write \(value) -> \(ok ? "ok" : "FAILED")")
+  }
 }
 
 /// Uniformly scales the display's *current* transfer table. Quartz hands back
@@ -242,6 +286,59 @@ case "watch":
     }
   }
   print("watch: done after \(start.duration(to: .now))")
+case "volume", "contrast":
+  let code = arguments[0] == "volume" ? VCP.audioSpeakerVolume : VCP.contrast
+  switch arguments.count > 1 ? arguments[1] : nil {
+  case "get":
+    await ddcGet(code: code, label: arguments[0])
+  case "set":
+    guard arguments.count == 3, let value = UInt16(arguments[2]), value <= 100 else {
+      print("usage: candela-probe \(arguments[0]) set <0-100>")
+      exit(2)
+    }
+    await ddcSet(code: code, value: value, label: arguments[0])
+  default:
+    print("usage: candela-probe \(arguments[0]) [get|set <0-100>]")
+    exit(2)
+  }
+case "mute":
+  guard arguments.count == 2, ["on", "off"].contains(arguments[1]) else {
+    print("usage: candela-probe mute on|off")
+    exit(2)
+  }
+  // VCP spec (and fork) wire values: 1 = mute, 2 = unmute.
+  await ddcSet(code: VCP.audioMuteScreenBlank, value: arguments[1] == "on" ? 1 : 2, label: "mute")
+case "vcp":
+  // Fully generic prober — the escape hatch for remap experiments.
+  switch arguments.count > 1 ? arguments[1] : nil {
+  case "get":
+    guard arguments.count == 3, let code = UInt8(arguments[2], radix: 16) else {
+      print("usage: candela-probe vcp get <hex code>")
+      exit(2)
+    }
+    await ddcGet(code: code, label: String(format: "0x%02x", code))
+  case "set":
+    guard arguments.count == 4, let code = UInt8(arguments[2], radix: 16), let value = UInt16(arguments[3]) else {
+      print("usage: candela-probe vcp set <hex code> <0-65535>")
+      exit(2)
+    }
+    await ddcSet(code: code, value: value, label: String(format: "0x%02x", code))
+  default:
+    print("usage: candela-probe vcp [get <hex>|set <hex> <value>]")
+    exit(2)
+  }
+case "audio":
+  guard arguments.count == 2, arguments[1] == "devices" else {
+    print("usage: candela-probe audio devices")
+    exit(2)
+  }
+  let provider = CoreAudioDeviceProvider()
+  if let device = provider.defaultOutputDevice() {
+    print("default output: \(device.name) [\(device.id)] canSetOwnVolume=\(device.canSetOwnVolume)")
+    print("volume keys would be \(device.canSetOwnVolume ? "RELEASED to macOS" : "WATCHED by Candela") outside name-matching mode")
+  } else {
+    print("no default output device")
+  }
 default:
   print(usage)
   exit(2)
