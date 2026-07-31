@@ -19,6 +19,11 @@ struct PanelView: View {
     let _ = model.prefsRevision
     let externals = Self.visibleDisplays(model)
     let showsBuiltIn = Self.showsBuiltIn(model)
+    // One read per render, like every other panel pref; `prefsRevision`
+    // (touched above) re-renders after the App menu pane writes them.
+    let appPrefs = DisplayPrefs(persistenceKey: "app")
+    let snapsToStops = appPrefs.enableSliderSnap
+    let showsPercent = appPrefs.enableSliderPercent
     VStack(spacing: 0) {
       if !model.accessibilityGranted {
         accessibilityBanner
@@ -40,20 +45,28 @@ struct PanelView: View {
               .foregroundStyle(.secondary)
               .lineLimit(1)
               .accessibilityHidden(true) // the slider carries the display name
-            DisplaySliderRow(controller: builtIn.controller, displayName: name)
+            DisplaySliderRow(
+              controller: builtIn.controller, displayName: name,
+              snapsToStops: snapsToStops, showsPercent: showsPercent
+            )
           }
         }
         ForEach(externals) { state in
           let name = Self.title(for: state.display)
           VStack(alignment: .leading, spacing: 8) {
             DisplayHeaderRow(controller: state.controller, displayName: name)
-            DisplaySliderRow(controller: state.controller, displayName: name)
+            DisplaySliderRow(
+              controller: state.controller, displayName: name,
+              snapsToStops: snapsToStops, showsPercent: showsPercent
+            )
             if showsVolumeSlider(for: state) {
               let hasAudio = model.hasAudioOutput(state)
               ValueSliderRow(
                 controller: state.volume,
                 systemImage: "speaker.wave.2.fill",
                 accessibilityLabel: "\(name) volume",
+                snapsToStops: snapsToStops,
+                showsPercent: showsPercent,
                 mutedSystemImage: "speaker.slash.fill"
               )
               .disabled(!hasAudio)
@@ -63,7 +76,9 @@ struct PanelView: View {
               ValueSliderRow(
                 controller: state.contrast,
                 systemImage: "circle.lefthalf.filled",
-                accessibilityLabel: "\(name) contrast"
+                accessibilityLabel: "\(name) contrast",
+                snapsToStops: snapsToStops,
+                showsPercent: showsPercent
               )
             }
           }
@@ -335,6 +350,8 @@ private struct HDRModeButtonStyle: ButtonStyle {
 private struct DisplaySliderRow: View {
   let controller: BrightnessController
   let displayName: String
+  let snapsToStops: Bool
+  let showsPercent: Bool
 
   var body: some View {
     CandelaSlider(
@@ -342,7 +359,9 @@ private struct DisplaySliderRow: View {
         get: { controller.brightness },
         set: { controller.setBrightness($0) }
       ),
-      accessibilityLabel: "\(displayName) brightness"
+      accessibilityLabel: "\(displayName) brightness",
+      snapsToStops: snapsToStops,
+      showsPercent: showsPercent
     )
   }
 }
@@ -359,10 +378,15 @@ private struct ValueSliderRow: View {
   let controller: DDCValueController
   let systemImage: String
   let accessibilityLabel: String
+  let snapsToStops: Bool
+  let showsPercent: Bool
   /// Substituted while muted; nil for commands that never mute (contrast).
   var mutedSystemImage: String?
 
-  private var isMuted: Bool { controller.isMuted && mutedSystemImage != nil }
+  /// Volume is the command whose 0 means "mute". Having a muted glyph IS the
+  /// definition of that here — contrast has none and never mutes.
+  private var mutesAtZero: Bool { mutedSystemImage != nil }
+  private var isMuted: Bool { controller.isMuted && mutesAtZero }
 
   var body: some View {
     CandelaSlider(
@@ -371,7 +395,12 @@ private struct ValueSliderRow: View {
         set: { controller.setValue($0) }
       ),
       systemImage: isMuted ? (mutedSystemImage ?? systemImage) : systemImage,
-      accessibilityLabel: isMuted ? "\(accessibilityLabel), muted" : accessibilityLabel
+      accessibilityLabel: isMuted ? "\(accessibilityLabel), muted" : accessibilityLabel,
+      snapsToStops: snapsToStops,
+      // D29: never let snapping pull a volume drag onto 0, which the engine
+      // treats as a hardware mute (VCP 0x8D). Contrast keeps the 0 stop.
+      snapsToZero: !mutesAtZero,
+      showsPercent: showsPercent
     )
   }
 }
