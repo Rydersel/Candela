@@ -51,10 +51,6 @@ struct DisplayDetailView: View {
       resetSection
     }
     .formStyle(.grouped)
-    // The HARDWARE name, always — it is the display's identity, so renaming it
-    // below does not relabel the window you are editing. (This is what the old
-    // card's `header` carried; the rename field still shows the override.)
-    .navigationTitle(Text(verbatim: state.display.name))
     .onAppear { seedDrafts() }
     // Drafts seeded only in `.onAppear` survive a wipe: if this pane is on
     // screen when the user resets everything from General, the card still holds

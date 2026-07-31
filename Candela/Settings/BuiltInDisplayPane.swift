@@ -52,6 +52,5 @@ struct BuiltInDisplayPane: View {
       }
     }
     .formStyle(.grouped)
-    .navigationTitle(Text(verbatim: model.builtIn?.display.name ?? "Built-in Display"))
   }
 }
