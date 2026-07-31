@@ -133,9 +133,17 @@ public final class DisplayPrefs: @unchecked Sendable {
   private let defaults: UserDefaults
   private let persistenceKey: String
 
-  public init(defaults: UserDefaults = .standard, persistenceKey: String) {
+  /// D11 safe-mode seam: one flag injected at construction (never a global or
+  /// a UserDefaults lookup). Forces the two startup-traffic getters only;
+  /// every setter still writes through, so a pref changed during a safe-mode
+  /// session takes effect on the next normal launch. Public so a construction
+  /// site can be asserted rather than trusted.
+  public let isSafeMode: Bool
+
+  public init(defaults: UserDefaults = .standard, persistenceKey: String, safeMode: Bool = false) {
     self.defaults = defaults
     self.persistenceKey = persistenceKey
+    isSafeMode = safeMode
   }
 
   /// Unknown stored raw values fall back to `.off` — an unset key reads 0,
@@ -300,8 +308,17 @@ public final class DisplayPrefs: @unchecked Sendable {
   }
 
   /// Mode → DDC read tries (fork OtherDisplay.pollingCount).
+  ///
+  /// D11: safe mode issues no DDC reads at all, so the try budget is zero
+  /// regardless of the stored mode. Belt-and-braces — `startupAction` is
+  /// already forced to `.doNothing` and `pollingTries` is consulted only on
+  /// the `.read` path, so under safe mode this second override is unreachable
+  /// through the first. It is kept because it is the honest expression of "no
+  /// reads this session" and survives any future call site that consults
+  /// `pollingTries` directly.
   public var pollingTries: Int {
-    switch pollingMode {
+    if isSafeMode { return 0 }
+    return switch pollingMode {
     case .none: 0
     case .minimal: 1
     case .normal: 5
@@ -345,8 +362,19 @@ public final class DisplayPrefs: @unchecked Sendable {
   }
 
   /// What launch/reconfigure/wake does with saved DDC values (D5).
+  ///
+  /// D11: under safe mode the GETTER reports `.doNothing`, which disables both
+  /// the startup restore and the wake restore (`RestoreCoordinator` gates on
+  /// `== .write`) and the volume/contrast readback (`DDCValueController`
+  /// gates on `== .read`) for the session. The SETTER still writes the real
+  /// value through, so a pref changed during a safe-mode session takes effect
+  /// on the next normal launch.
   public var startupAction: StartupAction {
-    get { StartupAction(rawValue: defaults.integer(forKey: "startupAction")) ?? .doNothing }
+    get {
+      isSafeMode
+        ? .doNothing
+        : (StartupAction(rawValue: defaults.integer(forKey: "startupAction")) ?? .doNothing)
+    }
     set { defaults.set(newValue.rawValue, forKey: "startupAction") }
   }
 

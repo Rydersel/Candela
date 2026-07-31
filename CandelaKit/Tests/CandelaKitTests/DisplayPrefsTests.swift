@@ -478,4 +478,37 @@ struct DisplayPrefsTests {
     #expect(MultiKeyboardBrightness.focusInsteadOfMouse.rawValue == 2)
     #expect(MultiKeyboardBrightness.allCases.count == 3)
   }
+
+  @Test func safeModeGatesStartupTrafficWithoutTouchingStoredPrefs() {
+    // D11: session-only hardware gate. The getter-level override is the
+    // injection seam — one flag passed in at construction, never a global and
+    // never a UserDefaults lookup buried in the engine.
+    let d = InMemoryDefaults()
+    let normal = DisplayPrefs(defaults: d, persistenceKey: "app")
+    normal.startupAction = .write
+    normal.pollingMode = .heavy
+    let safe = DisplayPrefs(defaults: d, persistenceKey: "app", safeMode: true)
+    #expect(safe.isSafeMode)
+    #expect(!normal.isSafeMode)
+    #expect(safe.startupAction == .doNothing)
+    #expect(safe.pollingTries == 0)
+    // Stored values untouched; next normal launch behaves as configured.
+    #expect(normal.startupAction == .write)
+    #expect(normal.pollingTries == 20)
+  }
+
+  @Test func safeModeSettersStillPersistForTheNextNormalSession() {
+    // Both gated getters, both directions (review lens 4, M10 — the original
+    // test asserted the override but never that a safe-mode WRITE survives).
+    let d = InMemoryDefaults()
+    let normal = DisplayPrefs(defaults: d, persistenceKey: "app")
+    let safe = DisplayPrefs(defaults: d, persistenceKey: "app", safeMode: true)
+    safe.startupAction = .read
+    safe.pollingMode = .heavy
+    #expect(normal.startupAction == .read)
+    #expect(normal.pollingTries == 20)
+    // …while the safe session itself still sees the gate.
+    #expect(safe.startupAction == .doNothing)
+    #expect(safe.pollingTries == 0)
+  }
 }

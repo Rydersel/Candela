@@ -43,8 +43,16 @@ final class AppModel {
 
   /// App-level M4 prefs (startupAction, multiKeyboardVolume, showContrast)
   /// read through one DisplayPrefs like the engine does; the persistence key
-  /// is irrelevant for unsuffixed accessors.
-  @ObservationIgnored private let appPrefs = DisplayPrefs(persistenceKey: "app")
+  /// is irrelevant for unsuffixed accessors. Assigned in `init` rather than
+  /// inline: it needs the safe-mode flag, which arrives as an init parameter.
+  @ObservationIgnored private let appPrefs: DisplayPrefs
+
+  /// D11: session-only hardware gate, injected once and never re-read from
+  /// UserDefaults. Also gates the brightness readback below, which the
+  /// `startupAction` getter override cannot reach (`BrightnessController`'s
+  /// `refreshFromHardware` carries no `startupAction` guard, unlike its
+  /// `DDCValueController` sibling).
+  @ObservationIgnored private let safeMode: Bool
 
   var volumeMode: MultiKeyboardVolume { appPrefs.multiKeyboardVolume }
 
@@ -77,12 +85,15 @@ final class AppModel {
     shade: (any ShadeRendering)? = nil,
     gamma: (any GammaApplying)? = nil,
     hdrToggling: (any HDRToggling)? = nil,
-    audioDevices: (any AudioDeviceProviding)? = nil
+    audioDevices: (any AudioDeviceProviding)? = nil,
+    safeMode: Bool = false
   ) {
     self.shade = shade
     self.gamma = gamma
     self.hdrToggling = hdrToggling ?? MonitorPanelService()
     self.audioDevices = audioDevices ?? CoreAudioDeviceProvider()
+    self.safeMode = safeMode
+    appPrefs = DisplayPrefs(persistenceKey: "app", safeMode: safeMode)
   }
 
   /// Every controlled display, built-in first (its `isNativeActive()` is
@@ -273,6 +284,12 @@ final class AppModel {
   /// wire (e.g. a discarded coalescer's tail-write racing a fresh read).
   @ObservationIgnored private var refreshTask: Task<[CGDirectDisplayID], Never>?
 
+  /// Identity of whatever currently occupies the single-flight slot above.
+  /// `Task` is a struct, so there is no `===` to compare with; this counter is
+  /// how a finished pass tells "the slot is still mine" from "someone else
+  /// installed a newer pass while I was suspended".
+  @ObservationIgnored private var refreshTaskGeneration: UInt64 = 0
+
   /// The CC-sync poll job. Cancelled and recreated after every refresh: its
   /// targets capture a fixed controller set, so a departed display's target
   /// must never outlive the pass that dropped it.
@@ -295,9 +312,50 @@ final class AppModel {
     }
     let task = Task { await performRefresh() }
     refreshTask = task
+    refreshTaskGeneration &+= 1
+    let generation = refreshTaskGeneration
     let departed = await task.value
-    refreshTask = nil
+    // Only clear the slot if we still own it. `rebuildControllers` below may
+    // have cleared it already and installed its own pass; a blind `= nil`
+    // would drop that pass out of the single-flight guard and let a second
+    // concurrent pass start on the same DDC services.
+    if refreshTaskGeneration == generation { refreshTask = nil }
     return departed
+  }
+
+  /// D30: force fresh controllers for every display.
+  ///
+  /// `performRefresh` reconciles by `CGDirectDisplayID` and REUSES
+  /// `previous.controller` / `previous.volume` / `previous.contrast` for a
+  /// still-connected display — by design, so long-lived media-key references
+  /// never go stale. That makes it the wrong tool after a settings reset:
+  /// every reused controller keeps in-memory state derived from prefs that no
+  /// longer exist (`hdrMode` mirror, `isMuted`, `lastAppliedSw`, and the
+  /// published value it will re-`persist()` straight back into the freshly
+  /// emptied domain). Emptying both slots first makes every display "appeared",
+  /// so all three controllers per display are constructed from the current
+  /// store.
+  ///
+  /// Callers must have already driven the hardware to a known state — this
+  /// drops the only objects that know what that state was.
+  func rebuildControllers() async {
+    // Drain any pass already in flight FIRST. `performRefresh` snapshots the
+    // reuse map and reassigns `displays` synchronously at its entry, before
+    // its first await — so clearing the slots underneath a running pass would
+    // neither rebuild its controllers (it made the reuse decision already) nor
+    // survive it (its assignment landed already, leaving `displays` empty).
+    // Piggybacking on it via `refresh()` has the same two problems. The loop
+    // re-checks because a topology event can install a newer pass while we
+    // wait; MainActor gives us no suspension between the loop exiting and
+    // `refresh()` reading the slot, so the hand-off cannot be raced.
+    while let inFlight = refreshTask {
+      let generation = refreshTaskGeneration
+      _ = await inFlight.value
+      if refreshTaskGeneration == generation { refreshTask = nil }
+    }
+    displays = []
+    builtIn = nil
+    await refresh()
   }
 
   /// Reconciles `displays` against discovery, keyed by `CGDirectDisplayID`:
@@ -330,7 +388,11 @@ final class AppModel {
         return state
       }
       let persistenceKey = entry.display.persistenceKey
-      let prefs = DisplayPrefs(persistenceKey: persistenceKey)
+      // D11: the ONE prefs object shared by this display's brightness, volume
+      // and contrast controllers — so the safe-mode `startupAction` override
+      // gates the volume/contrast readback (`refreshFromHardware` opens with
+      // `guard prefs.startupAction == .read`) for all of them at once.
+      let prefs = DisplayPrefs(persistenceKey: persistenceKey, safeMode: safeMode)
       let controller = BrightnessController(
         writer: entry.writer,
         backends: BrightnessBackends(
@@ -390,7 +452,12 @@ final class AppModel {
       isCurrent: { [displayManager] in displayManager.isEpochCurrent($0) }
     )
     for state in appeared {
-      await state.controller.refreshFromHardware()
+      // D11: safe mode issues NO DDC reads. `BrightnessController.refreshFromHardware`
+      // is ungated on `startupAction` in the engine, so the gate lands here.
+      // (Gating it inside the controller on `startupAction == .read` is arguably
+      // the correct engine behavior regardless — recorded as an M5 follow-up,
+      // deliberately out of this task's ownership fence.)
+      if !safeMode { await state.controller.refreshFromHardware() }
       await state.volume.refreshFromHardware() // no-op unless startupAction == .read (validated)
       await state.contrast.refreshFromHardware()
     }
@@ -399,7 +466,7 @@ final class AppModel {
       // from hardware. Harmless no-op on write-only panels (MAG341C): the
       // read fails its guard and the last-written state stands.
       await state.controller.waitForPendingWrites()
-      await state.controller.refreshFromHardware()
+      if !safeMode { await state.controller.refreshFromHardware() }
       // Kept displays re-read volume/contrast too (spec-coverage F2 — the
       // fork re-reads every command on every display rebuild); both are
       // gated no-ops unless startupAction == .read. Same drain-before-read
@@ -411,7 +478,8 @@ final class AppModel {
       await state.contrast.refreshFromHardware()
     }
     // Resync the built-in from its native read (cheap; a freshly created
-    // controller already seeded from the same read at init).
+    // controller already seeded from the same read at init). The built-in's
+    // read is native (DisplayServices), not DDC — ungated under safe mode.
     await builtIn?.controller.refreshFromHardware()
     restartPoller()
     return Array(existing.keys)
