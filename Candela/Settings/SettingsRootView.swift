@@ -1,4 +1,5 @@
 import AppKit
+import CandelaKit
 import SwiftUI
 
 /// Sidebar navigation over a pane registry. Replaces the five-tab `TabView`,
@@ -17,6 +18,8 @@ import SwiftUI
 struct SettingsRootView: View {
   @State private var selection: SettingsDestination? = .pane(.general)
 
+  @Environment(AppModel.self) private var model
+
   var body: some View {
     NavigationSplitView {
       SettingsSidebar(selection: $selection)
@@ -27,6 +30,16 @@ struct SettingsRootView: View {
     // Resizable, replacing the fork-era fixed `.frame(width: 620)`. The
     // minimum keeps the sidebar and a grouped form from crushing each other.
     .frame(minWidth: 720, minHeight: 480)
+    // A destination for an absent display must never render, so a display that
+    // is unplugged while selected drops the selection back to a pane. Keyed on
+    // persistence keys, not display IDs: an ID changes across a replug and
+    // would evict the user from a pane every time a link renegotiated.
+    .onChange(of: model.displays.map(\.display.persistenceKey)) { _, connected in
+      guard case let .display(key) = selection, key != "builtIn" else { return }
+      if SettingsSelectionPolicy.resolve(selectedDisplayKey: key, connectedKeys: connected) == nil {
+        selection = .pane(.general)
+      }
+    }
   }
 
   @ViewBuilder private var detail: some View {
@@ -35,13 +48,26 @@ struct SettingsRootView: View {
       let pane = SettingsRegistry.descriptor(for: id)
       pane.content()
         .navigationTitle(pane.title)
-    case .display, .none:
-      // Display destinations arrive with the sidebar's DISPLAYS group. Until
-      // then an unknown selection falls back rather than rendering an empty
-      // detail column.
-      SettingsRegistry.descriptor(for: .general).content()
-        .navigationTitle("General")
+    case let .display(key):
+      if let state = model.allControlledStates.first(where: { $0.display.persistenceKey == key }) {
+        if key == "builtIn" {
+          BuiltInDisplayPane(selection: $selection)
+        } else {
+          DisplayDetailView(state: state)
+        }
+      } else {
+        generalFallback
+      }
+    case .none:
+      generalFallback
     }
+  }
+
+  /// The detail column is never empty: an unresolvable selection shows General
+  /// rather than a blank pane, which reads as a broken window.
+  private var generalFallback: some View {
+    SettingsRegistry.descriptor(for: .general).content()
+      .navigationTitle("General")
   }
 }
 

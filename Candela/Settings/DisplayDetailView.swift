@@ -1,103 +1,23 @@
 import CandelaKit
 import SwiftUI
 
-/// Per-display settings. Structure follows the fork's rebuilt pane (chapter 2
-/// §1.1): ONE card per display in a vertical stack. There is no table, no row
-/// selection, no selected-display detail region and no sort control — display
-/// ORDER is the panel's business (ascending, ungated, Task 5), not a setting.
-/// A card here is a `Form` `Section`, which gives the same grouped-card look as
-/// the other four panes with none of the fork's hand-pinned 660×560 chrome.
+/// One connected external display's settings, as a full-window destination.
 ///
-/// Lists EXTERNAL displays only (`model.displays`). The built-in panel is
-/// deliberately absent: its `DisplayState` carries `NoopDDCWriter`-backed
-/// volume/contrast controllers that still report `isAvailable == true`
-/// (AppModel trap), so every DDC control on a built-in card would be a
-/// live-looking no-op — and its one real setting, whether the panel shows it,
-/// is the app-level toggle in the App Menu pane.
-///
-/// `@MainActor` as declared by the Task 3 stub — keep it: `DisplayCard`, which
-/// this builds, is `@MainActor` for `DisplayPrefWriter`'s sake.
-@MainActor
-struct DisplaysPane: View {
-  @Environment(AppModel.self) private var model
-
-  var body: some View {
-    // Re-render after seam writes and external writes (M5 live-observation
-    // contract): a control in this pane can change what another card shows.
-    // `.refreshUI` on every known PrefName is what guarantees the bump.
-    let _ = model.prefsRevision
-    Form {
-      if model.displays.isEmpty {
-        Section {
-          SettingsCaption(
-            "No external displays are connected. A card appears here for each display \(AppInfo.productName) can control."
-          )
-        }
-      }
-      ForEach(model.displays) { state in
-        DisplayCard(state: state)
-      }
-      if model.builtIn != nil {
-        Section {
-          SettingsCaption(
-            "The built-in display has no per-display settings — macOS controls its brightness directly. Whether its slider appears is set under App Menu."
-          )
-        }
-      }
-    }
-    .formStyle(.grouped)
-  }
-}
-
-/// Every Displays-pane write goes through here: mutate the pref, then fan out
-/// through the D20 seam. A control that writes a pref and does not propagate is
-/// a broken control (the engine reads prefs at construction and at key time,
-/// not reactively), so the two steps are deliberately not separable at the
-/// call site.
-@MainActor
-struct DisplayPrefWriter {
-  let persistenceKey: String
-  let actions: SettingsActions
-  let prefs: DisplayPrefs
-
-  init(persistenceKey: String, actions: SettingsActions) {
-    self.persistenceKey = persistenceKey
-    self.actions = actions
-    self.prefs = DisplayPrefs(persistenceKey: persistenceKey)
-  }
-
-  /// `name` is a `PrefName` case, i.e. the UNSUFFIXED pref name the propagation
-  /// table keys on (`.forceSw`, never `"forceSw.<pk>"`). D27 closed this name
-  /// space precisely because the old `String` form made `write("forceSW")` a
-  /// silent no-op that wrote the pref and fanned out to nothing. The
-  /// persistence key scopes the dimming re-apply to this display alone.
-  func write(_ name: PrefName, _ mutate: (DisplayPrefs) -> Void) {
-    mutate(prefs)
-    actions.prefDidChange(name, persistenceKey: persistenceKey)
-  }
-
-  /// A batch: several prefs written together, fanning out to the UNION of
-  /// their rows. Never collapse a batch onto one representative name — the
-  /// rows are not nested (`hideDisplay` carries `.updateStatusItem`,
-  /// `forceSw` does not), so picking a "superset" row silently drops effects.
-  func writeAll(_ names: [PrefName], _ mutate: (DisplayPrefs) -> Void) {
-    mutate(prefs)
-    actions.prefsDidChange(names, persistenceKey: persistenceKey)
-  }
-}
-
-/// One display's card.
+/// Was `DisplayCard`, one of several cards stacked inside a `DisplaysPane`.
+/// Promoting displays to top-level sidebar destinations is what actually
+/// separates this window from the fork's — and it retires the "Advanced"
+/// disclosure, because a full window has room to simply show the controls.
+/// That in turn retires the auto-open hack that used to force the disclosure
+/// open when the display was stranded hardware-muted: the recovery row is now
+/// unconditionally visible, which is what D29 rule 3 wanted all along.
 ///
 /// `@MainActor` is load-bearing, not decoration: `DisplayPrefWriter` is
 /// `@MainActor` (it holds `SettingsActions`), and a plain `struct … : View` has
 /// nonisolated stored and computed properties under Swift 6 complete
 /// concurrency, so `private var writer: DisplayPrefWriter { … }` would not
 /// compile without it.
-///
-/// Task 14 adds the per-command tuning grid and the per-display reset button to
-/// `advancedSection`.
 @MainActor
-struct DisplayCard: View {
+struct DisplayDetailView: View {
   let state: AppModel.DisplayState
 
   @Environment(AppModel.self) private var model
@@ -110,9 +30,6 @@ struct DisplayCard: View {
   @State private var audioNameDraft = ""
   @FocusState private var nameFocused: Bool
   @FocusState private var audioNameFocused: Bool
-  /// View state that SURVIVES a re-render, unlike the fork's disclosure, which
-  /// collapsed on every pane rebuild (chapter 2 QUIRK 16).
-  @State private var showsAdvanced = false
   @State private var confirmingReset = false
 
   private var persistenceKey: String { state.display.persistenceKey }
@@ -122,51 +39,23 @@ struct DisplayCard: View {
   }
 
   var body: some View {
-    Section {
-      TextField("Name", text: $nameDraft, prompt: Text(verbatim: state.display.name))
-        .focused($nameFocused)
-        .onSubmit { commitName() }
-        .onChange(of: nameFocused) { _, focused in
-          if !focused { commitName() }
-        }
-      SettingsCaption("Shown in the menu bar panel. Leave it empty to use the name the display reports.")
-
-      Toggle("Show this display in the menu bar panel", isOn: Binding(
-        get: { !prefs.hideDisplay },
-        set: { shown in writer.write(.hideDisplay) { $0.hideDisplay = !shown } }
-      ))
-
-      Toggle("Control this display with the keyboard", isOn: Binding(
-        get: { !prefs.isDisabled },
-        set: { enabled in writer.write(.isDisabled) { $0.isDisabled = !enabled } }
-      ))
-      SettingsCaption("When off, the brightness and volume keys skip this display.")
-
-      Toggle("Show the volume slider in the panel", isOn: Binding(
-        get: { !prefs.hideVolumeSlider },
-        set: { shown in writer.write(.hideVolumeSlider) { $0.hideVolumeSlider = !shown } }
-      ))
-      // The hide-vs-disable split (panel §5.4) is only obvious once you have
-      // seen both controls. This toggle removes the row; Advanced → "Volume
-      // slider (when shown):" decides whether a row that IS shown takes input.
-      // Without this sentence the two read as one setting worded twice — the
-      // near-duplicate Task 13 handed to Task 18 for a copy pass.
-      SettingsCaption("Removes the row entirely. Whether a slider that is shown accepts input is set under Advanced.")
-
-      DisclosureGroup("Advanced", isExpanded: $showsAdvanced) {
-        advancedSection
-      }
-    } header: {
-      header
+    // `DisplayPrefs` is plain UserDefaults and not observable, so this is the
+    // only thing that re-evaluates the body after a write anywhere else.
+    let _ = model.prefsRevision
+    Form {
+      identitySection
+      panelSection
+      controlMethodSection
+      volumeSection
+      tuningSection
+      resetSection
     }
-    .onAppear {
-      seedDrafts()
-      // D29 rule 3 covers "never disabled"; a recovery row sitting inside a
-      // disclosure that defaults CLOSED is reachable only by hunting, which is
-      // the same defect one step weaker. Open Advanced by itself when this card
-      // is stranded. Never closes it — checklist item 11's persistence holds.
-      if isStrandedMuted { showsAdvanced = true }
-    }
+    .formStyle(.grouped)
+    // The HARDWARE name, always — it is the display's identity, so renaming it
+    // below does not relabel the window you are editing. (This is what the old
+    // card's `header` carried; the rename field still shows the override.)
+    .navigationTitle(Text(verbatim: state.display.name))
+    .onAppear { seedDrafts() }
     // Drafts seeded only in `.onAppear` survive a wipe: if this pane is on
     // screen when the user resets everything from General, the card still holds
     // "Desk" and the next focus/blur re-writes friendlyName.<pk> into the
@@ -183,20 +72,53 @@ struct DisplayCard: View {
     audioNameDraft = prefs.audioDeviceNameOverride
   }
 
-  // MARK: - Header
+  // MARK: - Sections
 
-  /// The header carries the HARDWARE name, always — it is the display's
-  /// identity, and keeping it fixed means renaming does not relabel the card
-  /// you are editing. The rename field below shows the override.
-  private var header: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(verbatim: state.display.name)
-      Text(controlMethodLabel)
-        .font(.caption)
-        .foregroundStyle(.secondary)
+  private var identitySection: some View {
+    Section("Display") {
+      TextField("Name", text: $nameDraft, prompt: Text(verbatim: state.display.name))
+        .focused($nameFocused)
+        .onSubmit { commitName() }
+        .onChange(of: nameFocused) { _, focused in
+          if !focused { commitName() }
+        }
+      SettingsCaption("Shown in the menu bar panel. Leave it empty to use the name the display reports.")
+
+      // What the old card's section header carried as a subtitle. It is
+      // read-only status, not a setting, so it reads as a value rather than a
+      // control — but it belongs beside the identity, because it is the single
+      // most useful fact about how this display is being driven.
+      LabeledContent("Control method") {
+        Text(controlMethodLabel)
+          .foregroundStyle(.secondary)
+      }
+      .help(controlMethodExplanation)
     }
-    .textCase(nil)
-    .help(controlMethodExplanation)
+  }
+
+  private var panelSection: some View {
+    Section("Menu bar panel") {
+      Toggle("Show this display in the menu bar panel", isOn: Binding(
+        get: { !prefs.hideDisplay },
+        set: { shown in writer.write(.hideDisplay) { $0.hideDisplay = !shown } }
+      ))
+
+      Toggle("Control this display with the keyboard", isOn: Binding(
+        get: { !prefs.isDisabled },
+        set: { enabled in writer.write(.isDisabled) { $0.isDisabled = !enabled } }
+      ))
+      SettingsCaption("When off, the brightness and volume keys skip this display.")
+
+      Toggle("Show the volume slider in the panel", isOn: Binding(
+        get: { !prefs.hideVolumeSlider },
+        set: { shown in writer.write(.hideVolumeSlider) { $0.hideVolumeSlider = !shown } }
+      ))
+      // The hide-vs-disable split (panel §5.4) is only obvious once you have
+      // seen both controls. This toggle removes the row; "Volume slider (when
+      // shown)" below decides whether a row that IS shown takes input. Without
+      // this sentence the two read as one setting worded twice.
+      SettingsCaption("Removes the row entirely. Whether a slider that is shown accepts input is set under Volume.")
+    }
   }
 
   /// Candela's equivalent of the fork's `controlMethod` subtitle. The BRANCH
@@ -228,14 +150,11 @@ struct DisplayCard: View {
     }
   }
 
-  // MARK: - Advanced
+  // MARK: - Control method
 
-  @ViewBuilder private var advancedSection: some View {
-    // `defaultOutputDevice()` does a blocking HAL round-trip when the CoreAudio
-    // listener has not primed its cache — read it once, not once per consumer.
-    let currentOutput = model.audioDevices.defaultOutputDevice()
-
-    Toggle("Use hardware (DDC) control", isOn: Binding(
+  private var controlMethodSection: some View {
+    Section("Control method") {
+      Toggle("Use hardware (DDC) control", isOn: Binding(
       get: { !prefs.forceSoftware },
       set: { useDDC in
         // D29 rule 1 — the THIRD mute-stranding path, and the only one that was
@@ -267,8 +186,18 @@ struct DisplayCard: View {
       }
     ))
     SettingsCaption("Software dimming normally adjusts the display's color profile. Switch to an overlay if another app keeps taking the profile back, or on virtual and AirPlay displays.")
+    }
+  }
 
-    Toggle("Show the on-screen volume indicator for this display", isOn: Binding(
+  // MARK: - Volume
+
+  @ViewBuilder private var volumeSection: some View {
+    // `defaultOutputDevice()` does a blocking HAL round-trip when the CoreAudio
+    // listener has not primed its cache — read it once, not once per consumer.
+    let currentOutput = model.audioDevices.defaultOutputDevice()
+
+    Section("Volume") {
+      Toggle("Show the on-screen volume indicator for this display", isOn: Binding(
       get: { !prefs.hideOsd },
       set: { shown in writer.write(.hideOsd) { $0.hideOsd = !shown } }
     ))
@@ -306,7 +235,8 @@ struct DisplayCard: View {
       // that can leave the state, because `toggleMute` refuses while
       // `isAvailable` is false; it clears the two prefs that make it false
       // FIRST (D29 rule 2), then unmutes while the display's current mute
-      // strategy is still in force. Never `.disabled`.
+      // strategy is still in force. Never `.disabled`, and no longer behind a
+      // disclosure either — the full-window layout shows it outright.
       VStack(alignment: .leading, spacing: 4) {
         Text("This display is muted in hardware.")
         Button("Turn Hardware Control Back On and Unmute") { recoverFromHardwareMute() }
@@ -345,23 +275,32 @@ struct DisplayCard: View {
       }
     }
     SettingsCaption("Used when the volume keys pick a display by matching the current audio output device. Leave it empty to match on the display's own name.")
+    }
+  }
 
-    Divider()
+  // MARK: - Tuning
 
-    CommandTuningGrid(state: state, writer: writer)
+  private var tuningSection: some View {
+    Section("Tuning") {
+      CommandTuningGrid(state: state, writer: writer)
+    }
+  }
 
-    Divider()
+  // MARK: - Reset
 
-    Button("Reset Display Settings…", role: .destructive) { confirmingReset = true }
-      .alert("Reset the settings for this display?", isPresented: $confirmingReset) {
-        Button("Reset", role: .destructive) { resetDisplay() }
-        Button("Cancel", role: .cancel) {}
-      } message: {
+  private var resetSection: some View {
+    Section {
+      Button("Reset Display Settings…", role: .destructive) { confirmingReset = true }
+        .alert("Reset the settings for this display?", isPresented: $confirmingReset) {
+          Button("Reset", role: .destructive) { resetDisplay() }
+          Button("Cancel", role: .cancel) {}
+        } message: {
         // Name what is lost, and name what is NOT: the saved levels are the
         // only source of truth on a write-only panel (trap 20), so a reset
         // that took them would leave the display at an unknown brightness.
         Text("This clears the name, visibility, keyboard, audio and DDC tuning settings for \(state.display.name), turns HDR off if it is on, and unmutes it. Your saved brightness, volume and contrast levels are kept.")
-      }
+        }
+    }
   }
 
   // MARK: - Per-display reset
