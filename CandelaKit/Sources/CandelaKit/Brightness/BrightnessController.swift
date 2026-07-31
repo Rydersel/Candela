@@ -593,8 +593,14 @@ public final class BrightnessController {
   /// `resetAllGamma()` once per event BEFORE this, so the table is OS-owned —
   /// the T5 ordering contract), re-pin shade frames, and re-run the software
   /// leg for the current value. Skipped under the native path per C1.
-  public func handleReconfigure() async {
-    backends.gamma?.recaptureDefaultTable(on: displayID)
+  public func handleReconfigure(recapture: Bool = true) async {
+    // recapture: false is the interference-accept path — at accept time the
+    // interfering app may own the table, and capturing that as the baseline
+    // bakes its curve in (poisoned-baseline amendment, progress.md:51). The
+    // next real reconfiguration recaptures normally.
+    if recapture {
+      backends.gamma?.recaptureDefaultTable(on: displayID)
+    }
     backends.shade?.repinFrames()
     lastAppliedSw = nil
     guard !usesNative else { return }

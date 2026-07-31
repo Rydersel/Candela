@@ -212,7 +212,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
           // software dedupe memo (which `setBrightness` alone would trip over,
           // the value being unchanged) and re-runs the software leg, now
           // routed to the shade. Async, so this returns to the alert at once.
-          Task { @MainActor in await controller?.handleReconfigure() }
+          // `recapture: false` — the interfering app may own the table right
+          // now, so a baseline capture here would bake its curve in as the
+          // "default"; the next real reconfiguration recaptures.
+          Task { @MainActor in await controller?.handleReconfigure(recapture: false) }
         }
       }
     }
