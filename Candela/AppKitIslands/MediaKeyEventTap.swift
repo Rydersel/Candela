@@ -284,8 +284,8 @@ final class MediaKeyEventTap {
       default: key = nil
       }
       // Unwatched keys pass through untouched: this is how volume keys reach
-      // the system in M2, and how brightness keys pass through when no
-      // external display is connected.
+      // the system when the audio-routing rule releases them (M4), and how
+      // brightness keys pass through when no external display is connected.
       guard let key, config.watchedKeys.contains(key) else { return event }
       onPress(MediaKeyPress(
         key: key,

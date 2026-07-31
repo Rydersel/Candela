@@ -10,10 +10,10 @@ public enum BrightnessScope: Sendable, Equatable {
   /// targets the current display by default, not every screen.
   case affected
   case allExternal // Ctrl+Cmd directed, and the app-side fallback when no display resolves
-  case builtInOnly // Ctrl directed — steps the built-in panel (Task 10)
+  case builtInOnly // Ctrl directed — steps the built-in panel
 }
 
-/// What the executor (Task 5) should do for a routed media-key press.
+/// What the executor should do for a routed media-key press.
 public enum KeyAction: Sendable, Equatable {
   /// Cmd+BrightnessDown fresh press. Executor tries to toggle mirroring;
   /// if mirroring is not applicable (single display) it falls back to a
@@ -21,7 +21,7 @@ public enum KeyAction: Sendable, Equatable {
   case toggleMirroringOrStepDown(isFine: Bool)
   case openDisplaysSettings // Option-only, fresh press
   case stepBrightness(isUp: Bool, isFine: Bool, scope: BrightnessScope)
-  case stepContrast(isUp: Bool, isFine: Bool) // Ctrl+Opt+Cmd (executor no-ops until M4)
+  case stepContrast(isUp: Bool, isFine: Bool) // Ctrl+Opt+Cmd directed
   case stepVolume(isUp: Bool, isFine: Bool)
   case toggleMute // fresh press only; repeats swallowed
   case openSoundSettings // Option-only on a volume/mute key, fresh press

@@ -8,6 +8,8 @@ final class AppModel {
   struct DisplayState: Identifiable {
     let display: ExternalDisplay
     let controller: BrightnessController
+    let volume: DDCValueController
+    let contrast: DDCValueController
     var id: CGDirectDisplayID { display.id }
   }
 
@@ -35,6 +37,17 @@ final class AppModel {
   /// enumeration + its 2 s state cache live behind one actor).
   let hdrToggling: any HDRToggling
 
+  /// Default-output questions + change signal (D4). Injected so a future app
+  /// test target can fake it; production uses CoreAudio.
+  let audioDevices: any AudioDeviceProviding
+
+  /// App-level M4 prefs (startupAction, multiKeyboardVolume, showContrast)
+  /// read through one DisplayPrefs like the engine does; the persistence key
+  /// is irrelevant for unsuffixed accessors.
+  @ObservationIgnored private let appPrefs = DisplayPrefs(persistenceKey: "app")
+
+  var volumeMode: MultiKeyboardVolume { appPrefs.multiKeyboardVolume }
+
   /// Software-dimming islands (AppKit lives in the app target behind
   /// CandelaKit protocols). Constructed by StatusItemController and injected
   /// here — implementer's choice per the Task 6 brief, so tests can hand the
@@ -52,15 +65,34 @@ final class AppModel {
   init(
     shade: (any ShadeRendering)? = nil,
     gamma: (any GammaApplying)? = nil,
-    hdrToggling: (any HDRToggling)? = nil
+    hdrToggling: (any HDRToggling)? = nil,
+    audioDevices: (any AudioDeviceProviding)? = nil
   ) {
     self.shade = shade
     self.gamma = gamma
     self.hdrToggling = hdrToggling ?? MonitorPanelService()
+    self.audioDevices = audioDevices ?? CoreAudioDeviceProvider()
+  }
+
+  /// Every controlled display, built-in first (its `isNativeActive()` is
+  /// constitutively true for role .builtIn, so CC-sync polls the MacBook
+  /// panel from the very first tick). Computed, never stored (backlog #6):
+  /// callers must read the display set at call time — a refresh between
+  /// poller ticks must not replicate onto a departed controller.
+  var allControlledStates: [DisplayState] {
+    (builtIn.map { [$0] } ?? []) + displays
+  }
+
+  /// Fork `!display.isDisabled` (per-display "disable keyboard control",
+  /// review R1): every key loop skips a disabled display's BODY, but the tap
+  /// still swallows the event — fork parity; spec Appendix A's pass-through
+  /// parenthetical is wrong about the fork. Read live per call.
+  func keyEnabledStates(_ states: [DisplayState]) -> [DisplayState] {
+    states.filter { !DisplayPrefs(persistenceKey: $0.display.persistenceKey).isDisabled }
   }
 
   func stepBrightnessAllExternal(isUp: Bool, isFine: Bool, isFresh: Bool) -> [(id: CGDirectDisplayID, name: String, newValue: Double)] {
-    displays.map { state in
+    keyEnabledStates(displays).map { state in
       (state.id, state.display.name, state.controller.step(isUp: isUp, isFine: isFine, isFresh: isFresh))
     }
   }
@@ -78,7 +110,10 @@ final class AppModel {
   func stepBrightness(displayIDs: [CGDirectDisplayID], isUp: Bool, isFine: Bool, isFresh: Bool) -> [(id: CGDirectDisplayID, name: String, newValue: Double)] {
     displayIDs.compactMap { displayID in
       let slot = displays.first { $0.id == displayID } ?? builtIn.flatMap { $0.id == displayID ? $0 : nil }
-      guard let slot else { return nil }
+      // isDisabled filters the loop body (R1): a resolved-but-disabled
+      // display steps nothing and shows no HUD; the executor's empty-result
+      // fallback path itself re-runs through keyEnabledStates.
+      guard let slot, !keyEnabledStates([slot]).isEmpty else { return nil }
       return (slot.id, slot.display.name,
               slot.controller.step(isUp: isUp, isFine: isFine, isFresh: isFresh))
     }
@@ -88,19 +123,88 @@ final class AppModel {
   /// the pointer's display, which may well be the built-in). Returns nil when
   /// no built-in display is online.
   func stepBrightnessBuiltIn(isUp: Bool, isFine: Bool, isFresh: Bool) -> (id: CGDirectDisplayID, name: String, newValue: Double)? {
-    guard let builtIn else { return nil }
+    guard let builtIn, !keyEnabledStates([builtIn]).isEmpty else { return nil }
     return (builtIn.id, builtIn.display.name,
             builtIn.controller.step(isUp: isUp, isFine: isFine, isFresh: isFresh))
   }
 
   /// Watch brightness keys only when an EXTERNAL display is present (fork:
-  /// updateMediaKeyTap's disengage rule) — with only the built-in, macOS
-  /// handles its own keys. Volume keys arrive with Milestone 4.
+  /// updateMediaKeyTap's disengage rule). Volume/mute keys additionally obey
+  /// the audio-routing rule: released to the system whenever the default
+  /// output can set its own volume (or name-matching finds no display).
   var tapConfig: MediaKeyEventTap.WatchConfig {
-    .init(
-      watchedKeys: displays.isEmpty ? [] : [.brightnessUp, .brightnessDown],
+    var watched: Set<MediaKey> = displays.isEmpty ? [] : [.brightnessUp, .brightnessDown]
+    if AudioRoutingPolicy.shouldWatchVolumeKeys(
+      mode: volumeMode,
+      // Fork getDdcCapableDisplays (= !isSw(), review R5): forceSoftware
+      // displays don't count — a rig whose only external is forceSoftware
+      // releases the volume keys to macOS.
+      ddcDisplaysExist: !ddcCapableStates().isEmpty,
+      matchingDisplayCount: audioMatchingDisplays().count,
+      defaultOutput: audioDevices.defaultOutputDevice()
+    ) {
+      watched.formUnion([.volumeUp, .volumeDown, .mute])
+    }
+    return .init(
+      watchedKeys: watched,
       interceptAlternateBrightnessKeys: !UserDefaults.standard.bool(forKey: "disableAltBrightnessKeys")
     )
+  }
+
+  /// Fork getDdcCapableDisplays (= !isSw(), review R5): the audio/tap pool
+  /// excludes forceSoftware displays — the pref exists because the display's
+  /// DDC wire is broken. Brightness keys are NOT gated on this (their
+  /// software leg still works on a forceSoftware display).
+  private func ddcCapableStates() -> [DisplayState] {
+    displays.filter { !DisplayPrefs(persistenceKey: $0.display.persistenceKey).forceSoftware }
+  }
+
+  /// Displays whose (override or raw) name matches the default output device.
+  /// Recomputed at every call — key time, not tap-arm time — which fixes the
+  /// fork's stale audioControlTargetDisplays cache (D4). Pool = DDC-capable
+  /// only (fork getDdcCapableDisplays, R5).
+  func audioMatchingDisplays() -> [DisplayState] {
+    guard let device = audioDevices.defaultOutputDevice() else { return [] }
+    return ddcCapableStates().filter { state in
+      AudioRoutingPolicy.displayMatchesDevice(
+        deviceName: device.name,
+        rawDisplayName: state.display.name,
+        nameOverride: DisplayPrefs(persistenceKey: state.display.persistenceKey).audioDeviceNameOverride
+      )
+    }
+  }
+
+  /// True when any of the IDs is a display we control (either slot),
+  /// regardless of isDisabled. The executor's brightness fallback-to-all
+  /// consults this: a resolved-but-keyboard-disabled display is NOT a
+  /// targeting failure — the fork skips it in the loop body and swallows the
+  /// press (R1), so the fallback must not fire for it.
+  func controlsAnyDisplay(in displayIDs: [CGDirectDisplayID]) -> Bool {
+    displayIDs.contains { id in
+      displays.contains { $0.id == id } || builtIn?.id == id
+    }
+  }
+
+  /// One D5 write-restore pass: every duplicate memo reset FIRST, then
+  /// re-write — brightness DDC leg, contrast, volume (+ the mute companion
+  /// inside restoreToHardware). ALL THREE legs restore only ever-touched
+  /// commands (D5's "stored (= ever-touched)"; fork isTouched — planner
+  /// flag 4 OVERTURNED, review R4): a fresh display publishes the ASSUMED
+  /// default (brightness 1.0) over an empty store, and writing that would
+  /// blast an OLED to 100% at first restore. Volume/contrast carry their own
+  /// gate inside restoreToHardware; brightness checks `hasStoredValue`
+  /// (never reach into the store from here).
+  func performRestorePass() {
+    for state in displays {
+      if state.controller.hasStoredValue {
+        state.controller.resetWriteMemo()
+        state.controller.reassertHardware()
+      }
+      state.contrast.resetWriteMemo()
+      state.contrast.restoreToHardware()
+      state.volume.resetWriteMemo()
+      state.volume.restoreToHardware()
+    }
   }
 
   /// The in-flight refresh, if any. Overlapping callers piggyback on it
@@ -149,17 +253,25 @@ final class AppModel {
   /// deinit finishes its coalescer, which lands any pending write before the
   /// drain task exits, so no explicit `waitForPendingWrites()` is needed.
   private func performRefresh() async -> [CGDirectDisplayID] {
-    var existing = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0.controller) })
-    var appeared: [BrightnessController] = []
-    var kept: [BrightnessController] = []
+    var existing = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
+    var appeared: [DisplayState] = []
+    var kept: [DisplayState] = []
     displays = DisplayDiscovery.discover().map { entry in
-      if let controller = existing.removeValue(forKey: entry.display.id) {
-        kept.append(controller)
-        // Fresh DisplayState (name may change), reused controller, fresh writer.
-        controller.rebind(writer: entry.writer)
-        return DisplayState(display: entry.display, controller: controller)
+      if let previous = existing.removeValue(forKey: entry.display.id) {
+        // Fresh DisplayState (name may change), reused controllers, fresh
+        // writer for all three (rebind also resets each duplicate memo).
+        previous.controller.rebind(writer: entry.writer)
+        previous.volume.rebind(writer: entry.writer)
+        previous.contrast.rebind(writer: entry.writer)
+        let state = DisplayState(
+          display: entry.display, controller: previous.controller,
+          volume: previous.volume, contrast: previous.contrast
+        )
+        kept.append(state)
+        return state
       }
       let persistenceKey = entry.display.persistenceKey
+      let prefs = DisplayPrefs(persistenceKey: persistenceKey)
       let controller = BrightnessController(
         writer: entry.writer,
         backends: BrightnessBackends(
@@ -173,15 +285,28 @@ final class AppModel {
           shade: shade,
           gamma: gamma
         ),
-        prefs: DisplayPrefs(persistenceKey: persistenceKey),
+        prefs: prefs,
         displayID: entry.display.id,
         store: UserDefaultsBrightnessStore(),
         // M3 key; the M2 key is read once for migration, then ignored.
         storageKey: "combinedBrightness.\(persistenceKey)",
         legacyKey: "brightness.\(persistenceKey)"
       )
-      appeared.append(controller)
-      return DisplayState(display: entry.display, controller: controller)
+      let volume = DDCValueController(
+        writer: entry.writer, command: .volume, prefs: prefs,
+        displayID: entry.display.id,
+        store: UserDefaultsBrightnessStore(), storageKey: "volume.\(persistenceKey)"
+      )
+      let contrast = DDCValueController(
+        writer: entry.writer, command: .contrast, prefs: prefs,
+        displayID: entry.display.id,
+        store: UserDefaultsBrightnessStore(), storageKey: "contrast.\(persistenceKey)"
+      )
+      let state = DisplayState(
+        display: entry.display, controller: controller, volume: volume, contrast: contrast
+      )
+      appeared.append(state)
+      return state
     }
     refreshBuiltIn()
     // Every controller — kept and appeared — gets the live epoch pair, so
@@ -192,20 +317,35 @@ final class AppModel {
         { [displayManager] in displayManager.currentEpoch() },
         isCurrent: { [displayManager] in displayManager.isEpochCurrent($0) }
       )
+      state.volume.setEpochProvider(
+        { [displayManager] in displayManager.currentEpoch() },
+        isCurrent: { [displayManager] in displayManager.isEpochCurrent($0) }
+      )
+      state.contrast.setEpochProvider(
+        { [displayManager] in displayManager.currentEpoch() },
+        isCurrent: { [displayManager] in displayManager.isEpochCurrent($0) }
+      )
     }
     builtIn?.controller.setEpochProvider(
       { [displayManager] in displayManager.currentEpoch() },
       isCurrent: { [displayManager] in displayManager.isEpochCurrent($0) }
     )
-    for controller in appeared {
-      await controller.refreshFromHardware()
+    for state in appeared {
+      await state.controller.refreshFromHardware()
+      await state.volume.refreshFromHardware() // no-op unless startupAction == .read (validated)
+      await state.contrast.refreshFromHardware()
     }
-    for controller in kept {
+    for state in kept {
       // Let any coalesced tail-write land before reading back, then resync
       // from hardware. Harmless no-op on write-only panels (MAG341C): the
       // read fails its guard and the last-written state stands.
-      await controller.waitForPendingWrites()
-      await controller.refreshFromHardware()
+      await state.controller.waitForPendingWrites()
+      await state.controller.refreshFromHardware()
+      // Kept displays re-read volume/contrast too (spec-coverage F2 — the
+      // fork re-reads every command on every display rebuild); both are
+      // gated no-ops unless startupAction == .read.
+      await state.volume.refreshFromHardware()
+      await state.contrast.refreshFromHardware()
     }
     // Resync the built-in from its native read (cheap; a freshly created
     // controller already seeded from the same read at init).
@@ -225,7 +365,10 @@ final class AppModel {
     }
     let display = ExternalDisplay(id: found.id, name: found.name, persistenceKey: "builtIn")
     if let existing = builtIn, existing.id == found.id {
-      builtIn = DisplayState(display: display, controller: existing.controller)
+      builtIn = DisplayState(
+        display: display, controller: existing.controller,
+        volume: existing.volume, contrast: existing.contrast
+      )
       return
     }
     let controller = BrightnessController(
@@ -248,7 +391,21 @@ final class AppModel {
       // built-in brightness across launches; the controller seeds from a
       // native read at init.
     )
-    builtIn = DisplayState(display: display, controller: controller)
+    // Inert value controllers: the built-in has no DDC wire, so their
+    // `isAvailable` stays true but every write no-ops on `NoopDDCWriter`.
+    // Nothing renders them — the panel shows volume/contrast for `displays`
+    // only — they exist so `DisplayState` has one shape for both slots.
+    builtIn = DisplayState(
+      display: display, controller: controller,
+      volume: DDCValueController(
+        writer: NoopDDCWriter(), command: .volume,
+        prefs: DisplayPrefs(persistenceKey: "builtIn"), displayID: found.id
+      ),
+      contrast: DDCValueController(
+        writer: NoopDDCWriter(), command: .contrast,
+        prefs: DisplayPrefs(persistenceKey: "builtIn"), displayID: found.id
+      )
+    )
   }
 
   /// Rebuilds the native-brightness poll job for the current display set
@@ -260,9 +417,7 @@ final class AppModel {
       pollerTask = nil
       return
     }
-    // Built-in first: its `isNativeActive()` is constitutively true for role
-    // .builtIn, so CC-sync polls the MacBook panel from the very first tick.
-    let states = (builtIn.map { [$0] } ?? []) + displays
+    let states = allControlledStates
     let targets = states.map { state -> BrightnessPoller.Target in
       let controller = state.controller
       return BrightnessPoller.Target(
@@ -283,12 +438,14 @@ final class AppModel {
             guard let self else { return }
             // Display set read at fan-out time, not at target-build time: a
             // refresh between ticks must not replicate onto a departed
-            // controller. The built-in is added explicitly — it lives in its
-            // own slot, outside `displays` (re-review T10-A).
+            // controller — which is why `allControlledStates` is computed.
+            // The built-in is in the list (its own slot, outside `displays`,
+            // re-review T10-A); it moves from last to first, behaviorally
+            // irrelevant (`task-11-report.md:49`).
             BrightnessSync.fanOut(
               delta: delta,
               from: controller,
-              to: self.displays.map(\.controller) + [self.builtIn?.controller].compactMap { $0 },
+              to: self.allControlledStates.map(\.controller),
               isEnabled: UserDefaults.standard.bool(forKey: "enableBrightnessSync")
             )
           }
