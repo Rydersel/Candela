@@ -25,7 +25,10 @@ struct PanelView: View {
     let snapsToStops = appPrefs.enableSliderSnap
     let showsPercent = appPrefs.enableSliderPercent
     VStack(spacing: 0) {
-      if !model.accessibilityGranted {
+      // Task 12 hand-off: the same predicate as the Keyboard pane's warning
+      // row, never a bare `!isGranted` — an all-custom-shortcut rig needs no
+      // grant, and the two surfaces must not disagree about that.
+      if model.accessibility.isWarningWarranted {
         accessibilityBanner
         Divider()
       }
@@ -210,8 +213,10 @@ struct PanelView: View {
   /// Visually quiet Accessibility banner (spec §6: banner, not alert):
   /// 13 pt secondary text with a small trailing link button, matching the
   /// panel's section typography so it reads as information, not alarm. Shown
-  /// only while the grant is missing; clears live via observation when
-  /// `AccessibilityPermission`'s polling notices the grant.
+  /// only while the grant is missing AND a key mode actually wants it; appears
+  /// and clears live via observation, in both directions, because
+  /// `AccessibilityPermission` observes for the app's lifetime (D9) — a
+  /// revoked grant (every ad-hoc re-sign) brings this back with no relaunch.
   private var accessibilityBanner: some View {
     HStack(spacing: 8) {
       Image(systemName: "exclamationmark.triangle")
