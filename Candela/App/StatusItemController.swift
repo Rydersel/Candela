@@ -77,6 +77,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// registers capture it weakly, so dropping it would silently kill every
   /// custom shortcut.
   private var shortcutManager: ShortcutManager?
+  /// Held for the app's lifetime so "Run Setup Again…" and the post-reset
+  /// re-run reuse one window instead of stacking copies.
+  private var onboardingController: OnboardingWindowController?
   /// Stored (review M23) so the topology loop can `cleanupDisplay` departed
   /// displays' HUD panels; the executor shares this same instance.
   private let hud = BrightnessHUD()
@@ -296,7 +299,16 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     mediaKeyTap = tap
 
     let permission = model.accessibility
-    permission.promptIfNeeded()
+    // D14 + HIG: on a first run the Setup window owns the Accessibility ask so
+    // it can explain WHY first. Prompting here would fire the system dialog
+    // before the window is even on screen — the one thing integrating the
+    // request into Setup is supposed to prevent. `prefsSchemaVersion` is the
+    // trigger (D13/D14): it is written at Setup *completion*, so an
+    // interrupted first run still counts as a first run.
+    let isFirstRun = PrefsSchema.storedVersion(in: .standard) == nil
+    if !isFirstRun {
+      permission.promptIfNeeded()
+    }
     if permission.isGranted {
       startMediaKeyTap()
     }
@@ -332,6 +344,39 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       wireInterferenceHooks()
       restoreCoordinator.noteLaunchOrReconfigure()
     }
+
+    // D13: nobody else calls this. It is a no-op while the version key is
+    // absent (first run), and the forward path for every stored version after
+    // that — so it must run before the schema version is written by Setup
+    // completion.
+    PrefsSchema.migrateIfNeeded(in: .standard)
+
+    settingsActions.showOnboarding = { [weak self] in self?.presentOnboarding() }
+    // D12: a full-domain wipe removes prefsSchemaVersion, so the post-reset
+    // state IS a first-run state and gets the same window.
+    settingsActions.postReset = { [weak self] in self?.presentOnboarding() }
+
+    // Last statement of launch, per the HIG: Setup appears over a fully live
+    // app (menu-bar icon already installed, displays warming) rather than as
+    // part of launching.
+    if isFirstRun {
+      presentOnboarding()
+    }
+  }
+
+  /// The Setup window (user-facing name; "onboarding" is internal only).
+  private func presentOnboarding() {
+    let controller = onboardingController ?? OnboardingWindowController(
+      permission: model.accessibility,
+      onCompletion: {
+        // D14: completion is recorded HERE — on close, by any route — not at
+        // launch. A force-quit mid-Setup leaves the key absent and the next
+        // launch runs Setup again.
+        PrefsSchema.recordCurrentVersion(in: .standard)
+      }
+    )
+    onboardingController = controller
+    controller.present()
   }
 
   /// Review M24 + D5: remove software dimming, then hand the DDC register the
