@@ -1,6 +1,5 @@
 import CoreGraphics
 import Observation
-import os
 
 /// Single source of truth for one display's value on one pure-DDC command —
 /// volume or contrast — the sibling of `BrightnessController` (D1): no
@@ -218,11 +217,15 @@ public final class DDCValueController {
     for _ in 0 ..< tries {
       guard let result = await writer.read(command: readCode), result.max > 0 else { continue }
       guard issuedGeneration == issuedAtStart else { return }
+      // The max is real information on every validated read (the loop guard
+      // proved `max > 0`); learn it BEFORE the artifact skip below, which
+      // concerns `current` only — otherwise the skip path leaves `readMax`
+      // nil and later writes scale against the assumed 100.
+      readMax = Int(result.max)
       // Muted default-strategy register 0 is the mute ARTIFACT, not
       // information (review F1): adopting/persisting it would destroy the
       // unmute restore target.
       if command == .volume, isMuted, result.current == 0 { break }
-      readMax = Int(result.max)
       let adopted = DimmingMath.ddcToValue(
         result.current,
         minDDC: Double(tuning.minDDCOverride),

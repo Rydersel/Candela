@@ -49,6 +49,10 @@ public final class RestoreCoordinator {
     // "no pass before the sober delay" assertion relies on. Do not "fix"
     // this to Task.detached under strict-concurrency friction.
     Task { [weak self] in
+      // The strong ref deliberately pins the coordinator for the chain's
+      // whole duration (~13 s): once a wake chain has started it must run to
+      // completion, not evaporate mid-way. Safe because AppModel /
+      // StatusItemController own the coordinator for the app's lifetime.
       guard let self else { return }
       try? await Task.sleep(for: self.soberDelay)
       for _ in 0 ..< self.repeatCount {

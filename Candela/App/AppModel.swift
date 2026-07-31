@@ -134,14 +134,18 @@ final class AppModel {
   /// output can set its own volume (or name-matching finds no display).
   var tapConfig: MediaKeyEventTap.WatchConfig {
     var watched: Set<MediaKey> = displays.isEmpty ? [] : [.brightnessUp, .brightnessDown]
+    // One snapshot of the default output for both consumers: read twice, a
+    // device change landing between them could arm the tap on an inconsistent
+    // pair (match count from one device, routing verdict from another).
+    let device = audioDevices.defaultOutputDevice()
     if AudioRoutingPolicy.shouldWatchVolumeKeys(
       mode: volumeMode,
       // Fork getDdcCapableDisplays (= !isSw(), review R5): forceSoftware
       // displays don't count — a rig whose only external is forceSoftware
       // releases the volume keys to macOS.
       ddcDisplaysExist: !ddcCapableStates().isEmpty,
-      matchingDisplayCount: audioMatchingDisplays().count,
-      defaultOutput: audioDevices.defaultOutputDevice()
+      matchingDisplayCount: audioMatchingDisplays(for: device).count,
+      defaultOutput: device
     ) {
       watched.formUnion([.volumeUp, .volumeDown, .mute])
     }
@@ -164,7 +168,14 @@ final class AppModel {
   /// fork's stale audioControlTargetDisplays cache (D4). Pool = DDC-capable
   /// only (fork getDdcCapableDisplays, R5).
   func audioMatchingDisplays() -> [DisplayState] {
-    guard let device = audioDevices.defaultOutputDevice() else { return [] }
+    audioMatchingDisplays(for: audioDevices.defaultOutputDevice())
+  }
+
+  /// Same rule against a caller-supplied device snapshot — lets `tapConfig`
+  /// evaluate the match count and the routing verdict against one and the
+  /// same default output.
+  private func audioMatchingDisplays(for device: AudioOutputDevice?) -> [DisplayState] {
+    guard let device else { return [] }
     return ddcCapableStates().filter { state in
       AudioRoutingPolicy.displayMatchesDevice(
         deviceName: device.name,
@@ -343,8 +354,12 @@ final class AppModel {
       await state.controller.refreshFromHardware()
       // Kept displays re-read volume/contrast too (spec-coverage F2 — the
       // fork re-reads every command on every display rebuild); both are
-      // gated no-ops unless startupAction == .read.
+      // gated no-ops unless startupAction == .read. Same drain-before-read
+      // shape as the brightness leg above — a queued coalescer write must not
+      // land after the read has already adopted the pre-write hardware value.
+      await state.volume.waitForPendingWrites()
       await state.volume.refreshFromHardware()
+      await state.contrast.waitForPendingWrites()
       await state.contrast.refreshFromHardware()
     }
     // Resync the built-in from its native read (cheap; a freshly created

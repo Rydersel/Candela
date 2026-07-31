@@ -136,8 +136,11 @@ final class KeyActionExecutor {
     case .allScreens:
       return model.keyEnabledStates(model.displays)
     case .audioDeviceNameMatching:
-      // Zero matches never falls back — the tap rule already released the
-      // keys to macOS in that state (fork parity).
+      // Zero matches never falls back (fork parity). Two states reach here:
+      // the tap released the keys to macOS (default output can set its own
+      // volume), OR the keys stay watched with a nil default output — the
+      // tap rule can't distinguish that from "not yet routed" — and the
+      // empty match set swallows the press.
       return model.keyEnabledStates(model.audioMatchingDisplays())
     case .mouse:
       let ids = Self.pointerDisplayID().map(Self.expandToMirrorSet) ?? []

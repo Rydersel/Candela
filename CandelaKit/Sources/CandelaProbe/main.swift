@@ -76,6 +76,13 @@ func requireOnlineDisplays() {
   exit(1)
 }
 
+/// Hex VCP code parser that tolerates the `0x` prefix this tool itself prints
+/// (`String(format: "0x%02x", …)`), so its own output pastes back in.
+func parseHexByte(_ text: String) -> UInt8? {
+  let body = text.hasPrefix("0x") || text.hasPrefix("0X") ? String(text.dropFirst(2)) : text
+  return UInt8(body, radix: 16)
+}
+
 /// Generic DDC read/write over `found`, shared by volume/contrast/mute/vcp.
 func ddcGet(code: UInt8, label: String) async {
   requireDDCDisplays()
@@ -121,11 +128,7 @@ case "list", nil:
     print("\(entry.display.id)\t\(entry.display.name)")
   }
 case "get":
-  requireDDCDisplays()
-  for entry in found {
-    let result = await entry.writer.read(command: VCP.brightness)
-    print("\(entry.display.name): \(result.map { "\($0.current)/\($0.max)" } ?? "read failed")")
-  }
+  await ddcGet(code: VCP.brightness, label: "brightness")
 case "set":
   requireDDCDisplays()
   guard arguments.count == 2, let value = UInt16(arguments[1]) else {
@@ -312,13 +315,13 @@ case "vcp":
   // Fully generic prober — the escape hatch for remap experiments.
   switch arguments.count > 1 ? arguments[1] : nil {
   case "get":
-    guard arguments.count == 3, let code = UInt8(arguments[2], radix: 16) else {
+    guard arguments.count == 3, let code = parseHexByte(arguments[2]) else {
       print("usage: candela-probe vcp get <hex code>")
       exit(2)
     }
     await ddcGet(code: code, label: String(format: "0x%02x", code))
   case "set":
-    guard arguments.count == 4, let code = UInt8(arguments[2], radix: 16), let value = UInt16(arguments[3]) else {
+    guard arguments.count == 4, let code = parseHexByte(arguments[2]), let value = UInt16(arguments[3]) else {
       print("usage: candela-probe vcp set <hex code> <0-65535>")
       exit(2)
     }
@@ -335,7 +338,13 @@ case "audio":
   let provider = CoreAudioDeviceProvider()
   if let device = provider.defaultOutputDevice() {
     print("default output: \(device.name) [\(device.id)] canSetOwnVolume=\(device.canSetOwnVolume)")
-    print("volume keys would be \(device.canSetOwnVolume ? "RELEASED to macOS" : "WATCHED by Candela") outside name-matching mode")
+    // The real tap rule checks ddcDisplaysExist FIRST, so with no DDC-capable
+    // display the keys stay with macOS whatever the device reports.
+    if found.isEmpty {
+      print("volume keys stay with macOS regardless: no DDC-capable displays\(filterNote)")
+    } else {
+      print("volume keys would be \(device.canSetOwnVolume ? "RELEASED to macOS" : "WATCHED by Candela") outside name-matching mode")
+    }
   } else {
     print("no default output device")
   }

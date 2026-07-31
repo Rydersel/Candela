@@ -768,6 +768,11 @@ public final class BrightnessController {
   /// pass's brightness leg). Routed through `applyPaths`, not a bare submit,
   /// so the echo slot stays honest for the poller; the software leg re-apply
   /// dedupes to a no-op.
+  ///
+  /// Deliberately NOT gated on `hasStoredValue` — the R4 gate lives in
+  /// `AppModel.performRestorePass`, which must skip this call for a display
+  /// whose published value is still the assumed 1.0 default over an empty
+  /// store.
   public func reassertHardware() {
     applyPaths(brightness)
   }

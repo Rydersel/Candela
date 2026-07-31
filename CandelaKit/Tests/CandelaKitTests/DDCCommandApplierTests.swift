@@ -41,10 +41,15 @@ struct DDCCommandApplierTests {
     // A false from ANY fanned-out code must surface as a failed apply: the
     // coalescer records its duplicate memo only on success, so a partial
     // fan-out failure must not suppress the retry (test-design F8).
-    let fake = PartialFailDDC(failingCommand: 0x2F)
+    //
+    // The FIRST code fails on purpose: with the last code failing, an
+    // accidental short-circuit (`allOK && await write`) would still pass both
+    // assertions. Failing 0x10 pins BOTH halves of the contract — the failure
+    // propagates AND the fan-out continues to 0x2F.
+    let fake = PartialFailDDC(failingCommand: 0x10)
     let applier = DDCCommandApplier(writer: fake, command: VCP.contrast, remapCodes: [0x10, 0x2F])
     #expect(await applier.apply(.ddc(raw: 7)) == false)
-    #expect(await fake.recordedWrites().count == 2) // still attempts every code
+    #expect(await fake.recordedWrites().map(\.command) == [0x10, 0x2F]) // no short-circuit past the failure
   }
 }
 

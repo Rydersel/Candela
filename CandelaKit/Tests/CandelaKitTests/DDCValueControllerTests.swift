@@ -76,6 +76,38 @@ struct DDCValueControllerTests {
     func recordedWrites() -> [(command: UInt8, value: UInt16)] { writes }
   }
 
+  /// Scripted reads plus a hook fired DURING a chosen read — the seam that
+  /// lets a test land user input inside `refreshFromHardware`'s value loop
+  /// (the F2 mute-generation regression pin).
+  private actor HookedScriptedDDC: DDCWriting {
+    private(set) var readCount = 0
+    private var reads: [(current: UInt16, max: UInt16)?]
+    private var hookAfterRead: Int
+    private var hook: (@Sendable () async -> Void)?
+    private(set) var writes: [(command: UInt8, value: UInt16)] = []
+
+    init(reads: [(current: UInt16, max: UInt16)?], hookAfterRead: Int) {
+      self.reads = reads
+      self.hookAfterRead = hookAfterRead
+    }
+
+    func setHook(_ hook: @escaping @Sendable () async -> Void) { self.hook = hook }
+
+    func write(command: UInt8, value: UInt16) async -> Bool {
+      writes.append((command, value))
+      return true
+    }
+
+    func read(command _: UInt8) async -> (current: UInt16, max: UInt16)? {
+      readCount += 1
+      let result = reads.isEmpty ? nil : reads.removeFirst()
+      if readCount == hookAfterRead, let hook { await hook() }
+      return result
+    }
+
+    func recordedWrites() -> [(command: UInt8, value: UInt16)] { writes }
+  }
+
   // MARK: - Seeding
 
   @Test func volumeSeedsTheForkDefaultOfTwelvePointFivePercent() {
@@ -425,6 +457,29 @@ struct DDCValueControllerTests {
     #expect(harness.controller.value == 0.5)
     #expect(harness.store.savedBrightness(for: "volume.pk") == 0.5)
     #expect(harness.controller.isMuted)
+  }
+
+  @Test func muteLandingDuringTheValueReadBailsTheMuteReadback() async {
+    // Fix round 1 F2 regression pin: the mute generation is captured BEFORE
+    // the value read loop. A `toggleMute` landing mid-value-read bumps that
+    // generation, so the 0x8D readback pass must recognise the user's fresh
+    // mute as newer and bail. Sink the capture below the value loop and the
+    // capture already includes the bump — the readback's (current: 2) then
+    // clobbers the fresh mute back to unmuted and this test goes red.
+    let scripted = HookedScriptedDDC(
+      reads: [(current: 50, max: 100), (current: 2, max: 2)], // value read, then 0x8D says "unmuted"
+      hookAfterRead: 1
+    )
+    let harness = Harness(command: .volume, savedValue: 0.5, writer: scripted) { prefs in
+      prefs.startupAction = .read
+      prefs.enableMuteUnmute = true // wire mode: toggleMute touches the mute coalescer only
+    }
+    let controller = harness.controller
+    await scripted.setHook { await MainActor.run { _ = controller.toggleMute() } }
+    await harness.controller.refreshFromHardware()
+    #expect(await scripted.readCount == 2) // the 0x8D pass DID run — and bailed
+    #expect(harness.controller.isMuted)
+    #expect(harness.prefs.muted)
   }
 
   @Test func minimalPollingReadsExactlyOnce() async {
