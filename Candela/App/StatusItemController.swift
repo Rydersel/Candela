@@ -52,6 +52,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// Sleep/wake observation tokens (block-based observers stay registered
   /// only while retained). Never removed — fork parity, app-lifetime.
   private var sleepWakeObservers: [any NSObjectProtocol] = []
+  /// Startup/wake DDC restore choreography (D5). `startupAction` is app-level
+  /// but read through DisplayPrefs like every other engine pref.
+  private let restoreCoordinator = RestoreCoordinator(
+    startupAction: { DisplayPrefs(persistenceKey: "app").startupAction }
+  )
   private let log = Logger(subsystem: "com.rydersel.Candela", category: "keys")
 
   func applicationDidFinishLaunching(_: Notification) {
@@ -60,6 +65,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // died with a scaled table installed, and capturing that as the baseline
     // would bake the dimming in permanently.
     gammaController.resetAllGamma()
+
+    // D5: the coordinator gates on startupAction internally, so every
+    // launch/reconfigure/wake call site is unconditional.
+    restoreCoordinator.restorePass = { [weak model] in model?.performRestorePass() }
 
     let hostingView = PanelHostingView(rootView: PanelRoot(model: model))
     hostingView.frame.size = hostingView.fittingSize
@@ -93,9 +102,17 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       })
     }
     for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
-      sleepWakeObservers.append(workspaceCenter.addObserver(forName: name, object: nil, queue: nil) { _ in
+      sleepWakeObservers.append(workspaceCenter.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
         displayManager.noteWake()
+        // The observer closure runs off-main; the coordinator is MainActor.
+        Task { @MainActor in self?.restoreCoordinator.noteWake() }
       })
+    }
+
+    // Re-arm volume keys when the default output device changes (D4). The
+    // handler fires on the CoreAudio listener queue; hop to main for the tap.
+    model.audioDevices.setOnDefaultOutputChange { [weak self] in
+      Task { @MainActor in self?.refreshTapConfig() }
     }
 
     // Topology consumption loop — the stream's single consumer: after each
@@ -107,6 +124,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         guard let self else { return }
         let departed = await self.model.refresh()
         self.refreshTapConfig()
+        // D5: a reconfigure pass restores once (the wake repeat chain, when
+        // one is running, keeps re-asserting on its own schedule).
+        self.restoreCoordinator.noteLaunchOrReconfigure()
         self.wireInterferenceHooks()
         // Fork parity: the counter zeroes on every configure so unrelated
         // events across a long session never add up to an offer.
@@ -139,7 +159,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     let tap = MediaKeyEventTap { press in
       Task { @MainActor in
         let config = KeyRouterConfig(
-          useFineScaleBrightness: UserDefaults.standard.bool(forKey: "useFineScaleBrightness")
+          useFineScaleBrightness: UserDefaults.standard.bool(forKey: "useFineScaleBrightness"),
+          useFineScaleVolume: UserDefaults.standard.bool(forKey: "useFineScaleVolume")
         )
         // isFresh separates a fresh press from key-repeat for the engine.
         executor.execute(KeyRouter.route(press, config: config), isFresh: !press.isRepeat)
@@ -168,15 +189,30 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       await model.refresh()
       refreshTapConfig()
       wireInterferenceHooks()
+      restoreCoordinator.noteLaunchOrReconfigure()
     }
   }
 
-  /// Review M24: remove software dimming at quit — otherwise the display
-  /// stays dark with nothing left running to undo it. The DDC register stays
-  /// at its last level (truthful contract; full hardware restore is M4).
+  /// Review M24 + D5: remove software dimming, then hand the DDC register the
+  /// full-range equivalent of the published brightness so the monitor is not
+  /// left at a combined-mode DDC floor.
   func applicationWillTerminate(_: Notification) {
     gammaController.resetAllGamma()
     shadeOverlay.removeAllShades()
+    for state in model.displays {
+      // Quitting while DisplayManager is suspended (mid-reconfigure or
+      // asleep) silently drops this at the epoch gate — acceptable:
+      // best-effort is the D5 contract (concurrency flag-8 note).
+      state.controller.restoreFullRangeDDC()
+    }
+    // Best-effort barrier (planner flag 8, endorsed): the coalescer drains on
+    // the global executor, so a short main-thread nap gives the ~20 ms/display
+    // DDC transactions time to land before exit. Awaiting the main-actor
+    // waiters here would deadlock (terminate is synchronous on main).
+    // `.terminateLater` + async drain is the recorded M5 cleanup.
+    if !model.displays.isEmpty {
+      Thread.sleep(forTimeInterval: 0.25)
+    }
   }
 
   func menuDidClose(_: NSMenu) {
@@ -212,7 +248,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
           // software dedupe memo (which `setBrightness` alone would trip over,
           // the value being unchanged) and re-runs the software leg, now
           // routed to the shade. Async, so this returns to the alert at once.
-          Task { @MainActor in await controller?.handleReconfigure() }
+          // `recapture: false` — the interfering app may own the table right
+          // now, so a baseline capture here would bake its curve in as the
+          // "default"; the next real reconfiguration recaptures.
+          Task { @MainActor in await controller?.handleReconfigure(recapture: false) }
         }
       }
     }

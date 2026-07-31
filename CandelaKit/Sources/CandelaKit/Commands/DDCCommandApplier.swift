@@ -1,0 +1,44 @@
+//  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
+
+import os
+
+private let applierLog = Logger(subsystem: "com.rydersel.Candela", category: "applier")
+
+/// Command-generic DDC applier (D1): carries the VCP byte the write targets,
+/// plus the user's control-code remap — fork `getRemapControlCodes` semantics:
+/// a non-empty remap REPLACES the command, and writes go to EVERY remapped
+/// code (reads use only the first; the read side lives in the controllers).
+/// `DDCBrightnessApplier` stays for the untuned M3 brightness leg.
+public struct DDCCommandApplier: BrightnessApplying {
+  /// Per-instance, not static — same rationale as `DDCBrightnessApplier`.
+  private let mismatchLogged = OSAllocatedUnfairLock(initialState: false)
+  private let writer: any DDCWriting
+  private let command: UInt8
+  private let remapCodes: [UInt8]
+
+  public init(writer: any DDCWriting, command: UInt8, remapCodes: [UInt8] = []) {
+    self.writer = writer
+    self.command = command
+    self.remapCodes = remapCodes
+  }
+
+  public func apply(_ target: HardwareTarget) async -> Bool {
+    guard case let .ddc(raw) = target else {
+      let firstTime = mismatchLogged.withLock { logged -> Bool in
+        if logged { return false }
+        logged = true
+        return true
+      }
+      if firstTime {
+        applierLog.error("DDCCommandApplier received a .native target — path-selection wiring bug")
+      }
+      return false
+    }
+    let codes = remapCodes.isEmpty ? [command] : remapCodes
+    var allOK = true
+    for code in codes {
+      allOK = await writer.write(command: code, value: raw) && allOK
+    }
+    return allOK
+  }
+}

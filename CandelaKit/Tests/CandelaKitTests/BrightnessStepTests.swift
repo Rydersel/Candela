@@ -35,7 +35,9 @@ struct BrightnessStepTests {
 
   @Test func fineStepIsQuarterChiclet() {
     let c = makeController(brightness: 0.5)
-    #expect(c.step(isUp: true, isFine: true) == 0.515625) // 1/64
+    // D3: fine is the shared flat ±0.01 (fork calcNewValue), no longer the
+    // 1/64 grid snap (old expectation: 0.515625).
+    #expect(abs(c.step(isUp: true, isFine: true) - 0.51) < 1e-9)
   }
 
   @Test func clampsAtTop() {

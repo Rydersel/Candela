@@ -28,9 +28,6 @@ public enum DimmingMath {
   /// Software dimming stops at 15% of the panel's output unless the user opts
   /// into zero (fork `.allowZeroSwBrightness`), so it can never blank the screen.
   private static let swLowThreshold: Double = 0.15
-  /// Fixed linear DDC curve for M3. Per-command curve/invert tuning is M4 work;
-  /// `minDDC`/`maxDDC` are already parameters so that arrival is additive.
-  private static let ddcCurveMultiplier: Double = 1.0
 
   // MARK: - Combined-brightness boundary
 
@@ -104,15 +101,25 @@ public enum DimmingMath {
   // MARK: - Stepping
 
   /// One keypress step along the combined 0…1 scale (fork
-  /// `OtherDisplay.calcNewValue` with `half: true`): 32 chiclets, snapping in
-  /// the direction of travel, with a quarter-chiclet bias so a step never lands
-  /// imperceptibly close to where it started. `isFine` is a flat ±0.01.
+  /// `OtherDisplay.calcNewValue` with `half: true`): 32 chiclets.
   public static func stepCombined(current: Double, isUp: Bool, isFine: Bool) -> Double {
+    step(current: current, isUp: isUp, isFine: isFine, chicletCount: combinedChicletCount)
+  }
+
+  /// One keypress step for the plain 16-chiclet commands — volume, contrast,
+  /// and (per D3) brightness's default branch: ceil/floor snap in the
+  /// direction of travel, 25% hysteresis, fine ±0.01 (fork
+  /// `OtherDisplay.calcNewValue`, `half: false`).
+  public static func stepValue(current: Double, isUp: Bool, isFine: Bool) -> Double {
+    step(current: current, isUp: isUp, isFine: isFine, chicletCount: 16)
+  }
+
+  private static func step(current: Double, isUp: Bool, isFine: Bool, chicletCount: Double) -> Double {
     let next: Double
     if isFine {
       next = current + (isUp ? 0.01 : -0.01)
     } else {
-      let chiclet = current * combinedChicletCount
+      let chiclet = current * chicletCount
       // Distance above the next-lower chiclet — `.towardZero`, not nearest.
       let distance = abs(chiclet.rounded(.towardZero) - chiclet)
       var nextFilledChiclet = isUp ? chiclet.rounded(.up) : chiclet.rounded(.down)
@@ -125,30 +132,62 @@ public enum DimmingMath {
       } else if isUp, distance > 1 - chicletDistanceThreshold {
         nextFilledChiclet += 1
       }
-      next = nextFilledChiclet / combinedChicletCount
+      next = nextFilledChiclet / chicletCount
     }
     return clamp01(next)
   }
 
   // MARK: - DDC conversion
 
-  /// A 0…1 DDC portion as a raw register value (fork `convValueToDDC`):
-  /// curve, denormalize into `[minDDC, maxDDC]`, truncate. Truncation (not
-  /// rounding) is the fork's behavior — 0.004 of a 0…100 range is DDC 0.
-  ///
-  /// No volume special case here: M3 is brightness only.
-  public static func valueToDDC(_ v: Double, minDDC: Double, maxDDC: Double) -> UInt16 {
-    let curvedValue = pow(clamp01(v), ddcCurveMultiplier)
-    let deNormalizedValue = (maxDDC - minDDC) * curvedValue + minDDC
-    let bounded = min(max(deNormalizedValue, minDDC), maxDDC)
-    return UInt16(min(max(bounded, 0), Double(UInt16.max)))
+  /// Fork `getCurveMultiplier`: 9-step curve index → exponent. 0 (unset) and 5
+  /// are both linear. Applied `pow(v, m)` on write, `pow(n, 1/m)` on read.
+  public static func curveMultiplier(forIndex index: Int) -> Double {
+    switch index {
+    case 1: return 0.6
+    case 2: return 0.7
+    case 3: return 0.8
+    case 4: return 0.9
+    case 6: return 1.3
+    case 7: return 1.5
+    case 8: return 1.7
+    case 9: return 1.88
+    default: return 1.0
+    }
   }
 
-  /// Inverse of ``valueToDDC(_:minDDC:maxDDC:)`` (fork `convDDCToValue`).
-  public static func ddcToValue(_ raw: UInt16, minDDC: Double, maxDDC: Double) -> Double {
+  /// A 0…1 portion as a raw register value (fork `convValueToDDC`). Order is
+  /// load-bearing (D3): invert → clamp01 → curve → affine [minDDC, maxDDC] →
+  /// clamp → truncating UInt16 (fork behavior: 0.004 of a 0…100 range is DDC
+  /// 0) → optional volume floor. `floorNonZeroToOne` is the fork's "never let
+  /// sound mute accidentally" rule — muting breaks some panels, so a non-zero
+  /// input never produces digital 0.
+  public static func valueToDDC(
+    _ v: Double, minDDC: Double, maxDDC: Double,
+    curve: Double = 1.0, invert: Bool = false, floorNonZeroToOne: Bool = false
+  ) -> UInt16 {
+    var value = v
+    if invert { value = 1 - value }
+    let curvedValue = pow(clamp01(value), curve)
+    let deNormalizedValue = (maxDDC - minDDC) * curvedValue + minDDC
+    let bounded = min(max(deNormalizedValue, minDDC), maxDDC)
+    var raw = UInt16(min(max(bounded, 0), Double(UInt16.max)))
+    if floorNonZeroToOne, v > 0 {
+      raw = max(1, raw)
+    }
+    return raw
+  }
+
+  /// Inverse of ``valueToDDC`` (fork `convDDCToValue`): curve unapplied as
+  /// `pow(n, 1/curve)`, invert last.
+  public static func ddcToValue(
+    _ raw: UInt16, minDDC: Double, maxDDC: Double,
+    curve: Double = 1.0, invert: Bool = false
+  ) -> Double {
     guard maxDDC > minDDC else { return 0 }
     let normalizedValue = (min(max(Double(raw), minDDC), maxDDC) - minDDC) / (maxDDC - minDDC)
-    return clamp01(pow(normalizedValue, 1 / ddcCurveMultiplier))
+    var value = pow(normalizedValue, 1 / curve)
+    if invert { value = 1 - value }
+    return clamp01(value)
   }
 
   private static func clamp01(_ value: Double) -> Double {

@@ -29,9 +29,11 @@ public final class GammaInterferenceMonitor {
   /// (Candela presents asynchronously, so that window is real).
   public private(set) var suspendedForSession = false
 
-  /// Clobber events observed this session. Internal: the offer is the public
-  /// signal, the count is a test seam.
-  private(set) var interferenceCount = 0
+  /// Clobber events per display this session (backlog #5a: one global count
+  /// let N displays trip the threshold on the FIRST real event, and the alert
+  /// named whichever display came third). Internal: the offer is the public
+  /// signal, the counts are a test seam.
+  private(set) var interferenceCounts: [CGDirectDisplayID: Int] = [:]
 
   private var lastVerified: [CGDirectDisplayID: ContinuousClock.Instant] = [:]
 
@@ -63,17 +65,18 @@ public final class GammaInterferenceMonitor {
     lastVerified[displayID] = instant
     guard !gamma.verifyTableIntact(on: displayID) else { return }
 
-    interferenceCount += 1
-    log.info("Gamma table interference on display \(displayID, privacy: .public), event \(self.interferenceCount)")
-    guard interferenceCount >= threshold else { return }
+    interferenceCounts[displayID, default: 0] += 1
+    let count = interferenceCounts[displayID, default: 0]
+    log.info("Gamma table interference on display \(displayID, privacy: .public), event \(count)")
+    guard count >= threshold else { return }
 
     suspendedForSession = true
-    alerts.offerShadeFallback(displayName: displayName) { [weak self] in
+    // No re-arm on accept (backlog #5b, divergence from the fork): re-arming
+    // nags up to once per display on 3+-external rigs. Suspended lasts until
+    // relaunch, exactly like "Not Now" — the accepted display dims through
+    // the shade either way.
+    alerts.offerShadeFallback(displayName: displayName) {
       onSwitchToShade()
-      // Re-arm (fork parity): the accepted display now dims through the shade,
-      // so its hook stops firing — but any *other* display is still watched.
-      self?.interferenceCount = 0
-      self?.suspendedForSession = false
     }
   }
 
@@ -81,7 +84,7 @@ public final class GammaInterferenceMonitor {
   /// so a long session doesn't accumulate unrelated events into an offer.
   /// `suspendedForSession` survives — "Not Now" lasts until relaunch.
   public func resetCounter() {
-    interferenceCount = 0
+    interferenceCounts.removeAll()
     // The tables were reset and re-captured around this event; the next apply
     // deserves a fresh look rather than waiting out a stale throttle window.
     lastVerified.removeAll()

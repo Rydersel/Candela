@@ -1004,6 +1004,141 @@ actor GatedEngageHDR: HDRToggling {
   }
 }
 
+// MARK: - M4 backlog trio (#1, #4, #8)
+
+/// Backlog #1 fixture: fails the first engage, then parks the rollback's
+/// `refreshHDRCaches` inside `supportsHDR` so a newer transition can start
+/// while the failure arm is suspended.
+actor GatedRollbackHDR: HDRToggling {
+  private var failNextSet = true
+  private var enabled = false
+  private var gateArmed = false
+  private var parked: CheckedContinuation<Void, Never>?
+
+  func armGate() { gateArmed = true }
+  func hasParked() -> Bool { parked != nil }
+  func release() {
+    parked?.resume()
+    parked = nil
+  }
+
+  func supportsHDR(displayID _: CGDirectDisplayID) async -> Bool {
+    if gateArmed {
+      gateArmed = false
+      await withCheckedContinuation { parked = $0 }
+    }
+    return true
+  }
+
+  func isHDREnabled(displayID _: CGDirectDisplayID) -> Bool { enabled }
+
+  @discardableResult
+  func setHDR(displayID _: CGDirectDisplayID, enabled: Bool) -> Bool {
+    if enabled, failNextSet {
+      failNextSet = false
+      return false
+    }
+    self.enabled = enabled
+    return true
+  }
+
+  func displaysReconfigured() {}
+}
+
+@MainActor
+@Suite("Backlog #1 — engage-failure re-guard")
+struct EngageFailureReguardTests {
+  @Test func staleRollbackDoesNotReapplyAfterSupersession() async {
+    let suiteName = "com.rydersel.Candela.tests.reguard.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let gated = GatedRollbackHDR()
+    let controller = BrightnessController(
+      writer: FakeDDC(readResult: nil),
+      backends: BrightnessBackends(
+        applierNative: FakeNativeApplier(), hdr: gated, shade: nil, gamma: nil
+      ),
+      prefs: DisplayPrefs(defaults: defaults, persistenceKey: "rg"),
+      displayID: 11
+    )
+    controller.settleDelay = .milliseconds(10)
+    nonisolated(unsafe) var submitCount = 0
+    controller._onSubmit = { _ in submitCount += 1 }
+    await controller.initialHDRRefresh?.value
+
+    await gated.armGate()
+    let first = Task { await controller.setHDRMode(.alwaysOn) } // engage FAILS → rollback parks in refreshHDRCaches
+    #expect(await eventually { await gated.hasParked() })
+    #expect(controller.hdrMode == .off) // rollback already committed pre-park
+
+    // A newer transition supersedes the parked rollback and runs to completion.
+    await controller.setHDRMode(.alwaysOn)
+    #expect(controller.hdrMode == .alwaysOn)
+    #expect(controller.isHDREngaged)
+
+    let countBeforeRelease = submitCount
+    await gated.release()
+    await first.value
+    // Without the re-guard, the stale rollback fires one more applyPaths —
+    // an extra submit against state the newer transition owns.
+    #expect(submitCount == countBeforeRelease)
+  }
+}
+
+@MainActor
+@Suite("Backlog #4 — park-at-s exemption")
+struct ParkExemptionTests {
+  @Test func forceSoftwareDisplayIsExemptFromParkAtS() {
+    // A forceSoftware display's whole [0,1] range is the software leg — the
+    // quit teardown argument for parking does not apply, and parking silently
+    // raises its brightness every launch.
+    let h = Harness(seed: [Harness.storageKey: 0.3]) { prefs, _ in prefs.forceSoftware = true }
+    #expect(h.controller.brightness == 0.3)
+  }
+
+  @Test func combinedDisplayStillParksAtS() {
+    let h = Harness(seed: [Harness.storageKey: 0.3])
+    #expect(h.controller.brightness == 0.5)
+  }
+}
+
+@MainActor
+@Suite("Backlog #8 — settle skipped when HDR already externally live")
+struct AlreadyLiveEngageTests {
+  @Test func alwaysOnWithHDRAlreadyLiveSkipsSetHDRAndSettle() async {
+    let h = Harness(hdrEnabled: true, settle: .milliseconds(50))
+    await h.prime() // mode .off + HDR live: NOT native yet (policy off), no entry work
+    await h.controller.setHDRMode(.alwaysOn)
+    #expect(h.controller.hdrMode == .alwaysOn)
+    #expect(h.controller.isHDREngaged)
+    // The already-live door: no redundant setHDR(true), no transition window.
+    #expect(await h.hdr?.recordedSetCalls().isEmpty == true)
+    #expect(h.controller.isNativeActive())
+    // Entry assert fired through applyPaths → a native submit of the current value.
+    #expect(h.submitted.last == .native(1.0))
+  }
+
+  @Test func alwaysOnWithAStaleLiveCacheFallsThroughToTheRealEngage() async {
+    // Concurrency F3 / review R3: the door trusts cachedHDRActive, but the
+    // user can toggle HDR off in System Settings and click Always On before
+    // the reconfigure-driven cache refresh lands. Committing `.alwaysOn`
+    // without engaging (and with no rollback) would persist a lying mode —
+    // the door must re-check after refreshHDRCaches and fall through to the
+    // normal engage arm.
+    let h = Harness(hdrEnabled: true, settle: .milliseconds(10))
+    await h.prime() // cache: HDR live
+    // External toggle the controller has NOT observed — the cache is now stale.
+    await h.hdr?.setHDR(displayID: Harness.displayID, enabled: false)
+    await h.controller.setHDRMode(.alwaysOn)
+    #expect(h.controller.hdrMode == .alwaysOn)
+    #expect(h.controller.isHDREngaged)
+    #expect(h.controller.isNativeActive())
+    // The fall-through ran the REAL engage: the test's own disable call,
+    // then the controller's setHDR(true).
+    #expect(await h.hdr?.recordedSetCalls() == [false, true])
+  }
+}
+
 /// HDRToggling fake with an independently released gate on EACH direction, so
 /// a test can park an exit transition on its disengage while a later
 /// transition parks on its engage (holding its settle window open).

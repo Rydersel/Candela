@@ -9,7 +9,9 @@ private let applierLog = Logger(subsystem: "com.rydersel.Candela", category: "ap
 /// coalescer's duplicate-skip compares what actually hits hardware,
 /// independent of which applier carries the write.
 public enum HardwareTarget: Sendable, Equatable {
-  /// Raw DDC brightness value (0...maxDDCValue), written to VCP 0x10.
+  /// Raw DDC value (0...maxDDCValue) for the applier's command — brightness
+  /// VCP 0x10 by default, but a remapped or non-brightness command's raw
+  /// rides the same case; the code lives with the writer, not here.
   case ddc(raw: UInt16)
   /// Native Apple-display brightness in 0...1 (DisplayServices).
   case native(Float)

@@ -52,6 +52,8 @@ actor FakeDDC: DDCWriting {
   }
 
   func recordedWrites() async -> [(command: UInt8, value: UInt16)] { writes }
+
+  func setReadResult(_ result: (current: UInt16, max: UInt16)?) { readResult = result }
 }
 
 @MainActor
@@ -91,7 +93,12 @@ actor FakeDDC: DDCWriting {
   await controller.waitForPendingWrites()
   let writes = await fake.recordedWrites()
   #expect(writes.last?.value == 100)
-  #expect(writes.count < 50) // latest-wins coalescing must drop intermediates
+  // No strict `count < 50` bound: when the drain keeps pace with the submit
+  // loop nothing coalesces and 50 writes is legitimate — the old bound
+  // asserted a scheduling race (flaked ~2/14 runs, T12 report). Latest-wins
+  // correctness is the ordered final value, pinned above; the drop behavior
+  // is pinned deterministically by the gated coalescer tests.
+  #expect(writes.count <= 50)
 }
 
 @MainActor
@@ -100,7 +107,10 @@ actor FakeDDC: DDCWriting {
   let controller = makeLegacyPathController(writer: fake)
   await controller.refreshFromHardware()
   #expect(controller.maxDDCValue == 120)
-  #expect(abs(controller.brightness - 0.25) < 0.001)
+  // M4: the read mirrors the write through the tuning's effective max, which
+  // clamps a read max above 100 to the fork's DDC_MAX_DETECT_LIMIT — so 30
+  // maps over [0, 100], not [0, 120] (old pre-tuning expectation: 0.25).
+  #expect(abs(controller.brightness - 0.3) < 0.001)
 }
 
 @MainActor

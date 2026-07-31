@@ -222,4 +222,82 @@ struct DimmingMathTests {
       #expect(isClose(back, percent, accuracy: 1.0 / 100.0))
     }
   }
+
+  // MARK: - M4 per-command conversion (fork convValueToDDC/convDDCToValue)
+
+  @Test func curveTableMatchesTheForkExactly() {
+    let table: [Int: Double] = [1: 0.6, 2: 0.7, 3: 0.8, 4: 0.9, 5: 1.0, 6: 1.3, 7: 1.5, 8: 1.7, 9: 1.88]
+    for (index, multiplier) in table {
+      #expect(DimmingMath.curveMultiplier(forIndex: index) == multiplier)
+    }
+    #expect(DimmingMath.curveMultiplier(forIndex: 0) == 1.0) // unset = linear
+    #expect(DimmingMath.curveMultiplier(forIndex: 42) == 1.0)
+  }
+
+  @Test func valueToDDCAppliesCurveThenAffineMap() {
+    // curve 0.6: pow(0.5, 0.6) ≈ 0.6598 → truncates to 65 on 0…100
+    #expect(DimmingMath.valueToDDC(0.5, minDDC: 0, maxDDC: 100, curve: 0.6) == 65)
+    // curve 1.88: pow(0.5, 1.88) ≈ 0.2718 → 27
+    #expect(DimmingMath.valueToDDC(0.5, minDDC: 0, maxDDC: 100, curve: 1.88) == 27)
+  }
+
+  @Test func valueToDDCInvertsBeforeTheCurve() {
+    // invert → 0.25, then linear on 0…100 → 25
+    #expect(DimmingMath.valueToDDC(0.75, minDDC: 0, maxDDC: 100, invert: true) == 25)
+    // order matters: invert(0.75)=0.25, pow(0.25, 2)=0.0625 → 6 (not pow-then-invert = 43)
+    #expect(DimmingMath.valueToDDC(0.75, minDDC: 0, maxDDC: 100, curve: 2.0, invert: true) == 6)
+  }
+
+  @Test func valueToDDCMapsIntoTheOverrideBand() {
+    #expect(DimmingMath.valueToDDC(0.0, minDDC: 20, maxDDC: 80) == 20)
+    #expect(DimmingMath.valueToDDC(1.0, minDDC: 20, maxDDC: 80) == 80)
+    #expect(DimmingMath.valueToDDC(0.5, minDDC: 20, maxDDC: 80) == 50)
+  }
+
+  @Test func volumeFloorNeverWritesAccidentalDigitalZero() {
+    // "Never let sound to mute accidentally" — fork convValueToDDC
+    #expect(DimmingMath.valueToDDC(0.004, minDDC: 0, maxDDC: 100, floorNonZeroToOne: true) == 1)
+    #expect(DimmingMath.valueToDDC(0.0, minDDC: 0, maxDDC: 100, floorNonZeroToOne: true) == 0)
+    #expect(DimmingMath.valueToDDC(0.004, minDDC: 0, maxDDC: 100) == 0) // truncation without the floor
+  }
+
+  @Test func ddcToValueIsTheInverseWithCurveAndInvert() {
+    #expect(abs(DimmingMath.ddcToValue(65, minDDC: 0, maxDDC: 100, curve: 0.6) - pow(0.65, 1 / 0.6)) < 1e-9)
+    #expect(DimmingMath.ddcToValue(25, minDDC: 0, maxDDC: 100, invert: true) == 0.75)
+    #expect(DimmingMath.ddcToValue(50, minDDC: 0, maxDDC: 0) == 0) // degenerate range guarded, no NaN
+  }
+
+  // MARK: - Shared 16-chiclet step (fork OtherDisplay.calcNewValue, half: false)
+
+  @Test func stepValueCoarseWalksOneChiclet() {
+    #expect(DimmingMath.stepValue(current: 0.5, isUp: true, isFine: false) == 0.5625) // 8/16 → 9/16
+    #expect(DimmingMath.stepValue(current: 0.5, isUp: false, isFine: false) == 0.4375) // 8/16 → 7/16
+  }
+
+  @Test func stepValueSnapsWithTheQuarterChicletHysteresis() {
+    // 0.51 → chiclet 8.16: up ceil→9; down floor 8, distance 0.16 < 0.25 → 7
+    #expect(DimmingMath.stepValue(current: 0.51, isUp: true, isFine: false) == 0.5625)
+    #expect(DimmingMath.stepValue(current: 0.51, isUp: false, isFine: false) == 0.4375)
+    // 0.55 → chiclet 8.8: up distance 0.8 > 0.75 → 10; down floor → 8
+    #expect(DimmingMath.stepValue(current: 0.55, isUp: true, isFine: false) == 0.625)
+    #expect(DimmingMath.stepValue(current: 0.55, isUp: false, isFine: false) == 0.5)
+  }
+
+  @Test func stepValueFineIsFlatPlusMinusPointZeroOne() {
+    #expect(abs(DimmingMath.stepValue(current: 0.5, isUp: true, isFine: true) - 0.51) < 1e-9)
+    #expect(abs(DimmingMath.stepValue(current: 0.5, isUp: false, isFine: true) - 0.49) < 1e-9)
+  }
+
+  @Test func stepValueClampsAtTheRails() {
+    #expect(DimmingMath.stepValue(current: 1.0, isUp: true, isFine: false) == 1.0)
+    #expect(DimmingMath.stepValue(current: 0.0, isUp: false, isFine: false) == 0.0)
+    #expect(DimmingMath.stepValue(current: 0.005, isUp: false, isFine: true) == 0.0)
+  }
+
+  @Test func stepCombinedBehaviorIsUnchangedByTheExtraction() {
+    // Regression pin: 32 chiclets, same hysteresis, same fine step as M3.
+    #expect(DimmingMath.stepCombined(current: 0.5, isUp: true, isFine: false) == 0.53125)
+    #expect(DimmingMath.stepCombined(current: 0.5, isUp: false, isFine: false) == 0.46875)
+    #expect(abs(DimmingMath.stepCombined(current: 0.5, isUp: true, isFine: true) - 0.51) < 1e-9)
+  }
 }

@@ -17,6 +17,9 @@ final class FakeInterferenceGamma: GammaApplying {
 
   var intact = true
   private(set) var events: [Event] = []
+  /// Displays whose baseline table was re-captured, in order — the accept
+  /// path's recapture skip is an absence assertion, so it needs a record.
+  private(set) var recaptured: [CGDirectDisplayID] = []
 
   var verifyCount: Int { events.filter { if case .verify = $0 { return true }; return false }.count }
   var appliedScales: [Double] {
@@ -34,7 +37,7 @@ final class FakeInterferenceGamma: GammaApplying {
     return intact
   }
 
-  func recaptureDefaultTable(on _: CGDirectDisplayID) {}
+  func recaptureDefaultTable(on displayID: CGDirectDisplayID) { recaptured.append(displayID) }
   func resetAllGamma() {}
 }
 
@@ -93,7 +96,7 @@ private struct Fixture {
   let fixture = Fixture()
   fixture.gamma.intact = true
   for _ in 0 ..< 5 { fixture.check() }
-  #expect(fixture.monitor.interferenceCount == 0)
+  #expect(fixture.monitor.interferenceCounts.isEmpty)
   #expect(fixture.alerts.offers.isEmpty)
   #expect(!fixture.monitor.suspendedForSession)
 }
@@ -103,7 +106,7 @@ private struct Fixture {
   let fixture = Fixture()
   fixture.gamma.intact = false
   fixture.check()
-  #expect(fixture.monitor.interferenceCount == 1)
+  #expect(fixture.monitor.interferenceCounts[Fixture.displayID] == 1)
   #expect(fixture.alerts.offers.isEmpty)
   // The monitor itself never writes gamma: the check sits immediately before
   // the apply it guards, so the caller's own write is the re-apply.
@@ -139,7 +142,7 @@ private struct Fixture {
 
   controller.setBrightness(0.5)
 
-  #expect(monitor.interferenceCount == 1)
+  #expect(monitor.interferenceCounts[3] == 1)
   #expect(gamma.events.count == 2)
   #expect(gamma.events.first == .verify(3))
   if case let .apply(scale) = gamma.events.last {
@@ -166,20 +169,71 @@ private struct Fixture {
 }
 
 @MainActor
-@Test func acceptSwitchesToShadeAndRearms() {
-  let fixture = Fixture()
+@Test func perDisplayCountsPreventCrossDisplayThresholdTripping() {
+  // Backlog #5a: N displays clobbering once each must NOT trip threshold 3 —
+  // the alert must name the display that actually earned it.
+  let gamma = FakeInterferenceGamma()
+  let alerts = RecordingAlerts()
+  let monitor = GammaInterferenceMonitor(gamma: gamma, alerts: alerts, threshold: 3)
+  // Defeat the 500 ms per-display verify throttle deterministically: every
+  // `now()` read jumps a full second.
+  nonisolated(unsafe) var tick = ContinuousClock.now
+  monitor.now = {
+    tick += .seconds(1)
+    return tick
+  }
+  gamma.intact = false
+  monitor.checkBeforeApply(displayID: 1, displayName: "One") {}
+  monitor.checkBeforeApply(displayID: 2, displayName: "Two") {}
+  monitor.checkBeforeApply(displayID: 3, displayName: "Three") {}
+  #expect(alerts.offers.isEmpty) // global counter would have fired here
+  #expect(monitor.interferenceCounts[1] == 1)
+  monitor.checkBeforeApply(displayID: 1, displayName: "One") {}
+  monitor.checkBeforeApply(displayID: 1, displayName: "One") {}
+  #expect(alerts.offers.map(\.displayName) == ["One"])
+}
+
+@MainActor
+@Test func acceptDoesNotReArmTheMonitor() {
+  // Backlog #5b: the fork-parity re-arm nags once per display on 3+ rigs.
+  // Candela keeps the session suspended after accept, same as "Not Now".
+  // SUPERSEDES the deleted `acceptSwitchesToShadeAndRearms` (which pinned
+  // the fork's reset-and-re-arm accept); its switch-to-shade assertion is
+  // folded in here.
+  let gamma = FakeInterferenceGamma()
+  let alerts = RecordingAlerts()
+  let monitor = GammaInterferenceMonitor(gamma: gamma, alerts: alerts, threshold: 1)
+  gamma.intact = false
   var switched = 0
-  fixture.gamma.intact = false
-  for _ in 0 ..< 3 { fixture.check { switched += 1 } }
-  #expect(fixture.alerts.offers.count == 1)
+  monitor.checkBeforeApply(displayID: 1, displayName: "One") { switched += 1 }
+  #expect(monitor.suspendedForSession)
+  alerts.acceptLast() // user clicks "Use Shade Dimming"
+  #expect(switched == 1) // the accepted display still switches to the shade
+  #expect(monitor.suspendedForSession) // still suspended — no nag loop
+}
 
-  fixture.alerts.acceptLast()
-
-  #expect(switched == 1)
-  #expect(fixture.monitor.interferenceCount == 0)
-  // Checking re-arms (fork parity) — avoidGamma now keeps this display off the
-  // gamma path anyway, so the hook simply stops firing for it.
-  #expect(!fixture.monitor.suspendedForSession)
+@MainActor
+@Test func acceptPathReconfigureSkipsTheRecapture() async {
+  // progress.md:51 poisoned-baseline amendment: at accept time the
+  // interfering app may own the table — recapturing would bake its curve in
+  // as the "default" and clearSoftwareLeg would later resurface it as a tint.
+  let suiteName = "com.rydersel.Candela.tests.recapture.\(UUID().uuidString)"
+  let defaults = UserDefaults(suiteName: suiteName)!
+  defer { defaults.removePersistentDomain(forName: suiteName) }
+  let gamma = FakeInterferenceGamma()
+  let controller = BrightnessController(
+    writer: FakeDDC(readResult: nil),
+    backends: BrightnessBackends(
+      applierNative: NativeBrightnessApplier(displayID: 5) { _, _ in false },
+      hdr: nil, shade: nil, gamma: gamma
+    ),
+    prefs: DisplayPrefs(defaults: defaults, persistenceKey: "rc"),
+    displayID: 5
+  )
+  await controller.handleReconfigure(recapture: false)
+  #expect(gamma.recaptured.isEmpty)
+  await controller.handleReconfigure() // default keeps the M3 behavior
+  #expect(gamma.recaptured == [5])
 }
 
 @MainActor
@@ -195,7 +249,7 @@ private struct Fixture {
   let readsBefore = fixture.gamma.verifyCount
   fixture.check()
 
-  #expect(fixture.monitor.interferenceCount == 3)
+  #expect(fixture.monitor.interferenceCounts[Fixture.displayID] == 3)
   #expect(fixture.alerts.offers.count == 1)
   #expect(fixture.gamma.verifyCount == readsBefore) // not even a table read
 }
@@ -209,7 +263,7 @@ private struct Fixture {
 
   fixture.monitor.resetCounter()
 
-  #expect(fixture.monitor.interferenceCount == 0)
+  #expect(fixture.monitor.interferenceCounts.isEmpty)
   #expect(fixture.monitor.suspendedForSession)
 }
 
@@ -224,13 +278,13 @@ private struct Fixture {
   fixture.monitor.checkBeforeApply(displayID: 3, displayName: "MAG341C", onSwitchToShade: {})
 
   #expect(fixture.gamma.verifyCount == 1)
-  #expect(fixture.monitor.interferenceCount == 1)
+  #expect(fixture.monitor.interferenceCounts[3] == 1)
 
   fixture.clock.advance(.milliseconds(500))
   fixture.monitor.checkBeforeApply(displayID: 3, displayName: "MAG341C", onSwitchToShade: {})
 
   #expect(fixture.gamma.verifyCount == 2)
-  #expect(fixture.monitor.interferenceCount == 2)
+  #expect(fixture.monitor.interferenceCounts[3] == 2)
 }
 
 @MainActor
