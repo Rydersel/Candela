@@ -43,7 +43,9 @@ struct SettingsRootView: View {
       // hidden (`titleVisibility`), which keeps the window named for the
       // Window menu and accessibility without drawing a second copy.
       detail
-        .background(.background)
+        // The Form paints an opaque grouped background of its own; hidden, so
+        // the window's material is what shows behind the section cards.
+        .scrollContentBackground(.hidden)
         .toolbar {
           // macOS 26 gives toolbar items the Liquid Glass capsule it gives
           // CONTROLS, which drew a pill around the title. A title is not a
@@ -74,6 +76,7 @@ struct SettingsRootView: View {
       minWidth: 720, idealWidth: 900, maxWidth: .infinity,
       minHeight: 480, idealHeight: 560, maxHeight: .infinity
     )
+    .glassWindowBackground()
     .background(SettingsWindowConfigurator(title: currentTitle))
     // A destination for an absent display must never render, so a display that
     // is unplugged while selected drops the selection back to a pane. Keyed on

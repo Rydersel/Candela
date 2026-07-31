@@ -100,7 +100,10 @@ struct SettingsSidebar: View {
     // The cost is arrow-key navigation between rows, which a `List` gave for
     // free. Each row is a focusable button, so the sidebar stays reachable and
     // operable by keyboard via Tab and Space.
-    .glassSurface(cornerRadius: 12)
+    // No surface of its own: the WHOLE window is the material now (see
+    // `glassWindowBackground`), so a second glass layer here would stack two
+    // translucencies and put the sidebar card back.
+    //
     // A settings window has exactly one navigation surface, and collapsing it
     // leaves a detail pane you cannot navigate out of. `NavigationSplitView`
     // adds the toggle by default, which parks a stray button in the toolbar.

@@ -38,4 +38,24 @@ extension View {
   func glassSurface(cornerRadius: CGFloat = 10) -> some View {
     modifier(GlassSurface(cornerRadius: cornerRadius))
   }
+
+  /// Makes the whole WINDOW translucent, rather than one surface inside it.
+  ///
+  /// This is the supported route. Inserting an `NSVisualEffectView` into the
+  /// window's content view and clearing the window background does not work —
+  /// tried, and it rendered the window empty, because `NavigationSplitView`
+  /// owns its column backgrounds and does not composite over a hand-inserted
+  /// backing view.
+  ///
+  /// `containerBackground(_:for: .window)` is macOS 15+, so 14.0 keeps its
+  /// ordinary opaque window. That is a degradation, not a broken state: the
+  /// window simply looks like it did before Liquid Glass existed.
+  @ViewBuilder
+  func glassWindowBackground() -> some View {
+    if #available(macOS 15.0, *) {
+      containerBackground(.ultraThinMaterial, for: .window)
+    } else {
+      self
+    }
+  }
 }
