@@ -16,7 +16,9 @@ import Foundation
 /// into a real defaults domain, which is exactly the failure this class
 /// exists to prevent. Each instance is an isolated store, so tests need no
 /// unique suite names and no cleanup at all.
-final class InMemoryDefaults: UserDefaults, @unchecked Sendable {
+/// Not `final`: tests subclass this to spy on writes, which is the only way to
+/// tell "wrote nothing" apart from "rewrote the same value".
+class InMemoryDefaults: UserDefaults, @unchecked Sendable {
   private let lock = NSLock()
   private var storage: [String: Any] = [:]
 
