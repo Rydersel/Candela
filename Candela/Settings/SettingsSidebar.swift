@@ -69,6 +69,14 @@ struct SettingsSidebar: View {
       }
     }
     .listStyle(.sidebar)
+    // On macOS 26 the sidebar's hosting view is inset inside its column —
+    // measured at 200×472 within a 208×512 wrapper — which is the floating
+    // sidebar treatment. With the list drawing its own material inside that
+    // inset, the result is a visible rounded card hovering inside the window,
+    // most obvious in dark mode. Hiding the list's background removes the card
+    // edge and lets the window's own surface run behind the rows; the inset
+    // stays, but with nothing filling it there is no floating panel to see.
+    .scrollContentBackground(.hidden)
     // A settings window has exactly one navigation surface, and collapsing it
     // leaves a detail pane you cannot navigate out of. `NavigationSplitView`
     // adds the toggle by default, which parked a stray button in the middle of
@@ -106,8 +114,14 @@ struct SettingsSidebar: View {
           .frame(height: 3)
           .overlay(alignment: .leading) {
             GeometryReader { geo in
+              // Monochrome, not the accent. The selection pill is already
+              // accent-coloured, and an accent bar on every row made the
+              // sidebar read as several competing highlights rather than one
+              // selection plus some levels. Neutral fill also keeps the bar
+              // legible on the selected row, where an accent-on-accent bar
+              // nearly vanished.
               Capsule()
-                .fill(.tint)
+                .fill(.secondary)
                 .frame(width: geo.size.width * min(max(controller.brightness, 0), 1))
             }
           }
