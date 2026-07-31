@@ -9,10 +9,10 @@ struct CandelaApp: App {
   @NSApplicationDelegateAdaptor(StatusItemController.self) private var statusItemController
 
   var body: some Scene {
-    // A SwiftUI App must declare at least one scene. Settings is inert for an
-    // LSUIElement app until the settings UI arrives (Milestone 5).
     Settings {
-      EmptyView()
+      SettingsRootView()
+        .environment(statusItemController.model)
+        .environment(statusItemController.settingsActions)
     }
   }
 }

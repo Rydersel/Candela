@@ -140,7 +140,10 @@ struct PanelView: View {
   private var footer: some View {
     HStack {
       Spacer()
-      FooterIconButton(systemImage: "xmark.circle", help: "Quit Candela") {
+      FooterIconButton(systemImage: "gearshape", help: "Settings…") {
+        SettingsOpener.open()
+      }
+      FooterIconButton(systemImage: "xmark.circle", help: "Quit \(AppInfo.productName)") {
         NSApplication.shared.terminate(nil)
       }
     }

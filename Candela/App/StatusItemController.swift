@@ -93,6 +93,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     item.menu = menu
     statusItem = item
 
+    // The panel's gear button lives inside this menu's tracking session and
+    // must end it before a window can take focus (see SettingsOpener).
+    SettingsOpener.statusMenu = menu
+
     // Reconfiguration intake: synchronous registration on the main thread is
     // load-bearing — CG delivers the callback on the registering thread's
     // run loop, and only the main thread has one that lives forever.
@@ -229,6 +233,14 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     if !model.displays.isEmpty {
       Thread.sleep(forTimeInterval: 0.25)
     }
+  }
+
+  /// Dock-less reopen (double-clicking the app in Finder, `open -a`): with no
+  /// window to restore there is nothing for AppKit to do, so route it to
+  /// Settings — never to onboarding, which is a first-run flow.
+  func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows _: Bool) -> Bool {
+    SettingsOpener.open()
+    return false
   }
 
   func menuDidClose(_: NSMenu) {
