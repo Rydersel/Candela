@@ -27,9 +27,20 @@ struct SettingsRootView: View {
     } detail: {
       detail
     }
-    // Resizable, replacing the fork-era fixed `.frame(width: 620)`. The
-    // minimum keeps the sidebar and a grouped form from crushing each other.
-    .frame(minWidth: 720, minHeight: 480)
+    // Replaces the fork-era fixed `.frame(width: 620)`.
+    //
+    // The maxima are load-bearing, not decoration: a bare `minWidth/minHeight`
+    // pair leaves the content's ideal size as its maximum too, and the window
+    // then refuses to grow OR shrink — measured at a hard 900×512 in both
+    // directions. `.infinity` is what actually makes it resizable, and the
+    // scene needs `.windowResizability(.contentMinSize)` to agree (see
+    // CandelaApp). The minimum keeps the sidebar and a grouped form from
+    // crushing each other.
+    .frame(
+      minWidth: 720, idealWidth: 900, maxWidth: .infinity,
+      minHeight: 480, idealHeight: 560, maxHeight: .infinity
+    )
+    .background(SettingsWindowConfigurator())
     // A destination for an absent display must never render, so a display that
     // is unplugged while selected drops the selection back to a pane. Keyed on
     // persistence keys, not display IDs: an ID changes across a replug and
@@ -68,6 +79,38 @@ struct SettingsRootView: View {
   private var generalFallback: some View {
     SettingsRegistry.descriptor(for: .general).content()
       .navigationTitle("General")
+  }
+}
+
+/// Adds the `.resizable` style mask that a `Settings` scene omits.
+///
+/// No SwiftUI modifier restores it: `.windowResizability(.contentMinSize)` on
+/// the scene plus an `.infinity` content frame both leave the zoom button
+/// disabled and the window pinned — measured at a hard 900×512, immovable in
+/// either direction. A fixed size was tolerable for a stack of tabs; it is not
+/// for a split view whose panes differ in height, where the window keeps
+/// whatever size the pane it first opened on happened to want.
+///
+/// This hangs off the view rather than off `SettingsOpener` deliberately.
+/// ⌘, does NOT go through `SettingsOpener` — it is delivered straight to
+/// SwiftUI's own menu item — so a fix installed on the open path only works
+/// when the window is opened from the panel's gear. Attaching it to the view
+/// makes it independent of how the window came to exist.
+private struct SettingsWindowConfigurator: NSViewRepresentable {
+  func makeNSView(context _: Context) -> NSView {
+    let view = NSView(frame: .zero)
+    // The view is not in a window yet during `makeNSView`.
+    DispatchQueue.main.async { configure(view.window) }
+    return view
+  }
+
+  func updateNSView(_ view: NSView, context _: Context) {
+    DispatchQueue.main.async { configure(view.window) }
+  }
+
+  private func configure(_ window: NSWindow?) {
+    guard let window, !window.styleMask.contains(.resizable) else { return }
+    window.styleMask.insert(.resizable)
   }
 }
 
