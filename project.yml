@@ -2,9 +2,13 @@ name: Candela
 packages:
   CandelaKit:
     path: CandelaKit
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    from: 3.0.1
 options:
   deploymentTarget:
     macOS: "14.0"
+  developmentLanguage: en
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -19,6 +23,7 @@ targets:
     sources: [Candela]
     dependencies:
       - package: CandelaKit
+      - package: KeyboardShortcuts
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rydersel.Candela

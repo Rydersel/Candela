@@ -52,6 +52,43 @@ public enum MultiKeyboardVolume: Int, Sendable, CaseIterable {
   case audioDeviceNameMatching = 2
 }
 
+/// Menu-bar icon visibility (fork MenuIcon). Raw values are the fork's —
+/// `externalOnly` was appended later as 3, so RAW ORDER ≠ UI ORDER; pickers
+/// must list cases explicitly (D5).
+public enum MenuIcon: Int, Sendable, CaseIterable {
+  case show = 0
+  case sliderOnly = 1
+  case hide = 2
+  case externalOnly = 3
+}
+
+/// Panel footer style (fork MenuItemStyle).
+///
+/// RESERVED AND INERT (D32): the key exists so the schema slot is claimed and
+/// can never be reused, but no Candela code reads it — Task 5 ships no footer
+/// styles. Task 18 documents it as reserved, never as an escape hatch.
+public enum MenuItemStyle: Int, Sendable, CaseIterable {
+  case icon = 0
+  case text = 1
+  case hide = 2
+}
+
+/// Keyboard mode for one key family (fork KeyboardBrightness/KeyboardVolume —
+/// same raw values, one shared enum).
+public enum KeyMode: Int, Sendable, CaseIterable {
+  case media = 0
+  case custom = 1
+  case both = 2
+  case disabled = 3
+}
+
+/// Which display(s) the brightness keys hit (fork MultiKeyboardBrightness).
+public enum MultiKeyboardBrightness: Int, Sendable, CaseIterable {
+  case mouse = 0
+  case allScreens = 1
+  case focusInsteadOfMouse = 2
+}
+
 /// One command's DDC tuning row (fork: the Displays-pane grid — Enabled /
 /// Min / Max / Curve / Invert / Remap).
 public struct CommandTuning: Sendable, Equatable {
@@ -200,6 +237,30 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("hideVolumeSlider")) }
   }
 
+  /// User-chosen display name; "" = use the hardware name (fork friendlyName).
+  public var friendlyName: String {
+    get { defaults.string(forKey: key("friendlyName")) ?? "" }
+    set { defaults.set(newValue, forKey: key("friendlyName")) }
+  }
+
+  /// Per-display hide: the panel skips this display's section entirely
+  /// (spec §2 "per-display hide" — the fork never shipped the control; D7).
+  public var hideDisplay: Bool {
+    get { defaults.bool(forKey: key("hideDisplay")) }
+    set { defaults.set(newValue, forKey: key("hideDisplay")) }
+  }
+
+  /// Fork longerDelay: slower-paced DDC reads.
+  ///
+  /// RESERVED AND INERT (D26 CORRECTION / D32): the key exists so the schema
+  /// slot is claimed, but NOTHING in Candela reads it — the paced-read plumbing
+  /// was never ported, and D26 cut both the control and the fork's
+  /// start-at-login safety interlock. Task 18 documents it as reserved.
+  public var longerDelay: Bool {
+    get { defaults.bool(forKey: key("longerDelay")) }
+    set { defaults.set(newValue, forKey: key("longerDelay")) }
+  }
+
   /// Manual override for the panel's audio-sink detection, in both directions
   /// (see `AudioSinkOverride`). Unknown raw values fall back to `.auto`, so a
   /// stray write can never strand the slider in a state the user cannot undo.
@@ -293,6 +354,92 @@ public final class DisplayPrefs: @unchecked Sendable {
   public var multiKeyboardVolume: MultiKeyboardVolume {
     get { MultiKeyboardVolume(rawValue: defaults.integer(forKey: "multiKeyboardVolume")) ?? .mouse }
     set { defaults.set(newValue.rawValue, forKey: "multiKeyboardVolume") }
+  }
+
+  public var menuIcon: MenuIcon {
+    get { MenuIcon(rawValue: defaults.integer(forKey: "menuIcon")) ?? .show }
+    set { defaults.set(newValue.rawValue, forKey: "menuIcon") }
+  }
+
+  /// Reserved and inert — see `MenuItemStyle` (D32).
+  public var menuItemStyle: MenuItemStyle {
+    get { MenuItemStyle(rawValue: defaults.integer(forKey: "menuItemStyle")) ?? .icon }
+    set { defaults.set(newValue.rawValue, forKey: "menuItemStyle") }
+  }
+
+  public var keyboardBrightness: KeyMode {
+    get { KeyMode(rawValue: defaults.integer(forKey: "keyboardBrightness")) ?? .media }
+    set { defaults.set(newValue.rawValue, forKey: "keyboardBrightness") }
+  }
+
+  public var keyboardVolume: KeyMode {
+    get { KeyMode(rawValue: defaults.integer(forKey: "keyboardVolume")) ?? .media }
+    set { defaults.set(newValue.rawValue, forKey: "keyboardVolume") }
+  }
+
+  public var multiKeyboardBrightness: MultiKeyboardBrightness {
+    get { MultiKeyboardBrightness(rawValue: defaults.integer(forKey: "multiKeyboardBrightness")) ?? .mouse }
+    set { defaults.set(newValue.rawValue, forKey: "multiKeyboardBrightness") }
+  }
+
+  /// Reserved and inert (D32): nothing renders tick marks — Task 6 ships none.
+  public var showTickMarks: Bool {
+    get { defaults.bool(forKey: "showTickMarks") }
+    set { defaults.set(newValue, forKey: "showTickMarks") }
+  }
+
+  public var enableSliderSnap: Bool {
+    get { defaults.bool(forKey: "enableSliderSnap") }
+    set { defaults.set(newValue, forKey: "enableSliderSnap") }
+  }
+
+  public var enableSliderPercent: Bool {
+    get { defaults.bool(forKey: "enableSliderPercent") }
+    set { defaults.set(newValue, forKey: "enableSliderPercent") }
+  }
+
+  /// Hide the built-in display's panel section (Candela's positive-default
+  /// equivalent of the fork's dead hideAppleFromMenu — the filter WORKS here, D2).
+  public var hideBuiltInDisplay: Bool {
+    get { defaults.bool(forKey: "hideBuiltInDisplay") }
+    set { defaults.set(newValue, forKey: "hideBuiltInDisplay") }
+  }
+
+  // Folded raw app-level keys (previously read straight off UserDefaults.standard
+  // in AppModel/StatusItemController — key strings are shipped schema, unchanged).
+
+  public var enableBrightnessSync: Bool {
+    get { defaults.bool(forKey: "enableBrightnessSync") }
+    set { defaults.set(newValue, forKey: "enableBrightnessSync") }
+  }
+
+  public var useFineScaleBrightness: Bool {
+    get { defaults.bool(forKey: "useFineScaleBrightness") }
+    set { defaults.set(newValue, forKey: "useFineScaleBrightness") }
+  }
+
+  public var useFineScaleVolume: Bool {
+    get { defaults.bool(forKey: "useFineScaleVolume") }
+    set { defaults.set(newValue, forKey: "useFineScaleVolume") }
+  }
+
+  /// INVERTED on disk (fork key). UI binds through
+  /// `interceptAlternateBrightnessKeys` below (D1).
+  public var disableAltBrightnessKeys: Bool {
+    get { defaults.bool(forKey: "disableAltBrightnessKeys") }
+    set { defaults.set(newValue, forKey: "disableAltBrightnessKeys") }
+  }
+
+  // D1 binding-layer positives: checked-in-UI == true here == "off" on disk.
+
+  public var combinedBrightness: Bool {
+    get { !disableCombinedBrightness }
+    set { disableCombinedBrightness = !newValue }
+  }
+
+  public var interceptAlternateBrightnessKeys: Bool {
+    get { !disableAltBrightnessKeys }
+    set { disableAltBrightnessKeys = !newValue }
   }
 
   private func key(_ name: String) -> String {

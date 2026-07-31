@@ -299,4 +299,183 @@ struct DisplayPrefsTests {
       #expect(prefs.tuning(for: .contrast) == tuning)
     }
   }
+
+  // MARK: - M5 settings schema
+
+  @Test func m5PerDisplayKeysComposeAndDefault() {
+    let d = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: d, persistenceKey: "PK")
+    #expect(prefs.friendlyName == "")
+    #expect(!prefs.hideDisplay)
+    #expect(!prefs.longerDelay)
+    prefs.friendlyName = "Desk"
+    prefs.hideDisplay = true
+    prefs.longerDelay = true
+    // 1. setter key strings
+    #expect(d.string(forKey: "friendlyName.PK") == "Desk")
+    #expect(d.bool(forKey: "hideDisplay.PK"))
+    #expect(d.bool(forKey: "longerDelay.PK"))
+    // 2. the getter reads the SAME key
+    #expect(prefs.friendlyName == "Desk")
+    #expect(prefs.hideDisplay)
+    #expect(prefs.longerDelay)
+    // 3. a fresh instance sees them (no in-object memoization)
+    let reread = DisplayPrefs(defaults: d, persistenceKey: "PK")
+    #expect(reread.friendlyName == "Desk")
+    #expect(reread.hideDisplay)
+    #expect(reread.longerDelay)
+    // and they do not bleed across displays
+    let other = DisplayPrefs(defaults: d, persistenceKey: "OTHER")
+    #expect(other.friendlyName == "")
+    #expect(!other.hideDisplay)
+  }
+
+  @Test func m5AppLevelKeysAreUnsuffixedWithForkDefaults() {
+    let d = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: d, persistenceKey: "irrelevant")
+    #expect(prefs.menuIcon == .show)
+    #expect(prefs.menuItemStyle == .icon)
+    #expect(prefs.keyboardBrightness == .media)
+    #expect(prefs.keyboardVolume == .media)
+    #expect(prefs.multiKeyboardBrightness == .mouse)
+    #expect(!prefs.showTickMarks)
+    #expect(!prefs.enableSliderSnap)
+    #expect(!prefs.enableSliderPercent)
+    #expect(!prefs.hideBuiltInDisplay)
+
+    prefs.menuIcon = .externalOnly
+    prefs.menuItemStyle = .text
+    prefs.keyboardBrightness = .disabled
+    prefs.keyboardVolume = .custom
+    prefs.multiKeyboardBrightness = .focusInsteadOfMouse
+    prefs.showTickMarks = true
+    prefs.enableSliderSnap = true
+    prefs.enableSliderPercent = true
+    prefs.hideBuiltInDisplay = true
+
+    // 1. setter keys — unsuffixed, raw values as stored
+    #expect(d.integer(forKey: "menuIcon") == 3)
+    #expect(d.integer(forKey: "menuItemStyle") == 1)
+    #expect(d.integer(forKey: "keyboardBrightness") == 3)
+    #expect(d.integer(forKey: "keyboardVolume") == 1)
+    #expect(d.integer(forKey: "multiKeyboardBrightness") == 2)
+    #expect(d.bool(forKey: "showTickMarks"))
+    #expect(d.bool(forKey: "enableSliderSnap"))
+    #expect(d.bool(forKey: "enableSliderPercent"))
+    #expect(d.bool(forKey: "hideBuiltInDisplay"))
+    // no per-display suffix leaked in
+    #expect(d.object(forKey: "menuIcon.irrelevant") == nil)
+
+    // 2 + 3. getters read the same keys, from this instance and a fresh one
+    let reread = DisplayPrefs(defaults: d, persistenceKey: "different-display")
+    for p in [prefs, reread] {
+      #expect(p.menuIcon == .externalOnly)
+      #expect(p.menuItemStyle == .text)
+      #expect(p.keyboardBrightness == .disabled)
+      #expect(p.keyboardVolume == .custom)
+      #expect(p.multiKeyboardBrightness == .focusInsteadOfMouse)
+      #expect(p.showTickMarks)
+      #expect(p.enableSliderSnap)
+      #expect(p.enableSliderPercent)
+      #expect(p.hideBuiltInDisplay)
+    }
+  }
+
+  @Test func unknownStoredRawValuesFallBackRatherThanTrap() {
+    // Raw 0 is a VALID case for three of these four enums, so the default-value
+    // assertions above cannot reach the `?? fallback` at all. D13's downgrade
+    // story (and the retired-HDRMode-raw-1 precedent) rests entirely on it.
+    let d = InMemoryDefaults()
+    for key in ["menuIcon", "menuItemStyle", "keyboardBrightness",
+                "keyboardVolume", "multiKeyboardBrightness"] {
+      d.set(99, forKey: key)
+    }
+    let prefs = DisplayPrefs(defaults: d, persistenceKey: "x")
+    #expect(prefs.menuIcon == .show)
+    #expect(prefs.menuItemStyle == .icon)
+    #expect(prefs.keyboardBrightness == .media)
+    #expect(prefs.keyboardVolume == .media)
+    #expect(prefs.multiKeyboardBrightness == .mouse)
+  }
+
+  @Test func foldedRawKeysKeepTheirExactKeyStrings() {
+    let d = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: d, persistenceKey: "PK")
+    #expect(!prefs.enableBrightnessSync)
+    #expect(!prefs.useFineScaleBrightness)
+    #expect(!prefs.useFineScaleVolume)
+    #expect(!prefs.disableAltBrightnessKeys)
+    prefs.enableBrightnessSync = true
+    prefs.useFineScaleBrightness = true
+    prefs.useFineScaleVolume = true
+    prefs.disableAltBrightnessKeys = true
+    // 1. setter keys — these four are read by name in shipped M1–M4 code
+    // (AppModel.tapConfig, the tap's KeyRouterConfig, the poller fan-out), so a
+    // drift here silently unhooks the engine.
+    #expect(d.bool(forKey: "enableBrightnessSync"))
+    #expect(d.bool(forKey: "useFineScaleBrightness"))
+    #expect(d.bool(forKey: "useFineScaleVolume"))
+    #expect(d.bool(forKey: "disableAltBrightnessKeys"))
+    // 2 + 3. getters agree, from this instance and a fresh one
+    let reread = DisplayPrefs(defaults: d, persistenceKey: "PK")
+    for p in [prefs, reread] {
+      #expect(p.enableBrightnessSync)
+      #expect(p.useFineScaleBrightness)
+      #expect(p.useFineScaleVolume)
+      #expect(p.disableAltBrightnessKeys)
+    }
+  }
+
+  @Test func positiveAccessorsInvertAtTheBindingLayerOnly() {
+    let d = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: d, persistenceKey: "PK")
+    // D1: unset reads as the fork default (ON), stored key stays inverted.
+    #expect(prefs.combinedBrightness)
+    #expect(prefs.interceptAlternateBrightnessKeys)
+
+    prefs.combinedBrightness = false
+    prefs.interceptAlternateBrightnessKeys = false
+    #expect(d.bool(forKey: "disableCombinedBrightness"))
+    #expect(d.bool(forKey: "disableAltBrightnessKeys"))
+    #expect(!prefs.combinedBrightness) // read back through the positive
+    #expect(!prefs.interceptAlternateBrightnessKeys)
+    #expect(prefs.disableCombinedBrightness) // and through the negative
+    #expect(prefs.disableAltBrightnessKeys)
+
+    // The `= true` leg: the inverted key must be cleared, not just left alone.
+    prefs.combinedBrightness = true
+    prefs.interceptAlternateBrightnessKeys = true
+    #expect(!d.bool(forKey: "disableCombinedBrightness"))
+    #expect(!d.bool(forKey: "disableAltBrightnessKeys"))
+    let reread = DisplayPrefs(defaults: d, persistenceKey: "PK")
+    #expect(reread.combinedBrightness)
+    #expect(reread.interceptAlternateBrightnessKeys)
+  }
+
+  @Test func m5RawValuesNeverDrift() {
+    // Per CASE, not per multiset: `case show = 0, hide = 1, sliderOnly = 2` also
+    // satisfies `allCases.map(\.rawValue) == [0, 1, 2, 3]`, and under D22 it is
+    // the case↔value BINDING that is the shipped on-disk schema.
+    #expect(MenuIcon.show.rawValue == 0)
+    #expect(MenuIcon.sliderOnly.rawValue == 1)
+    #expect(MenuIcon.hide.rawValue == 2)
+    #expect(MenuIcon.externalOnly.rawValue == 3)
+    #expect(MenuIcon.allCases.count == 4)
+
+    #expect(MenuItemStyle.icon.rawValue == 0)
+    #expect(MenuItemStyle.text.rawValue == 1)
+    #expect(MenuItemStyle.hide.rawValue == 2)
+    #expect(MenuItemStyle.allCases.count == 3)
+
+    #expect(KeyMode.media.rawValue == 0)
+    #expect(KeyMode.custom.rawValue == 1)
+    #expect(KeyMode.both.rawValue == 2)
+    #expect(KeyMode.disabled.rawValue == 3)
+    #expect(KeyMode.allCases.count == 4)
+
+    #expect(MultiKeyboardBrightness.mouse.rawValue == 0)
+    #expect(MultiKeyboardBrightness.allScreens.rawValue == 1)
+    #expect(MultiKeyboardBrightness.focusInsteadOfMouse.rawValue == 2)
+    #expect(MultiKeyboardBrightness.allCases.count == 3)
+  }
 }
