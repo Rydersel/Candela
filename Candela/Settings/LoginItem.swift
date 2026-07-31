@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import ServiceManagement
@@ -30,6 +31,36 @@ final class LoginItem {
   }
 
   private(set) var lastError: String?
+
+  /// Registered once, removed in `deinit`. `nonisolated(unsafe)` because a
+  /// `deinit` is nonisolated and cannot touch main-actor state; the property is
+  /// written exactly once, from `init`, on the main actor.
+  @ObservationIgnored nonisolated(unsafe) private var activationObserver: (any NSObjectProtocol)?
+
+  init() {
+    // Closes the last hole in D10 (Task 10 hand-off): a live *read* is not a
+    // live *render*, and `.onAppear` only fires when a pane appears. Becoming
+    // active is the moment any already-open window showing this toggle is
+    // about to be looked at, and it is the only signal that covers a change
+    // made in System Settings → General → Login Items — or by `sfltool` —
+    // while Candela sat in the background. With it, the Setup window and the
+    // General pane both correct themselves on the way back.
+    activationObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.didBecomeActiveNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      // `queue: .main` guarantees the main *thread*; assumeIsolated asserts
+      // the isolation the compiler cannot infer through a @Sendable block.
+      MainActor.assumeIsolated { self?.refresh() }
+    }
+  }
+
+  deinit {
+    if let activationObserver {
+      NotificationCenter.default.removeObserver(activationObserver)
+    }
+  }
 
   func refresh() { refreshToken &+= 1 }
 
