@@ -46,12 +46,15 @@ struct PanelView: View {
             DisplayHeaderRow(controller: state.controller, displayName: state.display.name)
             DisplaySliderRow(controller: state.controller, displayName: state.display.name)
             if showsVolumeSlider(for: state) {
+              let hasAudio = model.hasAudioOutput(state)
               ValueSliderRow(
                 controller: state.volume,
                 systemImage: "speaker.wave.2.fill",
                 accessibilityLabel: "\(state.display.name) volume",
                 mutedSystemImage: "speaker.slash.fill"
               )
+              .disabled(!hasAudio)
+              .help(hasAudio ? "" : "\(state.display.name) reports no audio output")
             }
             if showsContrastSlider(for: state) {
               ValueSliderRow(
@@ -88,6 +91,12 @@ struct PanelView: View {
   /// last two are exactly `DDCValueController.isAvailable`, and reusing it is
   /// deliberate: it is the same gate `setValue` self-gates on, so a visible
   /// slider can never be a silently dead one.
+  ///
+  /// Distinct from the audio-sink gate (`AppModel.hasAudioOutput`), which
+  /// DISABLES the row instead of removing it: those displays still have a
+  /// working volume register, so a greyed row says "nothing would come out of
+  /// it", while these three conjuncts mean the control does not apply here
+  /// at all.
   private func showsVolumeSlider(for state: AppModel.DisplayState) -> Bool {
     let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
     return state.volume.isAvailable && !prefs.hideVolumeSlider

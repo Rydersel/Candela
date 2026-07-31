@@ -171,6 +171,25 @@ final class AppModel {
     audioMatchingDisplays(for: audioDevices.defaultOutputDevice())
   }
 
+  /// Whether this display can play sound at all: it enumerates as a CoreAudio
+  /// output device (EDID-declared audio sink), and the per-display
+  /// `forceNoAudioOutput` escape hatch is not set. False greys out the panel's
+  /// volume slider — the row stays visible, because "this display has no
+  /// audio" is information, whereas `hideVolumeSlider` is the user saying they
+  /// never want to see it.
+  ///
+  /// Reads the provider's change-refreshed name snapshot, so this stays a
+  /// cheap MainActor call (no HAL round-trip on menu open).
+  func hasAudioOutput(_ state: DisplayState) -> Bool {
+    let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
+    guard !prefs.forceNoAudioOutput else { return false }
+    return AudioRoutingPolicy.displayHasAudioSink(
+      rawDisplayName: state.display.name,
+      nameOverride: prefs.audioDeviceNameOverride,
+      outputDeviceNames: audioDevices.outputDeviceNames()
+    )
+  }
+
   /// Same rule against a caller-supplied device snapshot — lets `tapConfig`
   /// evaluate the match count and the routing verdict against one and the
   /// same default output.

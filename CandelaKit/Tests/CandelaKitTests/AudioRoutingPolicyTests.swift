@@ -31,6 +31,63 @@ struct AudioRoutingPolicyTests {
     ))
   }
 
+  // MARK: - Audio-sink detection (panel volume-slider gate)
+
+  private let sinks = ["MacBook Pro Speakers", "MAG 341C OLED", "BlackHole 2ch"]
+
+  @Test func displayWithAnEnumeratedOutputDeviceHasASink() {
+    // Real pairing on the dev desk: CoreGraphics and CoreAudio both name the
+    // panel "MAG 341C OLED", so the normalized forms are identical.
+    #expect(AudioRoutingPolicy.displayHasAudioSink(
+      rawDisplayName: "MAG 341C OLED", nameOverride: "", outputDeviceNames: sinks
+    ))
+  }
+
+  @Test func aSuffixMismatchNeedsTheOverride() {
+    // Deliberate brittleness, inherited from `displayMatchesDevice`: matching
+    // is exact on normalized forms, so a display whose audio device carries an
+    // extra word reports NO sink...
+    #expect(!AudioRoutingPolicy.displayHasAudioSink(
+      rawDisplayName: "MAG 341C", nameOverride: "", outputDeviceNames: sinks
+    ))
+    // ...and `audioDeviceNameOverride` is the documented way out. This is the
+    // reason detection alone is not the whole feature.
+    #expect(AudioRoutingPolicy.displayHasAudioSink(
+      rawDisplayName: "MAG 341C", nameOverride: "MAG 341C OLED", outputDeviceNames: sinks
+    ))
+  }
+
+  @Test func displayAbsentFromTheOutputListHasNoSink() {
+    #expect(!AudioRoutingPolicy.displayHasAudioSink(
+      rawDisplayName: "LG UltraFine", nameOverride: "", outputDeviceNames: sinks
+    ))
+  }
+
+  @Test func emptyOutputListMeansNoSink() {
+    #expect(!AudioRoutingPolicy.displayHasAudioSink(
+      rawDisplayName: "MAG341C", nameOverride: "", outputDeviceNames: []
+    ))
+  }
+
+  @Test func overrideRedirectsSinkDetection() {
+    // The panel enumerates under an unrelated device name.
+    #expect(AudioRoutingPolicy.displayHasAudioSink(
+      rawDisplayName: "LG UltraFine", nameOverride: "BlackHole 2ch", outputDeviceNames: sinks
+    ))
+    // ...and an override pointing at nothing is still a miss.
+    #expect(!AudioRoutingPolicy.displayHasAudioSink(
+      rawDisplayName: "MAG341C", nameOverride: "USB DAC", outputDeviceNames: sinks
+    ))
+  }
+
+  @Test func nameThatNormalizesAwayNeverMatches() {
+    // "(2)" normalizes to "" — without the guard it would match any device
+    // name that also normalizes to empty, and report a sink that isn't there.
+    #expect(!AudioRoutingPolicy.displayHasAudioSink(
+      rawDisplayName: "(2)", nameOverride: "", outputDeviceNames: ["(1)", "42"]
+    ))
+  }
+
   // MARK: - Tap rule (fork updateMediaKeyTap; D4)
 
   private let selfVolumeDevice = AudioOutputDevice(id: 1, name: "MacBook Pro Speakers", canSetOwnVolume: true)

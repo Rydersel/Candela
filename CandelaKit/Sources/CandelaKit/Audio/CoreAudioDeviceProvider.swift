@@ -16,6 +16,10 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, Sendable {
   /// matching against a change-refreshed snapshot still fixes the fork's
   /// stale-cache defect. Outer nil = never fetched; inner nil = no device.
   private let snapshot = OSAllocatedUnfairLock<AudioOutputDevice??>(initialState: AudioOutputDevice??.none)
+  /// Second change-refreshed snapshot, same rules as `snapshot`: the device
+  /// LIST changes on its own events (plug/unplug), not on default-output
+  /// changes, so it gets its own listener. nil = never fetched.
+  private let outputNames = OSAllocatedUnfairLock<[String]?>(initialState: nil)
 
   public init() {}
 
@@ -23,6 +27,13 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, Sendable {
     if let fetched = snapshot.withLock({ $0 }) { return fetched }
     let fresh = readDefaultOutputDevice()
     snapshot.withLock { $0 = .some(fresh) }
+    return fresh
+  }
+
+  public func outputDeviceNames() -> [String] {
+    if let cached = outputNames.withLock({ $0 }) { return cached }
+    let fresh = readOutputDeviceNames()
+    outputNames.withLock { $0 = fresh }
     return fresh
   }
 
@@ -42,6 +53,20 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, Sendable {
       guard let self else { return }
       let fresh = self.readDefaultOutputDevice()
       self.snapshot.withLock { $0 = .some(fresh) }
+      let names = self.readOutputDeviceNames()
+      self.outputNames.withLock { $0 = names }
+    }
+    // Device-list listener: refreshes the output-name snapshot only. It
+    // deliberately does NOT notify the handler — the handler re-arms the key
+    // tap, whose rule depends on the DEFAULT output, and the panel re-reads
+    // names on every menu open.
+    var deviceListAddress = Self.deviceListAddress
+    AudioObjectAddPropertyListenerBlock(
+      AudioObjectID(kAudioObjectSystemObject), &deviceListAddress, listenerQueue
+    ) { [weak self] _, _ in
+      guard let self else { return }
+      let names = self.readOutputDeviceNames()
+      self.outputNames.withLock { $0 = names }
     }
     var address = Self.defaultOutputAddress
     AudioObjectAddPropertyListenerBlock(
@@ -72,6 +97,48 @@ public final class CoreAudioDeviceProvider: AudioDeviceProviding, Sendable {
       canSetOwnVolume: canSetVolume(deviceID)
     )
   }
+
+  /// Every device that has at least one output channel, by name. A display
+  /// only appears here when its EDID declares an audio sink, which is the
+  /// closest passive signal macOS offers for "this panel can play sound".
+  private func readOutputDeviceNames() -> [String] {
+    var address = Self.deviceListAddress
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(
+      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size
+    ) == noErr, size > 0 else { return [] }
+    var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+    guard AudioObjectGetPropertyData(
+      AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &ids
+    ) == noErr else { return [] }
+    return ids.filter(hasOutputChannels).compactMap(deviceName)
+  }
+
+  private func hasOutputChannels(_ deviceID: AudioObjectID) -> Bool {
+    var address = AudioObjectPropertyAddress(
+      mSelector: kAudioDevicePropertyStreamConfiguration,
+      mScope: kAudioObjectPropertyScopeOutput,
+      mElement: kAudioObjectPropertyElementMain
+    )
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &size) == noErr,
+          size > 0 else { return false }
+    let buffer = UnsafeMutableRawPointer.allocate(
+      byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment
+    )
+    defer { buffer.deallocate() }
+    guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, buffer) == noErr else {
+      return false
+    }
+    let list = UnsafeMutableAudioBufferListPointer(buffer.assumingMemoryBound(to: AudioBufferList.self))
+    return list.contains { $0.mNumberChannels > 0 }
+  }
+
+  private static let deviceListAddress = AudioObjectPropertyAddress(
+    mSelector: kAudioHardwarePropertyDevices,
+    mScope: kAudioObjectPropertyScopeGlobal,
+    mElement: kAudioObjectPropertyElementMain
+  )
 
   private static let defaultOutputAddress = AudioObjectPropertyAddress(
     mSelector: kAudioHardwarePropertyDefaultOutputDevice,

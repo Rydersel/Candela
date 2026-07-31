@@ -203,18 +203,21 @@ struct DisplayPrefsTests {
       #expect(prefs.muted == false)
       #expect(prefs.audioDeviceNameOverride == "")
       #expect(prefs.hideVolumeSlider == false)
+      #expect(prefs.forceNoAudioOutput == false)
       #expect(prefs.isDisabled == false)
       #expect(prefs.hideOsd == false)
       prefs.enableMuteUnmute = true
       prefs.muted = true
       prefs.audioDeviceNameOverride = "MAG 341C"
       prefs.hideVolumeSlider = true
+      prefs.forceNoAudioOutput = true
       prefs.isDisabled = true
       prefs.hideOsd = true
       #expect(defaults.object(forKey: "enableMuteUnmute.AAAA-BBBB") as? Bool == true)
       #expect(defaults.object(forKey: "muted.AAAA-BBBB") as? Bool == true)
       #expect(defaults.string(forKey: "audioDeviceNameOverride.AAAA-BBBB") == "MAG 341C")
       #expect(defaults.object(forKey: "hideVolumeSlider.AAAA-BBBB") as? Bool == true)
+      #expect(defaults.object(forKey: "forceNoAudioOutput.AAAA-BBBB") as? Bool == true)
       #expect(defaults.object(forKey: "isDisabled.AAAA-BBBB") as? Bool == true)
       #expect(defaults.object(forKey: "hideOsd.AAAA-BBBB") as? Bool == true)
     }

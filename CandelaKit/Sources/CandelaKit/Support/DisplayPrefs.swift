@@ -184,6 +184,17 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("hideVolumeSlider")) }
   }
 
+  /// Manual override for the panel's audio-sink detection: force the volume
+  /// slider into its disabled state even when the display DOES enumerate as a
+  /// CoreAudio output. For panels that declare audio in their EDID but have
+  /// neither speakers nor a jack to play it through — detection cannot tell
+  /// those from a jack-equipped panel, so this is the escape hatch. It never
+  /// works in reverse: a display with no audio sink stays disabled regardless.
+  public var forceNoAudioOutput: Bool {
+    get { defaults.bool(forKey: key("forceNoAudioOutput")) }
+    set { defaults.set(newValue, forKey: key("forceNoAudioOutput")) }
+  }
+
   /// Per-display "disable keyboard control" (fork `isDisabled`): media keys
   /// skip this display in every key loop's BODY — the tap still swallows the
   /// event (fork parity; there is no pass-through for disabled displays).
