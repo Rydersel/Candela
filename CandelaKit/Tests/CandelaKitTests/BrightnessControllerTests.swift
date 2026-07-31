@@ -93,7 +93,12 @@ actor FakeDDC: DDCWriting {
   await controller.waitForPendingWrites()
   let writes = await fake.recordedWrites()
   #expect(writes.last?.value == 100)
-  #expect(writes.count < 50) // latest-wins coalescing must drop intermediates
+  // No strict `count < 50` bound: when the drain keeps pace with the submit
+  // loop nothing coalesces and 50 writes is legitimate — the old bound
+  // asserted a scheduling race (flaked ~2/14 runs, T12 report). Latest-wins
+  // correctness is the ordered final value, pinned above; the drop behavior
+  // is pinned deterministically by the gated coalescer tests.
+  #expect(writes.count <= 50)
 }
 
 @MainActor

@@ -152,4 +152,18 @@ struct KeyRouterTests {
   @Test func optionShiftVolumeIsFineStepNotDeepLink() {
     #expect(routeVol(.volumeDown, [.option, .shift]) == .stepVolume(isUp: false, isFine: true))
   }
+
+  // Fork-parity pins (review T6-Q1): the cells future edits would most
+  // plausibly break — key-up routes regardless of modifiers (the fork plays
+  // the feedback sound on an Option-only release too), only EXACT Option is
+  // the deep link, and brightness-family chords mean nothing to volume.
+  @Test func modifiedVolumeKeyUpStillRoutesTheRelease() {
+    #expect(routeVol(.volumeUp, pressed: false, [.option]) == .volumeKeyUp)
+  }
+  @Test func optionShiftMuteTogglesNotDeepLink() {
+    #expect(routeVol(.mute, [.option, .shift]) == .toggleMute)
+  }
+  @Test func controlCommandVolumeIsAPlainStep() {
+    #expect(routeVol(.volumeUp, [.control, .command]) == .stepVolume(isUp: true, isFine: false))
+  }
 }
