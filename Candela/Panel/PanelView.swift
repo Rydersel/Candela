@@ -238,17 +238,31 @@ struct PanelView: View {
     .padding(.vertical, 10)
   }
 
+  /// Both actions carry a word.
+  ///
+  /// The quit control used to be a bare `xmark.circle`, and an ✕ inside a
+  /// popover means "dismiss this popover" everywhere else in macOS — so the
+  /// one control that terminates the app wore the universal symbol for closing
+  /// the transient window it lives in. With the menu bar icon hidden there is
+  /// no Dock tile to relaunch from, which makes that misfire expensive.
+  ///
+  /// Settings stays at the bottom deliberately: the system's own Wi-Fi, Sound
+  /// and Display menu-bar panels all end with a settings row, and diverging
+  /// from that purely to differ from the fork would trade a real convention
+  /// for a cosmetic distinction.
   private var footer: some View {
-    HStack {
-      Spacer()
-      FooterIconButton(systemImage: "gearshape", help: "Settings…") {
+    HStack(spacing: 0) {
+      FooterPillButton(systemImage: "gearshape", title: "Settings…") {
         SettingsOpener.open()
       }
-      FooterIconButton(systemImage: "xmark.circle", help: "Quit \(AppInfo.productName)") {
+      Spacer(minLength: 8)
+      // Trailing, so the destructive action is furthest from where the pointer
+      // rests after dragging a slider.
+      FooterPillButton(systemImage: "power", title: "Quit") {
         NSApplication.shared.terminate(nil)
       }
     }
-    .padding(.horizontal, 10)
+    .padding(.horizontal, 8)
     .frame(height: 32)
   }
 }
@@ -424,30 +438,38 @@ private struct ValueSliderRow: View {
   }
 }
 
-/// Footer action button: 22 pt secondary-colored SF Symbol that brightens and
-/// gains a subtle rounded background on hover, with a distinct pressed state.
-private struct FooterIconButton: View {
+/// Footer action button: a symbol and a word on a subtle rounded background
+/// that appears on hover, with a distinct pressed state.
+///
+/// Replaced the icon-only `FooterIconButton` when the quit control gained a
+/// label; nothing in the footer is icon-only any more, so that type is gone.
+///
+/// `power` means "shut down" on macOS, so on the quit button the WORD carries
+/// the meaning and the symbol is only there to balance the gear opposite it.
+private struct FooterPillButton: View {
   let systemImage: String
-  let help: String
+  let title: LocalizedStringKey
   let action: () -> Void
 
   @State private var isHovering = false
 
   var body: some View {
     Button(action: action) {
-      Image(systemName: systemImage)
-        .font(.system(size: 14, weight: .medium))
-        .frame(width: 22, height: 22)
+      HStack(spacing: 5) {
+        Image(systemName: systemImage)
+          .font(.system(size: 12, weight: .medium))
+        Text(title)
+          .font(.system(size: 12))
+      }
+      .padding(.horizontal, 8)
+      .frame(height: 22)
     }
     .buttonStyle(FooterIconButtonStyle(isHovering: isHovering))
     .onHover { isHovering = $0 }
-    // The menu can close without a trailing mouse-exit event (e.g. Escape or
-    // clicking the status item), which would leave a phantom hover highlight
-    // on the next open. The menu item's view leaves the window on close, so
-    // onDisappear fires and clears it.
+    // Same phantom-hover fix as FooterIconButton: the menu can close without a
+    // trailing mouse-exit event (Escape, or clicking the status item), which
+    // would leave a stuck highlight on the next open.
     .onDisappear { isHovering = false }
-    .help(help)
-    .accessibilityLabel(help)
   }
 }
 

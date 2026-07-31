@@ -114,9 +114,10 @@ struct GeneralPane: View {
       // The fork's "Combine hardware and software dimming" named the
       // mechanism; this names the outcome and moves the mechanism into the
       // caption (D25).
-      Toggle("Dim past the display's minimum", isOn: Binding(
-        get: { prefs.combinedBrightness },
-        set: { enabled in
+      SettingRow("Once a display reaches its lowest hardware brightness, \(AppInfo.productName) keeps dimming in software. DDC-controlled displays only.") {
+        Toggle("Dim past the display's minimum", isOn: Binding(
+          get: { prefs.combinedBrightness },
+          set: { enabled in
           // D1: positive accessor over an inverted key. `combinedBrightness`
           // is `!disableCombinedBrightness`; the on-disk key keeps its name.
           prefs.combinedBrightness = enabled
@@ -128,24 +129,25 @@ struct GeneralPane: View {
           // returned early in pure-DDC mode, which is what left a display at
           // its DDC floor with the gamma table still scaled — near-black until
           // replug.
-          actions.prefDidChange(.disableCombinedBrightness)
-        }
-      ))
-      SettingsCaption("Once a display reaches its lowest hardware brightness, \(AppInfo.productName) keeps dimming in software. DDC-controlled displays only.")
+            actions.prefDidChange(.disableCombinedBrightness)
+          }
+        ))
+      }
 
-      Toggle("Allow a fully dark display", isOn: Binding(
-        get: { prefs.allowZeroSwBrightness },
-        set: { enabled in
-          prefs.allowZeroSwBrightness = enabled
-          actions.prefDidChange(.allowZeroSwBrightness)
-        }
-      ))
       // Deliberately NOT disabled when combined dimming is off: `applySoftware`
       // passes `allowZero:` on the software-only path too, where the whole
       // slider range IS the software leg. Disabling it there would lock a user
       // out of the one control that governs how dark that display can go. The
       // caption carries the condition instead.
-      SettingsCaption("The slider can reach 0%, which blanks the display completely. Applies wherever software dimming is in use — combined dimming above, or a display with hardware control turned off in the Displays pane. If keyboard control is also off, a blank display can be hard to undo.")
+      SettingRow("The slider can reach 0%, which blanks the display completely. Applies wherever software dimming is in use — combined dimming above, or a display with hardware control turned off in the Displays pane. If keyboard control is also off, a blank display can be hard to undo.") {
+        Toggle("Allow a fully dark display", isOn: Binding(
+          get: { prefs.allowZeroSwBrightness },
+          set: { enabled in
+            prefs.allowZeroSwBrightness = enabled
+            actions.prefDidChange(.allowZeroSwBrightness)
+          }
+        ))
+      }
     }
   }
 
@@ -153,14 +155,15 @@ struct GeneralPane: View {
 
   private var syncSection: some View {
     Section("Sync") {
-      Toggle("Match other displays to the built-in display", isOn: Binding(
-        get: { prefs.enableBrightnessSync },
-        set: { enabled in
-          prefs.enableBrightnessSync = enabled
-          actions.prefDidChange(.enableBrightnessSync)
-        }
-      ))
-      SettingsCaption("Brightness changes made by the ambient light sensor, Control Center or System Settings are mirrored to your other displays.")
+      SettingRow("Brightness changes made by the ambient light sensor, Control Center or System Settings are mirrored to your other displays.") {
+        Toggle("Match other displays to the built-in display", isOn: Binding(
+          get: { prefs.enableBrightnessSync },
+          set: { enabled in
+            prefs.enableBrightnessSync = enabled
+            actions.prefDidChange(.enableBrightnessSync)
+          }
+        ))
+      }
     }
   }
 
@@ -168,16 +171,18 @@ struct GeneralPane: View {
 
   private var startupSection: some View {
     Section("Startup") {
-      Picker("On startup and wake:", selection: Binding(
-        get: { prefs.startupAction },
-        set: { action in
-          prefs.startupAction = action
-          actions.prefDidChange(.startupAction)
+      SettingRow(startupCaption) {
+        Picker("On startup and wake:", selection: Binding(
+          get: { prefs.startupAction },
+          set: { action in
+            prefs.startupAction = action
+            actions.prefDidChange(.startupAction)
+          }
+        )) {
+          Text("Trust the last saved values (recommended)").tag(StartupAction.doNothing)
+          Text("Re-send the last saved values to the display").tag(StartupAction.write)
+          Text("Ask the display for its current values").tag(StartupAction.read)
         }
-      )) {
-        Text("Trust the last saved values (recommended)").tag(StartupAction.doNothing)
-        Text("Re-send the last saved values to the display").tag(StartupAction.write)
-        Text("Ask the display for its current values").tag(StartupAction.read)
       }
       // The picker deliberately shows the PERSISTED choice even in a safe-mode
       // session: this pane's `DisplayPrefs` is built without the safe-mode

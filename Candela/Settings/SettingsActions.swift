@@ -64,3 +64,40 @@ final class SettingsActions {
     }
   }
 }
+
+/// Every Displays-pane write goes through here: mutate the pref, then fan out
+/// through the D20 seam. A control that writes a pref and does not propagate is
+/// a broken control (the engine reads prefs at construction and at key time,
+/// not reactively), so the two steps are deliberately not separable at the
+/// call site.
+@MainActor
+struct DisplayPrefWriter {
+  let persistenceKey: String
+  let actions: SettingsActions
+  let prefs: DisplayPrefs
+
+  init(persistenceKey: String, actions: SettingsActions) {
+    self.persistenceKey = persistenceKey
+    self.actions = actions
+    self.prefs = DisplayPrefs(persistenceKey: persistenceKey)
+  }
+
+  /// `name` is a `PrefName` case, i.e. the UNSUFFIXED pref name the propagation
+  /// table keys on (`.forceSw`, never `"forceSw.<pk>"`). D27 closed this name
+  /// space precisely because the old `String` form made `write("forceSW")` a
+  /// silent no-op that wrote the pref and fanned out to nothing. The
+  /// persistence key scopes the dimming re-apply to this display alone.
+  func write(_ name: PrefName, _ mutate: (DisplayPrefs) -> Void) {
+    mutate(prefs)
+    actions.prefDidChange(name, persistenceKey: persistenceKey)
+  }
+
+  /// A batch: several prefs written together, fanning out to the UNION of
+  /// their rows. Never collapse a batch onto one representative name — the
+  /// rows are not nested (`hideDisplay` carries `.updateStatusItem`,
+  /// `forceSw` does not), so picking a "superset" row silently drops effects.
+  func writeAll(_ names: [PrefName], _ mutate: (DisplayPrefs) -> Void) {
+    mutate(prefs)
+    actions.prefsDidChange(names, persistenceKey: persistenceKey)
+  }
+}

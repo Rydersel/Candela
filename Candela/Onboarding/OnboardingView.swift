@@ -33,14 +33,13 @@ struct OnboardingView: View {
   @State private var didRequestAccessibility = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 22) {
+    VStack(alignment: .leading, spacing: 18) {
       hero
-      Divider()
-      openAtLogin
-      Divider()
-      keyboard
-      Divider()
-      accessibility
+      VStack(alignment: .leading, spacing: 14) {
+        card { openAtLogin }
+        card { keyboard }
+        card { accessibility }
+      }
       footer
     }
     .padding(.horizontal, 32)
@@ -50,6 +49,34 @@ struct OnboardingView: View {
     // layout.md: no critical control flush against the bottom edge.
     .padding(.bottom, 24)
     .frame(width: 520)
+  }
+
+  /// The same rounded, elevated surface a `Form(.grouped)` section draws in the
+  /// settings window, so Setup and Settings read as one app rather than two.
+  ///
+  /// Built by hand rather than with a real `Form`: this screen is a single
+  /// column with a hero and a default button, not a settings list, and a
+  /// grouped `Form` would impose its own row metrics and inset headers on
+  /// content that is prose and buttons.
+  @ViewBuilder
+  private func card(@ViewBuilder _ content: () -> some View) -> some View {
+    VStack(alignment: .leading, spacing: 8) { content() }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(14)
+      .background(
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+          .fill(Color(nsColor: .controlBackgroundColor))
+      )
+  }
+
+  /// Heading with the settings sidebar's tile, so the two windows share one
+  /// visual vocabulary. The tile is decoration — the words carry the meaning.
+  private func heading(_ text: LocalizedStringKey, symbol: String, tint: Color) -> some View {
+    HStack(spacing: 8) {
+      SettingsSymbolTile(symbol: symbol, tint: tint)
+      Text(text)
+        .font(.title3.weight(.semibold))
+    }
   }
 
   private var hero: some View {
@@ -73,8 +100,7 @@ struct OnboardingView: View {
     VStack(alignment: .leading, spacing: 6) {
       // Benefit heading, not a restatement: the toggle's own label is the
       // General pane's exact string and must not be duplicated above it.
-      Text("Always there when you need it")
-        .font(.title3.weight(.semibold))
+      heading("Always there when you need it", symbol: "power", tint: .gray)
       // BYTE-IDENTICAL to the General pane's toggle (Task 10). Same setting,
       // same words, and macOS's own Login Items wording.
       Toggle("Open at Login", isOn: Binding(
@@ -102,8 +128,7 @@ struct OnboardingView: View {
 
   private var keyboard: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text("Your keyboard already works")
-        .font(.title3.weight(.semibold))
+      heading("Your keyboard already works", symbol: "keyboard", tint: .indigo)
       keyRow(symbol: "sun.max", label: "Brightness up and down")
       keyRow(symbol: "speaker.wave.2", label: "Volume up and down")
       keyRow(symbol: "speaker.slash", label: "Mute")
@@ -123,8 +148,7 @@ struct OnboardingView: View {
 
   private var accessibility: some View {
     VStack(alignment: .leading, spacing: 10) {
-      Text("One permission to ask for")
-        .font(.title3.weight(.semibold))
+      heading("One permission to ask for", symbol: "lock.shield", tint: .blue)
       // HIG: explain the benefit BEFORE the system dialog appears. Naming the
       // limit ("and nothing else") and the fallback ("the menu bar still
       // works") is the part that makes this an explanation rather than a
