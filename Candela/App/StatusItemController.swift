@@ -299,10 +299,23 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     permission.promptIfNeeded()
     if permission.isGranted {
       startMediaKeyTap()
-    } else {
-      permission.startPolling { [weak self] in
-        self?.startMediaKeyTap()
+    }
+    // D9: monitoring runs for the app's lifetime and reports both directions —
+    // it is not a one-shot wait for the grant. An ad-hoc re-sign drops the TCC
+    // grant silently, and before this the keys simply stopped working with no
+    // banner and no way back short of a relaunch.
+    permission.startMonitoring { [weak self] granted in
+      guard let self else { return }
+      if granted {
+        // Re-grant (or first grant): the old tap port is dead after a TCC
+        // round-trip, so the tap is rebuilt rather than reused. `start` tears
+        // down any existing tap before creating the new one, so no explicit
+        // stop is needed here.
+        self.startMediaKeyTap()
       }
+      // Revocation needs no action: `isGranted` is observable, so the panel
+      // banner re-appears on its own now that the source no longer latches,
+      // and the dead tap is rebuilt on the next grant.
     }
 
     // Warm the display list before the first open. Menu tracking can hold the
