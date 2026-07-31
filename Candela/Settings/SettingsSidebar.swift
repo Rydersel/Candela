@@ -80,30 +80,28 @@ struct SettingsSidebar: View {
       .padding(.vertical, 10)
     }
     .scrollContentBackground(.hidden)
-    // Hand-built rows rather than a `List`, and the reason is not cosmetic.
+    // OPAQUE, deliberately. No material, no Liquid Glass, nothing translucent.
     //
-    // Every list style loses on one axis. `.sidebar` and `.inset` draw a
-    // rounded selection pill but also draw their own panel, and that panel DIMS
-    // when the window is not key — confirmed by comparing focused and unfocused
-    // captures, and unreachable from AppKit because SwiftUI, not
-    // `NSVisualEffectView`, draws it (a dump of the live hierarchy found no
-    // sidebar-material effect view at all, and every effect view present was
-    // already pinned `.active`). `.plain` has no panel but a square, full-width
-    // highlight; and layering a custom pill under a `List`'s own selection
-    // produced two stacked highlights, because `listRowBackground` composites
-    // INSIDE the selection rather than replacing it.
+    // Every translucent option dimmed when the window lost focus, which for a
+    // settings window is most of the time it is on screen — you click away to
+    // see what a setting did. That dimming was not reachable: the panel is
+    // drawn by SwiftUI's list style, not by an `NSVisualEffectView` (a dump of
+    // the live hierarchy found no sidebar-material effect view at all, and
+    // every effect view present was already pinned `.active`), and replacing
+    // it with our own `glassEffect` surface dimmed too. A solid fill cannot
+    // dim, which is the whole point.
     //
-    // Owning the rows removes all three at once: no list-drawn panel to dim,
-    // exactly one pill, and the surface underneath is a real material that
-    // ignores key state.
+    // Hand-built rows rather than a `List` for a related reason: `.sidebar`
+    // and `.inset` draw the panel that dims, `.plain` draws a square
+    // full-width highlight, and a custom pill under a `List`'s own selection
+    // gave two stacked highlights because `listRowBackground` composites
+    // INSIDE the selection rather than replacing it. Owning the rows gives
+    // exactly one pill and no panel.
     //
     // The cost is arrow-key navigation between rows, which a `List` gave for
     // free. Each row is a focusable button, so the sidebar stays reachable and
     // operable by keyboard via Tab and Space.
-    // No surface of its own: the WHOLE window is the material now (see
-    // `glassWindowBackground`), so a second glass layer here would stack two
-    // translucencies and put the sidebar card back.
-    //
+    .background(Color(nsColor: .windowBackgroundColor))
     // A settings window has exactly one navigation surface, and collapsing it
     // leaves a detail pane you cannot navigate out of. `NavigationSplitView`
     // adds the toggle by default, which parks a stray button in the toolbar.

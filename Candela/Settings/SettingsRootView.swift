@@ -43,9 +43,7 @@ struct SettingsRootView: View {
       // hidden (`titleVisibility`), which keeps the window named for the
       // Window menu and accessibility without drawing a second copy.
       detail
-        // The Form paints an opaque grouped background of its own; hidden, so
-        // the window's material is what shows behind the section cards.
-        .scrollContentBackground(.hidden)
+        .background(.background)
         .toolbar {
           // macOS 26 gives toolbar items the Liquid Glass capsule it gives
           // CONTROLS, which drew a pill around the title. A title is not a
@@ -76,7 +74,6 @@ struct SettingsRootView: View {
       minWidth: 720, idealWidth: 900, maxWidth: .infinity,
       minHeight: 480, idealHeight: 560, maxHeight: .infinity
     )
-    .glassWindowBackground()
     .background(SettingsWindowConfigurator(title: currentTitle))
     // A destination for an absent display must never render, so a display that
     // is unplugged while selected drops the selection back to a pane. Keyed on
@@ -172,33 +169,6 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
     DispatchQueue.main.async { configure(view.window) }
   }
 
-  /// Keeps the window's materials rendering when the window is not key.
-  ///
-  /// `NSVisualEffectView` defaults to `.followsWindowActiveState`, so every
-  /// glass surface flattens to a plain fill the moment the window loses focus
-  /// — which for a settings window is most of the time it is on screen, since
-  /// you click away to see the effect of what you just changed. `.active`
-  /// pins them on.
-  ///
-  /// Re-walked on each update rather than once: SwiftUI rebuilds parts of the
-  /// hierarchy as panes change, and a view created after the first pass would
-  /// otherwise keep the default.
-  private static func keepMaterialsActive(_ window: NSWindow) {
-    func walk(_ view: NSView) {
-      if let effect = view as? NSVisualEffectView, effect.state != .active {
-        effect.state = .active
-      }
-      for subview in view.subviews { walk(subview) }
-    }
-    if let contentView = window.contentView {
-      walk(contentView)
-      // The titlebar/toolbar lives in a separate view tree from contentView,
-      // so walking only the content leaves the top bar flattening on blur
-      // while the sidebar stays lit — the exact mismatch this fixes.
-      if let frameView = contentView.superview { walk(frameView) }
-    }
-  }
-
   private func configure(_ window: NSWindow?) {
     guard let window else { return }
     if !window.styleMask.contains(.resizable) {
@@ -221,7 +191,6 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
     if window.title != title {
       window.title = title
     }
-    Self.keepMaterialsActive(window)
   }
 }
 
