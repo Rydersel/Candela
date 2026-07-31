@@ -1,27 +1,47 @@
 import AppKit
 import SwiftUI
 
-/// Five tabs (≤ 6 per HIG tab-views guidance), short title-case noun labels,
-/// each pane fully self-contained. Identifiers ARE the titles (D6 — no "Main"
-/// vs "General" split, no preload hacks; cross-pane state goes through
-/// AppModel/SettingsActions observation, never viewDidLoad ordering).
+/// Sidebar navigation over a pane registry. Replaces the five-tab `TabView`,
+/// whose tab-for-tab match with the fork was the actual source of the visual
+/// resemblance — the styling was already modern, and the window already
+/// renders with Liquid Glass on macOS 26, which changed nothing.
+///
+/// D6 still holds and generalises to the registry: `PaneID.rawValue` is the
+/// identifier, `title` is the label, and cross-pane state goes through
+/// AppModel/SettingsActions observation, never view lifecycle ordering.
+///
+/// `@MainActor` because `SettingsRegistry` is main-actor-isolated and a
+/// `View`'s stored-property default expressions are nonisolated under
+/// `SWIFT_STRICT_CONCURRENCY: complete`.
+@MainActor
 struct SettingsRootView: View {
+  @State private var selection: SettingsDestination? = .pane(.general)
+
   var body: some View {
-    TabView {
-      GeneralPane()
-        .tabItem { Label("General", systemImage: "switch.2") }
-      AppMenuPane()
-        .tabItem { Label("App Menu", systemImage: "filemenu.and.cursorarrow") }
-      KeyboardPane()
-        .tabItem { Label("Keyboard", systemImage: "keyboard") }
-      DisplaysPane()
-        .tabItem { Label("Displays", systemImage: "display.2") }
-      AboutPane()
-        .tabItem { Label("About", systemImage: "info.circle") }
+    NavigationSplitView {
+      SettingsSidebar(selection: $selection)
+        .navigationSplitViewColumnWidth(min: 190, ideal: 200, max: 240)
+    } detail: {
+      detail
     }
-    // Fixed width, natural height per pane: the fork's 660×{700,600,640,360}
-    // magic heights are NOT ported (chapter-1 QUIRK — SwiftUI sizes to fit).
-    .frame(width: 620)
+    // Resizable, replacing the fork-era fixed `.frame(width: 620)`. The
+    // minimum keeps the sidebar and a grouped form from crushing each other.
+    .frame(minWidth: 720, minHeight: 480)
+  }
+
+  @ViewBuilder private var detail: some View {
+    switch selection {
+    case let .pane(id):
+      let pane = SettingsRegistry.descriptor(for: id)
+      pane.content()
+        .navigationTitle(pane.title)
+    case .display, .none:
+      // Display destinations arrive with the sidebar's DISPLAYS group. Until
+      // then an unknown selection falls back rather than rendering an empty
+      // detail column.
+      SettingsRegistry.descriptor(for: .general).content()
+        .navigationTitle("General")
+    }
   }
 }
 
