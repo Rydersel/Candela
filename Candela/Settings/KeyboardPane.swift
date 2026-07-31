@@ -103,6 +103,7 @@ struct KeyboardPane: View {
         KeyboardShortcuts.Recorder("Brightness up:", name: .brightnessUp)
         KeyboardShortcuts.Recorder("Contrast down:", name: .contrastDown)
         KeyboardShortcuts.Recorder("Contrast up:", name: .contrastUp)
+        SettingsCaption(Self.modifierHint)
         SettingsCaption("Contrast works on displays controlled over their data cable (DDC) only.")
       }
 
@@ -140,6 +141,7 @@ struct KeyboardPane: View {
         KeyboardShortcuts.Recorder("Volume down:", name: .volumeDown)
         KeyboardShortcuts.Recorder("Volume up:", name: .volumeUp)
         KeyboardShortcuts.Recorder("Mute:", name: .mute)
+        SettingsCaption(Self.modifierHint)
       }
 
       if KeyModePolicy.watchesMediaKeys(prefs.keyboardVolume) {
@@ -147,6 +149,15 @@ struct KeyboardPane: View {
       }
     }
   }
+
+  /// Why a bare letter looks like it does nothing.
+  ///
+  /// A recorder silently ignores a key pressed without a modifier, which reads
+  /// as a broken control — press "k", nothing happens, conclude the field is
+  /// dead. The rule is not arbitrary: these are system-wide hotkeys, so a
+  /// bare key would capture that key in every other app.
+  private static let modifierHint: LocalizedStringKey =
+    "Click a field and press the keys you want. A shortcut has to include ⌘, ⌃, ⌥ or ⇧ — a letter or number on its own is ignored, because it would be captured in every app."
 
   // MARK: - Targeting
 

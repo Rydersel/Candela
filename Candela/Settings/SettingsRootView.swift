@@ -25,16 +25,34 @@ struct SettingsRootView: View {
       SettingsSidebar(selection: $selection)
         .navigationSplitViewColumnWidth(min: 190, ideal: 200, max: 240)
     } detail: {
+      // The ONE visible title. Three spellings were tried and two shipped a
+      // visible defect, so the reasoning is recorded rather than rediscovered:
+      //
+      // 1. `.navigationTitle` alone renders at the LEADING edge of the detail
+      //    column — a stray label rather than a title.
+      // 2. Setting `window.title` alone does the same thing: in a
+      //    full-size-content window with a sidebar, AppKit draws the window
+      //    title leading, NOT centred.
+      // 3. A principal item plus either of the above shows the name TWICE.
+      //
+      // So: a principal item draws it, and the window's own title is set but
+      // hidden (`titleVisibility`), which keeps the window named for the
+      // Window menu and accessibility without drawing a second copy.
       detail
         .toolbar {
-          // `.navigationTitle` renders at the LEADING edge of the detail
-          // column, which reads as a stray label rather than a window title.
-          // A principal item centres it over the toolbar, the way System
-          // Settings titles its panes. The navigation title stays for the
-          // window's own name (Window menu, accessibility).
-          ToolbarItem(placement: .principal) {
-            Text(currentTitle)
-              .font(.headline)
+          // macOS 26 gives toolbar items the Liquid Glass capsule it gives
+          // CONTROLS, which drew a pill around the title. A title is not a
+          // control, so on 26 it opts out of the shared background. Earlier
+          // versions have no such background and need no opt-out.
+          if #available(macOS 26.0, *) {
+            ToolbarItem(placement: .principal) {
+              Text(currentTitle).font(.headline)
+            }
+            .sharedBackgroundVisibility(.hidden)
+          } else {
+            ToolbarItem(placement: .principal) {
+              Text(currentTitle).font(.headline)
+            }
           }
         }
     }
@@ -51,7 +69,7 @@ struct SettingsRootView: View {
       minWidth: 720, idealWidth: 900, maxWidth: .infinity,
       minHeight: 480, idealHeight: 560, maxHeight: .infinity
     )
-    .background(SettingsWindowConfigurator())
+    .background(SettingsWindowConfigurator(title: currentTitle))
     // A destination for an absent display must never render, so a display that
     // is unplugged while selected drops the selection back to a pane. Keyed on
     // persistence keys, not display IDs: an ID changes across a replug and
@@ -90,9 +108,7 @@ struct SettingsRootView: View {
   @ViewBuilder private var detail: some View {
     switch selection {
     case let .pane(id):
-      let pane = SettingsRegistry.descriptor(for: id)
-      pane.content()
-        .navigationTitle(pane.title)
+      SettingsRegistry.descriptor(for: id).content()
     case let .display(key):
       if let state = model.allControlledStates.first(where: { $0.display.persistenceKey == key }) {
         if key == "builtIn" {
@@ -112,7 +128,6 @@ struct SettingsRootView: View {
   /// rather than a blank pane, which reads as a broken window.
   private var generalFallback: some View {
     SettingsRegistry.descriptor(for: .general).content()
-      .navigationTitle("General")
   }
 }
 
@@ -130,7 +145,14 @@ struct SettingsRootView: View {
 /// SwiftUI's own menu item — so a fix installed on the open path only works
 /// when the window is opened from the panel's gear. Attaching it to the view
 /// makes it independent of how the window came to exist.
+/// Also owns the window's NAME — set, but with `titleVisibility` hidden. The
+/// visible title is a principal toolbar item (see `body`); this one exists so
+/// the Window menu and accessibility have a name to report, and is not drawn
+/// because AppKit would place it at the LEADING edge of a full-size-content
+/// window with a sidebar, giving a second, misaligned copy.
 private struct SettingsWindowConfigurator: NSViewRepresentable {
+  let title: String
+
   func makeNSView(context _: Context) -> NSView {
     let view = NSView(frame: .zero)
     // The view is not in a window yet during `makeNSView`.
@@ -143,8 +165,19 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
   }
 
   private func configure(_ window: NSWindow?) {
-    guard let window, !window.styleMask.contains(.resizable) else { return }
-    window.styleMask.insert(.resizable)
+    guard let window else { return }
+    if !window.styleMask.contains(.resizable) {
+      window.styleMask.insert(.resizable)
+    }
+    // Named but not drawn: the visible title is the principal toolbar item, so
+    // letting AppKit draw this one too is what produced two copies of the pane
+    // name. `title` still feeds the Window menu and accessibility.
+    if window.titleVisibility != .hidden {
+      window.titleVisibility = .hidden
+    }
+    if window.title != title {
+      window.title = title
+    }
   }
 }
 
