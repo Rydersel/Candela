@@ -4,11 +4,10 @@ import Testing
 
 @Suite("Per-display prefs")
 struct DisplayPrefsTests {
-  /// Each test gets a throwaway suite so nothing leaks into the user's defaults.
+  /// Each test gets a throwaway in-memory store, so nothing touches disk or
+  /// the user's defaults.
   private func withSuite(_ body: (UserDefaults) -> Void) {
-    let suiteName = "com.rydersel.Candela.tests.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = InMemoryDefaults()
     body(defaults)
   }
 

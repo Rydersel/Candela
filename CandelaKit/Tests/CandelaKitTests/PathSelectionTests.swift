@@ -104,13 +104,10 @@ private final class Harness {
   let shade = FakeShade()
   let gamma = FakeGamma()
   let store = PathMemoryStore()
-  // nonisolated(unsafe): accessed from the nonisolated deinit only for
-  // cleanup; UserDefaults is documented thread-safe.
-  nonisolated(unsafe) let defaults: UserDefaults
+  let defaults: UserDefaults
   let prefs: DisplayPrefs
   let controller: BrightnessController
   private(set) var submitted: [HardwareTarget] = []
-  private nonisolated let suiteName: String
 
   init(
     ddcRead: (current: UInt16, max: UInt16)? = nil,
@@ -125,8 +122,7 @@ private final class Harness {
     // matching `configure` under the forward-scan rule.
     readNative: (@Sendable (CGDirectDisplayID) -> Float?)? = nil
   ) {
-    suiteName = "com.rydersel.Candela.tests.path.\(UUID().uuidString)"
-    defaults = UserDefaults(suiteName: suiteName)!
+    defaults = InMemoryDefaults()
     prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
     ddc = FakeDDC(readResult: ddcRead)
     hdr = withHDR ? FakeHDR(supports: hdrSupported, enabled: hdrEnabled) : nil
@@ -158,9 +154,6 @@ private final class Harness {
     await controller.noteHDRStateMayHaveChanged()
   }
 
-  deinit {
-    defaults.removePersistentDomain(forName: suiteName)
-  }
 }
 
 private func approx(_ a: Double, _ b: Double, tolerance: Double = 1e-9) -> Bool {
@@ -807,9 +800,7 @@ struct HDRModeEngageFailureTests {
   /// `applyPaths` is the observable. (The ABA row below still discriminates on
   /// the mode itself.)
   @Test func overlappingSetHDRModeFailedEngageDoesNotClobberNewerTransition() async {
-    let suiteName = "com.rydersel.Candela.tests.path.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
     let gated = GatedEngageHDR()
     let controller = BrightnessController(
@@ -854,9 +845,7 @@ struct HDRModeEngageFailureTests {
   /// and the THIRD transition's committed mode/prefs are clobbered by the
   /// first's `previous`.
   @Test func overlappingSetHDRModeABADoesNotClobberThirdTransition() async {
-    let suiteName = "com.rydersel.Candela.tests.path.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
     // Only the FIRST engage is gated (and fails); the third transition's
     // engage passes straight through and succeeds.
@@ -904,9 +893,7 @@ struct HDRModeEngageFailureTests {
   /// settle flag of the transition that retargeted past it or fire its
   /// `applyPaths` against state that transition owns.
   @Test func overlappingSetHDRModeExitArmDoesNotClobberNewerTransition() async {
-    let suiteName = "com.rydersel.Candela.tests.path.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
     prefs.hdrMode = .alwaysOn
     let gated = GatedTransitionHDR()
@@ -1049,9 +1036,7 @@ actor GatedRollbackHDR: HDRToggling {
 @Suite("Backlog #1 — engage-failure re-guard")
 struct EngageFailureReguardTests {
   @Test func staleRollbackDoesNotReapplyAfterSupersession() async {
-    let suiteName = "com.rydersel.Candela.tests.reguard.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = InMemoryDefaults()
     let gated = GatedRollbackHDR()
     let controller = BrightnessController(
       writer: FakeDDC(readResult: nil),

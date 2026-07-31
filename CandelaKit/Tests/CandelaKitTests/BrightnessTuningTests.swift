@@ -4,14 +4,13 @@ import Testing
 
 @MainActor
 private final class TuningHarness {
-  private nonisolated let suiteName = "com.rydersel.Candela.tests.brightness-tuning.\(UUID().uuidString)"
-  nonisolated(unsafe) let defaults: UserDefaults
+  let defaults: UserDefaults
   let fake = FakeDDC(readResult: nil)
   let prefs: DisplayPrefs
   let controller: BrightnessController
 
   init(configure: (DisplayPrefs) -> Void = { _ in }) {
-    defaults = UserDefaults(suiteName: suiteName)!
+    defaults = InMemoryDefaults()
     // Full-range DDC leg — the M1/M2 shape, so raw values are directly legible.
     defaults.set(true, forKey: "disableCombinedBrightness")
     prefs = DisplayPrefs(defaults: defaults, persistenceKey: "bt")
@@ -26,8 +25,6 @@ private final class TuningHarness {
       displayID: 9
     )
   }
-
-  deinit { defaults.removePersistentDomain(forName: suiteName) }
 
   func drainedWrites() async -> [(command: UInt8, value: UInt16)] {
     await controller.waitForPendingWrites()

@@ -13,10 +13,9 @@ func makeLegacyPathController(
   store: (any BrightnessStoring)? = nil,
   storageKey: String? = nil
 ) -> BrightnessController {
-  // One shared suite: the only key ever written is the app-level
-  // combined-disable flag, always with the same value, so cross-test reuse
-  // (and parallel test execution) is safe.
-  let defaults = UserDefaults(suiteName: "com.rydersel.Candela.tests.legacy-path")!
+  // Per-call in-memory store: the only key ever written is the app-level
+  // combined-disable flag, and no two callers share state.
+  let defaults = InMemoryDefaults()
   defaults.set(true, forKey: "disableCombinedBrightness")
   return BrightnessController(
     writer: writer,

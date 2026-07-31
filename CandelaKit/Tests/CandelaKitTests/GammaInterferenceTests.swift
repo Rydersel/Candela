@@ -121,9 +121,8 @@ private struct Fixture {
   let gamma = FakeInterferenceGamma()
   let alerts = RecordingAlerts()
   let monitor = GammaInterferenceMonitor(gamma: gamma, alerts: alerts)
-  let defaults = UserDefaults(suiteName: "com.rydersel.Candela.tests.gamma-interference")!
+  let defaults = InMemoryDefaults()
   defaults.set(true, forKey: "forceSw.gi")
-  defer { defaults.removePersistentDomain(forName: "com.rydersel.Candela.tests.gamma-interference") }
   let controller = BrightnessController(
     writer: FakeDDC(readResult: nil),
     backends: BrightnessBackends(
@@ -217,9 +216,7 @@ private struct Fixture {
   // progress.md:51 poisoned-baseline amendment: at accept time the
   // interfering app may own the table — recapturing would bake its curve in
   // as the "default" and clearSoftwareLeg would later resurface it as a tint.
-  let suiteName = "com.rydersel.Candela.tests.recapture.\(UUID().uuidString)"
-  let defaults = UserDefaults(suiteName: suiteName)!
-  defer { defaults.removePersistentDomain(forName: suiteName) }
+  let defaults = InMemoryDefaults()
   let gamma = FakeInterferenceGamma()
   let controller = BrightnessController(
     writer: FakeDDC(readResult: nil),
