@@ -113,6 +113,7 @@ struct DisplayCard: View {
   /// View state that SURVIVES a re-render, unlike the fork's disclosure, which
   /// collapsed on every pane rebuild (chapter 2 QUIRK 16).
   @State private var showsAdvanced = false
+  @State private var confirmingReset = false
 
   private var persistenceKey: String { state.display.persistenceKey }
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: persistenceKey) }
@@ -335,7 +336,108 @@ struct DisplayCard: View {
     }
     SettingsCaption("Used when the volume keys pick a display by matching the current audio output device. Leave it empty to match on the display's own name.")
 
-    // Task 14 appends the per-command tuning grid and the reset button here.
+    Divider()
+
+    CommandTuningGrid(state: state, writer: writer)
+
+    Divider()
+
+    Button("Reset Display Settings…", role: .destructive) { confirmingReset = true }
+      .alert("Reset the settings for this display?", isPresented: $confirmingReset) {
+        Button("Reset", role: .destructive) { resetDisplay() }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        // Name what is lost, and name what is NOT: the saved levels are the
+        // only source of truth on a write-only panel (trap 20), so a reset
+        // that took them would leave the display at an unknown brightness.
+        Text("This clears the name, visibility, keyboard, audio and DDC tuning settings for \(state.display.name), turns HDR off if it is on, and unmutes it. Your saved brightness, volume and contrast levels are kept.")
+      }
+  }
+
+  // MARK: - Per-display reset
+
+  /// Per-display reset (fork "Reset settings", chapter 2 §6) with the fork's
+  /// three defects fixed — no `setDirectBrightness(1)`/`setSwBrightness(1)`
+  /// slam (D4: the seam re-applies the same value on the new path), the curve
+  /// is cleared to unset rather than written as an explicit 5, and it is
+  /// available for every display rather than hidden on virtual ones — plus the
+  /// ordering defect the five-lens review found in the plan itself.
+  ///
+  /// ORDER IS THE WHOLE POINT (D29 rule 2, lens-3 C5). The previous version
+  /// attempted `toggleMute()` FIRST, then cleared `forceSoftware` and the
+  /// per-command `unavailableDDC`, then set `enableMuteUnmute = false`. On a
+  /// display that arrived at the reset already in the D29 state — muted with
+  /// hardware control off — the unmute hit `toggleMute`'s `isAvailable` guard
+  /// and returned silently, and the reset then retired the only mute strategy
+  /// that could ever send 0x8D=2 again. The user's reasonable response to a bad
+  /// state, using the button whose alert promises to fix it, made the monitor
+  /// permanently silent while the app believed it was unmuted.
+  ///
+  /// So: availability prefs FIRST, unmute SECOND (while the display's current
+  /// mute strategy is still in force), retire the strategy LAST.
+  private func resetDisplay() {
+    Task { @MainActor in
+      // 1. D22: HDR goes through the controller's state machine — settle
+      //    window, poller gating, rollback — never through `prefs.hdrMode`.
+      //    Done first so the DDC register is unlocked for everything below.
+      if state.controller.hdrMode != .off {
+        await state.controller.setHDRMode(.off)
+      }
+
+      // 2. Every pref except the mute strategy, in ONE batch whose fan-out is
+      //    the UNION of its rows. Never collapse it onto a single
+      //    `prefDidChange(.forceSw)`: `hideDisplay` carries `.updateStatusItem`
+      //    and `forceSw` does not, so with `menuIcon == .sliderOnly` a reset
+      //    that un-hid the display would leave the status item missing.
+      //    Clearing `forceSoftware` and every command's `unavailableDDC` here
+      //    is also what makes step 3 able to work at all (D29 rule 2).
+      writer.writeAll([
+        .friendlyName, .hideDisplay, .isDisabled, .hideOsd, .forceSw, .avoidGamma,
+        .audioDeviceNameOverride, .audioSinkOverride, .hideVolumeSlider,
+        .combinedSwitchingPoint,
+        .unavailableDDC, .minDDCOverride, .maxDDCOverride, .curveDDC, .invertDDC, .remapDDC,
+      ]) { prefs in
+        prefs.friendlyName = ""
+        prefs.hideDisplay = false
+        prefs.isDisabled = false
+        prefs.hideOsd = false
+        prefs.forceSoftware = false
+        prefs.avoidGamma = false
+        prefs.audioDeviceNameOverride = ""
+        prefs.audioSinkOverride = .auto
+        prefs.hideVolumeSlider = false
+        prefs.combinedSwitchingPoint = 0
+        // D26-cut prefs are reset too: they are invisible, so this button is
+        // the only way out of a bad `defaults write`. None of these three is a
+        // `PrefName` case (nothing reads them at pref-write time), so they are
+        // written here and correctly absent from the fan-out list above.
+        // `longerDelay` is reserved and inert — cleared for tidiness only.
+        prefs.longerDelay = false
+        prefs.pollingMode = .normal
+        prefs.pollingCount = 0
+        // ONE shared definition of "untouched", from CandelaKit, pinned by
+        // `theFactoryTuningIsWhatAnUntouchedDisplayReports`.
+        for command in DDCCommand.allCases {
+          prefs.setTuning(.unset, for: command)
+        }
+      }
+
+      // 3. `isAvailable` is true again, and `enableMuteUnmute` still holds the
+      //    value the display was muted under — so this sends the RIGHT wire
+      //    value (0x8D=2 in the dedicated-command strategy, a volume write
+      //    otherwise). `toggleMute` also clears the persisted `muted` flag,
+      //    which is why it is not written by hand.
+      if state.volume.isMuted {
+        _ = state.volume.toggleMute()
+      }
+
+      // 4. Only now retire the strategy. Its row is UI-only, so this second
+      //    fan-out costs a re-render and nothing else.
+      writer.write(.enableMuteUnmute) { $0.enableMuteUnmute = false }
+
+      nameDraft = ""
+      audioNameDraft = ""
+    }
   }
 
   // MARK: - Mute recovery (D29 rule 2 + rule 3)
