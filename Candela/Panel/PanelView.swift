@@ -45,6 +45,21 @@ struct PanelView: View {
           VStack(alignment: .leading, spacing: 8) {
             DisplayHeaderRow(controller: state.controller, displayName: state.display.name)
             DisplaySliderRow(controller: state.controller, displayName: state.display.name)
+            if showsVolumeSlider(for: state) {
+              ValueSliderRow(
+                controller: state.volume,
+                systemImage: "speaker.wave.2.fill",
+                accessibilityLabel: "\(state.display.name) volume",
+                mutedSystemImage: "speaker.slash.fill"
+              )
+            }
+            if showsContrastSlider(for: state) {
+              ValueSliderRow(
+                controller: state.contrast,
+                systemImage: "circle.lefthalf.filled",
+                accessibilityLabel: "\(state.display.name) contrast"
+              )
+            }
           }
         }
       }
@@ -54,6 +69,37 @@ struct PanelView: View {
       footer
     }
     .frame(width: 280)
+  }
+
+  // MARK: - Slider visibility
+  //
+  // Only `model.displays` (external) ever gets value rows: the built-in slot's
+  // volume/contrast controllers are inert placeholders on a `NoopDDCWriter`
+  // whose `isAvailable` is nonetheless true (T10 concern 6), so rendering them
+  // would show a live-looking slider that does nothing.
+  //
+  // Prefs are plain UserDefaults, not observable — the panel re-evaluates on
+  // every menu open via the model refresh, which is the M4 contract; live pref
+  // observation is M5 settings work.
+
+  /// D2: volume slider per DDC display, unless hidden per display, disabled
+  /// per command, or `forceSoftware` — all three fork conjuncts (fork
+  /// MenuHandler: `!isSw + !unavailableDDC + !hideVolume`; review R5). The
+  /// last two are exactly `DDCValueController.isAvailable`, and reusing it is
+  /// deliberate: it is the same gate `setValue` self-gates on, so a visible
+  /// slider can never be a silently dead one.
+  private func showsVolumeSlider(for state: AppModel.DisplayState) -> Bool {
+    let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
+    return state.volume.isAvailable && !prefs.hideVolumeSlider
+  }
+
+  /// D2: contrast slider behind the app-level `showContrast` pref (default
+  /// false, fork parity), never for a disabled command, never for a
+  /// `forceSoftware` display (fork stepContrast/menu: `!isSw()`, R5 — the
+  /// latter two again via `isAvailable`).
+  private func showsContrastSlider(for state: AppModel.DisplayState) -> Bool {
+    let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
+    return prefs.showContrast && state.contrast.isAvailable
   }
 
   /// Visually quiet Accessibility banner (spec §6: banner, not alert):
@@ -175,17 +221,28 @@ private struct DisplayHeaderRow: View {
 /// metrics instead of a square icon frame.
 private struct HDRModeButtonStyle: ButtonStyle {
   let isHovering: Bool
+  // Backlog #10: the style must read enablement itself — a disabled button
+  // previously rendered live (hover fill, primary text) and just did nothing.
+  @Environment(\.isEnabled) private var isEnabled
 
   func makeBody(configuration: Configuration) -> some View {
-    let background: AnyShapeStyle = if configuration.isPressed {
+    let hovering = isHovering && isEnabled
+    let background: AnyShapeStyle = if configuration.isPressed, isEnabled {
       AnyShapeStyle(.tertiary)
-    } else if isHovering {
+    } else if hovering {
       AnyShapeStyle(.quaternary)
     } else {
       AnyShapeStyle(.clear)
     }
+    let foreground: HierarchicalShapeStyle = if !isEnabled {
+      .quaternary
+    } else if hovering {
+      .primary
+    } else {
+      .secondary
+    }
     return configuration.label
-      .foregroundStyle(isHovering ? .primary : .secondary)
+      .foregroundStyle(foreground)
       .padding(.horizontal, 5)
       .padding(.vertical, 2)
       .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(background))
@@ -207,6 +264,35 @@ private struct DisplaySliderRow: View {
         set: { controller.setBrightness($0) }
       ),
       accessibilityLabel: "\(displayName) brightness"
+    )
+  }
+}
+
+/// Volume/contrast row: the same capsule slider as brightness, one visual
+/// language for every value in the section.
+///
+/// Muted volume renders as 0 with a slashed speaker — `isMuted` and a genuine
+/// value of 0 are distinct states (T10 handoff) and the icon is what tells
+/// them apart, since the knob sits at the leading edge either way. The stored
+/// value survives being muted: dragging up from 0 unmutes and lands on the
+/// dragged value through the controller's mute-companion logic.
+private struct ValueSliderRow: View {
+  let controller: DDCValueController
+  let systemImage: String
+  let accessibilityLabel: String
+  /// Substituted while muted; nil for commands that never mute (contrast).
+  var mutedSystemImage: String?
+
+  private var isMuted: Bool { controller.isMuted && mutedSystemImage != nil }
+
+  var body: some View {
+    CandelaSlider(
+      value: Binding(
+        get: { isMuted ? 0 : controller.value },
+        set: { controller.setValue($0) }
+      ),
+      systemImage: isMuted ? (mutedSystemImage ?? systemImage) : systemImage,
+      accessibilityLabel: isMuted ? "\(accessibilityLabel), muted" : accessibilityLabel
     )
   }
 }
@@ -240,17 +326,27 @@ private struct FooterIconButton: View {
 
 private struct FooterIconButtonStyle: ButtonStyle {
   let isHovering: Bool
+  // Backlog #10, same treatment as HDRModeButtonStyle.
+  @Environment(\.isEnabled) private var isEnabled
 
   func makeBody(configuration: Configuration) -> some View {
-    let background: AnyShapeStyle = if configuration.isPressed {
+    let hovering = isHovering && isEnabled
+    let background: AnyShapeStyle = if configuration.isPressed, isEnabled {
       AnyShapeStyle(.tertiary)
-    } else if isHovering {
+    } else if hovering {
       AnyShapeStyle(.quaternary)
     } else {
       AnyShapeStyle(.clear)
     }
+    let foreground: HierarchicalShapeStyle = if !isEnabled {
+      .quaternary
+    } else if hovering {
+      .primary
+    } else {
+      .secondary
+    }
     return configuration.label
-      .foregroundStyle(isHovering ? .primary : .secondary)
+      .foregroundStyle(foreground)
       .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(background))
       .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
   }
