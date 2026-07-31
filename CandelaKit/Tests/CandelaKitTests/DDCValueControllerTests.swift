@@ -411,6 +411,22 @@ struct DDCValueControllerTests {
     #expect(await scripted.readCount == 3)
   }
 
+  @Test func mutedReadOfRegisterZeroKeepsTheSavedVolume() async {
+    // Fix round 1 F1: muted in the default strategy, the register holds 0 as
+    // the MUTE ARTIFACT, not information. A `.read` relaunch seeing
+    // (0, 100) — a technically valid read — must not adopt/persist 0, or the
+    // unmute restore target is destroyed (next unmute restores 1/16, not 0.5).
+    let scripted = ScriptedDDC(reads: [(current: 0, max: 100)])
+    let harness = Harness(command: .volume, savedValue: 0.5, writer: scripted) { prefs in
+      prefs.startupAction = .read
+      prefs.muted = true
+    }
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.value == 0.5)
+    #expect(harness.store.savedBrightness(for: "volume.pk") == 0.5)
+    #expect(harness.controller.isMuted)
+  }
+
   @Test func minimalPollingReadsExactlyOnce() async {
     // A bug that reads once regardless of tries — or five times under
     // .minimal — fails one of this pair.

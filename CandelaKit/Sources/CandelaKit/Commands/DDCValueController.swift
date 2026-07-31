@@ -210,9 +210,18 @@ public final class DDCValueController {
     // store. Any submit bumps the generation, so a mismatch means user
     // input superseded this read.
     let issuedAtStart = issuedGeneration
+    // Captured HERE, not after the value loop (review F2): a toggleMute
+    // landing mid-value-loop bumps the mute generation, and a later capture
+    // would blind the 0x8D-readback guard to it — the readback could then
+    // setMuted(false)+persist over the user's fresh mute.
+    let muteIssuedAtStart = issuedMuteGeneration
     for _ in 0 ..< tries {
       guard let result = await writer.read(command: readCode), result.max > 0 else { continue }
       guard issuedGeneration == issuedAtStart else { return }
+      // Muted default-strategy register 0 is the mute ARTIFACT, not
+      // information (review F1): adopting/persisting it would destroy the
+      // unmute restore target.
+      if command == .volume, isMuted, result.current == 0 { break }
       readMax = Int(result.max)
       let adopted = DimmingMath.ddcToValue(
         result.current,
@@ -226,7 +235,6 @@ public final class DDCValueController {
       break
     }
     guard command == .volume, prefs.enableMuteUnmute else { return }
-    let muteIssuedAtStart = issuedMuteGeneration
     for _ in 0 ..< tries {
       guard let result = await writer.read(command: VCP.audioMuteScreenBlank), result.max > 0 else { continue }
       // Same fence for the mute readback: in wire mode every mute-state
