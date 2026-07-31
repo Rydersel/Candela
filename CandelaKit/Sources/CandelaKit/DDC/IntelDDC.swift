@@ -123,6 +123,67 @@ public class IntelDDC {
     return nil
   }
 
+  /// DDC/CI Capabilities Request (VCP 0xF3), reassembled. Same contract as the
+  /// arm64 path: `nil` means the transaction failed, never "no capabilities".
+  public func readCapabilityString(
+    tries: UInt = 3,
+    minReplyDelay: UInt64? = nil,
+    errorRecoveryWaitTime: UInt32? = nil,
+    writeSleepTime: UInt32 = 10000
+  ) -> String? {
+    var bytes: [UInt8] = []
+    var offset: UInt16 = 0
+    for _ in 0 ..< 128 {
+      guard let fragment = self.readCapabilityFragment(
+        offset: offset, tries: tries, minReplyDelay: minReplyDelay,
+        errorRecoveryWaitTime: errorRecoveryWaitTime, writeSleepTime: writeSleepTime
+      ) else {
+        return nil
+      }
+      if fragment.isEmpty { break }
+      bytes.append(contentsOf: fragment)
+      offset &+= UInt16(fragment.count)
+      if bytes.count > 4096 { return nil }
+    }
+    guard !bytes.isEmpty else { return nil }
+    return String(decoding: bytes, as: UTF8.self)
+  }
+
+  private func readCapabilityFragment(
+    offset: UInt16, tries: UInt, minReplyDelay: UInt64?,
+    errorRecoveryWaitTime: UInt32?, writeSleepTime: UInt32
+  ) -> [UInt8]? {
+    // [source 0x51][0x80 | messageLength][0xF3][offsetHi][offsetLo][checksum]
+    var data: [UInt8] = [0x51, 0x83, 0xF3, UInt8(offset >> 8), UInt8(offset & 0xFF), 0]
+    data[5] = 0x6E ^ data[0] ^ data[1] ^ data[2] ^ data[3] ^ data[4]
+    var replyData = [UInt8](repeating: 0, count: 38)
+    for _ in 1 ... max(tries, 1) {
+      usleep(writeSleepTime)
+      usleep(errorRecoveryWaitTime ?? 0)
+      var request = IOI2CRequest()
+      request.commFlags = 0
+      request.sendAddress = 0x6E
+      request.sendTransactionType = IOOptionBits(kIOI2CSimpleTransactionType)
+      request.sendBuffer = withUnsafePointer(to: &data[0]) { vm_address_t(bitPattern: $0) }
+      request.sendBytes = UInt32(data.count)
+      request.minReplyDelay = minReplyDelay ?? 10
+      request.replyAddress = 0x6F
+      request.replySubAddress = 0x51
+      request.replyTransactionType = self.replyTransactionType
+      request.replyBytes = UInt32(replyData.count)
+      request.replyBuffer = withUnsafePointer(to: &replyData[0]) { vm_address_t(bitPattern: $0) }
+      guard IntelDDC.send(request: &request, to: self.framebuffer,
+                          errorRecoveryWaitTime: errorRecoveryWaitTime) else { continue }
+      // Unlike `read`, the checksum is NOT taken over the whole buffer: a short
+      // fragment leaves the tail undefined. `CapabilityString.fragment` derives
+      // the real frame length from the length byte.
+      if let fragment = CapabilityString.fragment(fromFrame: replyData, expectedOffset: offset) {
+        return fragment
+      }
+    }
+    return nil
+  }
+
   private static func supportedTransactionType() -> IOOptionBits? {
     var ioIterator = io_iterator_t()
     guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceNameMatching("IOFramebufferI2CInterface"), &ioIterator) == KERN_SUCCESS else {

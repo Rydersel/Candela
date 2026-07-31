@@ -10,6 +10,11 @@ final class AppModel {
     let controller: BrightnessController
     let volume: DDCValueController
     let contrast: DDCValueController
+    /// This display's live DDC wire, kept beside the controllers so an
+    /// off-path transaction (the D24 capabilities probe) can reach it without
+    /// re-running discovery. Replaced on every refresh — a replug hands out a
+    /// fresh IOAVService and the old one must never be written to.
+    let writer: any DDCWriting
     var id: CGDirectDisplayID { display.id }
   }
 
@@ -46,6 +51,17 @@ final class AppModel {
   /// is irrelevant for unsuffixed accessors. Assigned in `init` rather than
   /// inline: it needs the safe-mode flag, which arrives as an init parameter.
   @ObservationIgnored private let appPrefs: DisplayPrefs
+
+  /// D24: per-display VCP 0x62 verdict from the capabilities string. Observable,
+  /// so the panel's volume slider enables/disables live the moment a probe
+  /// lands. An ABSENT entry means "not probed yet, or the probe was skipped" and
+  /// reads as `.unknown` — the panel is fully usable before any DDC happens. A
+  /// STORED `.unknown` means the probe ran and failed, and is cached for the
+  /// session so a write-only panel (the MAG 341C) is not re-probed on every
+  /// menu close.
+  private(set) var volumeSupport: [String: VCPSupport] = [:]
+
+  @ObservationIgnored private var capabilityProbesInFlight: Set<String> = []
 
   /// D11: session-only hardware gate, injected once and never re-read from
   /// UserDefaults. Also gates the brightness readback below, which the
@@ -203,30 +219,56 @@ final class AppModel {
     audioMatchingDisplays(for: audioDevices.defaultOutputDevice())
   }
 
-  /// Whether this display can play sound at all: it enumerates as a CoreAudio
-  /// output device (EDID-declared audio sink), unless `audioSinkOverride` says
-  /// otherwise. False greys out the panel's volume slider — the row stays
-  /// visible, because "this display has no audio" is information, whereas
-  /// `hideVolumeSlider` is the user saying they never want to see it.
+  /// Whether the panel's volume slider accepts input for this display (D24).
   ///
-  /// PANEL ONLY. The volume keys never consult this: their targets come from
-  /// `resolveVolumeTargets`, and a display whose speakers CoreAudio cannot see
-  /// still takes DDC volume writes. A wrong verdict here costs a slider, never
-  /// the keys.
+  /// REPLACES the CoreAudio name-match gate shipped in 7b5be00 / 1f117b3, which
+  /// made absence of evidence sufficient to disable a working control — and was
+  /// wrong in both directions (a panel can declare audio in its EDID with
+  /// nothing to play it through; a panel with working speakers is invisible to
+  /// CoreAudio when the Mac's link carries no audio). The signal is now the
+  /// monitor's own capabilities string. `AudioRoutingPolicy.displayHasAudioSink`
+  /// is untouched and retained under test, with no production caller in v1.
+  func volumeSliderEnabled(_ state: DisplayState) -> Bool {
+    VolumeSliderPolicy.isEnabled(
+      override: DisplayPrefs(persistenceKey: state.display.persistenceKey).audioSinkOverride,
+      volumeSupport: volumeSupport[state.display.persistenceKey] ?? .unknown
+    )
+  }
+
+  /// Starts a capabilities probe for every display `CapabilityProbePolicy` says
+  /// is eligible.
   ///
-  /// Reads the provider's change-refreshed name snapshot, so this stays a
-  /// cheap MainActor call (no HAL round-trip on menu open).
-  func hasAudioOutput(_ state: DisplayState) -> Bool {
-    let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
-    switch prefs.audioSinkOverride {
-    case .forceNone: return false
-    case .forcePresent: return true
-    case .auto:
-      return AudioRoutingPolicy.displayHasAudioSink(
-        rawDisplayName: state.display.name,
-        nameOverride: prefs.audioDeviceNameOverride,
-        outputDeviceNames: audioDevices.outputDeviceNames()
-      )
+  /// Never awaited by a caller: a fragment round-trip is ~80 ms and a wedged bus
+  /// costs ~0.5 s per fragment before it gives up, and D24 forbids the panel
+  /// blocking on any of that. The cache is what keeps this from being per-open
+  /// traffic — a display is probed once per session per plug.
+  private func probeVolumeCapabilities() {
+    for state in displays {
+      let persistenceKey = state.display.persistenceKey
+      // The eligibility rule lives in CandelaKit and is tested there (D21) —
+      // in particular the HDR case, which SKIPS without caching, because DDC is
+      // dead under HDR and a `.unknown` written now would outlive the cause.
+      guard CapabilityProbePolicy.shouldProbe(
+        cached: volumeSupport[persistenceKey],
+        inFlight: capabilityProbesInFlight.contains(persistenceKey),
+        hdrEngaged: state.controller.isHDREngaged
+      ) else { continue }
+      capabilityProbesInFlight.insert(persistenceKey)
+      let writer = state.writer
+      let manager = displayManager
+      let epoch = displayManager.currentEpoch()
+      Task { [weak self] in
+        let capabilities = await writer.readCapabilityString()
+        guard let self else { return }
+        self.capabilityProbesInFlight.remove(persistenceKey)
+        // A sleep or reconfiguration since the request means this answer may
+        // describe a wire that no longer exists. Discard rather than cache; the
+        // entry stays absent and the next pass re-probes.
+        guard manager.isEpochCurrent(epoch) else { return }
+        self.volumeSupport[persistenceKey] = capabilities.map {
+          CapabilityString.support(forVCP: VCP.audioSpeakerVolume, in: $0)
+        } ?? .unknown
+      }
     }
   }
 
@@ -382,7 +424,7 @@ final class AppModel {
         previous.contrast.rebind(writer: entry.writer)
         let state = DisplayState(
           display: entry.display, controller: previous.controller,
-          volume: previous.volume, contrast: previous.contrast
+          volume: previous.volume, contrast: previous.contrast, writer: entry.writer
         )
         kept.append(state)
         return state
@@ -424,7 +466,8 @@ final class AppModel {
         store: UserDefaultsBrightnessStore(), storageKey: "contrast.\(persistenceKey)"
       )
       let state = DisplayState(
-        display: entry.display, controller: controller, volume: volume, contrast: contrast
+        display: entry.display, controller: controller, volume: volume, contrast: contrast,
+        writer: entry.writer
       )
       appeared.append(state)
       return state
@@ -482,6 +525,11 @@ final class AppModel {
     // read is native (DisplayServices), not DDC — ungated under safe mode.
     await builtIn?.controller.refreshFromHardware()
     restartPoller()
+    // Drop verdicts for departed displays: a replug hands out a fresh
+    // IOAVService, so an old answer is not evidence about the new wire.
+    let live = Set(displays.map(\.display.persistenceKey))
+    volumeSupport = volumeSupport.filter { live.contains($0.key) }
+    probeVolumeCapabilities()
     return Array(existing.keys)
   }
 
@@ -498,7 +546,7 @@ final class AppModel {
     if let existing = builtIn, existing.id == found.id {
       builtIn = DisplayState(
         display: display, controller: existing.controller,
-        volume: existing.volume, contrast: existing.contrast
+        volume: existing.volume, contrast: existing.contrast, writer: existing.writer
       )
       return
     }
@@ -535,7 +583,11 @@ final class AppModel {
       contrast: DDCValueController(
         writer: NoopDDCWriter(), command: .contrast,
         prefs: DisplayPrefs(persistenceKey: "builtIn"), displayID: found.id
-      )
+      ),
+      // No DDC wire, and nothing ever probes the built-in slot (the D24 pass
+      // walks `displays`, which is external-only) — but `DisplayState` has one
+      // shape for both slots, so the honest stub goes here too.
+      writer: NoopDDCWriter()
     )
   }
 

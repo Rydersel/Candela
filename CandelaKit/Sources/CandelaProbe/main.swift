@@ -31,6 +31,7 @@ usage: candela-probe [--display <id>] <subcommand>
   contrast get|set <0-100>                DDC read/write of VCP 0x12
   mute on|off                             DDC write of VCP 0x8D (1=mute, 2=unmute)
   vcp get <hex>|set <hex> <0-65535>       raw VCP prober
+  caps                                    DDC/CI capabilities string (VCP 0xF3) + volume verdict
   audio devices                           default CoreAudio output + native-volume check
   native get                              DisplayServicesGetBrightness per display
   native set <0-1>                        DisplayServicesSetBrightness + read-back
@@ -125,7 +126,20 @@ switch arguments.first {
 case "list", nil:
   requireDDCDisplays()
   for entry in found {
-    print("\(entry.display.id)\t\(entry.display.name)")
+    // Column 2 is the persistence key: every per-display `defaults write`
+    // key is suffixed with it (docs/ADVANCED-SETTINGS.md).
+    print("\(entry.display.id)\t\(entry.display.persistenceKey)\t\(entry.display.name)")
+  }
+case "caps":
+  requireDDCDisplays()
+  for entry in found {
+    guard let capabilities = await entry.writer.readCapabilityString() else {
+      // Expected on the MAG 341C and every other write-only panel.
+      print("\(entry.display.name): capabilities read FAILED -> unknown (volume slider stays enabled)")
+      continue
+    }
+    print("\(entry.display.name): \(capabilities)")
+    print("  VCP 0x62 (volume): \(CapabilityString.support(forVCP: VCP.audioSpeakerVolume, in: capabilities))")
   }
 case "get":
   await ddcGet(code: VCP.brightness, label: "brightness")

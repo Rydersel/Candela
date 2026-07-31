@@ -60,17 +60,31 @@ struct PanelView: View {
               snapsToStops: snapsToStops, showsPercent: showsPercent
             )
             if showsVolumeSlider(for: state) {
-              let hasAudio = model.hasAudioOutput(state)
+              let volumeEnabled = model.volumeSliderEnabled(state)
               ValueSliderRow(
                 controller: state.volume,
                 systemImage: "speaker.wave.2.fill",
+                // T5's friendly-name local — NOT `state.display.name`. A
+                // renamed display must announce one name in every row of its
+                // section, tooltips included.
                 accessibilityLabel: "\(name) volume",
+                // T6's non-defaulted options. They have no defaults on
+                // `ValueSliderRow`; dropping them is a compile error, and
+                // "fixing" that by giving them defaults silently disables
+                // snapping and the percent readout on every volume slider.
                 snapsToStops: snapsToStops,
                 showsPercent: showsPercent,
+                // Also what makes this row zero-free: `ValueSliderRow` derives
+                // `snapsToZero: !mutesAtZero` from this glyph's presence, and a
+                // muting row must never snap to 0 (D29 — a snapped-to-zero
+                // volume hardware-mutes the display over VCP 0x8D). Dropping
+                // the glyph re-arms that hazard with no compile error.
                 mutedSystemImage: "speaker.slash.fill"
               )
-              .disabled(!hasAudio)
-              .help(hasAudio ? "" : "\(name) reports no audio output")
+              .disabled(!volumeEnabled)
+              // The reason changed with the signal: this is the monitor
+              // declining the feature, not macOS failing to find a speaker.
+              .help(volumeEnabled ? "" : "\(name) reports no volume control over DDC")
             }
             if showsContrastSlider(for: state) {
               ValueSliderRow(
@@ -174,11 +188,11 @@ struct PanelView: View {
   /// deliberate: it is the same gate `setValue` self-gates on, so a visible
   /// slider can never be a silently dead one.
   ///
-  /// Distinct from the audio-sink gate (`AppModel.hasAudioOutput`), which
-  /// DISABLES the row instead of removing it: those displays still have a
-  /// working volume register, so a greyed row says "nothing would come out of
-  /// it", while these three conjuncts mean the control does not apply here
-  /// at all.
+  /// Distinct from the volume-capability gate (`AppModel.volumeSliderEnabled`),
+  /// which DISABLES the row instead of removing it: that display has a volume
+  /// register the app is willing to write, and greying says "this monitor says
+  /// it does not implement volume", while these conjuncts mean the control does
+  /// not apply here at all.
   private func showsVolumeSlider(for state: AppModel.DisplayState) -> Bool {
     let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
     return state.volume.isAvailable && !prefs.hideVolumeSlider
