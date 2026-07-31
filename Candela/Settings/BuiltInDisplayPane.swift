@@ -35,11 +35,12 @@ struct BuiltInDisplayPane: View {
     let _ = model.prefsRevision
     Form {
       Section("Keyboard") {
-        Toggle("Control this display with the keyboard", isOn: Binding(
-          get: { !prefs.isDisabled },
-          set: { enabled in writer.write(.isDisabled) { $0.isDisabled = !enabled } }
-        ))
-        SettingsCaption("When off, the brightness keys skip the built-in display.")
+        SettingRow("When off, the brightness keys skip the built-in display.") {
+          Toggle("Control this display with the keyboard", isOn: Binding(
+            get: { !prefs.isDisabled },
+            set: { enabled in writer.write(.isDisabled) { $0.isDisabled = !enabled } }
+          ))
+        }
       }
 
       Section("Brightness") {
@@ -47,8 +48,9 @@ struct BuiltInDisplayPane: View {
       }
 
       Section("Menu bar panel") {
-        Button("Open Menu Bar Settings") { selection = .pane(.menuBar) }
-        SettingsCaption("Whether this display's slider appears in the panel is set under Menu Bar, so it stays reachable when the lid is closed and this display disappears.")
+        SettingRow("Whether this display's slider appears in the panel is set under Menu Bar, so it stays reachable when the lid is closed and this display disappears.") {
+          Button("Open Menu Bar Settings") { selection = .pane(.menuBar) }
+        }
       }
     }
     .formStyle(.grouped)

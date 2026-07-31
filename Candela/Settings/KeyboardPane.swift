@@ -102,8 +102,9 @@ struct KeyboardPane: View {
         KeyboardShortcuts.Recorder("Brightness down:", name: .brightnessDown)
         KeyboardShortcuts.Recorder("Brightness up:", name: .brightnessUp)
         KeyboardShortcuts.Recorder("Contrast down:", name: .contrastDown)
-        KeyboardShortcuts.Recorder("Contrast up:", name: .contrastUp)
-        SettingsCaption(Self.modifierHint)
+        SettingRow(Self.modifierHint) {
+          KeyboardShortcuts.Recorder("Contrast up:", name: .contrastUp)
+        }
         SettingsCaption("Contrast works on displays controlled over their data cable (DDC) only.")
       }
 
@@ -113,11 +114,12 @@ struct KeyboardPane: View {
         SettingsCaption("Hold Control while pressing a brightness key to adjust the built-in display, Control and Command to adjust every external display, and Control, Option and Command to adjust contrast. Shift and Option give finer steps.")
         SettingsCaption("Option on its own opens Displays settings, and Command with the brightness-down key switches display mirroring on or off.")
 
-        Toggle("Also accept F14 and F15", isOn: Binding(
-          get: { prefs.interceptAlternateBrightnessKeys }, // D1 positive accessor
-          set: { setInterceptAlternateKeys($0) }
-        ))
-        SettingsCaption("F14 and F15 are Scroll Lock and Pause on PC keyboards, and the brightness keys on some Logitech keyboards.")
+        SettingRow("F14 and F15 are Scroll Lock and Pause on PC keyboards, and the brightness keys on some Logitech keyboards.") {
+          Toggle("Also accept F14 and F15", isOn: Binding(
+            get: { prefs.interceptAlternateBrightnessKeys }, // D1 positive accessor
+            set: { setInterceptAlternateKeys($0) }
+          ))
+        }
       }
     }
   }
@@ -126,22 +128,24 @@ struct KeyboardPane: View {
 
   @ViewBuilder private var volumeSection: some View {
     Section("Volume keys") {
-      Picker("Control volume with:", selection: Binding(
-        get: { prefs.keyboardVolume },
-        set: { setVolumeMode($0) }
-      )) {
-        Text("The keyboard's volume and mute keys").tag(KeyMode.media)
-        Text("Custom shortcuts").tag(KeyMode.custom)
-        Text("Both").tag(KeyMode.both)
-        Text("Nothing").tag(KeyMode.disabled)
+      SettingRow("Volume applies to external displays that accept volume commands over their data cable (DDC).") {
+        Picker("Control volume with:", selection: Binding(
+          get: { prefs.keyboardVolume },
+          set: { setVolumeMode($0) }
+        )) {
+          Text("The keyboard's volume and mute keys").tag(KeyMode.media)
+          Text("Custom shortcuts").tag(KeyMode.custom)
+          Text("Both").tag(KeyMode.both)
+          Text("Nothing").tag(KeyMode.disabled)
+        }
       }
-      SettingsCaption("Volume applies to external displays that accept volume commands over their data cable (DDC).")
 
       if KeyModePolicy.firesCustomShortcuts(prefs.keyboardVolume) {
         KeyboardShortcuts.Recorder("Volume down:", name: .volumeDown)
         KeyboardShortcuts.Recorder("Volume up:", name: .volumeUp)
-        KeyboardShortcuts.Recorder("Mute:", name: .mute)
-        SettingsCaption(Self.modifierHint)
+        SettingRow(Self.modifierHint) {
+          KeyboardShortcuts.Recorder("Mute:", name: .mute)
+        }
       }
 
       if KeyModePolicy.watchesMediaKeys(prefs.keyboardVolume) {
@@ -163,29 +167,32 @@ struct KeyboardPane: View {
 
   @ViewBuilder private var targetSection: some View {
     Section("Target display") {
-      Picker("Brightness keys affect:", selection: Binding(
-        get: { prefs.multiKeyboardBrightness },
-        set: { setBrightnessTarget($0) }
-      )) {
-        Text("The display under the pointer").tag(MultiKeyboardBrightness.mouse)
-        Text("Every display").tag(MultiKeyboardBrightness.allScreens)
-        Text("The display with the active window").tag(MultiKeyboardBrightness.focusInsteadOfMouse)
-      }
-      .disabled(prefs.keyboardBrightness == .disabled)
-      if prefs.multiKeyboardBrightness == .focusInsteadOfMouse {
-        SettingsCaption("Window focus may not resolve correctly for full-screen apps.")
+      SettingRow {
+        Picker("Brightness keys affect:", selection: Binding(
+          get: { prefs.multiKeyboardBrightness },
+          set: { setBrightnessTarget($0) }
+        )) {
+          Text("The display under the pointer").tag(MultiKeyboardBrightness.mouse)
+          Text("Every display").tag(MultiKeyboardBrightness.allScreens)
+          Text("The display with the active window").tag(MultiKeyboardBrightness.focusInsteadOfMouse)
+        }
+        .disabled(prefs.keyboardBrightness == .disabled)
+        if prefs.multiKeyboardBrightness == .focusInsteadOfMouse {
+          SettingsCaption("Window focus may not resolve correctly for full-screen apps.")
+        }
       }
 
-      Picker("Volume keys affect:", selection: Binding(
-        get: { prefs.multiKeyboardVolume },
-        set: { setVolumeTarget($0) }
-      )) {
-        Text("The display under the pointer").tag(MultiKeyboardVolume.mouse)
-        Text("Every display").tag(MultiKeyboardVolume.allScreens)
-        Text("The display matching the audio output device").tag(MultiKeyboardVolume.audioDeviceNameMatching)
+      SettingRow(volumeTargetCaption) {
+        Picker("Volume keys affect:", selection: Binding(
+          get: { prefs.multiKeyboardVolume },
+          set: { setVolumeTarget($0) }
+        )) {
+          Text("The display under the pointer").tag(MultiKeyboardVolume.mouse)
+          Text("Every display").tag(MultiKeyboardVolume.allScreens)
+          Text("The display matching the audio output device").tag(MultiKeyboardVolume.audioDeviceNameMatching)
+        }
+        .disabled(prefs.keyboardVolume == .disabled)
       }
-      .disabled(prefs.keyboardVolume == .disabled)
-      SettingsCaption(volumeTargetCaption)
     }
   }
 
@@ -205,15 +212,15 @@ struct KeyboardPane: View {
       ))
       .disabled(prefs.keyboardBrightness == .disabled)
 
-      Toggle("Fine steps for volume", isOn: Binding(
-        get: { prefs.useFineScaleVolume },
-        set: { setFineScaleVolume($0) }
-      ))
-      .disabled(prefs.keyboardVolume == .disabled)
-
       // D25: the fork's "Fine OSD scale for…" leaked internal vocabulary. "On-screen
       // indicator" is the house term for the HUD across this pane and the Displays pane.
-      SettingsCaption("A key press normally moves one notch of the on-screen indicator, and holding Shift and Option moves a quarter of that. Turning these on swaps the two, so every press is fine by default.")
+      SettingRow("A key press normally moves one notch of the on-screen indicator, and holding Shift and Option moves a quarter of that. Turning these on swaps the two, so every press is fine by default.") {
+        Toggle("Fine steps for volume", isOn: Binding(
+          get: { prefs.useFineScaleVolume },
+          set: { setFineScaleVolume($0) }
+        ))
+        .disabled(prefs.keyboardVolume == .disabled)
+      }
       SettingsCaption("Custom shortcuts have no modifiers of their own, so they always use the step size selected here.")
     }
   }

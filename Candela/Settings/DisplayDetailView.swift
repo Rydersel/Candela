@@ -72,13 +72,14 @@ struct DisplayDetailView: View {
 
   private var identitySection: some View {
     Section("Display") {
-      TextField("Name", text: $nameDraft, prompt: Text(verbatim: state.display.name))
-        .focused($nameFocused)
-        .onSubmit { commitName() }
-        .onChange(of: nameFocused) { _, focused in
-          if !focused { commitName() }
-        }
-      SettingsCaption("Shown in the menu bar panel. Leave it empty to use the name the display reports.")
+      SettingRow("Shown in the menu bar panel. Leave it empty to use the name the display reports.") {
+        TextField("Name", text: $nameDraft, prompt: Text(verbatim: state.display.name))
+          .focused($nameFocused)
+          .onSubmit { commitName() }
+          .onChange(of: nameFocused) { _, focused in
+            if !focused { commitName() }
+          }
+      }
 
       // What the old card's section header carried as a subtitle. It is
       // read-only status, not a setting, so it reads as a value rather than a
@@ -99,21 +100,23 @@ struct DisplayDetailView: View {
         set: { shown in writer.write(.hideDisplay) { $0.hideDisplay = !shown } }
       ))
 
-      Toggle("Control this display with the keyboard", isOn: Binding(
-        get: { !prefs.isDisabled },
-        set: { enabled in writer.write(.isDisabled) { $0.isDisabled = !enabled } }
-      ))
-      SettingsCaption("When off, the brightness and volume keys skip this display.")
+      SettingRow("When off, the brightness and volume keys skip this display.") {
+        Toggle("Control this display with the keyboard", isOn: Binding(
+          get: { !prefs.isDisabled },
+          set: { enabled in writer.write(.isDisabled) { $0.isDisabled = !enabled } }
+        ))
+      }
 
-      Toggle("Show the volume slider in the panel", isOn: Binding(
-        get: { !prefs.hideVolumeSlider },
-        set: { shown in writer.write(.hideVolumeSlider) { $0.hideVolumeSlider = !shown } }
-      ))
       // The hide-vs-disable split (panel §5.4) is only obvious once you have
       // seen both controls. This toggle removes the row; "Volume slider (when
       // shown)" below decides whether a row that IS shown takes input. Without
       // this sentence the two read as one setting worded twice.
-      SettingsCaption("Removes the row entirely. Whether a slider that is shown accepts input is set under Volume.")
+      SettingRow("Removes the row entirely. Whether a slider that is shown accepts input is set under Volume.") {
+        Toggle("Show the volume slider in the panel", isOn: Binding(
+          get: { !prefs.hideVolumeSlider },
+          set: { shown in writer.write(.hideVolumeSlider) { $0.hideVolumeSlider = !shown } }
+        ))
+      }
     }
   }
 
@@ -150,38 +153,40 @@ struct DisplayDetailView: View {
 
   private var controlMethodSection: some View {
     Section("Control method") {
-      Toggle("Use hardware (DDC) control", isOn: Binding(
-      get: { !prefs.forceSoftware },
-      set: { useDDC in
-        // D29 rule 1 — the THIRD mute-stranding path, and the only one that was
-        // unrecoverable. `isAvailable` is
-        // `!tuning.unavailableDDC && !prefs.forceSoftware`, and `toggleMute`
-        // guards on it. Turning DDC control off while the display is 0x8D-muted
-        // used to make the unmute refuse FOREVER: the key path is gone, the
-        // panel drops the volume slider, `restoreToHardware` is gated on the
-        // same flag, and both UI escape hatches are disabled in exactly that
-        // state. Unmute BEFORE persisting the disabling value.
-        if !useDDC, state.volume.isMuted {
-          _ = state.volume.toggleMute()
-        }
-        writer.write(.forceSw) { $0.forceSoftware = !useDDC }
+      SettingRow("Turn this off if hardware control misbehaves on this display — brightness then dims in software, and volume and contrast become unavailable. Your current brightness is preserved either way.") {
+        Toggle("Use hardware (DDC) control", isOn: Binding(
+          get: { !prefs.forceSoftware },
+          set: { useDDC in
+            // D29 rule 1 — the THIRD mute-stranding path, and the only one that was
+            // unrecoverable. `isAvailable` is
+            // `!tuning.unavailableDDC && !prefs.forceSoftware`, and `toggleMute`
+            // guards on it. Turning DDC control off while the display is 0x8D-muted
+            // used to make the unmute refuse FOREVER: the key path is gone, the
+            // panel drops the volume slider, `restoreToHardware` is gated on the
+            // same flag, and both UI escape hatches are disabled in exactly that
+            // state. Unmute BEFORE persisting the disabling value.
+            if !useDDC, state.volume.isMuted {
+              _ = state.volume.toggleMute()
+            }
+            writer.write(.forceSw) { $0.forceSoftware = !useDDC }
+          }
+        ))
       }
-    ))
-    SettingsCaption("Turn this off if hardware control misbehaves on this display — brightness then dims in software, and volume and contrast become unavailable. Your current brightness is preserved either way.")
 
-    Toggle("Dim with a screen overlay", isOn: Binding(
-      get: { prefs.avoidGamma },
-      set: { overlay in
-        // D28: the seam's `.reapplyDimming` reaches `reapplyAfterPrefChange()`,
-        // which TEARS DOWN the abandoned backend before re-applying. Without
-        // that teardown `applySoftware` writes the newly selected backend and
-        // leaves the other one engaged — the shade at alpha 1 − 0.8^1.5 on top
-        // of a gamma table still at 0.8 — so the display drops to roughly the
-        // product of the two and stays there until a topology change.
-        writer.write(.avoidGamma) { $0.avoidGamma = overlay }
+      SettingRow("Software dimming normally adjusts the display's color profile. Switch to an overlay if another app keeps taking the profile back, or on virtual and AirPlay displays.") {
+        Toggle("Dim with a screen overlay", isOn: Binding(
+          get: { prefs.avoidGamma },
+          set: { overlay in
+            // D28: the seam's `.reapplyDimming` reaches `reapplyAfterPrefChange()`,
+            // which TEARS DOWN the abandoned backend before re-applying. Without
+            // that teardown `applySoftware` writes the newly selected backend and
+            // leaves the other one engaged — the shade at alpha 1 − 0.8^1.5 on top
+            // of a gamma table still at 0.8 — so the display drops to roughly the
+            // product of the two and stays there until a topology change.
+            writer.write(.avoidGamma) { $0.avoidGamma = overlay }
+          }
+        ))
       }
-    ))
-    SettingsCaption("Software dimming normally adjusts the display's color profile. Switch to an overlay if another app keeps taking the profile back, or on virtual and AirPlay displays.")
     }
   }
 
@@ -193,11 +198,12 @@ struct DisplayDetailView: View {
     let currentOutput = model.audioDevices.defaultOutputDevice()
 
     Section("Volume") {
-      Toggle("Show the on-screen volume indicator for this display", isOn: Binding(
-      get: { !prefs.hideOsd },
-      set: { shown in writer.write(.hideOsd) { $0.hideOsd = !shown } }
-    ))
-    SettingsCaption("Turn this off if macOS already shows its own volume indicator for this display. Brightness and contrast indicators are unaffected.")
+      SettingRow("Turn this off if macOS already shows its own volume indicator for this display. Brightness and contrast indicators are unaffected.") {
+        Toggle("Show the on-screen volume indicator for this display", isOn: Binding(
+          get: { !prefs.hideOsd },
+          set: { shown in writer.write(.hideOsd) { $0.hideOsd = !shown } }
+        ))
+      }
 
     Toggle("Mute with the display's own mute command", isOn: Binding(
       get: { prefs.enableMuteUnmute },
@@ -240,19 +246,20 @@ struct DisplayDetailView: View {
       SettingsCaption("Muting used the display's own mute command, and that command can only be undone over hardware control. This turns hardware control back on for this display and unmutes it.")
     }
 
-    // "(when shown)" is load-bearing, not padding: without it this picker and
-    // the "Show the volume slider in the panel" toggle above read as the same
-    // setting. One hides the row, this one decides whether a visible row takes
-    // input.
-    Picker("Volume slider (when shown):", selection: Binding(
-      get: { prefs.audioSinkOverride },
-      set: { override in writer.write(.audioSinkOverride) { $0.audioSinkOverride = override } }
-    )) {
-      Text("Enable automatically").tag(AudioSinkOverride.auto)
-      Text("Always enabled").tag(AudioSinkOverride.forcePresent)
-      Text("Always disabled").tag(AudioSinkOverride.forceNone)
-    }
-    SettingsCaption("\(AppInfo.productName) asks the display itself whether it accepts volume commands, and greys the slider only when the display says no. Override that when the answer is wrong for your setup — some displays report a volume control they ignore, and others accept volume they never advertise.")
+      // "(when shown)" is load-bearing, not padding: without it this picker and
+      // the "Show the volume slider in the panel" toggle above read as the same
+      // setting. One hides the row, this one decides whether a visible row takes
+      // input.
+      SettingRow("\(AppInfo.productName) asks the display itself whether it accepts volume commands, and greys the slider only when the display says no. Override that when the answer is wrong for your setup — some displays report a volume control they ignore, and others accept volume they never advertise.") {
+        Picker("Volume slider (when shown):", selection: Binding(
+          get: { prefs.audioSinkOverride },
+          set: { override in writer.write(.audioSinkOverride) { $0.audioSinkOverride = override } }
+        )) {
+          Text("Enable automatically").tag(AudioSinkOverride.auto)
+          Text("Always enabled").tag(AudioSinkOverride.forcePresent)
+          Text("Always disabled").tag(AudioSinkOverride.forceNone)
+        }
+      }
 
     LabeledContent("Audio device name") {
       HStack(spacing: 8) {

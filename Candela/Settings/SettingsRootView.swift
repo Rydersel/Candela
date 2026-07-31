@@ -175,6 +175,14 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
     if window.titleVisibility != .hidden {
       window.titleVisibility = .hidden
     }
+    // The default style puts the toolbar in its own band BELOW the titlebar,
+    // which dropped the pane title 24 pt under the window controls and opened
+    // a strip of dead space across the top of both columns (measured: title at
+    // y=162 against controls at y=138). `.unifiedCompact` merges the two rows,
+    // so the title sits on the same line as the controls.
+    if window.toolbarStyle != .unifiedCompact {
+      window.toolbarStyle = .unifiedCompact
+    }
     if window.title != title {
       window.title = title
     }

@@ -40,16 +40,17 @@ struct SettingsSidebar: View {
     List(selection: $selection) {
       Section {
         ForEach(SettingsRegistry.panes) { pane in
-          Label {
-            Text(pane.title)
-          } icon: {
-            SettingsSymbolTile(symbol: pane.symbol, tint: pane.tint)
+          row(.pane(pane.id)) {
+            Label {
+              Text(pane.title)
+            } icon: {
+              SettingsSymbolTile(symbol: pane.symbol, tint: pane.tint)
+            }
           }
-          .tag(SettingsDestination.pane(pane.id))
         }
       }
 
-      Section("Displays") {
+      Section {
         // Built-in first, matching `AppModel.allControlledStates`.
         if let builtIn = model.builtIn {
           displayRow(display: builtIn.display, controller: builtIn.controller)
@@ -65,24 +66,64 @@ struct SettingsSidebar: View {
             .font(.callout)
             .foregroundStyle(.secondary)
             .selectionDisabled()
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
         }
+      } header: {
+        Text("Displays")
+          .font(.callout.weight(.semibold))
+          .foregroundStyle(.secondary)
       }
     }
-    .listStyle(.sidebar)
-    // On macOS 26 the sidebar's hosting view is inset inside its column —
-    // measured at 200×472 within a 208×512 wrapper — which is the floating
-    // sidebar treatment. With the list drawing its own material inside that
-    // inset, the result is a visible rounded card hovering inside the window,
-    // most obvious in dark mode. Hiding the list's background removes the card
-    // edge and lets the window's own surface run behind the rows; the inset
-    // stays, but with nothing filling it there is no floating panel to see.
+    // `.plain`, NOT `.sidebar`.
+    //
+    // On macOS 26 `.listStyle(.sidebar)` opts into the Tahoe floating-glass
+    // sidebar: the list is drawn as a rounded, stroked panel inset inside its
+    // column — measured at 200×472 within a 208×512 wrapper — with the window
+    // controls sitting outside it. In a dark window that reads as a card
+    // hovering inside the window rather than as part of it, and System
+    // Settings itself does not look like that. `.scrollContentBackground` does
+    // not help: it removes the panel's fill but leaves its stroke and inset.
+    //
+    // `.plain` gives a flush, full-bleed list, and the selection pill and row
+    // spacing that `.sidebar` provided for free are rebuilt in `row(_:)` below.
+    .listStyle(.plain)
     .scrollContentBackground(.hidden)
+    .environment(\.defaultMinListRowHeight, 30)
+    // `.sidebar` reserved a band above its first row; `.plain` does not, so
+    // without this the first row sits flush against the top edge, directly
+    // under the window controls, with no breathing room at all.
+    .safeAreaInset(edge: .top, spacing: 0) { Color.clear.frame(height: 10) }
     // A settings window has exactly one navigation surface, and collapsing it
     // leaves a detail pane you cannot navigate out of. `NavigationSplitView`
     // adds the toggle by default, which parked a stray button in the middle of
     // the sidebar's toolbar strip and reserved a band of empty space under the
     // window controls. Removing it reclaims both.
     .toolbar(removing: .sidebarToggle)
+  }
+
+  /// One selectable row, carrying the pill that `.listStyle(.sidebar)` would
+  /// have drawn.
+  ///
+  /// Selection is styled by hand rather than left to the list: `.plain` paints
+  /// a full-width, square-cornered accent bar, which is the same defect in the
+  /// other direction. Foreground is forced to white on the selected row —
+  /// SwiftUI only auto-inverts label colour for selection styles it drew
+  /// itself, so a custom background needs the text handled explicitly or the
+  /// tinted-tile rows go unreadable on accent.
+  @ViewBuilder
+  private func row(_ destination: SettingsDestination, @ViewBuilder _ content: () -> some View) -> some View {
+    let isSelected = selection == destination
+    content()
+      .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+      .padding(.vertical, 3)
+      .tag(destination)
+      .listRowSeparator(.hidden)
+      .listRowBackground(
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+          .fill(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.clear))
+          .padding(.horizontal, 4)
+      )
   }
 
   /// A display's row: name, and a bar showing where its brightness currently
@@ -104,16 +145,17 @@ struct SettingsSidebar: View {
       friendlyName: DisplayPrefs(persistenceKey: display.persistenceKey).friendlyName,
       hardwareName: display.name
     )
-    Label {
-      VStack(alignment: .leading, spacing: 3) {
-        Text(verbatim: name) // a display's name — never a lookup key
-          .lineLimit(1)
-          .truncationMode(.tail)
-        Capsule()
-          .fill(.quaternary)
-          .frame(height: 3)
-          .overlay(alignment: .leading) {
-            GeometryReader { geo in
+    row(.display(display.persistenceKey)) {
+      Label {
+        VStack(alignment: .leading, spacing: 3) {
+          Text(verbatim: name) // a display's name — never a lookup key
+            .lineLimit(1)
+            .truncationMode(.tail)
+          Capsule()
+            .fill(.quaternary)
+            .frame(height: 3)
+            .overlay(alignment: .leading) {
+              GeometryReader { geo in
               // Monochrome, not the accent: the selection pill is already
               // accent-coloured, and an accent bar on every row made the
               // sidebar read as several competing highlights rather than one
@@ -126,16 +168,16 @@ struct SettingsSidebar: View {
               // is showing where that boundary is, so it takes the highest-
               // contrast neutral available: near-white on dark, near-black on
               // light, and white against the accent on the selected row.
-              Capsule()
-                .fill(.primary)
-                .frame(width: geo.size.width * min(max(controller.brightness, 0), 1))
+                Capsule()
+                  .fill(.primary)
+                  .frame(width: geo.size.width * min(max(controller.brightness, 0), 1))
+              }
             }
-          }
-          .accessibilityHidden(true)
+            .accessibilityHidden(true)
+        }
+      } icon: {
+        SettingsSymbolTile(symbol: "display", tint: .blue)
       }
-    } icon: {
-      SettingsSymbolTile(symbol: "display", tint: .blue)
     }
-    .tag(SettingsDestination.display(display.persistenceKey))
   }
 }
