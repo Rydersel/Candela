@@ -26,11 +26,30 @@ struct CandelaSlider: View {
   /// Trailing whole-percent readout (app-level `enableSliderPercent`).
   var showsPercent: Bool = false
 
+  /// `.disabled(_:)` only blocks the gesture. This control draws every pixel
+  /// itself, so nothing about it changed appearance and a dead slider still
+  /// looked live — you could only discover it by trying to drag it. AppKit
+  /// de-emphasises an unavailable control rather than merely inhibiting it
+  /// (`disabledControlTextColor` is the text-side equivalent), so we do both.
+  @Environment(\.isEnabled) private var isEnabled
+
   private let height: CGFloat = 30
   private let strokeColor = Color.gray.opacity(0.5)
   /// Wide enough for "100%" at 11 pt with monospaced digits, so the capsule
   /// never resizes as the number changes width.
   private let readoutWidth: CGFloat = 34
+
+  /// Applied to the whole control rather than per layer. The fill, knob and
+  /// glyph are tuned against each other — a black glyph sitting on a white
+  /// fill — so restyling them individually would break that relationship in
+  /// one appearance or the other. Uniform de-emphasis keeps the internal
+  /// contrast intact while the control reads as unavailable in both.
+  private var disabledDimming: Double { isEnabled ? 1 : 0.4 }
+
+  /// Shadows go to zero when disabled rather than dimming with everything
+  /// else: a shadow reads as "raised, therefore pressable" at any opacity,
+  /// which is the opposite of what an unavailable control should say.
+  private var shadowOpacity: Double { isEnabled ? 1 : 0 }
 
   private var stops: [Double] { snapsToZero ? SliderSnap.stops : SliderSnap.stopsWithoutZero }
 
@@ -48,6 +67,7 @@ struct CandelaSlider: View {
           .accessibilityHidden(true)
       }
     }
+    .opacity(disabledDimming)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(accessibilityLabel)
     .accessibilityValue(SliderSnap.percentText(value))
@@ -74,10 +94,10 @@ struct CandelaSlider: View {
         Capsule()
           .fill(.white)
           .frame(width: fillWidth)
-          .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
+          .shadow(color: .black.opacity(0.12 * shadowOpacity), radius: 2, y: 1)
         Circle()
           .fill(.white)
-          .shadow(color: .black.opacity(0.18), radius: 2)
+          .shadow(color: .black.opacity(0.18 * shadowOpacity), radius: 2)
           .overlay(Circle().strokeBorder(strokeColor, lineWidth: 1))
           .frame(width: height, height: height)
           .offset(x: fillWidth - height)
