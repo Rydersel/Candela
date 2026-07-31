@@ -143,21 +143,31 @@ final class AppModel {
   /// updateMediaKeyTap's disengage rule). Volume/mute keys additionally obey
   /// the audio-routing rule: released to the system whenever the default
   /// output can set its own volume (or name-matching finds no display).
+  ///
+  /// The key modes are the outer gate: `.custom`/`.disabled` release that
+  /// family's keys to macOS entirely (Candela improves on the fork, whose tap
+  /// keeps swallowing them). Six prefs feed this — the four verified in D32
+  /// plus `keyboardBrightness`/`keyboardVolume` — and every one has a
+  /// `.rearmTap` row, so a mode change re-arms.
   var tapConfig: MediaKeyEventTap.WatchConfig {
-    var watched: Set<MediaKey> = displays.isEmpty ? [] : [.brightnessUp, .brightnessDown]
+    var watched: Set<MediaKey> = []
+    if KeyModePolicy.watchesMediaKeys(appPrefs.keyboardBrightness), !displays.isEmpty {
+      watched = [.brightnessUp, .brightnessDown]
+    }
     // One snapshot of the default output for both consumers: read twice, a
     // device change landing between them could arm the tap on an inconsistent
     // pair (match count from one device, routing verdict from another).
     let device = audioDevices.defaultOutputDevice()
-    if AudioRoutingPolicy.shouldWatchVolumeKeys(
-      mode: volumeMode,
-      // Fork getDdcCapableDisplays (= !isSw(), review R5): forceSoftware
-      // displays don't count — a rig whose only external is forceSoftware
-      // releases the volume keys to macOS.
-      ddcDisplaysExist: !ddcCapableStates().isEmpty,
-      matchingDisplayCount: audioMatchingDisplays(for: device).count,
-      defaultOutput: device
-    ) {
+    if KeyModePolicy.watchesMediaKeys(appPrefs.keyboardVolume),
+       AudioRoutingPolicy.shouldWatchVolumeKeys(
+         mode: volumeMode,
+         // Fork getDdcCapableDisplays (= !isSw(), review R5): forceSoftware
+         // displays don't count — a rig whose only external is forceSoftware
+         // releases the volume keys to macOS.
+         ddcDisplaysExist: !ddcCapableStates().isEmpty,
+         matchingDisplayCount: audioMatchingDisplays(for: device).count,
+         defaultOutput: device
+       ) {
       watched.formUnion([.volumeUp, .volumeDown, .mute])
     }
     return .init(

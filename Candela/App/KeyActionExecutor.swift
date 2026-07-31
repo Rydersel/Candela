@@ -31,7 +31,29 @@ final class KeyActionExecutor {
         // drives a mirror set: the members show the same picture, so stepping
         // only the master would leave the set visibly mismatched. Each stepped
         // display shows its own HUD.
-        let affected = Self.pointerDisplayID().map(Self.expandToMirrorSet) ?? []
+        //
+        // `multiKeyboardBrightness` (read live, per press) redirects which
+        // display that is: every screen at once, or the one owning the focused
+        // window instead of the pointer.
+        let mode = DisplayPrefs(persistenceKey: "app").multiKeyboardBrightness
+        if mode == .allScreens {
+          // Fork getAffectedDisplays(.allScreens): every display, built-in
+          // included — so this is NOT the same as the `.allExternal` scope.
+          stepAllExternal(isUp: isUp, isFine: isFine, isFresh: isFresh)
+          if let (id, name, newValue) = model.stepBrightnessBuiltIn(
+            isUp: isUp, isFine: isFine, isFresh: isFresh
+          ) {
+            showHUD(id: id, name: name, value: newValue)
+          }
+          return
+        }
+        // Focus mode falls back to the pointer when no window resolves (a
+        // full-screen-less desktop, a frontmost app with no on-screen window):
+        // losing the targeting refinement beats losing the keypress.
+        let anchor: CGDirectDisplayID? = (mode == .focusInsteadOfMouse
+          ? FocusedDisplay.frontmostWindowDisplayID()
+          : nil) ?? Self.pointerDisplayID()
+        let affected = anchor.map(Self.expandToMirrorSet) ?? []
         let stepped = model.stepBrightness(
           displayIDs: affected, isUp: isUp, isFine: isFine, isFresh: isFresh
         )
@@ -105,7 +127,7 @@ final class KeyActionExecutor {
       for state in model.keyEnabledStates(targets) {
         guard let newValue = state.contrast.step(isUp: isUp, isFine: isFine) else { continue }
         hud?.showHUD(
-          displayID: state.id, type: .contrast, name: state.display.name, value: Float(newValue)
+          displayID: state.id, type: .contrast, name: hudName(for: state), value: Float(newValue)
         )
       }
     case .openSoundSettings:
@@ -163,7 +185,7 @@ final class KeyActionExecutor {
     hud?.showHUD(
       displayID: state.id,
       type: state.volume.isMuted ? .volumeMuted : .volume,
-      name: state.display.name,
+      name: hudName(for: state),
       value: Float(value)
     )
   }
@@ -172,7 +194,33 @@ final class KeyActionExecutor {
     // Backlog #11 (D6): the HUD mirrors the badge's LIVENESS predicate
     // (isHDREngaged — HDR live however it got there), not the policy
     // (hdrMode). One predicate for both surfaces, decided deliberately.
-    hud?.showBrightness(displayID: id, name: name, value: value, nameSuffix: hdrSuffix(for: id))
+    hud?.showBrightness(
+      displayID: id,
+      name: hudName(id: id, hardwareName: name),
+      value: value,
+      nameSuffix: hdrSuffix(for: id)
+    )
+  }
+
+  /// What the HUD calls a display. The model hands every step path the RAW
+  /// hardware name, so the rename the user made in the Displays pane has to be
+  /// applied here — through `DisplayOrdering.title`, the same rule the panel
+  /// uses, or the same display would be named two different things depending on
+  /// whether it was opened or pressed at.
+  private func hudName(for state: AppModel.DisplayState) -> String {
+    DisplayOrdering.title(
+      friendlyName: DisplayPrefs(persistenceKey: state.display.persistenceKey).friendlyName,
+      hardwareName: state.display.name
+    )
+  }
+
+  /// Same rule, from an ID: the step results carry `(id, hardwareName, value)`
+  /// and not the state. An unresolvable ID keeps the hardware name.
+  private func hudName(id: CGDirectDisplayID, hardwareName: String) -> String {
+    let state = model.displays.first { $0.id == id }
+      ?? model.builtIn.flatMap { $0.id == id ? $0 : nil }
+    guard let state else { return hardwareName }
+    return hudName(for: state)
   }
 
   private func hdrSuffix(for id: CGDirectDisplayID) -> String? {

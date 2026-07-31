@@ -61,6 +61,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   // as properties: the tap's thread and the executor must outlive launch.
   private var keyActionExecutor: KeyActionExecutor?
   private var mediaKeyTap: MediaKeyEventTap?
+  /// Custom-shortcut dispatch. Held for the app's lifetime — the handlers it
+  /// registers capture it weakly, so dropping it would silently kill every
+  /// custom shortcut.
+  private var shortcutManager: ShortcutManager?
   /// Stored (review M23) so the topology loop can `cleanupDisplay` departed
   /// displays' HUD panels; the executor shares this same instance.
   private let hud = BrightnessHUD()
@@ -162,7 +166,18 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
 
     settingsActions.rearmTap = { [weak self] in self?.refreshTapConfig() }
-    settingsActions.recheckPermissions = { [weak self] in self?.model.accessibility.promptIfNeeded() }
+    settingsActions.recheckPermissions = { [weak self] in
+      // D2 bug 2: the fork computes this and never calls it, so changing a
+      // keyboard mode never re-prompts. Candela prompts — but only when a mode
+      // change actually made the CGEvent tap wanted. Custom shortcuts are
+      // Carbon hotkeys and need no grant, so an all-custom rig must not be
+      // shown a TCC prompt it can only refuse.
+      let prefs = DisplayPrefs(persistenceKey: "app")
+      guard KeyModePolicy.requiresAccessibility(
+        brightness: prefs.keyboardBrightness, volume: prefs.keyboardVolume
+      ) else { return }
+      self?.model.accessibility.promptIfNeeded()
+    }
     settingsActions.updateStatusItem = { [weak self] in self?.updateStatusItemVisibility() }
 
     // Topology consumption loop — the stream's single consumer: after each
@@ -207,6 +222,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // tap both live for the app's lifetime.
     let executor = KeyActionExecutor(model: model, hud: hud)
     keyActionExecutor = executor
+    shortcutManager = ShortcutManager(model: model, executor: executor)
     let tap = MediaKeyEventTap { press in
       Task { @MainActor in
         // Constructed INSIDE the press closure on purpose: the live read per
