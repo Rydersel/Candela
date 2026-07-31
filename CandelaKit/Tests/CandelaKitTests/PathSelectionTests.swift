@@ -410,6 +410,120 @@ struct PathSelectionTests {
   }
 }
 
+// MARK: - Settings re-apply (D28)
+
+@MainActor
+@Suite("Re-apply after a pref change")
+struct ReapplyAfterPrefChangeTests {
+  @Test func leavingCombinedModeRewritesTheDDCLegAndHandsBackTheGammaTable() async {
+    // The bug this exists to prevent: `handleReconfigure` re-runs the SOFTWARE
+    // leg only and returns early in pure-DDC mode, so toggling combined
+    // dimming off at 40% left the register at its combined floor with the
+    // gamma table still scaled — near-black, surviving menu cycles until a
+    // replug.
+    let h = Harness()
+    h.controller.setBrightness(0.4)
+    // combined, s = 0.5: ddc portion 0 -> raw 0; sw 0.8 -> gamma 0.8*0.85+0.15
+    #expect(h.submitted == [.ddc(raw: 0)])
+    #expect(h.gamma.scales.count == 1 && approx(h.gamma.scales[0], 0.83))
+
+    h.prefs.disableCombinedBrightness = true
+    h.controller.reapplyAfterPrefChange()
+
+    // Pure DDC now: full-range raw 40, and NO software leg at all — so the
+    // gamma table goes back to the OS baseline.
+    #expect(h.submitted == [.ddc(raw: 0), .ddc(raw: 40)])
+    #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 1.0))
+    #expect(h.controller.brightness == 0.4) // D4: the value is preserved, never slammed to 1.0
+  }
+
+  @Test func switchingSoftwareBackendTearsDownTheAbandonedOne() async {
+    // `applySoftware` writes ONE backend and never clears the other, so
+    // toggling `avoidGamma` used to leave the gamma table scaled while the
+    // shade also dimmed — the display dropped to roughly the product.
+    let h = Harness { prefs, _ in prefs.forceSoftware = true }
+    h.controller.setBrightness(0.4)
+    #expect(h.gamma.scales.count == 1 && approx(h.gamma.scales[0], 0.49)) // 0.4*0.85+0.15
+    #expect(h.shade.alphaCalls.isEmpty)
+
+    h.prefs.avoidGamma = true
+    h.controller.reapplyAfterPrefChange()
+
+    // Teardown runs BEFORE the re-apply (guaranteed by construction in
+    // `reapplyAfterPrefChange`), so the gamma table is neutral by the time the
+    // shade takes over — no double-dim, no lurch.
+    #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 1.0))
+    #expect(h.shade.alphaCalls.count == 1)
+    #expect(approx(h.shade.alphaCalls[0].alpha, DimmingMath.shadeAlpha(fromValue: 0.49)))
+    #expect(h.shade.removed.isEmpty) // the CHOSEN backend is never torn down
+
+    // ...and back the other way: the shade is removed, gamma resumes.
+    h.prefs.avoidGamma = false
+    h.controller.reapplyAfterPrefChange()
+    #expect(h.shade.removed == [Harness.displayID])
+    #expect(h.gamma.scales.count == 3 && approx(h.gamma.scales[2], 0.49))
+  }
+
+  @Test func anUnchangedDDCTargetStillReachesTheWire() async {
+    // A tuning edit can leave the raw target identical (e.g. re-applying after
+    // a pref that only affects the software leg). Without the duplicate-memo
+    // reset the coalescer suppresses it and the "re-apply" does nothing.
+    let h = Harness { _, defaults in defaults.set(true, forKey: "disableCombinedBrightness") }
+    h.controller.setBrightness(0.4)
+    await h.controller.waitForPendingWrites()
+    #expect(await h.ddc.recordedWrites().count == 1)
+
+    h.controller.reapplyAfterPrefChange()
+    await h.controller.waitForPendingWrites()
+    let writes = await h.ddc.recordedWrites()
+    #expect(writes.count == 2)
+    #expect(writes.allSatisfy { $0.command == VCP.brightness && $0.value == 40 })
+  }
+
+  @Test func minAndMaxOverridesTakeEffectWithoutTouchingTheSlider() async {
+    // The tuning grid's whole point: an override must move the hardware NOW,
+    // not on the user's next drag.
+    let h = Harness { _, defaults in defaults.set(true, forKey: "disableCombinedBrightness") }
+    h.controller.setBrightness(1.0)
+    #expect(h.submitted == [.ddc(raw: 100)])
+
+    var tuning = h.prefs.tuning(for: .brightness)
+    tuning.maxDDCOverride = 80
+    h.prefs.setTuning(tuning, for: .brightness)
+    h.controller.reapplyAfterPrefChange()
+    #expect(h.submitted == [.ddc(raw: 100), .ddc(raw: 80)])
+  }
+
+  @Test func underTheNativePathTheSoftwareLegIsClearedAndNoDDCIsWritten() async {
+    let h = Harness(hdrEnabled: true) { prefs, _ in prefs.hdrMode = .alwaysOn }
+    await h.prime()
+    h.controller.setBrightness(0.75)
+    h.controller.reapplyAfterPrefChange()
+    #expect(h.submitted.last == .native(0.75))
+    #expect(h.submitted.allSatisfy { if case .native = $0 { true } else { false } })
+    await h.controller.waitForPendingWrites()
+    #expect(await h.ddc.recordedWrites().isEmpty) // DDC is dead under HDR
+    #expect(h.shade.removed.contains(Harness.displayID))
+    #expect(h.gamma.scales.last == 1.0)
+  }
+
+  @Test func aDisabledBrightnessCommandWritesNoDDCButStillFixesTheSoftwareLeg() async {
+    // `unavailableDDC.brightness` routes through the combined branch's
+    // `if !tuning.unavailableDDC` guard: no register write, software leg only.
+    let h = Harness()
+    h.controller.setBrightness(0.4)
+    #expect(h.submitted == [.ddc(raw: 0)])
+
+    var tuning = h.prefs.tuning(for: .brightness)
+    tuning.unavailableDDC = true
+    h.prefs.setTuning(tuning, for: .brightness)
+    h.controller.reapplyAfterPrefChange()
+
+    #expect(h.submitted == [.ddc(raw: 0)]) // nothing new on the wire
+    #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 0.83)) // re-asserted
+  }
+}
+
 // MARK: - External adoption (echo slot, Task 7 contract)
 
 @MainActor

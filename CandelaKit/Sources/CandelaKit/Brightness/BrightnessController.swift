@@ -777,6 +777,53 @@ public final class BrightnessController {
     applyPaths(brightness)
   }
 
+  // MARK: - Settings re-apply (D28)
+
+  /// Which software backend the CURRENT prefs select, if any. Pure DDC and the
+  /// native path have no software leg at all — that `.none` is exactly what
+  /// `handleReconfigure`'s early `return` failed to act on.
+  private enum SoftwareBackendChoice { case none, gamma, shade }
+
+  private var softwareBackendChoice: SoftwareBackendChoice {
+    guard !usesNative else { return .none }
+    if prefs.forceSoftware || !prefs.disableCombinedBrightness {
+      return prefs.avoidGamma ? .shade : .gamma
+    }
+    return .none
+  }
+
+  /// The ONE door for "a pref that affects dimming just changed" (D28).
+  ///
+  /// `handleReconfigure(recapture:)` is NOT that door and must not be used for
+  /// it: it re-runs the software leg only, and returns before applying anything
+  /// in pure-DDC mode. This entry point instead:
+  ///
+  /// 1. tears down whichever software backend the new prefs do NOT select —
+  ///    `applySoftware` writes one backend and never clears the other, so
+  ///    without this a gamma→shade switch double-dims and a switch to pure DDC
+  ///    leaves a scaled table installed forever;
+  /// 2. clears the software dedupe and the coalescer's duplicate memo, so a
+  ///    re-apply at an unchanged value still reaches the wire;
+  /// 3. re-runs FULL path selection for the current published value, writing
+  ///    both legs.
+  ///
+  /// The published `brightness` is untouched: a mode switch is a re-conversion
+  /// of the same perceptual value, never a reset to 100% (D4).
+  ///
+  /// Deliberately does NOT recapture the gamma baseline: step 1 hands the table
+  /// back at scale 1.0 whenever gamma is being abandoned, and a settings edit is
+  /// not a WindowServer rebuild. (Re-capturing on settings edits is a possible
+  /// refinement — the baseline can otherwise go stale for a user who never
+  /// replugs — but it is a behavior change, not part of this fix.)
+  public func reapplyAfterPrefChange() {
+    let choice = softwareBackendChoice
+    if choice != .shade { backends.shade?.removeShade(for: displayID) }
+    if choice != .gamma { backends.gamma?.applyGammaScale(1.0, on: displayID) }
+    lastAppliedSw = nil
+    coalescer.resetDuplicateState()
+    applyPaths(brightness)
+  }
+
   /// Quit restore: write the register's FULL-RANGE equivalent of the
   /// published value — software dimming is being torn down at quit, so
   /// leaving the combined-mode DDC floor would strand the monitor dark

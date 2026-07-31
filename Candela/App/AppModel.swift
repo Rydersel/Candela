@@ -48,6 +48,17 @@ final class AppModel {
 
   var volumeMode: MultiKeyboardVolume { appPrefs.multiKeyboardVolume }
 
+  /// Bumped by the propagation seam on any pref write that a view renders.
+  /// The panel and every settings pane reference it in `body` so external
+  /// writes (drag-remove, another pane, `defaults write` + reset) re-render
+  /// them. `DisplayPrefs` is plain UserDefaults and not observable, so this is
+  /// the ONLY invalidation signal the settings UI has.
+  private(set) var prefsRevision = 0
+
+  func notePrefsChanged() {
+    prefsRevision &+= 1
+  }
+
   /// Software-dimming islands (AppKit lives in the app target behind
   /// CandelaKit protocols). Constructed by StatusItemController and injected
   /// here — implementer's choice per the Task 6 brief, so tests can hand the
@@ -151,7 +162,7 @@ final class AppModel {
     }
     return .init(
       watchedKeys: watched,
-      interceptAlternateBrightnessKeys: !UserDefaults.standard.bool(forKey: "disableAltBrightnessKeys")
+      interceptAlternateBrightnessKeys: appPrefs.interceptAlternateBrightnessKeys
     )
   }
 
@@ -488,7 +499,7 @@ final class AppModel {
               delta: delta,
               from: controller,
               to: self.allControlledStates.map(\.controller),
-              isEnabled: UserDefaults.standard.bool(forKey: "enableBrightnessSync")
+              isEnabled: self.appPrefs.enableBrightnessSync
             )
           }
         },

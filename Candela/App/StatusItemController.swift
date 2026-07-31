@@ -30,7 +30,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// shade fallback. One monitor for all displays (the fork's counter is
   /// global too); wired into every controller's pre-gamma-apply hook.
   private let interferenceMonitor: GammaInterferenceMonitor
-  private let model: AppModel
+  /// Internal, not private: `CandelaApp` puts this in the Settings scene
+  /// environment (Task 3), and every pane reads it from there.
+  let model: AppModel
+  /// The propagation seam's app-side fan-out (D20). Every settings pane writes
+  /// a pref and then calls through here; the closures are wired at launch.
+  let settingsActions: SettingsActions
   private var statusItem: NSStatusItem?
 
   override init() {
@@ -39,7 +44,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     shadeOverlay = shade
     gammaController = gamma
     interferenceMonitor = GammaInterferenceMonitor(gamma: gamma, alerts: EngineAlerts())
-    model = AppModel(shade: shade, gamma: gamma)
+    let model = AppModel(shade: shade, gamma: gamma)
+    self.model = model
+    settingsActions = SettingsActions(model: model)
     super.init()
   }
   // Media-key pipeline (tap → router → executor → controllers + HUD). Stored
@@ -115,6 +122,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       Task { @MainActor in self?.refreshTapConfig() }
     }
 
+    settingsActions.rearmTap = { [weak self] in self?.refreshTapConfig() }
+    settingsActions.recheckPermissions = { [weak self] in self?.model.accessibility.promptIfNeeded() }
+    // SEAM-HOOK: updateStatusItem — wired by Task 5 (visibility modes). Task 5
+    // replaces this line by locating THIS sentinel, not by matching prose.
+
     // Topology consumption loop — the stream's single consumer: after each
     // debounced reconfiguration (or post-wake sober), re-discover displays,
     // re-arm the media-key tap, and drop departed displays' HUD panels.
@@ -158,9 +170,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     keyActionExecutor = executor
     let tap = MediaKeyEventTap { press in
       Task { @MainActor in
+        // Constructed INSIDE the press closure on purpose: the live read per
+        // press is what closes fork bug 3, and is why the fine-scale prefs
+        // correctly carry no `.rearmTap` row in the propagation table.
+        let prefs = DisplayPrefs(persistenceKey: "app")
         let config = KeyRouterConfig(
-          useFineScaleBrightness: UserDefaults.standard.bool(forKey: "useFineScaleBrightness"),
-          useFineScaleVolume: UserDefaults.standard.bool(forKey: "useFineScaleVolume")
+          useFineScaleBrightness: prefs.useFineScaleBrightness,
+          useFineScaleVolume: prefs.useFineScaleVolume
         )
         // isFresh separates a fresh press from key-repeat for the engine.
         executor.execute(KeyRouter.route(press, config: config), isFresh: !press.isRepeat)
