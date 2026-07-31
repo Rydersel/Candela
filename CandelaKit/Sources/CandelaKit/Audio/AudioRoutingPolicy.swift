@@ -22,8 +22,18 @@ public enum AudioRoutingPolicy {
 
   /// Whether the display appears among the machine's audio output devices —
   /// i.e. whether its EDID declares an audio sink (speakers, or a headphone
-  /// jack the panel drives). The menu-bar panel greys its volume slider out
-  /// when this is false, since a DDC volume write would have nothing to act on.
+  /// jack the panel drives).
+  ///
+  /// **No production caller in v1, and that is deliberate — do not delete.**
+  /// D24 removed the panel-slider gate this used to serve: "no sink matched"
+  /// cannot be told apart from "this link carries no audio while the panel's
+  /// speakers run off another input", so it is not evidence a working control
+  /// should be taken away. The panel asks the monitor instead
+  /// (`CapabilityString` → `VolumeSliderPolicy`). Volume-KEY routing does not
+  /// use this either — that goes through `displayMatchesDevice`, reached from
+  /// `AppModel.audioMatchingDisplays(for:)`. Retained with its tests (D24) for
+  /// the Displays pane's "Audio device name" override and for the key-routing
+  /// refinements that will need it.
   ///
   /// Same normalized comparison and the same override precedence as
   /// `displayMatchesDevice`: a display whose audio device enumerates under an

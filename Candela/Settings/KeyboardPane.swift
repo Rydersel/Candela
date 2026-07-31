@@ -47,8 +47,14 @@ struct KeyboardPane: View {
   ///
   /// `AppModel.accessibility` polls while the grant is missing, so this row
   /// clears itself the moment the grant appears — no reopen, no relaunch.
+  ///
+  /// The predicate is `AccessibilityPermission.isWarningWarranted`, the SAME
+  /// property the panel's banner gates on (Task 9), not a second local copy of
+  /// the rule. Two implementations of one rule is exactly how the pane and the
+  /// banner end up disagreeing on an all-custom rig — the split Task 9 flagged
+  /// for this task to close.
   @ViewBuilder private var accessibilitySection: some View {
-    if needsAccessibility, !model.accessibilityGranted {
+    if model.accessibility.isWarningWarranted {
       Section {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
           // Symbol AND text: the state is never signalled by color alone
@@ -70,12 +76,6 @@ struct KeyboardPane: View {
         }
       }
     }
-  }
-
-  private var needsAccessibility: Bool {
-    KeyModePolicy.requiresAccessibility(
-      brightness: prefs.keyboardBrightness, volume: prefs.keyboardVolume
-    )
   }
 
   // MARK: - Brightness

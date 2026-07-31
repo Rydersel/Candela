@@ -146,6 +146,12 @@ struct DisplayCard: View {
         get: { !prefs.hideVolumeSlider },
         set: { shown in writer.write(.hideVolumeSlider) { $0.hideVolumeSlider = !shown } }
       ))
+      // The hide-vs-disable split (panel §5.4) is only obvious once you have
+      // seen both controls. This toggle removes the row; Advanced → "Volume
+      // slider (when shown):" decides whether a row that IS shown takes input.
+      // Without this sentence the two read as one setting worded twice — the
+      // near-duplicate Task 13 handed to Task 18 for a copy pass.
+      SettingsCaption("Removes the row entirely. Whether a slider that is shown accepts input is set under Advanced.")
 
       DisclosureGroup("Advanced", isExpanded: $showsAdvanced) {
         advancedSection
@@ -308,7 +314,11 @@ struct DisplayCard: View {
       SettingsCaption("Muting used the display's own mute command, and that command can only be undone over hardware control. This turns hardware control back on for this display and unmutes it.")
     }
 
-    Picker("Volume slider:", selection: Binding(
+    // "(when shown)" is load-bearing, not padding: without it this picker and
+    // the "Show the volume slider in the panel" toggle above read as the same
+    // setting. One hides the row, this one decides whether a visible row takes
+    // input.
+    Picker("Volume slider (when shown):", selection: Binding(
       get: { prefs.audioSinkOverride },
       set: { override in writer.write(.audioSinkOverride) { $0.audioSinkOverride = override } }
     )) {
@@ -316,7 +326,7 @@ struct DisplayCard: View {
       Text("Always enabled").tag(AudioSinkOverride.forcePresent)
       Text("Always disabled").tag(AudioSinkOverride.forceNone)
     }
-    SettingsCaption("\(AppInfo.productName) decides for itself whether the panel's volume slider is usable. Override that when the verdict is wrong for your setup — some displays report a volume control they ignore, and others accept volume they never advertise.")
+    SettingsCaption("\(AppInfo.productName) asks the display itself whether it accepts volume commands, and greys the slider only when the display says no. Override that when the answer is wrong for your setup — some displays report a volume control they ignore, and others accept volume they never advertise.")
 
     LabeledContent("Audio device name") {
       HStack(spacing: 8) {

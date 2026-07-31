@@ -70,6 +70,14 @@ final class AppModel {
   /// `DDCValueController` sibling).
   @ObservationIgnored private let safeMode: Bool
 
+  /// The same flag, readable by the settings UI. Safe mode is a *session*
+  /// state that silently changes what the Startup picker means, and a pane
+  /// that cannot see it shows the user their persisted choice while nothing is
+  /// being restored — a control describing behavior that is not happening,
+  /// which is the defect class D11 exists to prevent. Constant for the
+  /// session, so it is deliberately not observable.
+  var isSafeMode: Bool { safeMode }
+
   var volumeMode: MultiKeyboardVolume { appPrefs.multiKeyboardVolume }
 
   /// Bumped by the propagation seam on any pref write that a view renders.
@@ -94,8 +102,6 @@ final class AppModel {
   /// through the model already in the SwiftUI environment (and clears live
   /// when the grant appears while the panel is open).
   let accessibility = AccessibilityPermission()
-
-  var accessibilityGranted: Bool { accessibility.isGranted }
 
   init(
     shade: (any ShadeRendering)? = nil,

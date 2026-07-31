@@ -29,19 +29,27 @@ public enum PollingMode: Int, Sendable, CaseIterable {
   case custom = 2
 }
 
-/// Whether the panel treats a display as able to play sound, overriding the
-/// CoreAudio sink detection in either direction. Detection can be wrong both
-/// ways: a panel can declare audio in its EDID and have nothing to play it
-/// through, and a panel with working speakers can be invisible to CoreAudio
-/// when the Mac's link carries no audio (DVI/VGA, some adapters) while the
-/// speakers run off another input. DDC volume still works in that second case,
-/// so a one-directional override would strand the slider disabled.
+/// Whether the panel's volume slider accepts input, overriding the automatic
+/// verdict in either direction (D24).
+///
+/// The automatic signal is the display's own DDC/CI capabilities string: a
+/// clean parse with no VCP 0x62 is the ONLY thing that greys the slider on its
+/// own. A failed, timed-out or unparseable read resolves to `.unknown` and
+/// leaves the slider enabled. CoreAudio no longer gates this at all — "no sink
+/// matched" cannot be told apart from "this link carries no audio while the
+/// panel's speakers run off another input", so it was never evidence that a
+/// working control should be taken away.
+///
+/// Overrides exist because a capabilities string is unreliable in the field:
+/// monitors truncate them, omit codes they implement, and advertise codes they
+/// ignore.
 public enum AudioSinkOverride: Int, Sendable, CaseIterable {
-  /// Trust `AudioRoutingPolicy.displayHasAudioSink`.
+  /// Trust `CapabilityString.support(forVCP:in:)` via `VolumeSliderPolicy`.
   case auto = 0
-  /// Always disabled — declares audio it cannot play.
+  /// Always greyed — the panel advertises volume it does not actually apply.
   case forceNone = 1
-  /// Always enabled — plays sound CoreAudio cannot see.
+  /// Always live — the panel takes volume writes its capabilities string denies
+  /// (or never returned).
   case forcePresent = 2
 }
 
@@ -269,9 +277,11 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("longerDelay")) }
   }
 
-  /// Manual override for the panel's audio-sink detection, in both directions
-  /// (see `AudioSinkOverride`). Unknown raw values fall back to `.auto`, so a
-  /// stray write can never strand the slider in a state the user cannot undo.
+  /// Manual override for the panel's volume-slider verdict, in both directions
+  /// (see `AudioSinkOverride` — the automatic signal is the display's own
+  /// capabilities string, not CoreAudio). Unknown raw values fall back to
+  /// `.auto`, so a stray write can never strand the slider in a state the user
+  /// cannot undo.
   public var audioSinkOverride: AudioSinkOverride {
     get { AudioSinkOverride(rawValue: defaults.integer(forKey: key("audioSinkOverride"))) ?? .auto }
     set { defaults.set(newValue.rawValue, forKey: key("audioSinkOverride")) }

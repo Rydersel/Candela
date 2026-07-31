@@ -108,7 +108,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     if isSafeMode {
       let alert = NSAlert()
       alert.messageText = "Safe Mode"
-      alert.informativeText = """
+      var informative = """
       Shift was held during launch. For this session, \(AppInfo.productName) will not restore your \
       saved brightness, volume and contrast, will not read any values back from your displays, and \
       will not write to them when you quit.
@@ -116,6 +116,27 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       Your sliders and keyboard shortcuts still work, and they still send commands to your displays. \
       Nothing about your settings has changed — relaunch without holding Shift to leave Safe Mode.
       """
+      // The one piece of traffic the paragraph above does not cover. Brightness
+      // sync is off by default, but when it is on, `BrightnessSync.fanOut`
+      // writes DDC to the other displays whenever the built-in's brightness
+      // moves — INCLUDING moves nobody made here, like the ambient light
+      // sensor's. That is unattended traffic, so "your sliders and keyboard
+      // shortcuts" does not honestly account for it, and a user in safe mode
+      // because DDC writes are wedging a monitor has to be told. Named only
+      // when the pref is actually on: a standing caveat about a feature the
+      // user does not use is noise, and the honesty rule is about the copy
+      // matching THIS session.
+      if DisplayPrefs(persistenceKey: "app").enableBrightnessSync {
+        informative += """
+
+
+        "Match other displays to the built-in display" is on, so changes to the built-in display's \
+        brightness — including ones macOS makes by itself, such as the ambient light sensor's — are \
+        still mirrored out to your other displays. Turn it off in Settings if you need those \
+        displays left completely alone.
+        """
+      }
+      alert.informativeText = informative
       // Accessory-policy app: without activating first, a launch-time alert can
       // come up behind whatever was frontmost. `NSApp.activate()` is enough
       // here — the SettingsOpener caveat about the deprecated variant applies

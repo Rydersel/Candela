@@ -179,6 +179,23 @@ struct GeneralPane: View {
         Text("Re-send the last saved values to the display").tag(StartupAction.write)
         Text("Ask the display for its current values").tag(StartupAction.read)
       }
+      // The picker deliberately shows the PERSISTED choice even in a safe-mode
+      // session: this pane's `DisplayPrefs` is built without the safe-mode
+      // flag, so the getter reports what is on disk rather than the `.doNothing`
+      // the engine is running on, and the setter writes through for the next
+      // normal launch. That is right for a settings control — but on its own it
+      // is also a control describing behavior that is not happening, so safe
+      // mode has to be visible right here or the pane quietly lies (D11).
+      if model.isSafeMode {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+          // Symbol AND text — never state by color alone (color.md). No custom
+          // color; the row is monochrome in both appearances.
+          Image(systemName: "exclamationmark.triangle")
+            .foregroundStyle(.secondary)
+          Text("Safe Mode is on for this session, so this setting is not in effect.")
+        }
+        SettingsCaption("Shift was held at launch. Relaunch without holding Shift to restore normal startup and wake behavior. Your setting above is unchanged and will be used then.")
+      }
       SettingsCaption(startupCaption)
       if prefs.startupAction == .read {
         SettingsCaption("Some displays never answer DDC reads (write-only panels); values then stay as last saved.")
