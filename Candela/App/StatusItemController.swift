@@ -37,6 +37,14 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// a pref and then calls through here; the closures are wired at launch.
   let settingsActions: SettingsActions
   private var statusItem: NSStatusItem?
+  /// KVO on the item's own visibility: `behavior = .removalAllowed` lets the
+  /// user ⌘-drag the icon out of the menu bar, which must persist as
+  /// `menuIcon = .hide` (D5). Held so the observation stays registered.
+  private var statusItemVisibilityObserver: NSKeyValueObservation?
+  /// D5 loop guard (fork `statusItemVisibilityChangedByUser`): brackets our own
+  /// programmatic visibility writes so the KVO callback can tell them apart
+  /// from a user drag. Without it: apply → observe → persist → apply, forever.
+  private var isApplyingStatusItemVisibility = false
 
   override init() {
     let shade = ShadeOverlay()
@@ -91,11 +99,38 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     item.button?.image = NSImage(systemSymbolName: "sun.max", accessibilityDescription: "Candela")
     item.menu = menu
+    // Fork parity: the icon can be ⌘-dragged off the bar, and we persist that.
+    item.behavior = .removalAllowed
     statusItem = item
 
     // The panel's gear button lives inside this menu's tracking session and
     // must end it before a window can take focus (see SettingsOpener).
     SettingsOpener.statusMenu = menu
+
+    // The handler MUST run synchronously — a `Task { @MainActor … }` hop would
+    // land after `isApplyingStatusItemVisibility` was already reset, and every
+    // programmatic hide would be misread as a user drag-removal. AppKit posts
+    // this on the main thread, which is what assumeIsolated asserts.
+    //
+    // KNOWN TRAP: `assumeIsolated` *traps* rather than degrading if AppKit ever
+    // delivers this off-main. It cannot be replaced by an async hop here — the
+    // loop guard requires synchronous execution — so the constraint is
+    // documented at the site and the crash surface is exercised interactively.
+    statusItemVisibilityObserver = item.observe(\.isVisible, options: [.new]) { [weak self] _, change in
+      // The new value comes from `change`, never from the observed object:
+      // the closure's `NSStatusItem` is task-isolated, and reading it inside
+      // the main-actor region below is a "sending risks data races" error
+      // under `SWIFT_STRICT_CONCURRENCY: complete`. `.new` is what makes
+      // `newValue` non-nil, so it is load-bearing, not decoration.
+      guard let isVisible = change.newValue else { return }
+      MainActor.assumeIsolated {
+        self?.statusItemVisibilityChanged(isVisible: isVisible)
+      }
+    }
+    // Apply the mode immediately. With `.externalOnly` on a laptop the icon may
+    // appear a beat later, once the warm refresh below discovers the external —
+    // acceptable, and the correct trade: `.hide` must take effect at once.
+    updateStatusItemVisibility()
 
     // Reconfiguration intake: synchronous registration on the main thread is
     // load-bearing — CG delivers the callback on the registering thread's
@@ -128,8 +163,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
     settingsActions.rearmTap = { [weak self] in self?.refreshTapConfig() }
     settingsActions.recheckPermissions = { [weak self] in self?.model.accessibility.promptIfNeeded() }
-    // SEAM-HOOK: updateStatusItem — wired by Task 5 (visibility modes). Task 5
-    // replaces this line by locating THIS sentinel, not by matching prose.
+    settingsActions.updateStatusItem = { [weak self] in self?.updateStatusItemVisibility() }
 
     // Topology consumption loop — the stream's single consumer: after each
     // debounced reconfiguration (or post-wake sober), re-discover displays,
@@ -140,6 +174,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         guard let self else { return }
         let departed = await self.model.refresh()
         self.refreshTapConfig()
+        self.updateStatusItemVisibility()
         // D5: a reconfigure pass restores once (the wake repeat chain, when
         // one is running, keeps re-asserting on its own schedule).
         self.restoreCoordinator.noteLaunchOrReconfigure()
@@ -208,6 +243,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     Task {
       await model.refresh()
       refreshTapConfig()
+      updateStatusItemVisibility()
       wireInterferenceHooks()
       restoreCoordinator.noteLaunchOrReconfigure()
     }
@@ -249,6 +285,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     Task {
       await model.refresh()
       refreshTapConfig()
+      updateStatusItemVisibility()
       wireInterferenceHooks()
     }
   }
@@ -299,6 +336,42 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   private func refreshTapConfig() {
     guard let mediaKeyTap, mediaKeyTap.isRunning else { return }
     mediaKeyTap.update(config: model.tapConfig)
+  }
+
+  /// Applies the `menuIcon` mode to the status item (D5). Called at launch,
+  /// after every display refresh, and from the settings seam's
+  /// `.updateStatusItem` effect — which fires for `menuIcon`, `hideDisplay`
+  /// AND `hideBuiltInDisplay`, because the last two decide `hasVisibleSlider`.
+  private func updateStatusItemVisibility() {
+    guard let statusItem else { return }
+    let visible = MenuIconPolicy.isStatusItemVisible(
+      mode: DisplayPrefs(persistenceKey: "app").menuIcon,
+      hasExternalDisplay: !model.displays.isEmpty,
+      // Exactly the panel's own question — same statics, so the icon and the
+      // panel can never disagree about whether a slider exists.
+      hasVisibleSlider: !PanelView.visibleDisplays(model).isEmpty || PanelView.showsBuiltIn(model)
+    )
+    guard statusItem.isVisible != visible else { return }
+    isApplyingStatusItemVisibility = true
+    statusItem.isVisible = visible
+    isApplyingStatusItemVisibility = false
+  }
+
+  /// KVO sink for `NSStatusItem.isVisible` — i.e. the user dragged the icon
+  /// out of the menu bar (or we just hid it ourselves).
+  private func statusItemVisibilityChanged(isVisible: Bool) {
+    let prefs = DisplayPrefs(persistenceKey: "app")
+    guard let mode = MenuIconPolicy.modeAfterVisibilityChange(
+      isVisible: isVisible,
+      changedByUser: !isApplyingStatusItemVisibility,
+      current: prefs.menuIcon
+    ) else { return }
+    prefs.menuIcon = mode
+    // Deliberately NOT `settingsActions.prefDidChange(.menuIcon)`: that row
+    // also fires `.updateStatusItem`, which would re-apply visibility on top of
+    // the drag the user just performed. Only the re-render is wanted, so the
+    // App menu pane's popup (T11) flips to "Never" on its own.
+    model.notePrefsChanged()
   }
 }
 

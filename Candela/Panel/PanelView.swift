@@ -12,55 +12,58 @@ struct PanelView: View {
   @Environment(AppModel.self) private var model
 
   var body: some View {
+    // Prefs are plain UserDefaults, not observable. Touching prefsRevision
+    // here is what re-renders the panel after a settings pane (or a
+    // drag-removal) writes a panel-visible pref — the M5 live-observation
+    // contract from the T2 seam.
+    let _ = model.prefsRevision
+    let externals = Self.visibleDisplays(model)
+    let showsBuiltIn = Self.showsBuiltIn(model)
     VStack(spacing: 0) {
       if !model.accessibilityGranted {
         accessibilityBanner
         Divider()
       }
       VStack(alignment: .leading, spacing: 14) {
-        if model.displays.isEmpty, model.builtIn == nil {
-          // Empty state only when there is nothing at all to control — a
-          // present built-in section IS a controllable display.
-          Text("No controllable displays")
-            .font(.system(size: 13))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
+        if externals.isEmpty, !showsBuiltIn {
+          emptyState
         }
-        if let builtIn = model.builtIn {
+        if showsBuiltIn, let builtIn = model.builtIn {
           // Name header only — no HDR badge/menu chrome: the built-in never
           // routes HDR (role .builtIn), and the section stays as quiet as
           // Control Center keeps its module headers. The slider drives the
           // native path, so Control Center's own slider follows live.
+          let name = Self.title(for: builtIn.display)
           VStack(alignment: .leading, spacing: 8) {
-            Text(builtIn.display.name)
+            Text(name)
               .font(.system(size: 13, weight: .semibold))
               .foregroundStyle(.secondary)
               .lineLimit(1)
               .accessibilityHidden(true) // the slider carries the display name
-            DisplaySliderRow(controller: builtIn.controller, displayName: builtIn.display.name)
+            DisplaySliderRow(controller: builtIn.controller, displayName: name)
           }
         }
-        ForEach(model.displays) { state in
+        ForEach(externals) { state in
+          let name = Self.title(for: state.display)
           VStack(alignment: .leading, spacing: 8) {
-            DisplayHeaderRow(controller: state.controller, displayName: state.display.name)
-            DisplaySliderRow(controller: state.controller, displayName: state.display.name)
+            DisplayHeaderRow(controller: state.controller, displayName: name)
+            DisplaySliderRow(controller: state.controller, displayName: name)
             if showsVolumeSlider(for: state) {
               let hasAudio = model.hasAudioOutput(state)
               ValueSliderRow(
                 controller: state.volume,
                 systemImage: "speaker.wave.2.fill",
-                accessibilityLabel: "\(state.display.name) volume",
+                accessibilityLabel: "\(name) volume",
                 mutedSystemImage: "speaker.slash.fill"
               )
               .disabled(!hasAudio)
-              .help(hasAudio ? "" : "\(state.display.name) reports no audio output")
+              .help(hasAudio ? "" : "\(name) reports no audio output")
             }
             if showsContrastSlider(for: state) {
               ValueSliderRow(
                 controller: state.contrast,
                 systemImage: "circle.lefthalf.filled",
-                accessibilityLabel: "\(state.display.name) contrast"
+                accessibilityLabel: "\(name) contrast"
               )
             }
           }
@@ -74,6 +77,69 @@ struct PanelView: View {
     .frame(width: 280)
   }
 
+  // MARK: - What the panel renders
+  //
+  // These three are `static` and non-private on purpose: StatusItemController
+  // asks the SAME question to decide `.sliderOnly` menu-bar visibility (D5),
+  // and a second copy of the rule there would drift.
+
+  /// Externals the panel renders: per-display hide applied, then ascending
+  /// order by friendly-or-hardware name (D7). One call, so the filter cannot
+  /// be discarded by the sort the way the fork's is (D2 bug 1).
+  ///
+  /// `@MainActor` explicitly: `View` is not a globally-isolated protocol — only
+  /// `body` is — so a bare `static func` here would be nonisolated and reading
+  /// `AppModel.displays` from it is an isolation violation under
+  /// `SWIFT_STRICT_CONCURRENCY: complete`.
+  @MainActor
+  static func visibleDisplays(_ model: AppModel) -> [AppModel.DisplayState] {
+    DisplayOrdering.panelOrder(
+      model.displays,
+      isHidden: { DisplayPrefs(persistenceKey: $0.display.persistenceKey).hideDisplay },
+      title: { title(for: $0.display) }
+    )
+  }
+
+  /// The built-in section, behind the app-level toggle. This is Candela's
+  /// working version of the fork's `hideAppleFromMenu`, whose filter had no
+  /// runtime effect at all (D2 bug 1). `@MainActor` for the same reason as
+  /// `visibleDisplays` — it reads `AppModel`.
+  @MainActor
+  static func showsBuiltIn(_ model: AppModel) -> Bool {
+    model.builtIn != nil && !DisplayPrefs(persistenceKey: "app").hideBuiltInDisplay
+  }
+
+  /// The name every part of the panel shows for a display — header, slider
+  /// accessibility label, and tooltips all go through this one call, so a
+  /// rename in the Displays pane (T13) moves all of them together.
+  static func title(for display: ExternalDisplay) -> String {
+    DisplayOrdering.title(
+      friendlyName: DisplayPrefs(persistenceKey: display.persistenceKey).friendlyName,
+      hardwareName: display.name
+    )
+  }
+
+  /// Two different empties, said differently: "nothing is attached" is a fact
+  /// about the hardware, "you hid everything" is a state the user can undo —
+  /// and it must say where (design guidance: help people recover).
+  private var emptyState: some View {
+    VStack(spacing: 4) {
+      if model.displays.isEmpty, model.builtIn == nil {
+        Text("No controllable displays")
+      } else {
+        Text("Every display is hidden")
+        Text("Show one again in Settings → Displays.")
+          .font(.system(size: 11))
+          .foregroundStyle(.tertiary)
+      }
+    }
+    .font(.system(size: 13))
+    .foregroundStyle(.secondary)
+    .multilineTextAlignment(.center)
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 6)
+  }
+
   // MARK: - Slider visibility
   //
   // Only `model.displays` (external) ever gets value rows: the built-in slot's
@@ -81,9 +147,10 @@ struct PanelView: View {
   // whose `isAvailable` is nonetheless true (T10 concern 6), so rendering them
   // would show a live-looking slider that does nothing.
   //
-  // Prefs are plain UserDefaults, not observable — the panel re-evaluates on
-  // every menu open via the model refresh, which is the M4 contract; live pref
-  // observation is M5 settings work.
+  // Prefs are plain UserDefaults, not observable: the panel re-evaluates them
+  // on every menu open (the M4 contract) and, since M5, whenever
+  // `AppModel.prefsRevision` bumps — which the T2 seam does on every
+  // panel-visible pref write.
 
   /// D2: volume slider per DDC display, unless hidden per display, disabled
   /// per command, or `forceSoftware` — all three fork conjuncts (fork
