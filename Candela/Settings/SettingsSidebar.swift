@@ -68,6 +68,10 @@ struct SettingsSidebar: View {
             .selectionDisabled()
             .listRowSeparator(.hidden)
             .listRowBackground(Color.clear)
+            // Tighter than a selectable row: `.inset` indents enough that this
+            // sentence wrapped after "No external", which reads as broken text
+            // rather than as a wrapped line.
+            .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 2))
         }
       } header: {
         Text("Displays")
@@ -87,7 +91,7 @@ struct SettingsSidebar: View {
     //
     // `.plain` gives a flush, full-bleed list, and the selection pill and row
     // spacing that `.sidebar` provided for free are rebuilt in `row(_:)` below.
-    .listStyle(.plain)
+    .listStyle(.inset)
     .scrollContentBackground(.hidden)
     .environment(\.defaultMinListRowHeight, 30)
     // `.sidebar` reserved a band above its first row; `.plain` does not, so
@@ -113,17 +117,11 @@ struct SettingsSidebar: View {
   /// tinted-tile rows go unreadable on accent.
   @ViewBuilder
   private func row(_ destination: SettingsDestination, @ViewBuilder _ content: () -> some View) -> some View {
-    let isSelected = selection == destination
     content()
-      .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
       .padding(.vertical, 3)
       .tag(destination)
       .listRowSeparator(.hidden)
-      .listRowBackground(
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-          .fill(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.clear))
-          .padding(.horizontal, 4)
-      )
+      .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
   }
 
   /// A display's row: name, and a bar showing where its brightness currently
