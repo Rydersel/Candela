@@ -29,6 +29,22 @@ public enum PollingMode: Int, Sendable, CaseIterable {
   case custom = 2
 }
 
+/// Whether the panel treats a display as able to play sound, overriding the
+/// CoreAudio sink detection in either direction. Detection can be wrong both
+/// ways: a panel can declare audio in its EDID and have nothing to play it
+/// through, and a panel with working speakers can be invisible to CoreAudio
+/// when the Mac's link carries no audio (DVI/VGA, some adapters) while the
+/// speakers run off another input. DDC volume still works in that second case,
+/// so a one-directional override would strand the slider disabled.
+public enum AudioSinkOverride: Int, Sendable, CaseIterable {
+  /// Trust `AudioRoutingPolicy.displayHasAudioSink`.
+  case auto = 0
+  /// Always disabled — declares audio it cannot play.
+  case forceNone = 1
+  /// Always enabled — plays sound CoreAudio cannot see.
+  case forcePresent = 2
+}
+
 /// Fork MultiKeyboardVolume: which display(s) the volume keys hit.
 public enum MultiKeyboardVolume: Int, Sendable, CaseIterable {
   case mouse = 0
@@ -184,15 +200,12 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("hideVolumeSlider")) }
   }
 
-  /// Manual override for the panel's audio-sink detection: force the volume
-  /// slider into its disabled state even when the display DOES enumerate as a
-  /// CoreAudio output. For panels that declare audio in their EDID but have
-  /// neither speakers nor a jack to play it through — detection cannot tell
-  /// those from a jack-equipped panel, so this is the escape hatch. It never
-  /// works in reverse: a display with no audio sink stays disabled regardless.
-  public var forceNoAudioOutput: Bool {
-    get { defaults.bool(forKey: key("forceNoAudioOutput")) }
-    set { defaults.set(newValue, forKey: key("forceNoAudioOutput")) }
+  /// Manual override for the panel's audio-sink detection, in both directions
+  /// (see `AudioSinkOverride`). Unknown raw values fall back to `.auto`, so a
+  /// stray write can never strand the slider in a state the user cannot undo.
+  public var audioSinkOverride: AudioSinkOverride {
+    get { AudioSinkOverride(rawValue: defaults.integer(forKey: key("audioSinkOverride"))) ?? .auto }
+    set { defaults.set(newValue.rawValue, forKey: key("audioSinkOverride")) }
   }
 
   /// Per-display "disable keyboard control" (fork `isDisabled`): media keys

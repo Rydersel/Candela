@@ -203,23 +203,37 @@ struct DisplayPrefsTests {
       #expect(prefs.muted == false)
       #expect(prefs.audioDeviceNameOverride == "")
       #expect(prefs.hideVolumeSlider == false)
-      #expect(prefs.forceNoAudioOutput == false)
+      #expect(prefs.audioSinkOverride == .auto)
       #expect(prefs.isDisabled == false)
       #expect(prefs.hideOsd == false)
       prefs.enableMuteUnmute = true
       prefs.muted = true
       prefs.audioDeviceNameOverride = "MAG 341C"
       prefs.hideVolumeSlider = true
-      prefs.forceNoAudioOutput = true
+      prefs.audioSinkOverride = .forcePresent
       prefs.isDisabled = true
       prefs.hideOsd = true
       #expect(defaults.object(forKey: "enableMuteUnmute.AAAA-BBBB") as? Bool == true)
       #expect(defaults.object(forKey: "muted.AAAA-BBBB") as? Bool == true)
       #expect(defaults.string(forKey: "audioDeviceNameOverride.AAAA-BBBB") == "MAG 341C")
       #expect(defaults.object(forKey: "hideVolumeSlider.AAAA-BBBB") as? Bool == true)
-      #expect(defaults.object(forKey: "forceNoAudioOutput.AAAA-BBBB") as? Bool == true)
+      #expect(defaults.object(forKey: "audioSinkOverride.AAAA-BBBB") as? Int == 2)
       #expect(defaults.object(forKey: "isDisabled.AAAA-BBBB") as? Bool == true)
       #expect(defaults.object(forKey: "hideOsd.AAAA-BBBB") as? Bool == true)
+    }
+  }
+
+  @Test func audioSinkOverrideRoundTripsBothWaysAndFallsBackToAuto() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      prefs.audioSinkOverride = .forceNone
+      #expect(prefs.audioSinkOverride == .forceNone)
+      prefs.audioSinkOverride = .forcePresent
+      #expect(prefs.audioSinkOverride == .forcePresent)
+      // A stray raw must not strand the slider in a state with no UI to undo
+      // it — unknown means "trust detection", never "stay disabled".
+      defaults.set(99, forKey: "audioSinkOverride.pk")
+      #expect(prefs.audioSinkOverride == .auto)
     }
   }
 
