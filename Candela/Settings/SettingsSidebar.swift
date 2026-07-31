@@ -37,8 +37,8 @@ struct SettingsSidebar: View {
     // showing the old name after a rename until something else forced a
     // re-render.
     let _ = model.prefsRevision
-    List(selection: $selection) {
-      Section {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 2) {
         ForEach(SettingsRegistry.panes) { pane in
           row(.pane(pane.id)) {
             Label {
@@ -48,9 +48,14 @@ struct SettingsSidebar: View {
             }
           }
         }
-      }
 
-      Section {
+        Text("Displays")
+          .font(.callout.weight(.semibold))
+          .foregroundStyle(.secondary)
+          .padding(.horizontal, 8)
+          .padding(.top, 14)
+          .padding(.bottom, 2)
+
         // Built-in first, matching `AppModel.allControlledStates`.
         if let builtIn = model.builtIn {
           displayRow(display: builtIn.display, controller: builtIn.controller)
@@ -59,69 +64,74 @@ struct SettingsSidebar: View {
           displayRow(display: state.display, controller: state.controller)
         }
         if model.displays.isEmpty {
-          // Preserves what the deleted Displays pane told the user. Without
-          // it, someone seeing only "Built-in Display" cannot tell an
-          // undetected monitor from a broken app.
+          // Preserves what the deleted Displays pane told the user. Without it,
+          // someone seeing only "Built-in Display" cannot tell an undetected
+          // monitor from a broken app.
           Text("No external displays connected")
             .font(.callout)
             .foregroundStyle(.secondary)
-            .selectionDisabled()
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
-            // Tighter than a selectable row: `.inset` indents enough that this
-            // sentence wrapped after "No external", which reads as broken text
-            // rather than as a wrapped line.
-            .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 2))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 8)
+            .padding(.top, 4)
         }
-      } header: {
-        Text("Displays")
-          .font(.callout.weight(.semibold))
-          .foregroundStyle(.secondary)
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 8)
+      .padding(.vertical, 10)
     }
-    // `.plain`, NOT `.sidebar`.
-    //
-    // On macOS 26 `.listStyle(.sidebar)` opts into the Tahoe floating-glass
-    // sidebar: the list is drawn as a rounded, stroked panel inset inside its
-    // column — measured at 200×472 within a 208×512 wrapper — with the window
-    // controls sitting outside it. In a dark window that reads as a card
-    // hovering inside the window rather than as part of it, and System
-    // Settings itself does not look like that. `.scrollContentBackground` does
-    // not help: it removes the panel's fill but leaves its stroke and inset.
-    //
-    // `.plain` gives a flush, full-bleed list, and the selection pill and row
-    // spacing that `.sidebar` provided for free are rebuilt in `row(_:)` below.
-    .listStyle(.inset)
     .scrollContentBackground(.hidden)
-    .environment(\.defaultMinListRowHeight, 30)
-    // `.sidebar` reserved a band above its first row; `.plain` does not, so
-    // without this the first row sits flush against the top edge, directly
-    // under the window controls, with no breathing room at all.
-    .safeAreaInset(edge: .top, spacing: 0) { Color.clear.frame(height: 10) }
+    // Hand-built rows rather than a `List`, and the reason is not cosmetic.
+    //
+    // Every list style loses on one axis. `.sidebar` and `.inset` draw a
+    // rounded selection pill but also draw their own panel, and that panel DIMS
+    // when the window is not key — confirmed by comparing focused and unfocused
+    // captures, and unreachable from AppKit because SwiftUI, not
+    // `NSVisualEffectView`, draws it (a dump of the live hierarchy found no
+    // sidebar-material effect view at all, and every effect view present was
+    // already pinned `.active`). `.plain` has no panel but a square, full-width
+    // highlight; and layering a custom pill under a `List`'s own selection
+    // produced two stacked highlights, because `listRowBackground` composites
+    // INSIDE the selection rather than replacing it.
+    //
+    // Owning the rows removes all three at once: no list-drawn panel to dim,
+    // exactly one pill, and the surface underneath is a real material that
+    // ignores key state.
+    //
+    // The cost is arrow-key navigation between rows, which a `List` gave for
+    // free. Each row is a focusable button, so the sidebar stays reachable and
+    // operable by keyboard via Tab and Space.
+    .glassSurface(cornerRadius: 12)
     // A settings window has exactly one navigation surface, and collapsing it
     // leaves a detail pane you cannot navigate out of. `NavigationSplitView`
-    // adds the toggle by default, which parked a stray button in the middle of
-    // the sidebar's toolbar strip and reserved a band of empty space under the
-    // window controls. Removing it reclaims both.
+    // adds the toggle by default, which parks a stray button in the toolbar.
     .toolbar(removing: .sidebarToggle)
   }
 
-  /// One selectable row, carrying the pill that `.listStyle(.sidebar)` would
-  /// have drawn.
+  /// One selectable row: a button that draws its own selection pill.
   ///
-  /// Selection is styled by hand rather than left to the list: `.plain` paints
-  /// a full-width, square-cornered accent bar, which is the same defect in the
-  /// other direction. Foreground is forced to white on the selected row —
-  /// SwiftUI only auto-inverts label colour for selection styles it drew
-  /// itself, so a custom background needs the text handled explicitly or the
-  /// tinted-tile rows go unreadable on accent.
+  /// Foreground is forced to white when selected. SwiftUI only auto-inverts a
+  /// label's colour for selection styles it drew itself, so a hand-drawn
+  /// background has to handle the text, or the tinted-tile rows go unreadable
+  /// against the accent fill.
   @ViewBuilder
   private func row(_ destination: SettingsDestination, @ViewBuilder _ content: () -> some View) -> some View {
-    content()
-      .padding(.vertical, 3)
-      .tag(destination)
-      .listRowSeparator(.hidden)
-      .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
+    let isSelected = selection == destination
+    Button {
+      selection = destination
+    } label: {
+      content()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+    .buttonStyle(.plain)
+    .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+    .background(
+      RoundedRectangle(cornerRadius: 6, style: .continuous)
+        .fill(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.clear))
+    )
+    .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
   }
 
   /// A display's row: name, and a bar showing where its brightness currently
@@ -136,9 +146,8 @@ struct SettingsSidebar: View {
   private func displayRow(display: ExternalDisplay, controller: BrightnessController) -> some View {
     // The SAME resolution the panel uses, so a rename moves the sidebar, the
     // panel header, the slider's accessibility label and the HUD together. The
-    // detail pane's navigation title deliberately does NOT follow — it stays
-    // the hardware name, so renaming does not relabel the window you are
-    // editing the name in.
+    // detail pane's title deliberately does NOT follow — it stays the hardware
+    // name, so renaming does not relabel the window you are editing it in.
     let name = DisplayOrdering.title(
       friendlyName: DisplayPrefs(persistenceKey: display.persistenceKey).friendlyName,
       hardwareName: display.name
@@ -154,18 +163,18 @@ struct SettingsSidebar: View {
             .frame(height: 3)
             .overlay(alignment: .leading) {
               GeometryReader { geo in
-              // Monochrome, not the accent: the selection pill is already
-              // accent-coloured, and an accent bar on every row made the
-              // sidebar read as several competing highlights rather than one
-              // selection plus some levels.
-              //
-              // `.primary`, NOT `.secondary`. Secondary sits one step from the
-              // quaternary track, so in dark mode both are mid-greys and a
-              // full bar was indistinguishable from an empty one — the fill
-              // boundary simply did not read. A level indicator's entire job
-              // is showing where that boundary is, so it takes the highest-
-              // contrast neutral available: near-white on dark, near-black on
-              // light, and white against the accent on the selected row.
+                // Monochrome, not the accent: the selection pill is already
+                // accent-coloured, and an accent bar on every row made the
+                // sidebar read as several competing highlights rather than one
+                // selection plus some levels.
+                //
+                // `.primary`, NOT `.secondary`. Secondary sits one step from
+                // the quaternary track, so in dark mode both are mid-greys and
+                // a full bar was indistinguishable from an empty one — the fill
+                // boundary simply did not read. A level indicator's entire job
+                // is showing where that boundary is, so it takes the highest-
+                // contrast neutral available: near-white on dark, near-black on
+                // light, and white against the accent on the selected row.
                 Capsule()
                   .fill(.primary)
                   .frame(width: geo.size.width * min(max(controller.brightness, 0), 1))
