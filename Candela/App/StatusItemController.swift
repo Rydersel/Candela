@@ -208,7 +208,19 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       Task { @MainActor in self?.refreshTapConfig() }
     }
 
-    settingsActions.rearmTap = { [weak self] in self?.refreshTapConfig() }
+    settingsActions.rearmTap = { [weak self] in
+      self?.refreshTapConfig()
+      // Task 12 hand-off: a Carbon hotkey registration is exclusive and
+      // system-wide, so an assigned shortcut whose mode is off silently steals
+      // its combination from every other app. Registration must therefore
+      // follow the modes, and the settings reset wipes those modes — without
+      // this, shortcuts stay registered against prefs that no longer exist
+      // until the next relaunch. Sitting in `.rearmTap` rather than in the
+      // reset body covers every mode write that routes through the seam, not
+      // just this one. Static: the manager instance is private here, and the
+      // KeyboardShortcuts registry is global.
+      ShortcutManager.syncRegistration()
+    }
     settingsActions.recheckPermissions = { [weak self] in
       // D2 bug 2: the fork computes this and never calls it, so changing a
       // keyboard mode never re-prompts. Candela prompts — but only when a mode
@@ -429,7 +441,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //         controller for a still-connected display and leave it holding
     //         state derived from the prefs just destroyed.
     await model.rebuildControllers()
-    refreshTapConfig()
+    // Through the seam's own closure, not `refreshTapConfig()` directly: the
+    // wipe reset the key-mode prefs, and `.rearmTap` is where custom-shortcut
+    // registration is re-synced against them (Task 12 hand-off). Calling the
+    // private helper here would re-arm the CGEvent tap and leave the Carbon
+    // hotkeys registered against modes that no longer exist.
+    settingsActions.rearmTap()
     updateStatusItemVisibility()
     model.notePrefsChanged()
     // Post-reset state IS first-run state: prefsSchemaVersion is gone, so
