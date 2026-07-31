@@ -10,6 +10,11 @@ final class AppModel {
     let controller: BrightnessController
     let volume: DDCValueController
     let contrast: DDCValueController
+    /// This display's live DDC wire, kept beside the controllers so an
+    /// off-path transaction (the D24 capabilities probe) can reach it without
+    /// re-running discovery. Replaced on every refresh — a replug hands out a
+    /// fresh IOAVService and the old one must never be written to.
+    let writer: any DDCWriting
     var id: CGDirectDisplayID { display.id }
   }
 
@@ -43,10 +48,48 @@ final class AppModel {
 
   /// App-level M4 prefs (startupAction, multiKeyboardVolume, showContrast)
   /// read through one DisplayPrefs like the engine does; the persistence key
-  /// is irrelevant for unsuffixed accessors.
-  @ObservationIgnored private let appPrefs = DisplayPrefs(persistenceKey: "app")
+  /// is irrelevant for unsuffixed accessors. Assigned in `init` rather than
+  /// inline: it needs the safe-mode flag, which arrives as an init parameter.
+  @ObservationIgnored private let appPrefs: DisplayPrefs
+
+  /// D24: per-display VCP 0x62 verdict from the capabilities string. Observable,
+  /// so the panel's volume slider enables/disables live the moment a probe
+  /// lands. An ABSENT entry means "not probed yet, or the probe was skipped" and
+  /// reads as `.unknown` — the panel is fully usable before any DDC happens. A
+  /// STORED `.unknown` means the probe ran and failed, and is cached for the
+  /// session so a write-only panel (the MAG 341C) is not re-probed on every
+  /// menu close.
+  private(set) var volumeSupport: [String: VCPSupport] = [:]
+
+  @ObservationIgnored private var capabilityProbesInFlight: Set<String> = []
+
+  /// D11: session-only hardware gate, injected once and never re-read from
+  /// UserDefaults. Also gates the brightness readback below, which the
+  /// `startupAction` getter override cannot reach (`BrightnessController`'s
+  /// `refreshFromHardware` carries no `startupAction` guard, unlike its
+  /// `DDCValueController` sibling).
+  @ObservationIgnored private let safeMode: Bool
+
+  /// The same flag, readable by the settings UI. Safe mode is a *session*
+  /// state that silently changes what the Startup picker means, and a pane
+  /// that cannot see it shows the user their persisted choice while nothing is
+  /// being restored — a control describing behavior that is not happening,
+  /// which is the defect class D11 exists to prevent. Constant for the
+  /// session, so it is deliberately not observable.
+  var isSafeMode: Bool { safeMode }
 
   var volumeMode: MultiKeyboardVolume { appPrefs.multiKeyboardVolume }
+
+  /// Bumped by the propagation seam on any pref write that a view renders.
+  /// The panel and every settings pane reference it in `body` so external
+  /// writes (drag-remove, another pane, `defaults write` + reset) re-render
+  /// them. `DisplayPrefs` is plain UserDefaults and not observable, so this is
+  /// the ONLY invalidation signal the settings UI has.
+  private(set) var prefsRevision = 0
+
+  func notePrefsChanged() {
+    prefsRevision &+= 1
+  }
 
   /// Software-dimming islands (AppKit lives in the app target behind
   /// CandelaKit protocols). Constructed by StatusItemController and injected
@@ -60,18 +103,19 @@ final class AppModel {
   /// when the grant appears while the panel is open).
   let accessibility = AccessibilityPermission()
 
-  var accessibilityGranted: Bool { accessibility.isGranted }
-
   init(
     shade: (any ShadeRendering)? = nil,
     gamma: (any GammaApplying)? = nil,
     hdrToggling: (any HDRToggling)? = nil,
-    audioDevices: (any AudioDeviceProviding)? = nil
+    audioDevices: (any AudioDeviceProviding)? = nil,
+    safeMode: Bool = false
   ) {
     self.shade = shade
     self.gamma = gamma
     self.hdrToggling = hdrToggling ?? MonitorPanelService()
     self.audioDevices = audioDevices ?? CoreAudioDeviceProvider()
+    self.safeMode = safeMode
+    appPrefs = DisplayPrefs(persistenceKey: "app", safeMode: safeMode)
   }
 
   /// Every controlled display, built-in first (its `isNativeActive()` is
@@ -132,26 +176,36 @@ final class AppModel {
   /// updateMediaKeyTap's disengage rule). Volume/mute keys additionally obey
   /// the audio-routing rule: released to the system whenever the default
   /// output can set its own volume (or name-matching finds no display).
+  ///
+  /// The key modes are the outer gate: `.custom`/`.disabled` release that
+  /// family's keys to macOS entirely (Candela improves on the fork, whose tap
+  /// keeps swallowing them). Six prefs feed this — the four verified in D32
+  /// plus `keyboardBrightness`/`keyboardVolume` — and every one has a
+  /// `.rearmTap` row, so a mode change re-arms.
   var tapConfig: MediaKeyEventTap.WatchConfig {
-    var watched: Set<MediaKey> = displays.isEmpty ? [] : [.brightnessUp, .brightnessDown]
+    var watched: Set<MediaKey> = []
+    if KeyModePolicy.watchesMediaKeys(appPrefs.keyboardBrightness), !displays.isEmpty {
+      watched = [.brightnessUp, .brightnessDown]
+    }
     // One snapshot of the default output for both consumers: read twice, a
     // device change landing between them could arm the tap on an inconsistent
     // pair (match count from one device, routing verdict from another).
     let device = audioDevices.defaultOutputDevice()
-    if AudioRoutingPolicy.shouldWatchVolumeKeys(
-      mode: volumeMode,
-      // Fork getDdcCapableDisplays (= !isSw(), review R5): forceSoftware
-      // displays don't count — a rig whose only external is forceSoftware
-      // releases the volume keys to macOS.
-      ddcDisplaysExist: !ddcCapableStates().isEmpty,
-      matchingDisplayCount: audioMatchingDisplays(for: device).count,
-      defaultOutput: device
-    ) {
+    if KeyModePolicy.watchesMediaKeys(appPrefs.keyboardVolume),
+       AudioRoutingPolicy.shouldWatchVolumeKeys(
+         mode: volumeMode,
+         // Fork getDdcCapableDisplays (= !isSw(), review R5): forceSoftware
+         // displays don't count — a rig whose only external is forceSoftware
+         // releases the volume keys to macOS.
+         ddcDisplaysExist: !ddcCapableStates().isEmpty,
+         matchingDisplayCount: audioMatchingDisplays(for: device).count,
+         defaultOutput: device
+       ) {
       watched.formUnion([.volumeUp, .volumeDown, .mute])
     }
     return .init(
       watchedKeys: watched,
-      interceptAlternateBrightnessKeys: !UserDefaults.standard.bool(forKey: "disableAltBrightnessKeys")
+      interceptAlternateBrightnessKeys: appPrefs.interceptAlternateBrightnessKeys
     )
   }
 
@@ -171,30 +225,56 @@ final class AppModel {
     audioMatchingDisplays(for: audioDevices.defaultOutputDevice())
   }
 
-  /// Whether this display can play sound at all: it enumerates as a CoreAudio
-  /// output device (EDID-declared audio sink), unless `audioSinkOverride` says
-  /// otherwise. False greys out the panel's volume slider — the row stays
-  /// visible, because "this display has no audio" is information, whereas
-  /// `hideVolumeSlider` is the user saying they never want to see it.
+  /// Whether the panel's volume slider accepts input for this display (D24).
   ///
-  /// PANEL ONLY. The volume keys never consult this: their targets come from
-  /// `resolveVolumeTargets`, and a display whose speakers CoreAudio cannot see
-  /// still takes DDC volume writes. A wrong verdict here costs a slider, never
-  /// the keys.
+  /// REPLACES the CoreAudio name-match gate shipped in 7b5be00 / 1f117b3, which
+  /// made absence of evidence sufficient to disable a working control — and was
+  /// wrong in both directions (a panel can declare audio in its EDID with
+  /// nothing to play it through; a panel with working speakers is invisible to
+  /// CoreAudio when the Mac's link carries no audio). The signal is now the
+  /// monitor's own capabilities string. `AudioRoutingPolicy.displayHasAudioSink`
+  /// is untouched and retained under test, with no production caller in v1.
+  func volumeSliderEnabled(_ state: DisplayState) -> Bool {
+    VolumeSliderPolicy.isEnabled(
+      override: DisplayPrefs(persistenceKey: state.display.persistenceKey).audioSinkOverride,
+      volumeSupport: volumeSupport[state.display.persistenceKey] ?? .unknown
+    )
+  }
+
+  /// Starts a capabilities probe for every display `CapabilityProbePolicy` says
+  /// is eligible.
   ///
-  /// Reads the provider's change-refreshed name snapshot, so this stays a
-  /// cheap MainActor call (no HAL round-trip on menu open).
-  func hasAudioOutput(_ state: DisplayState) -> Bool {
-    let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
-    switch prefs.audioSinkOverride {
-    case .forceNone: return false
-    case .forcePresent: return true
-    case .auto:
-      return AudioRoutingPolicy.displayHasAudioSink(
-        rawDisplayName: state.display.name,
-        nameOverride: prefs.audioDeviceNameOverride,
-        outputDeviceNames: audioDevices.outputDeviceNames()
-      )
+  /// Never awaited by a caller: a fragment round-trip is ~80 ms and a wedged bus
+  /// costs ~0.5 s per fragment before it gives up, and D24 forbids the panel
+  /// blocking on any of that. The cache is what keeps this from being per-open
+  /// traffic — a display is probed once per session per plug.
+  private func probeVolumeCapabilities() {
+    for state in displays {
+      let persistenceKey = state.display.persistenceKey
+      // The eligibility rule lives in CandelaKit and is tested there (D21) —
+      // in particular the HDR case, which SKIPS without caching, because DDC is
+      // dead under HDR and a `.unknown` written now would outlive the cause.
+      guard CapabilityProbePolicy.shouldProbe(
+        cached: volumeSupport[persistenceKey],
+        inFlight: capabilityProbesInFlight.contains(persistenceKey),
+        hdrEngaged: state.controller.isHDREngaged
+      ) else { continue }
+      capabilityProbesInFlight.insert(persistenceKey)
+      let writer = state.writer
+      let manager = displayManager
+      let epoch = displayManager.currentEpoch()
+      Task { [weak self] in
+        let capabilities = await writer.readCapabilityString()
+        guard let self else { return }
+        self.capabilityProbesInFlight.remove(persistenceKey)
+        // A sleep or reconfiguration since the request means this answer may
+        // describe a wire that no longer exists. Discard rather than cache; the
+        // entry stays absent and the next pass re-probes.
+        guard manager.isEpochCurrent(epoch) else { return }
+        self.volumeSupport[persistenceKey] = capabilities.map {
+          CapabilityString.support(forVCP: VCP.audioSpeakerVolume, in: $0)
+        } ?? .unknown
+      }
     }
   }
 
@@ -252,6 +332,12 @@ final class AppModel {
   /// wire (e.g. a discarded coalescer's tail-write racing a fresh read).
   @ObservationIgnored private var refreshTask: Task<[CGDirectDisplayID], Never>?
 
+  /// Identity of whatever currently occupies the single-flight slot above.
+  /// `Task` is a struct, so there is no `===` to compare with; this counter is
+  /// how a finished pass tells "the slot is still mine" from "someone else
+  /// installed a newer pass while I was suspended".
+  @ObservationIgnored private var refreshTaskGeneration: UInt64 = 0
+
   /// The CC-sync poll job. Cancelled and recreated after every refresh: its
   /// targets capture a fixed controller set, so a departed display's target
   /// must never outlive the pass that dropped it.
@@ -274,9 +360,50 @@ final class AppModel {
     }
     let task = Task { await performRefresh() }
     refreshTask = task
+    refreshTaskGeneration &+= 1
+    let generation = refreshTaskGeneration
     let departed = await task.value
-    refreshTask = nil
+    // Only clear the slot if we still own it. `rebuildControllers` below may
+    // have cleared it already and installed its own pass; a blind `= nil`
+    // would drop that pass out of the single-flight guard and let a second
+    // concurrent pass start on the same DDC services.
+    if refreshTaskGeneration == generation { refreshTask = nil }
     return departed
+  }
+
+  /// D30: force fresh controllers for every display.
+  ///
+  /// `performRefresh` reconciles by `CGDirectDisplayID` and REUSES
+  /// `previous.controller` / `previous.volume` / `previous.contrast` for a
+  /// still-connected display — by design, so long-lived media-key references
+  /// never go stale. That makes it the wrong tool after a settings reset:
+  /// every reused controller keeps in-memory state derived from prefs that no
+  /// longer exist (`hdrMode` mirror, `isMuted`, `lastAppliedSw`, and the
+  /// published value it will re-`persist()` straight back into the freshly
+  /// emptied domain). Emptying both slots first makes every display "appeared",
+  /// so all three controllers per display are constructed from the current
+  /// store.
+  ///
+  /// Callers must have already driven the hardware to a known state — this
+  /// drops the only objects that know what that state was.
+  func rebuildControllers() async {
+    // Drain any pass already in flight FIRST. `performRefresh` snapshots the
+    // reuse map and reassigns `displays` synchronously at its entry, before
+    // its first await — so clearing the slots underneath a running pass would
+    // neither rebuild its controllers (it made the reuse decision already) nor
+    // survive it (its assignment landed already, leaving `displays` empty).
+    // Piggybacking on it via `refresh()` has the same two problems. The loop
+    // re-checks because a topology event can install a newer pass while we
+    // wait; MainActor gives us no suspension between the loop exiting and
+    // `refresh()` reading the slot, so the hand-off cannot be raced.
+    while let inFlight = refreshTask {
+      let generation = refreshTaskGeneration
+      _ = await inFlight.value
+      if refreshTaskGeneration == generation { refreshTask = nil }
+    }
+    displays = []
+    builtIn = nil
+    await refresh()
   }
 
   /// Reconciles `displays` against discovery, keyed by `CGDirectDisplayID`:
@@ -303,13 +430,17 @@ final class AppModel {
         previous.contrast.rebind(writer: entry.writer)
         let state = DisplayState(
           display: entry.display, controller: previous.controller,
-          volume: previous.volume, contrast: previous.contrast
+          volume: previous.volume, contrast: previous.contrast, writer: entry.writer
         )
         kept.append(state)
         return state
       }
       let persistenceKey = entry.display.persistenceKey
-      let prefs = DisplayPrefs(persistenceKey: persistenceKey)
+      // D11: the ONE prefs object shared by this display's brightness, volume
+      // and contrast controllers — so the safe-mode `startupAction` override
+      // gates the volume/contrast readback (`refreshFromHardware` opens with
+      // `guard prefs.startupAction == .read`) for all of them at once.
+      let prefs = DisplayPrefs(persistenceKey: persistenceKey, safeMode: safeMode)
       let controller = BrightnessController(
         writer: entry.writer,
         backends: BrightnessBackends(
@@ -341,7 +472,8 @@ final class AppModel {
         store: UserDefaultsBrightnessStore(), storageKey: "contrast.\(persistenceKey)"
       )
       let state = DisplayState(
-        display: entry.display, controller: controller, volume: volume, contrast: contrast
+        display: entry.display, controller: controller, volume: volume, contrast: contrast,
+        writer: entry.writer
       )
       appeared.append(state)
       return state
@@ -369,7 +501,12 @@ final class AppModel {
       isCurrent: { [displayManager] in displayManager.isEpochCurrent($0) }
     )
     for state in appeared {
-      await state.controller.refreshFromHardware()
+      // D11: safe mode issues NO DDC reads. `BrightnessController.refreshFromHardware`
+      // is ungated on `startupAction` in the engine, so the gate lands here.
+      // (Gating it inside the controller on `startupAction == .read` is arguably
+      // the correct engine behavior regardless — recorded as an M5 follow-up,
+      // deliberately out of this task's ownership fence.)
+      if !safeMode { await state.controller.refreshFromHardware() }
       await state.volume.refreshFromHardware() // no-op unless startupAction == .read (validated)
       await state.contrast.refreshFromHardware()
     }
@@ -378,7 +515,7 @@ final class AppModel {
       // from hardware. Harmless no-op on write-only panels (MAG341C): the
       // read fails its guard and the last-written state stands.
       await state.controller.waitForPendingWrites()
-      await state.controller.refreshFromHardware()
+      if !safeMode { await state.controller.refreshFromHardware() }
       // Kept displays re-read volume/contrast too (spec-coverage F2 — the
       // fork re-reads every command on every display rebuild); both are
       // gated no-ops unless startupAction == .read. Same drain-before-read
@@ -390,9 +527,15 @@ final class AppModel {
       await state.contrast.refreshFromHardware()
     }
     // Resync the built-in from its native read (cheap; a freshly created
-    // controller already seeded from the same read at init).
+    // controller already seeded from the same read at init). The built-in's
+    // read is native (DisplayServices), not DDC — ungated under safe mode.
     await builtIn?.controller.refreshFromHardware()
     restartPoller()
+    // Drop verdicts for departed displays: a replug hands out a fresh
+    // IOAVService, so an old answer is not evidence about the new wire.
+    let live = Set(displays.map(\.display.persistenceKey))
+    volumeSupport = volumeSupport.filter { live.contains($0.key) }
+    probeVolumeCapabilities()
     return Array(existing.keys)
   }
 
@@ -409,7 +552,7 @@ final class AppModel {
     if let existing = builtIn, existing.id == found.id {
       builtIn = DisplayState(
         display: display, controller: existing.controller,
-        volume: existing.volume, contrast: existing.contrast
+        volume: existing.volume, contrast: existing.contrast, writer: existing.writer
       )
       return
     }
@@ -446,7 +589,11 @@ final class AppModel {
       contrast: DDCValueController(
         writer: NoopDDCWriter(), command: .contrast,
         prefs: DisplayPrefs(persistenceKey: "builtIn"), displayID: found.id
-      )
+      ),
+      // No DDC wire, and nothing ever probes the built-in slot (the D24 pass
+      // walks `displays`, which is external-only) — but `DisplayState` has one
+      // shape for both slots, so the honest stub goes here too.
+      writer: NoopDDCWriter()
     )
   }
 
@@ -488,7 +635,7 @@ final class AppModel {
               delta: delta,
               from: controller,
               to: self.allControlledStates.map(\.controller),
-              isEnabled: UserDefaults.standard.bool(forKey: "enableBrightnessSync")
+              isEnabled: self.appPrefs.enableBrightnessSync
             )
           }
         },

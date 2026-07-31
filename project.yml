@@ -2,9 +2,17 @@ name: Candela
 packages:
   CandelaKit:
     path: CandelaKit
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    # Exact, not `from:` — Package.resolved lives inside the gitignored
+    # .xcodeproj, so a range re-resolves per worktree and can drift within 3.x
+    # with nothing committed to pin it. Matches the house convention (M4 pinned
+    # SimplyCoreAudio exactly and MediaKeyTap to a commit).
+    exactVersion: 3.0.1
 options:
   deploymentTarget:
     macOS: "14.0"
+  developmentLanguage: en
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -19,6 +27,7 @@ targets:
     sources: [Candela]
     dependencies:
       - package: CandelaKit
+      - package: KeyboardShortcuts
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rydersel.Candela

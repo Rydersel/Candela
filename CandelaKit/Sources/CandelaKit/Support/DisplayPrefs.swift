@@ -29,19 +29,27 @@ public enum PollingMode: Int, Sendable, CaseIterable {
   case custom = 2
 }
 
-/// Whether the panel treats a display as able to play sound, overriding the
-/// CoreAudio sink detection in either direction. Detection can be wrong both
-/// ways: a panel can declare audio in its EDID and have nothing to play it
-/// through, and a panel with working speakers can be invisible to CoreAudio
-/// when the Mac's link carries no audio (DVI/VGA, some adapters) while the
-/// speakers run off another input. DDC volume still works in that second case,
-/// so a one-directional override would strand the slider disabled.
+/// Whether the panel's volume slider accepts input, overriding the automatic
+/// verdict in either direction (D24).
+///
+/// The automatic signal is the display's own DDC/CI capabilities string: a
+/// clean parse with no VCP 0x62 is the ONLY thing that greys the slider on its
+/// own. A failed, timed-out or unparseable read resolves to `.unknown` and
+/// leaves the slider enabled. CoreAudio no longer gates this at all — "no sink
+/// matched" cannot be told apart from "this link carries no audio while the
+/// panel's speakers run off another input", so it was never evidence that a
+/// working control should be taken away.
+///
+/// Overrides exist because a capabilities string is unreliable in the field:
+/// monitors truncate them, omit codes they implement, and advertise codes they
+/// ignore.
 public enum AudioSinkOverride: Int, Sendable, CaseIterable {
-  /// Trust `AudioRoutingPolicy.displayHasAudioSink`.
+  /// Trust `CapabilityString.support(forVCP:in:)` via `VolumeSliderPolicy`.
   case auto = 0
-  /// Always disabled — declares audio it cannot play.
+  /// Always greyed — the panel advertises volume it does not actually apply.
   case forceNone = 1
-  /// Always enabled — plays sound CoreAudio cannot see.
+  /// Always live — the panel takes volume writes its capabilities string denies
+  /// (or never returned).
   case forcePresent = 2
 }
 
@@ -50,6 +58,43 @@ public enum MultiKeyboardVolume: Int, Sendable, CaseIterable {
   case mouse = 0
   case allScreens = 1
   case audioDeviceNameMatching = 2
+}
+
+/// Menu-bar icon visibility (fork MenuIcon). Raw values are the fork's —
+/// `externalOnly` was appended later as 3, so RAW ORDER ≠ UI ORDER; pickers
+/// must list cases explicitly (D5).
+public enum MenuIcon: Int, Sendable, CaseIterable {
+  case show = 0
+  case sliderOnly = 1
+  case hide = 2
+  case externalOnly = 3
+}
+
+/// Panel footer style (fork MenuItemStyle).
+///
+/// RESERVED AND INERT (D32): the key exists so the schema slot is claimed and
+/// can never be reused, but no Candela code reads it — Task 5 ships no footer
+/// styles. Task 18 documents it as reserved, never as an escape hatch.
+public enum MenuItemStyle: Int, Sendable, CaseIterable {
+  case icon = 0
+  case text = 1
+  case hide = 2
+}
+
+/// Keyboard mode for one key family (fork KeyboardBrightness/KeyboardVolume —
+/// same raw values, one shared enum).
+public enum KeyMode: Int, Sendable, CaseIterable {
+  case media = 0
+  case custom = 1
+  case both = 2
+  case disabled = 3
+}
+
+/// Which display(s) the brightness keys hit (fork MultiKeyboardBrightness).
+public enum MultiKeyboardBrightness: Int, Sendable, CaseIterable {
+  case mouse = 0
+  case allScreens = 1
+  case focusInsteadOfMouse = 2
 }
 
 /// One command's DDC tuning row (fork: the Displays-pane grid — Enabled /
@@ -96,9 +141,17 @@ public final class DisplayPrefs: @unchecked Sendable {
   private let defaults: UserDefaults
   private let persistenceKey: String
 
-  public init(defaults: UserDefaults = .standard, persistenceKey: String) {
+  /// D11 safe-mode seam: one flag injected at construction (never a global or
+  /// a UserDefaults lookup). Forces the two startup-traffic getters only;
+  /// every setter still writes through, so a pref changed during a safe-mode
+  /// session takes effect on the next normal launch. Public so a construction
+  /// site can be asserted rather than trusted.
+  public let isSafeMode: Bool
+
+  public init(defaults: UserDefaults = .standard, persistenceKey: String, safeMode: Bool = false) {
     self.defaults = defaults
     self.persistenceKey = persistenceKey
+    isSafeMode = safeMode
   }
 
   /// Unknown stored raw values fall back to `.off` — an unset key reads 0,
@@ -200,9 +253,35 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("hideVolumeSlider")) }
   }
 
-  /// Manual override for the panel's audio-sink detection, in both directions
-  /// (see `AudioSinkOverride`). Unknown raw values fall back to `.auto`, so a
-  /// stray write can never strand the slider in a state the user cannot undo.
+  /// User-chosen display name; "" = use the hardware name (fork friendlyName).
+  public var friendlyName: String {
+    get { defaults.string(forKey: key("friendlyName")) ?? "" }
+    set { defaults.set(newValue, forKey: key("friendlyName")) }
+  }
+
+  /// Per-display hide: the panel skips this display's section entirely
+  /// (spec §2 "per-display hide" — the fork never shipped the control; D7).
+  public var hideDisplay: Bool {
+    get { defaults.bool(forKey: key("hideDisplay")) }
+    set { defaults.set(newValue, forKey: key("hideDisplay")) }
+  }
+
+  /// Fork longerDelay: slower-paced DDC reads.
+  ///
+  /// RESERVED AND INERT (D26 CORRECTION / D32): the key exists so the schema
+  /// slot is claimed, but NOTHING in Candela reads it — the paced-read plumbing
+  /// was never ported, and D26 cut both the control and the fork's
+  /// start-at-login safety interlock. Task 18 documents it as reserved.
+  public var longerDelay: Bool {
+    get { defaults.bool(forKey: key("longerDelay")) }
+    set { defaults.set(newValue, forKey: key("longerDelay")) }
+  }
+
+  /// Manual override for the panel's volume-slider verdict, in both directions
+  /// (see `AudioSinkOverride` — the automatic signal is the display's own
+  /// capabilities string, not CoreAudio). Unknown raw values fall back to
+  /// `.auto`, so a stray write can never strand the slider in a state the user
+  /// cannot undo.
   public var audioSinkOverride: AudioSinkOverride {
     get { AudioSinkOverride(rawValue: defaults.integer(forKey: key("audioSinkOverride"))) ?? .auto }
     set { defaults.set(newValue.rawValue, forKey: key("audioSinkOverride")) }
@@ -239,8 +318,17 @@ public final class DisplayPrefs: @unchecked Sendable {
   }
 
   /// Mode → DDC read tries (fork OtherDisplay.pollingCount).
+  ///
+  /// D11: safe mode issues no DDC reads at all, so the try budget is zero
+  /// regardless of the stored mode. Belt-and-braces — `startupAction` is
+  /// already forced to `.doNothing` and `pollingTries` is consulted only on
+  /// the `.read` path, so under safe mode this second override is unreachable
+  /// through the first. It is kept because it is the honest expression of "no
+  /// reads this session" and survives any future call site that consults
+  /// `pollingTries` directly.
   public var pollingTries: Int {
-    switch pollingMode {
+    if isSafeMode { return 0 }
+    return switch pollingMode {
     case .none: 0
     case .minimal: 1
     case .normal: 5
@@ -284,8 +372,19 @@ public final class DisplayPrefs: @unchecked Sendable {
   }
 
   /// What launch/reconfigure/wake does with saved DDC values (D5).
+  ///
+  /// D11: under safe mode the GETTER reports `.doNothing`, which disables both
+  /// the startup restore and the wake restore (`RestoreCoordinator` gates on
+  /// `== .write`) and the volume/contrast readback (`DDCValueController`
+  /// gates on `== .read`) for the session. The SETTER still writes the real
+  /// value through, so a pref changed during a safe-mode session takes effect
+  /// on the next normal launch.
   public var startupAction: StartupAction {
-    get { StartupAction(rawValue: defaults.integer(forKey: "startupAction")) ?? .doNothing }
+    get {
+      isSafeMode
+        ? .doNothing
+        : (StartupAction(rawValue: defaults.integer(forKey: "startupAction")) ?? .doNothing)
+    }
     set { defaults.set(newValue.rawValue, forKey: "startupAction") }
   }
 
@@ -293,6 +392,92 @@ public final class DisplayPrefs: @unchecked Sendable {
   public var multiKeyboardVolume: MultiKeyboardVolume {
     get { MultiKeyboardVolume(rawValue: defaults.integer(forKey: "multiKeyboardVolume")) ?? .mouse }
     set { defaults.set(newValue.rawValue, forKey: "multiKeyboardVolume") }
+  }
+
+  public var menuIcon: MenuIcon {
+    get { MenuIcon(rawValue: defaults.integer(forKey: "menuIcon")) ?? .show }
+    set { defaults.set(newValue.rawValue, forKey: "menuIcon") }
+  }
+
+  /// Reserved and inert — see `MenuItemStyle` (D32).
+  public var menuItemStyle: MenuItemStyle {
+    get { MenuItemStyle(rawValue: defaults.integer(forKey: "menuItemStyle")) ?? .icon }
+    set { defaults.set(newValue.rawValue, forKey: "menuItemStyle") }
+  }
+
+  public var keyboardBrightness: KeyMode {
+    get { KeyMode(rawValue: defaults.integer(forKey: "keyboardBrightness")) ?? .media }
+    set { defaults.set(newValue.rawValue, forKey: "keyboardBrightness") }
+  }
+
+  public var keyboardVolume: KeyMode {
+    get { KeyMode(rawValue: defaults.integer(forKey: "keyboardVolume")) ?? .media }
+    set { defaults.set(newValue.rawValue, forKey: "keyboardVolume") }
+  }
+
+  public var multiKeyboardBrightness: MultiKeyboardBrightness {
+    get { MultiKeyboardBrightness(rawValue: defaults.integer(forKey: "multiKeyboardBrightness")) ?? .mouse }
+    set { defaults.set(newValue.rawValue, forKey: "multiKeyboardBrightness") }
+  }
+
+  /// Reserved and inert (D32): nothing renders tick marks — Task 6 ships none.
+  public var showTickMarks: Bool {
+    get { defaults.bool(forKey: "showTickMarks") }
+    set { defaults.set(newValue, forKey: "showTickMarks") }
+  }
+
+  public var enableSliderSnap: Bool {
+    get { defaults.bool(forKey: "enableSliderSnap") }
+    set { defaults.set(newValue, forKey: "enableSliderSnap") }
+  }
+
+  public var enableSliderPercent: Bool {
+    get { defaults.bool(forKey: "enableSliderPercent") }
+    set { defaults.set(newValue, forKey: "enableSliderPercent") }
+  }
+
+  /// Hide the built-in display's panel section (Candela's positive-default
+  /// equivalent of the fork's dead hideAppleFromMenu — the filter WORKS here, D2).
+  public var hideBuiltInDisplay: Bool {
+    get { defaults.bool(forKey: "hideBuiltInDisplay") }
+    set { defaults.set(newValue, forKey: "hideBuiltInDisplay") }
+  }
+
+  // Folded raw app-level keys (previously read straight off UserDefaults.standard
+  // in AppModel/StatusItemController — key strings are shipped schema, unchanged).
+
+  public var enableBrightnessSync: Bool {
+    get { defaults.bool(forKey: "enableBrightnessSync") }
+    set { defaults.set(newValue, forKey: "enableBrightnessSync") }
+  }
+
+  public var useFineScaleBrightness: Bool {
+    get { defaults.bool(forKey: "useFineScaleBrightness") }
+    set { defaults.set(newValue, forKey: "useFineScaleBrightness") }
+  }
+
+  public var useFineScaleVolume: Bool {
+    get { defaults.bool(forKey: "useFineScaleVolume") }
+    set { defaults.set(newValue, forKey: "useFineScaleVolume") }
+  }
+
+  /// INVERTED on disk (fork key). UI binds through
+  /// `interceptAlternateBrightnessKeys` below (D1).
+  public var disableAltBrightnessKeys: Bool {
+    get { defaults.bool(forKey: "disableAltBrightnessKeys") }
+    set { defaults.set(newValue, forKey: "disableAltBrightnessKeys") }
+  }
+
+  // D1 binding-layer positives: checked-in-UI == true here == "off" on disk.
+
+  public var combinedBrightness: Bool {
+    get { !disableCombinedBrightness }
+    set { disableCombinedBrightness = !newValue }
+  }
+
+  public var interceptAlternateBrightnessKeys: Bool {
+    get { !disableAltBrightnessKeys }
+    set { disableAltBrightnessKeys = !newValue }
   }
 
   private func key(_ name: String) -> String {
