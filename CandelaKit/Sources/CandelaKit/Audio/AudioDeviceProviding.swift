@@ -23,6 +23,10 @@ public protocol AudioDeviceProviding: Sendable {
   /// handler before trusting repeated reads, or the value can be stale for
   /// the object's lifetime.
   func defaultOutputDevice() -> AudioOutputDevice?
+  /// Names of every device with output channels, default or not — the signal
+  /// for "does this display accept audio at all". Same freshness contract as
+  /// `defaultOutputDevice()`.
+  func outputDeviceNames() -> [String]
   /// Fires on default-output-device change (any thread). Pass nil to clear.
   func setOnDefaultOutputChange(_ handler: (@Sendable () -> Void)?)
 }

@@ -43,9 +43,7 @@ struct BrightnessPersistenceTests {
   }
 
   @Test func userDefaultsStoreRoundTrips() {
-    let suiteName = "com.rydersel.Candela.tests.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = InMemoryDefaults()
     let store = UserDefaultsBrightnessStore(defaults: defaults)
     #expect(store.savedBrightness(for: "brightness.k") == nil)
     store.saveBrightness(0.4375, for: "brightness.k")

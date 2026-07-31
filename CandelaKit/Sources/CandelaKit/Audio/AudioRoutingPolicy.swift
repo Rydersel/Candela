@@ -20,6 +20,29 @@ public enum AudioRoutingPolicy {
     return normalizedName(target) == normalizedName(deviceName)
   }
 
+  /// Whether the display appears among the machine's audio output devices —
+  /// i.e. whether its EDID declares an audio sink (speakers, or a headphone
+  /// jack the panel drives). The menu-bar panel greys its volume slider out
+  /// when this is false, since a DDC volume write would have nothing to act on.
+  ///
+  /// Same normalized comparison and the same override precedence as
+  /// `displayMatchesDevice`: a display whose audio device enumerates under an
+  /// unrelated name is matched through `audioDeviceNameOverride`. An empty
+  /// device list means no sink — the honest answer on a machine with no audio
+  /// output at all.
+  ///
+  /// NOT a claim that the panel has speakers: a display with only a headphone
+  /// jack declares audio too, and DDC volume genuinely drives that jack.
+  public static func displayHasAudioSink(
+    rawDisplayName: String, nameOverride: String, outputDeviceNames: [String]
+  ) -> Bool {
+    let target = normalizedName(nameOverride.isEmpty ? rawDisplayName : nameOverride)
+    // A name that normalizes away entirely (all digits and parens) would
+    // match every same-shaped device name — refuse rather than guess.
+    guard !target.isEmpty else { return false }
+    return outputDeviceNames.contains { normalizedName($0) == target }
+  }
+
   /// The fork's tap rule (updateMediaKeyTap): watch volume keys only when DDC
   /// displays exist AND NOT (name-matching mode with zero matches) AND NOT
   /// (any other mode with a default output that sets its own volume). No

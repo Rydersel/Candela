@@ -9,10 +9,7 @@ struct DDCValueControllerTests {
   /// pattern — never touch .standard).
   @MainActor
   private final class Harness {
-    private nonisolated let suiteName = "com.rydersel.Candela.tests.ddcvalue.\(UUID().uuidString)"
-    // nonisolated(unsafe): accessed from the nonisolated deinit only for
-    // cleanup; UserDefaults is documented thread-safe (PathSelection pattern).
-    nonisolated(unsafe) let defaults: UserDefaults
+    let defaults: UserDefaults
     let prefs: DisplayPrefs
     let fake = FakeDDC(readResult: nil) // write-only panel by default (MAG parity)
     let store = MemoryValueStore()
@@ -23,7 +20,7 @@ struct DDCValueControllerTests {
       writer: (any DDCWriting)? = nil, // e.g. ScriptedDDC for retry/failure tests
       configure: (DisplayPrefs) -> Void = { _ in }
     ) {
-      defaults = UserDefaults(suiteName: suiteName)!
+      defaults = InMemoryDefaults()
       prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
       configure(prefs)
       let storageKey = "\(command.rawValue).pk"
@@ -33,8 +30,6 @@ struct DDCValueControllerTests {
         displayID: 1, store: store, storageKey: storageKey
       )
     }
-
-    deinit { defaults.removePersistentDomain(forName: suiteName) }
 
     func drainedWrites() async -> [(command: UInt8, value: UInt16)] {
       await controller.waitForPendingWrites()
@@ -363,9 +358,7 @@ struct DDCValueControllerTests {
     // Equal raws on two sibling commands must both land with their own
     // command bytes — per-command coalescer instances exist precisely so the
     // HardwareTarget-equality memo cannot cross-suppress (D1).
-    let suiteName = "com.rydersel.Candela.tests.ddcvalue.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
     let fake = FakeDDC(readResult: nil)
     let volume = DDCValueController(writer: fake, command: .volume, prefs: prefs, displayID: 1)

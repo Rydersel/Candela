@@ -98,9 +98,7 @@ struct ControllerRestoreTests {
     // Combined mode default: published 0.3 sits below s=0.5, so the combined
     // DDC leg is 0 — but the quit restore must write the FULL-RANGE
     // equivalent (30) so the monitor isn't left at the DDC floor.
-    let suiteName = "com.rydersel.Candela.tests.quitrestore.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = InMemoryDefaults()
     let fake = FakeDDC(readResult: nil)
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "qr")
     prefs.forceSoftware = true // keeps setBrightness off the DDC wire for setup…
@@ -123,9 +121,7 @@ struct ControllerRestoreTests {
   }
 
   @Test func reassertHardwareRewritesAfterAMemoReset() async {
-    let suiteName = "com.rydersel.Candela.tests.reassert.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = InMemoryDefaults()
     defaults.set(true, forKey: "disableCombinedBrightness")
     let fake = FakeDDC(readResult: nil)
     let controller = BrightnessController(
@@ -156,9 +152,7 @@ struct ControllerRestoreTests {
     // restore pass must never write that — full blast on an OLED at night.
     // AppModel.performRestorePass checks this accessor instead of reaching
     // into the store.
-    let suiteName = "com.rydersel.Candela.tests.evertouched.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = InMemoryDefaults()
     let store = PathMemoryStore()
     let controller = BrightnessController(
       writer: FakeDDC(readResult: nil),

@@ -4,11 +4,10 @@ import Testing
 
 @Suite("Per-display prefs")
 struct DisplayPrefsTests {
-  /// Each test gets a throwaway suite so nothing leaks into the user's defaults.
+  /// Each test gets a throwaway in-memory store, so nothing touches disk or
+  /// the user's defaults.
   private func withSuite(_ body: (UserDefaults) -> Void) {
-    let suiteName = "com.rydersel.Candela.tests.\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let defaults = InMemoryDefaults()
     body(defaults)
   }
 
@@ -204,20 +203,37 @@ struct DisplayPrefsTests {
       #expect(prefs.muted == false)
       #expect(prefs.audioDeviceNameOverride == "")
       #expect(prefs.hideVolumeSlider == false)
+      #expect(prefs.audioSinkOverride == .auto)
       #expect(prefs.isDisabled == false)
       #expect(prefs.hideOsd == false)
       prefs.enableMuteUnmute = true
       prefs.muted = true
       prefs.audioDeviceNameOverride = "MAG 341C"
       prefs.hideVolumeSlider = true
+      prefs.audioSinkOverride = .forcePresent
       prefs.isDisabled = true
       prefs.hideOsd = true
       #expect(defaults.object(forKey: "enableMuteUnmute.AAAA-BBBB") as? Bool == true)
       #expect(defaults.object(forKey: "muted.AAAA-BBBB") as? Bool == true)
       #expect(defaults.string(forKey: "audioDeviceNameOverride.AAAA-BBBB") == "MAG 341C")
       #expect(defaults.object(forKey: "hideVolumeSlider.AAAA-BBBB") as? Bool == true)
+      #expect(defaults.object(forKey: "audioSinkOverride.AAAA-BBBB") as? Int == 2)
       #expect(defaults.object(forKey: "isDisabled.AAAA-BBBB") as? Bool == true)
       #expect(defaults.object(forKey: "hideOsd.AAAA-BBBB") as? Bool == true)
+    }
+  }
+
+  @Test func audioSinkOverrideRoundTripsBothWaysAndFallsBackToAuto() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      prefs.audioSinkOverride = .forceNone
+      #expect(prefs.audioSinkOverride == .forceNone)
+      prefs.audioSinkOverride = .forcePresent
+      #expect(prefs.audioSinkOverride == .forcePresent)
+      // A stray raw must not strand the slider in a state with no UI to undo
+      // it — unknown means "trust detection", never "stay disabled".
+      defaults.set(99, forKey: "audioSinkOverride.pk")
+      #expect(prefs.audioSinkOverride == .auto)
     }
   }
 
