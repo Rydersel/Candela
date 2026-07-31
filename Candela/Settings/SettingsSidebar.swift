@@ -114,14 +114,20 @@ struct SettingsSidebar: View {
           .frame(height: 3)
           .overlay(alignment: .leading) {
             GeometryReader { geo in
-              // Monochrome, not the accent. The selection pill is already
+              // Monochrome, not the accent: the selection pill is already
               // accent-coloured, and an accent bar on every row made the
               // sidebar read as several competing highlights rather than one
-              // selection plus some levels. Neutral fill also keeps the bar
-              // legible on the selected row, where an accent-on-accent bar
-              // nearly vanished.
+              // selection plus some levels.
+              //
+              // `.primary`, NOT `.secondary`. Secondary sits one step from the
+              // quaternary track, so in dark mode both are mid-greys and a
+              // full bar was indistinguishable from an empty one — the fill
+              // boundary simply did not read. A level indicator's entire job
+              // is showing where that boundary is, so it takes the highest-
+              // contrast neutral available: near-white on dark, near-black on
+              // light, and white against the accent on the selected row.
               Capsule()
-                .fill(.secondary)
+                .fill(.primary)
                 .frame(width: geo.size.width * min(max(controller.brightness, 0), 1))
             }
           }
