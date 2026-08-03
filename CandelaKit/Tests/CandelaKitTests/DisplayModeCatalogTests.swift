@@ -105,6 +105,5 @@ struct DisplayModeCatalogTests {
     let rows = DisplayModeCatalog.curated(modes, nativePixelWidth: 5120, nativePixelHeight: 2880)
     #expect(rows.count == 1)
     #expect(rows[0].mode.refreshHz == 120)
-    #expect(rows[0].alternateRefreshRates == [120, 24])
   }
 }

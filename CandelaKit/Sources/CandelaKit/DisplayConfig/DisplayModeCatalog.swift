@@ -2,20 +2,23 @@ import Foundation
 
 /// One row in the curated list: a representative mode plus what the UI needs
 /// to describe it.
+///
+/// Carries no refresh-rate list of its own. The picker asks about the size the
+/// display is CURRENTLY running — which is not always a curated row, since the
+/// current size can sit below the usability floor — so it calls
+/// `refreshRates(in:logicalWidth:logicalHeight:)` directly. A per-row copy was
+/// the same list computed twice, read by nothing.
 public struct DisplayModeRow: Sendable, Equatable, Identifiable {
   public let mode: DisplayMode
   /// Relative to the OWNING panel — the same logical size is native on one
   /// display and scaled on another.
   public let isScaled: Bool
-  /// Every refresh rate available at this logical size, descending.
-  public let alternateRefreshRates: [Double]
 
   public var id: Int32 { mode.ioModeID }
 
-  public init(mode: DisplayMode, isScaled: Bool, alternateRefreshRates: [Double]) {
+  public init(mode: DisplayMode, isScaled: Bool) {
     self.mode = mode
     self.isScaled = isScaled
-    self.alternateRefreshRates = alternateRefreshRates
   }
 }
 
@@ -53,11 +56,7 @@ public enum DisplayModeCatalog {
       return DisplayModeRow(
         mode: representative,
         isScaled: representative.isScaled(nativePixelWidth: nativePixelWidth,
-                                          nativePixelHeight: nativePixelHeight),
-        // Deduplicated, matching `refreshRates(in:…)` — two modes at the same
-        // size and rate but different framebuffers would otherwise show the
-        // rate twice in the picker.
-        alternateRefreshRates: Array(Set(sorted.map(\.refreshHz))).sorted(by: >)
+                                          nativePixelHeight: nativePixelHeight)
       )
     }
     .sorted {
