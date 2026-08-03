@@ -41,7 +41,10 @@ struct PrefPropagationTests {
     #expect(PrefName.forceSw.rawValue == "forceSw") // NOT "forceSW"
     #expect(PrefName.unavailableDDC.rawValue == "unavailableDDC")
     #expect(PrefName.disableAltBrightnessKeys.rawValue == "disableAltBrightnessKeys")
-    #expect(PrefName.allCases.count == 33)
+    // W2 SP1 added `rememberDisplayMode`/`storedDisplayMode`: 33 -> 35.
+    #expect(PrefName.rememberDisplayMode.rawValue == "rememberDisplayMode")
+    #expect(PrefName.storedDisplayMode.rawValue == "storedDisplayMode")
+    #expect(PrefName.allCases.count == 35)
   }
 
   // MARK: - Rows

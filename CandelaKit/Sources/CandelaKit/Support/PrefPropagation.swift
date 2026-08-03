@@ -28,6 +28,8 @@ public enum PrefName: String, Sendable, CaseIterable {
   case friendlyName, hideDisplay, isDisabled, hideVolumeSlider, hideOsd
   case forceSw, avoidGamma, combinedSwitchingPoint
   case enableMuteUnmute, audioSinkOverride, audioDeviceNameOverride
+  // Per-display — display configuration (W2 SP1)
+  case rememberDisplayMode, storedDisplayMode
   // Per-command (base names; `DisplayPrefs.setTuning` adds the `.<cmd>` part)
   case unavailableDDC, minDDCOverride, maxDDCOverride, curveDDC, invertDDC, remapDDC
 }
@@ -68,6 +70,12 @@ public enum PrefPropagation {
     case .audioDeviceNameOverride:
       // Feeds `AppModel.audioMatchingDisplays`, i.e. `tapConfig`.
       [.rebuildPanel, .rearmTap]
+
+    case .rememberDisplayMode, .storedDisplayMode:
+      // Reapply happens at launch and reconnect only, never on the pref write
+      // itself (DM7) — writing the pref must not yank the user's screen.
+      // `.refreshUI` is unioned in below and is the whole row.
+      []
 
     case .enableMuteUnmute, .startupAction, .multiKeyboardBrightness,
          .useFineScaleBrightness, .useFineScaleVolume:

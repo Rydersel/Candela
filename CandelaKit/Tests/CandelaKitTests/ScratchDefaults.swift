@@ -41,4 +41,9 @@ class InMemoryDefaults: UserDefaults, @unchecked Sendable {
   override func double(forKey key: String) -> Double { object(forKey: key) as? Double ?? 0 }
   override func float(forKey key: String) -> Float { object(forKey: key) as? Float ?? 0 }
   override func string(forKey key: String) -> String? { object(forKey: key) as? String }
+  /// `ModePersistence` stores a JSON-encoded descriptor, making this the first
+  /// `Data` accessor in the suite. Overridden for the same reason as the rest:
+  /// a silent fall-through to the superclass would read the real defaults
+  /// domain rather than this instance's dictionary.
+  override func data(forKey key: String) -> Data? { object(forKey: key) as? Data }
 }
