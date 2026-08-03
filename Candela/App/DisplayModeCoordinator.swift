@@ -27,6 +27,21 @@ import Observation
 ///    went wrong, and the session is the one that decides what is applied.
 @MainActor @Observable
 final class DisplayModeCoordinator {
+  /// Which surface asked for the preview that is outstanding.
+  ///
+  /// Not cosmetic, and not a preference: it decides where the answer can be
+  /// offered. The settings pane's banner lives in an ordinary window that is
+  /// still there fifteen seconds later. The panel is an `NSMenu` tracking
+  /// session — it ends on Escape, on a click in the menu bar, and plausibly as
+  /// a side effect of the very reconfiguration the preview performs. A
+  /// panel-started preview therefore gets a surface that does not depend on the
+  /// menu still being open, or the countdown would expire with the user having
+  /// been shown nothing at all.
+  enum PreviewOrigin: Sendable {
+    case settings
+    case panel
+  }
+
   /// Everything one display's UI renders, computed once per enumeration.
   /// Enumerating costs several CoreGraphics round-trips, so it is done on
   /// demand and cached, never per body evaluation. A missing entry means "not
@@ -85,7 +100,20 @@ final class DisplayModeCoordinator {
   let configurator: any DisplayConfiguring
   let persistence: ModePersistence
 
+  /// Where a `.panel`-origin preview is answered. Wired at launch; nil means
+  /// the app never installed one, which degrades to "no confirmation surface
+  /// for panel selections" rather than to a crash.
+  @ObservationIgnored weak var confirmation: (any ModeConfirmationPresenting)?
+
+  /// Called after a commit actually wrote `storedDisplayMode`, so the
+  /// propagation seam hears about it (D27) no matter which surface answered.
+  /// Owned here because it used to be the answering view's job, and two views
+  /// answering the same question is one too many — the second one to be written
+  /// is the one that forgets.
+  @ObservationIgnored var didStoreMode: (CGDirectDisplayID) -> Void = { _ in }
+
   @ObservationIgnored private let session: ModePreviewSession
+  @ObservationIgnored private var origin: PreviewOrigin = .settings
   @ObservationIgnored private var countdown: Task<Void, Never>?
   @ObservationIgnored private var pending: Task<Void, Never>?
   @ObservationIgnored private var inFlightSelects = 0
@@ -204,7 +232,11 @@ final class DisplayModeCoordinator {
   /// Synchronous and fire-and-forget on purpose — the queue owns the ordering,
   /// so no caller can create a second in-flight `begin()` by spawning its own
   /// task.
-  func select(_ mode: DisplayMode, on displayID: CGDirectDisplayID) {
+  ///
+  /// `origin` is not defaulted: every caller has to say where its answer will
+  /// be offered, because getting it wrong is invisible until a countdown
+  /// expires against nobody.
+  func select(_ mode: DisplayMode, on displayID: CGDirectDisplayID, from origin: PreviewOrigin) {
     // Raised HERE, synchronously, not inside the queued operation: the whole
     // point is that the banner's buttons are already disabled by the time the
     // reconfiguration starts, so nobody can confirm a mode they are not
@@ -213,7 +245,7 @@ final class DisplayModeCoordinator {
     inFlightSelects += 1
     isApplying = true
     enqueue {
-      await self.performSelect(mode, on: displayID)
+      await self.performSelect(mode, on: displayID, from: origin)
       self.inFlightSelects -= 1
       if self.inFlightSelects == 0 { self.isApplying = false }
     }
@@ -269,7 +301,14 @@ final class DisplayModeCoordinator {
 
   // MARK: - Operations (always inside the queue)
 
-  private func performSelect(_ mode: DisplayMode, on displayID: CGDirectDisplayID) async {
+  private func performSelect(
+    _ mode: DisplayMode, on displayID: CGDirectDisplayID, from origin: PreviewOrigin
+  ) async {
+    // Adopted here rather than in `select` so it names the preview that is
+    // about to become outstanding, not whichever click was most recent: two
+    // queued selects from different surfaces each get their own surface as they
+    // land, in the order they land.
+    self.origin = origin
     startFailure = nil
     switch await session.begin(mode: mode, on: displayID) {
     case .success:
@@ -349,6 +388,7 @@ final class DisplayModeCoordinator {
     guard let outstanding = await session.previewedMode else {
       preview = nil
       stopCountdown()
+      syncConfirmation()
       return
     }
     let carried: DisplayConfigError? = switch failure {
@@ -369,6 +409,22 @@ final class DisplayModeCoordinator {
       isCountingDown: counting
     )
     if !counting { stopCountdown() }
+    syncConfirmation()
+  }
+
+  /// Show or hide the standalone confirmation surface to match what `adopt`
+  /// just decided. Driven from `adopt` rather than by observing `preview`
+  /// because `adopt` is the single writer, so the window can never be showing
+  /// something the coordinator has already resolved.
+  ///
+  /// Called on every countdown tick, so the presenter must treat a repeat
+  /// present for the same display as a no-op.
+  private func syncConfirmation() {
+    guard origin == .panel, let preview else {
+      confirmation?.dismissConfirmation()
+      return
+    }
+    confirmation?.presentConfirmation(on: preview.displayID)
   }
 
   /// The countdown driver.
@@ -411,6 +467,7 @@ final class DisplayModeCoordinator {
       return
     }
     persistence.store(mode.descriptor, for: identity)
+    didStoreMode(displayID)
   }
 
   private func identity(for displayID: CGDirectDisplayID) -> DisplayConfigIdentity? {
@@ -426,5 +483,71 @@ final class DisplayModeCoordinator {
       width = mode.logicalWidth
       height = mode.logicalHeight
     }
+  }
+}
+
+/// A surface that can answer a preview on its own, independently of whichever
+/// view started it. Declared beside the coordinator, and AppKit-free, so the
+/// contract belongs to the thing that needs it — the window that implements it
+/// is an app-target island like every other.
+@MainActor
+protocol ModeConfirmationPresenting: AnyObject {
+  /// Must be idempotent: called again on every countdown tick.
+  func presentConfirmation(on displayID: CGDirectDisplayID)
+  func dismissConfirmation()
+}
+
+extension DisplayModeCoordinator.Catalog {
+  /// The mode to apply for a curated row: the chosen SIZE at the refresh rate
+  /// the display is already running, when that size offers it.
+  ///
+  /// A size change should not silently move someone from 60 Hz to 175 Hz, and
+  /// the curated row carries the size's FASTEST rate as its representative, so
+  /// taking the row's own mode would do exactly that.
+  ///
+  /// `ModePersistence.resolve` is the tested answer to this question (geometry
+  /// + desired refresh → best live mode, deterministic down to `ioModeID`), so
+  /// the rule is not re-invented in a view. Its cross-size fallbacks cannot
+  /// help here — the row came from the live list — so a resolved mode at a
+  /// different size is rejected in favour of the row's own representative.
+  ///
+  /// Lives here rather than in either view because the panel and the settings
+  /// pane must apply the same rule; two copies would differ the first time one
+  /// was touched.
+  func modeKeepingCurrentRefreshRate(for row: DisplayModeRow) -> DisplayMode {
+    let wanted = DisplayModeDescriptor(
+      logicalWidth: row.mode.logicalWidth,
+      logicalHeight: row.mode.logicalHeight,
+      pixelWidth: row.mode.pixelWidth,
+      pixelHeight: row.mode.pixelHeight,
+      refreshHz: current?.refreshHz ?? row.mode.refreshHz
+    )
+    return mode(matching: wanted, atSizeOf: row.mode) ?? row.mode
+  }
+
+  /// Resolves `descriptor` against the live list, keeping the answer only when
+  /// it is still the size the caller asked about.
+  func mode(matching descriptor: DisplayModeDescriptor, atSizeOf size: DisplayMode) -> DisplayMode? {
+    let match: DisplayMode? = switch ModePersistence.resolve(descriptor, in: all) {
+    case let .exact(mode): mode
+    case let .refreshRateDiffers(mode): mode
+    case let .scaleDiffers(mode): mode
+    case let .sizeDiffers(mode): mode
+    case .none: nil
+    }
+    guard let match,
+          match.logicalWidth == size.logicalWidth,
+          match.logicalHeight == size.logicalHeight
+    else { return nil }
+    return match
+  }
+
+  /// True for the row whose LOGICAL SIZE the display is running. Comparing
+  /// `ioModeID` instead would leave the checkmark off whenever the user is at a
+  /// size's slower refresh rate: the curated row's representative mode is that
+  /// size's FASTEST rate, so the IDs differ while the size is plainly selected.
+  func isCurrentSize(_ mode: DisplayMode) -> Bool {
+    guard let current else { return false }
+    return current.logicalWidth == mode.logicalWidth && current.logicalHeight == mode.logicalHeight
   }
 }

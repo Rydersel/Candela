@@ -36,7 +36,7 @@ struct DisplayModeSection: View {
               title: sizeLabel(row.mode),
               detail: nil,
               badges: badges(for: row, in: catalog),
-              isCurrent: isCurrentSize(row.mode, in: catalog)
+              isCurrent: catalog.isCurrentSize(row.mode)
             ) {
               select(size: row, in: catalog)
             }
@@ -129,44 +129,23 @@ struct DisplayModeSection: View {
   }
 
   private func countdownText(_ seconds: Int) -> String {
-    seconds == 1
-      ? "Reverting to the previous resolution in 1 second."
-      : "Reverting to the previous resolution in \(seconds) seconds."
+    DisplayModeCopy.countdown(seconds)
   }
 
+  /// The stored-mode fan-out is NOT done here: `DisplayModeCoordinator` owns it
+  /// (`didStoreMode`), so the panel's confirmation surface cannot forget it.
   private func keep(_ answered: DisplayModeCoordinator.Preview) async {
-    let outcome = await coordinator.confirm(answered)
-    guard case .committed = outcome else { return }
-    // The commit writes `storedDisplayMode` only while this display is being
-    // remembered; the seam is told only when a pref actually changed (D27).
-    if coordinator.isRemembering(displayID) {
-      actions.prefDidChange(.storedDisplayMode, persistenceKey: persistenceKey)
-    }
+    await coordinator.confirm(answered)
   }
 
   // MARK: - Rows
 
   private func sizeLabel(_ mode: DisplayMode) -> String {
-    // RM11: "looks like", never "true native HiDPI". On a fixed panel only one
-    // logical size is a true 2× of the native framebuffer; everything else
-    // renders oversized and downsamples.
-    "Looks like \(mode.logicalWidth) × \(mode.logicalHeight)"
+    DisplayModeCopy.size(mode)
   }
 
   private func refreshLabel(_ hz: Double) -> String {
-    // Rates are quantized to one decimal at the CoreGraphics boundary, so 59.9
-    // is a real value and truncating it to "59 Hz" would both misreport it and
-    // collide with a genuine 59 Hz row.
-    hz == hz.rounded() ? "\(Int(hz)) Hz" : String(format: "%.1f Hz", hz)
-  }
-
-  /// True for the row whose LOGICAL SIZE the display is running. Comparing
-  /// `ioModeID` instead would leave the checkmark off whenever the user is at a
-  /// size's slower refresh rate: the curated row's representative mode is that
-  /// size's FASTEST rate, so the IDs differ while the size is plainly selected.
-  private func isCurrentSize(_ mode: DisplayMode, in catalog: DisplayModeCoordinator.Catalog) -> Bool {
-    guard let current = catalog.current else { return false }
-    return current.logicalWidth == mode.logicalWidth && current.logicalHeight == mode.logicalHeight
+    DisplayModeCopy.refresh(hz)
   }
 
   private func badges(
@@ -252,25 +231,10 @@ struct DisplayModeSection: View {
   // MARK: - Selection
 
   /// Applies the chosen SIZE while keeping the refresh rate the display is
-  /// already running, when that size offers it — a size change should not
-  /// silently move someone from 60 Hz to 175 Hz, and the curated row carries
-  /// the size's fastest rate as its representative.
-  ///
-  /// `ModePersistence.resolve` is the tested answer to exactly this question
-  /// (geometry + desired refresh → best live mode, deterministic down to
-  /// `ioModeID`), so the rule is not re-invented in the view layer. Its
-  /// cross-size fallbacks cannot help here — the row came from the live list —
-  /// so a resolved mode at a different size is rejected in favour of the row's
-  /// own representative.
+  /// already running, when that size offers it. The rule itself lives on
+  /// `Catalog` — the panel applies the same one.
   private func select(size row: DisplayModeRow, in catalog: DisplayModeCoordinator.Catalog) {
-    let wanted = DisplayModeDescriptor(
-      logicalWidth: row.mode.logicalWidth,
-      logicalHeight: row.mode.logicalHeight,
-      pixelWidth: row.mode.pixelWidth,
-      pixelHeight: row.mode.pixelHeight,
-      refreshHz: catalog.current?.refreshHz ?? row.mode.refreshHz
-    )
-    apply(resolved(wanted, in: catalog, matching: row.mode) ?? row.mode, in: catalog)
+    apply(catalog.modeKeepingCurrentRefreshRate(for: row), in: catalog)
   }
 
   private func select(refreshHz: Double, in catalog: DisplayModeCoordinator.Catalog) {
@@ -282,27 +246,8 @@ struct DisplayModeSection: View {
       pixelHeight: current.pixelHeight,
       refreshHz: refreshHz
     )
-    guard let mode = resolved(wanted, in: catalog, matching: current) else { return }
+    guard let mode = catalog.mode(matching: wanted, atSizeOf: current) else { return }
     apply(mode, in: catalog)
-  }
-
-  private func resolved(
-    _ descriptor: DisplayModeDescriptor,
-    in catalog: DisplayModeCoordinator.Catalog,
-    matching size: DisplayMode
-  ) -> DisplayMode? {
-    let match: DisplayMode? = switch ModePersistence.resolve(descriptor, in: catalog.all) {
-    case let .exact(mode): mode
-    case let .refreshRateDiffers(mode): mode
-    case let .scaleDiffers(mode): mode
-    case let .sizeDiffers(mode): mode
-    case .none: nil
-    }
-    guard let match,
-          match.logicalWidth == size.logicalWidth,
-          match.logicalHeight == size.logicalHeight
-    else { return nil }
-    return match
   }
 
   private func apply(_ mode: DisplayMode, in catalog: DisplayModeCoordinator.Catalog) {
@@ -315,7 +260,10 @@ struct DisplayModeSection: View {
     // coordinator's queue, which is what serialises two fast clicks; spawning
     // one per click is precisely how the banner ends up naming a different mode
     // than the one "Keep" would commit.
-    coordinator.select(mode, on: displayID)
+    //
+    // `.settings`: the answer is the banner at the top of this section, in a
+    // window that is still on screen when the countdown expires.
+    coordinator.select(mode, on: displayID, from: .settings)
   }
 }
 
