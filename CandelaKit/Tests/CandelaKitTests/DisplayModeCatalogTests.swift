@@ -15,9 +15,32 @@ struct DisplayModeCatalogTests {
 
   @Test func curationDropsModesBelowTheUsabilityFloor() {
     let rows = curatedDell()
-    #expect(rows.allSatisfy { $0.mode.logicalWidth >= DisplayModeCatalog.usabilityFloorLogicalWidth })
+    #expect(rows.allSatisfy {
+      min($0.mode.logicalWidth, $0.mode.logicalHeight) >= DisplayModeCatalog.usabilityFloorMinorAxis
+    })
     // The raw fixture definitely contains sub-floor junk.
-    #expect(dell.contains { $0.logicalWidth < DisplayModeCatalog.usabilityFloorLogicalWidth })
+    #expect(dell.contains {
+      min($0.logicalWidth, $0.logicalHeight) < DisplayModeCatalog.usabilityFloorMinorAxis
+    })
+  }
+
+  /// Regression for the rotated-display bug. The development Dell runs rotated
+  /// 270 degrees, where usable desktops are tall and narrow — a width-only
+  /// floor cut these two entirely.
+  @Test func usablePortraitModesSurviveOnARotatedDisplay() {
+    let sizes = curatedDell().map { "\($0.mode.logicalWidth)x\($0.mode.logicalHeight)" }
+    #expect(sizes.contains("945x1680"))
+    #expect(sizes.contains("900x1600"))
+  }
+
+  /// The ultrawide's exact-2x native mode is 1720x720. Its minor axis is 720,
+  /// so any floor above that removes the single most important mode on that
+  /// panel — which is why the floor is 720 and not 768.
+  @Test func theUltrawidesNativeHiDPIModeSurvivesTheFloor() {
+    let rows = DisplayModeCatalog.curated(mag,
+                                          nativePixelWidth: DisplayModeFixtures.magNativePixels.0,
+                                          nativePixelHeight: DisplayModeFixtures.magNativePixels.1)
+    #expect(rows.contains { $0.mode.logicalWidth == 1720 && $0.mode.logicalHeight == 720 })
   }
 
   @Test func curatedRowsAreSortedByDescendingLogicalArea() {
@@ -54,7 +77,10 @@ struct DisplayModeCatalogTests {
     let rows = DisplayModeCatalog.curated(mag,
                                           nativePixelWidth: DisplayModeFixtures.magNativePixels.0,
                                           nativePixelHeight: DisplayModeFixtures.magNativePixels.1)
-    #expect(rows.allSatisfy { $0.mode.pixelWidth <= DisplayModeFixtures.magNativePixels.0 })
+    // The exact curated result, in order — a tautology like "nothing exceeds
+    // the native framebuffer" cannot fail for any input, since curation never
+    // synthesizes modes. This pins the floor AND the grouping by name.
+    #expect(rows.map { "\($0.mode.logicalWidth)x\($0.mode.logicalHeight)" } == ["1720x720", "1280x720"])
     #expect(rows.first?.mode.logicalWidth == 1720)
   }
 

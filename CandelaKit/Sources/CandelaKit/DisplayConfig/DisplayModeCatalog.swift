@@ -25,16 +25,22 @@ public struct DisplayModeRow: Sendable, Equatable, Identifiable {
 /// Foundation only — no CoreGraphics — so the judgement is testable against
 /// captured fixtures rather than against attached hardware.
 public enum DisplayModeCatalog {
-  /// Below this, a mode is not a usable desktop. The real Dell list contains
-  /// 300×400; nobody is choosing that.
-  public static let usabilityFloorLogicalWidth = 1024
+  /// Below this on its SHORTER axis, a mode is not a usable desktop. The real
+  /// Dell list contains 300×400; nobody is choosing that.
+  ///
+  /// Deliberately the minor axis rather than width: the development Dell runs
+  /// rotated 270°, where usable desktops are tall and narrow, and a width-only
+  /// floor cut 945×1680 and 900×1600. Deliberately 720 rather than 768: the
+  /// MAG ultrawide's exact-2x native mode is 1720×720, so a higher floor would
+  /// remove the most important mode on that panel.
+  public static let usabilityFloorMinorAxis = 720
 
   /// Default presentation: one row per logical size, fastest refresh rate
   /// representing it, junk dropped, largest first.
   public static func curated(
     _ modes: [DisplayMode], nativePixelWidth: Int, nativePixelHeight: Int
   ) -> [DisplayModeRow] {
-    let usable = modes.filter { $0.logicalWidth >= usabilityFloorLogicalWidth }
+    let usable = modes.filter { min($0.logicalWidth, $0.logicalHeight) >= usabilityFloorMinorAxis }
     let groups = Dictionary(grouping: usable) { SizeKey(width: $0.logicalWidth, height: $0.logicalHeight) }
 
     return groups.compactMap { _, group -> DisplayModeRow? in
