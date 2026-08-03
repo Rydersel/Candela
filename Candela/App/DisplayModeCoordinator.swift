@@ -148,10 +148,12 @@ final class DisplayModeCoordinator {
   /// catalog now renders as "not enumerated yet", i.e. as nothing at all, and
   /// `.task(id:)` does not re-fire for an unchanged id.
   @ObservationIgnored private var observed: Set<CGDirectDisplayID> = []
-  /// Displays whose stored mode has already been reapplied since they arrived.
-  /// This set IS the "launch and reconnect, never continuously" rule (DM7) —
-  /// see `reapplyStoredModes`.
-  @ObservationIgnored private var reappliedDisplays: Set<CGDirectDisplayID> = []
+  /// Which displays count as having just arrived — the "launch and reconnect,
+  /// never continuously" rule (DM7). It lives in `CandelaKit` under test
+  /// because its two failure directions are both timing, and both are invisible
+  /// from here: too eager fights the user forever, too shy silently fails to
+  /// restore anything on the replug the feature is named for.
+  @ObservationIgnored private var arrivals = DisplayArrivalTracker()
   @ObservationIgnored private var screenObserver: (any NSObjectProtocol)?
   /// Reapply happens with nobody in front of the screen, so every outcome is
   /// also written where it can be read afterwards. The in-app report can be
@@ -175,7 +177,20 @@ final class DisplayModeCoordinator {
       object: nil,
       queue: .main
     ) { [weak self] _ in
-      Task { @MainActor in self?.handleDisplaysChanged() }
+      // Sampled HERE, synchronously in the notification block, and carried into
+      // the handler — never re-read on the other side of the hop.
+      //
+      // The hop is unavoidable (this block is not main-actor isolated) and its
+      // delay is unbounded: this codebase documents main-actor work being
+      // starved during menu tracking. If an unplug and a replug post
+      // back-to-back, both handlers would then read a list with the display
+      // present and conclude it never left — and the resolution the user
+      // remembered would silently not come back, in exactly the case they
+      // enabled the feature for. Reading `configurator` rather than `self` is
+      // what makes the sample legal here: it is `Sendable` and captured
+      // directly, so nothing touches the main-actor object off the main actor.
+      let live = Set(configurator.displays().map(\.id))
+      Task { @MainActor in self?.handleDisplaysChanged(observedLive: live) }
     }
   }
 
@@ -222,7 +237,13 @@ final class DisplayModeCoordinator {
   /// display, fail, and leave the session holding an outstanding preview
   /// forever; `begin()` on ANY other display then reverts-first, fails, and
   /// refuses, so one unplug would wedge mode switching for the whole session.
-  func handleDisplaysChanged() {
+  /// - Parameter observedLive: the display set as it was WHEN THE NOTIFICATION
+  ///   WAS POSTED. Not the same thing as the set live now, and the difference
+  ///   is the whole point: a departure has to count as a departure even when
+  ///   the display is back by the time this runs. Everything else below reads
+  ///   the CURRENT list instead — a catalog or a report must describe what is
+  ///   plugged in now, not what was plugged in a moment ago.
+  func handleDisplaysChanged(observedLive: Set<CGDirectDisplayID>) {
     let live = Set(configurator.displays().map(\.id))
     // Over `observed`, not over `catalogs`: a departed display's entry is nil,
     // so iterating the cache would never re-enumerate it when it comes back.
@@ -233,13 +254,15 @@ final class DisplayModeCoordinator {
         catalogs[displayID] = nil
       }
     }
-    // A departure is what makes the next arrival an arrival. Pruned HERE, on
-    // the undebounced screen-parameters notification, rather than only inside
-    // `reapplyStoredModes`: the app's topology signal coalesces a burst into
-    // one event, so an unplug and replug inside its quiet window would arrive
-    // as a single event with the display present at both ends — and the stored
-    // mode would never be reapplied for a replug that plainly happened.
-    reappliedDisplays.formIntersection(live)
+    // A departure is what makes the next arrival an arrival, so it is recorded
+    // HERE, from the undebounced screen-parameters notification and from the
+    // set that notification was posted with. Two separate reasons the app's own
+    // topology signal cannot be the only source: it coalesces a burst into a
+    // single element, so an unplug and replug inside its one-second quiet
+    // window would arrive as one event with the display present at both ends;
+    // and this handler itself can run late, which is why it is told what was
+    // live rather than asked to look.
+    arrivals.noteObserved(live: observedLive)
     // A report about a display that is gone describes nothing the user can act
     // on, and would reappear on the pane of whatever takes its ID next.
     reapplyReports = reapplyReports.filter { live.contains($0.key) }
@@ -276,19 +299,18 @@ final class DisplayModeCoordinator {
   /// no `prefDidChange` here: nothing changed.)
   func reapplyStoredModes() {
     let live = configurator.displays()
-    let liveIDs = Set(live.map(\.id))
-    reappliedDisplays.formIntersection(liveIDs)
-    let arrivals = live.filter { !reappliedDisplays.contains($0.id) }
-    guard !arrivals.isEmpty else { return }
-    // Marked BEFORE the work, not after: the work is queued and asynchronous,
-    // and a second call landing in between would otherwise queue a second pass
-    // over the same displays.
-    reappliedDisplays.formUnion(arrivals.map(\.id))
+    // Claiming marks, in one step: the work below is queued and asynchronous,
+    // so a second call landing before it finishes must not act on the same
+    // arrival twice. A claim that is then deliberately not acted on is given
+    // back (`release`), never silently kept.
+    let claimed = arrivals.claimArrivals(live: Set(live.map(\.id)))
+    let displays = live.filter { claimed.contains($0.id) }
+    guard !displays.isEmpty else { return }
     // Through the same queue as every session operation. Reapply does not touch
     // the session, but it does apply modes at SESSION scope — landing that in
     // the middle of a `begin()`/`confirm()` would move a display out from under
     // a preview whose fallback was captured before it.
-    enqueue { await self.performReapply(arrivals) }
+    enqueue { await self.performReapply(displays) }
   }
 
   func dismissReapplyReport(for displayID: CGDirectDisplayID) {
@@ -302,10 +324,17 @@ final class DisplayModeCoordinator {
     // strand it — the countdown would then "revert" to a mode the display had
     // already left.
     let previewed = await session.previewedMode?.displayID
-    // Skipped outright, not deferred. A display that has only just arrived can
-    // hold a preview only if the user started one in the moment since — and an
-    // explicit choice they are looking at right now outranks a choice they made
-    // some other day.
+    if let previewed, displays.contains(where: { $0.id == previewed }) {
+      // Skipped because an explicit choice the user is looking at RIGHT NOW
+      // outranks one they made some other day — but the claim goes back, so
+      // this is "not now" rather than "never". Without the release, a display
+      // that happened to be mid-preview when it arrived would go unreapplied
+      // for the rest of the connection, which nothing about the skip intends.
+      // The retry needs no scheduler of its own: resolving the preview is
+      // itself a reconfiguration, and the topology event it produces is what
+      // calls this again.
+      arrivals.release(previewed)
+    }
     for display in displays where display.id != previewed {
       let identity = display.identity
       let stored = persistence.storedMode(for: identity)
@@ -343,6 +372,16 @@ final class DisplayModeCoordinator {
       }
 
       if let notice {
+        // A display can leave across the queue wait or across the apply itself
+        // — and `handleDisplaysChanged` has by then already pruned the reports
+        // it knew about. Writing this one now would leave a report on the pane
+        // of a display that is gone, until the next screen-parameters event
+        // happened to clear it. The claim goes back with it: the arrival was
+        // never completed, so its return is an arrival again.
+        guard configurator.displays().contains(where: { $0.id == display.id }) else {
+          arrivals.release(display.id)
+          continue
+        }
         reapplyReports[display.id] = ReapplyReport(
           displayID: display.id, requested: requested, notice: notice
         )
