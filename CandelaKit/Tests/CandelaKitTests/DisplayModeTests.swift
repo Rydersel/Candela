@@ -18,6 +18,12 @@ struct DisplayModeTests {
   @Test func hiDPIIsAFramebufferAtLeastTwiceTheLogicalWidth() {
     #expect(mode(logical: (2560, 1440), pixels: (5120, 2880)).isHiDPI)
     #expect(!mode(logical: (2560, 1440), pixels: (2560, 1440)).isHiDPI)
+
+    // The case that separates ">= 2x" from "any upscale at all": a 1.5x scaled
+    // mode renders oversized but is NOT HiDPI. This is precisely the mode class
+    // the feature exists to surface, so the boundary has to be pinned — without
+    // it, `pixelWidth > logicalWidth` would satisfy the other two assertions.
+    #expect(!mode(logical: (1920, 1080), pixels: (2880, 1620)).isHiDPI)
   }
 
   /// isScaled must compare against the PANEL's native pixels, not the mode's
@@ -49,9 +55,33 @@ struct DisplayModeTests {
                                        pixelWidth: 5120, pixelHeight: 2880, refreshHz: 120))
   }
 
+  /// `smaller`'s framebuffer is deliberately NOT proportional to its logical
+  /// size (5160x2400 is 2.15:1, against a 2580x1080 logical 2.389:1). That
+  /// makes the assertion load-bearing: an `aspectRatio` derived from pixel
+  /// rather than logical dimensions fails here.
   @Test func aspectRatioComparesEqualForTheSameShapeAtDifferentSizes() {
     let ultrawide = mode(logical: (3440, 1440), pixels: (3440, 1440))
-    let smaller = mode(logical: (2580, 1080), pixels: (5160, 2160))
+    let smaller = mode(logical: (2580, 1080), pixels: (5160, 2400))
     #expect(abs(ultrawide.aspectRatio - smaller.aspectRatio) < 0.0001)
+  }
+
+  /// Codable is this type's whole reason for existing — it is what lands in
+  /// UserDefaults. Pin both the round trip and the on-disk key names, so a
+  /// later property rename breaks a test instead of silently orphaning every
+  /// stored preference.
+  @Test func theDescriptorSurvivesAJSONRoundTripWithStableKeys() throws {
+    let original = DisplayModeDescriptor(
+      logicalWidth: 2560, logicalHeight: 1440,
+      pixelWidth: 5120, pixelHeight: 2880, refreshHz: 119.88
+    )
+
+    let data = try JSONEncoder().encode(original)
+    let decoded = try JSONDecoder().decode(DisplayModeDescriptor.self, from: data)
+    #expect(decoded == original)
+
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(Set(object.keys) == [
+      "logicalWidth", "logicalHeight", "pixelWidth", "pixelHeight", "refreshHz",
+    ])
   }
 }

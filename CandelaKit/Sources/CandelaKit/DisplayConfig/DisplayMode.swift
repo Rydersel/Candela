@@ -82,6 +82,18 @@ public struct DisplayModeDescriptor: Sendable, Equatable, Hashable, Codable {
     self.refreshHz = refreshHz
   }
 
+  /// Spelled out rather than synthesized on purpose: these strings are an
+  /// on-disk format. Synthesized keys track the property names, so a later
+  /// rename would silently orphan every stored preference rather than forcing
+  /// a deliberate decision about the old data.
+  private enum CodingKeys: String, CodingKey {
+    case logicalWidth
+    case logicalHeight
+    case pixelWidth
+    case pixelHeight
+    case refreshHz
+  }
+
   public var aspectRatio: Double {
     logicalHeight > 0 ? Double(logicalWidth) / Double(logicalHeight) : 0
   }
