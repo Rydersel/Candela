@@ -266,6 +266,15 @@ final class DisplayModeCoordinator {
     // A report about a display that is gone describes nothing the user can act
     // on, and would reappear on the pane of whatever takes its ID next.
     reapplyReports = reapplyReports.filter { live.contains($0.key) }
+    // Same rule for a start failure, and it needs saying separately because the
+    // preview path self-heals here and this one cannot: a failure has no
+    // countdown re-presenting it every second, and `dropPreviewOnDepartedDisplay`
+    // returns early when nothing is outstanding. Left alone, unplugging the
+    // display leaves a window naming a display that is gone, which AppKit then
+    // relocates onto some other screen.
+    if let failure = startFailure, !live.contains(failure.displayID) {
+      dismissStartFailure()
+    }
     dropPreviewOnDepartedDisplay()
   }
 
@@ -467,10 +476,12 @@ final class DisplayModeCoordinator {
     await enqueueReturning { await self.performResolve(answered, keeping: false) }
   }
 
+  /// THE only place `startFailure` is cleared, for the same reason `store` is
+  /// the only place a mode is written: the standalone window RENDERS this, so
+  /// clearing it and syncing the window are one operation, not two that a
+  /// caller is trusted to pair.
   func dismissStartFailure() {
     startFailure = nil
-    // Not only for tidiness: when the failure IS what the standalone window is
-    // showing, dismissing it here is the only thing that takes the window down.
     syncConfirmation()
   }
 
@@ -508,7 +519,12 @@ final class DisplayModeCoordinator {
     // queued selects from different surfaces each get their own surface as they
     // land, in the order they land.
     origins[displayID] = origin
-    startFailure = nil
+    // Through `dismissStartFailure`, never a bare `startFailure = nil`: the
+    // standalone window renders the failure, so clearing it without syncing
+    // leaves an EMPTY floating panel on the display for the whole duration of
+    // the CoreGraphics mode change below, which then pops back as the preview
+    // card. Reachable by the obvious retry — fail, reopen the panel, pick again.
+    dismissStartFailure()
     // The user has answered the report themselves — whatever reapply could not
     // do for this display, they are now doing by hand. Leaving the notice up
     // would have it contradict the choice they just made.
@@ -518,6 +534,9 @@ final class DisplayModeCoordinator {
       await adopt(.clear)
       startCountdown()
     case let .failure(error):
+      // The one write to `startFailure` that is not a clear. It is synced by the
+      // `adopt` below — which must therefore stay immediately after it, since
+      // this is what puts the failure on screen.
       startFailure = StartFailure(displayID: displayID, error: error)
       // A begin() that fails may or may not have left something outstanding: it
       // refuses when the previous mode is unreadable (nothing applied), and it
@@ -615,13 +634,19 @@ final class DisplayModeCoordinator {
     syncConfirmation()
   }
 
-  /// Show or hide the standalone confirmation surface to match what `adopt`
-  /// just decided. Driven from `adopt` rather than by observing `preview`
-  /// because `adopt` is the single writer, so the window can never be showing
-  /// something the coordinator has already resolved.
+  /// Points the standalone surface at whatever the coordinator now has to say,
+  /// or at nothing.
+  ///
+  /// It reads TWO pieces of state — `preview` and `startFailure` — so it has
+  /// two callers, not one: `adopt` (the sole writer of `preview`) and
+  /// `dismissStartFailure` (the sole writer of `startFailure`). Every write to
+  /// either must be followed by this call, which is why both are funnelled
+  /// through a single function rather than assigned at will. An un-synced write
+  /// does not merely leave the window stale — it leaves it rendering a state
+  /// that no longer exists, i.e. an empty floating panel.
   ///
   /// Called on every countdown tick, so the presenter must treat a repeat
-  /// present for the same display as a no-op.
+  /// present of unchanged content as a no-op.
   private func syncConfirmation() {
     // A preview outranks a start failure: it has a countdown and a screen at
     // stake, and the failure is still on the panel's own row when it reopens.
