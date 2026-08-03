@@ -278,7 +278,10 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   }
 }
 
-private extension NSScreen {
+/// Internal, not fileprivate: every AppKit island that has to put a window on a
+/// particular display needs this, and a second copy is a second thing to get
+/// wrong. `ModeConfirmationWindow` is the other caller.
+extension NSScreen {
   var displayID: CGDirectDisplayID? {
     self.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
   }

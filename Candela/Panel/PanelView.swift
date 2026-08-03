@@ -11,6 +11,10 @@ import SwiftUI
 struct PanelView: View {
   @Environment(AppModel.self) private var model
 
+  /// At most one display's resolution list is open at a time, and it collapses
+  /// when the menu closes so the panel never reopens taller than it needs.
+  @State private var expandedResolution: CGDirectDisplayID?
+
   var body: some View {
     // Prefs are plain UserDefaults, not observable. Touching prefsRevision
     // here is what re-renders the panel after a settings pane (or a
@@ -98,6 +102,12 @@ struct PanelView: View {
                 showsPercent: showsPercent
               )
             }
+            PanelResolutionSection(
+              displayID: state.id,
+              displayName: name,
+              coordinator: model.displayModes,
+              expandedDisplayID: $expandedResolution
+            )
           }
         }
       }
@@ -107,6 +117,9 @@ struct PanelView: View {
       footer
     }
     .frame(width: 280)
+    // The menu can close without a mouse-exit event, and it takes the panel's
+    // view hierarchy with it — the same signal the hover fixes below rely on.
+    .onDisappear { expandedResolution = nil }
   }
 
   // MARK: - What the panel renders
@@ -264,6 +277,23 @@ struct PanelView: View {
     }
     .padding(.horizontal, 8)
     .frame(height: 32)
+  }
+}
+
+/// The panel's own menu tracking session, so a control inside the panel can end
+/// it. One holder, set once at launch by `StatusItemController`.
+///
+/// Two controls need this, for two consequences of the same fact — a tracking
+/// session holds the main run loop in event-tracking mode. `SettingsOpener` ends
+/// it because a window cannot take focus while it runs. `PanelResolutionSection`
+/// ends it because main-actor work queued from inside it is starved until it
+/// does.
+@MainActor
+enum PanelMenu {
+  static weak var menu: NSMenu?
+
+  static func endTracking() {
+    menu?.cancelTracking()
   }
 }
 

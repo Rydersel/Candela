@@ -45,6 +45,7 @@ struct DisplayDetailView: View {
     Form {
       identitySection
       panelSection
+      displayModeSection
       controlMethodSection
       volumeSection
       tuningSection
@@ -52,6 +53,18 @@ struct DisplayDetailView: View {
     }
     .formStyle(.grouped)
     .onAppear { seedDrafts() }
+    // Mode enumeration is several CoreGraphics round-trips, so it runs here
+    // rather than per body evaluation. It hangs off the Form, not off
+    // `DisplayModeSection`: a modifier applied to a `Section` inside a grouped
+    // Form is not reliably applied to the section itself (`listRowInsets` and
+    // `listRowSeparator` are both measured no-ops there), and a lifecycle hook
+    // that silently never fires would leave the resolution list empty.
+    // Any LATER resolution change — ours, System Settings', or a replug —
+    // re-enumerates through the coordinator's own screen-parameters observer,
+    // which must run whether or not this pane is on screen: a display can
+    // depart while the pane is being dismissed for exactly that reason, and its
+    // outstanding preview still has to be dropped.
+    .task(id: state.id) { model.displayModes.refreshCatalog(for: state.id) }
     // Drafts seeded only in `.onAppear` survive a wipe: if this pane is on
     // screen when the user resets everything from General, the card still holds
     // "Desk" and the next focus/blur re-writes friendlyName.<pk> into the
@@ -118,6 +131,12 @@ struct DisplayDetailView: View {
         ))
       }
     }
+  }
+
+  // MARK: - Resolution
+
+  private var displayModeSection: some View {
+    DisplayModeSection(state: state, coordinator: model.displayModes, actions: actions)
   }
 
   /// Candela's equivalent of the fork's `controlMethod` subtitle. The BRANCH

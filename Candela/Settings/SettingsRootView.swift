@@ -221,12 +221,12 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
 /// async variants were the worst-behaved of the six tried).
 @MainActor
 enum SettingsOpener {
-  /// Set by StatusItemController at launch so the panel's gear button can end
-  /// the tracking session it lives inside.
-  static weak var statusMenu: NSMenu?
-
   static func open() {
-    statusMenu?.cancelTracking()
+    // The gear button lives inside the panel's menu tracking session, and no
+    // window can take focus while one is running. The menu is held by
+    // `PanelMenu` — one holder, because a second panel control now has to end
+    // tracking for a different reason (see `PanelResolutionSection`).
+    PanelMenu.endTracking()
     // Deprecated since macOS 14 and used anyway: the replacement genuinely
     // does not activate an LSUIElement app from a tracking session. Revisit
     // only against a measurement, never against the deprecation warning alone.

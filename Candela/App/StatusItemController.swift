@@ -80,6 +80,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// Held for the app's lifetime so "Run Setup Again…" and the post-reset
   /// re-run reuse one window instead of stacking copies.
   private var onboardingController: OnboardingWindowController?
+  /// Answers a resolution preview started from the panel. Held here because the
+  /// coordinator references it weakly — the countdown must outlive the menu
+  /// tracking session that started it, so the window cannot be owned by a view.
+  private var modeConfirmation: ModeConfirmationWindow?
   /// Stored (review M23) so the topology loop can `cleanupDisplay` departed
   /// displays' HUD panels; the executor shares this same instance.
   private let hud = BrightnessHUD()
@@ -110,8 +114,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       alert.messageText = "Safe Mode"
       var informative = """
       Shift was held during launch. For this session, \(AppInfo.productName) will not restore your \
-      saved brightness, volume and contrast, will not read any values back from your displays, and \
-      will not write to them when you quit.
+      saved brightness, volume, contrast or resolution, will not read any values back from your \
+      displays, and will not write to them when you quit.
 
       Your sliders and keyboard shortcuts still work, and they still send commands to your displays. \
       Nothing about your settings has changed — relaunch without holding Shift to leave Safe Mode.
@@ -174,9 +178,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     item.behavior = .removalAllowed
     statusItem = item
 
-    // The panel's gear button lives inside this menu's tracking session and
-    // must end it before a window can take focus (see SettingsOpener).
-    SettingsOpener.statusMenu = menu
+    // Panel controls that have to end this tracking session reach it through
+    // here: the gear button (a window cannot take focus while it runs) and
+    // resolution selection (main-actor work queued from inside it is starved
+    // until it ends). See `PanelMenu`.
+    PanelMenu.menu = menu
 
     // The handler MUST run synchronously — a `Task { @MainActor … }` hop would
     // land after `isApplyingStatusItemVisibility` was already reset, and every
@@ -260,6 +266,31 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     settingsActions.updateStatusItem = { [weak self] in self?.updateStatusItemVisibility() }
     settingsActions.performReset = { [weak self] in self?.performSettingsReset() }
 
+    // Resolution previews started from the panel are answered in a window of
+    // their own: the panel is a menu tracking session and cannot be relied on
+    // to still exist fifteen seconds later. See `ModeConfirmationWindow`.
+    let confirmation = ModeConfirmationWindow(coordinator: model.displayModes)
+    confirmation.displayName = { [weak self] displayID in
+      guard let state = self?.model.allControlledStates.first(where: { $0.id == displayID })
+      else { return "" }
+      // The panel's own naming rule, so a renamed display is named the same way
+      // in the row that started the change and in the window that confirms it.
+      return PanelView.title(for: state.display)
+    }
+    modeConfirmation = confirmation
+    model.displayModes.confirmation = confirmation
+    // D27: the coordinator writes `storedDisplayMode` on a commit, and the seam
+    // has to hear about it whichever surface answered. Wired once here rather
+    // than in each surface — the panel's window has no `SettingsActions`, and a
+    // second copy of this rule is a second thing to forget.
+    model.displayModes.didStoreMode = { [weak self] displayID in
+      guard let self,
+            let key = model.allControlledStates
+            .first(where: { $0.id == displayID })?.display.persistenceKey
+      else { return }
+      self.settingsActions.prefDidChange(.storedDisplayMode, persistenceKey: key)
+    }
+
     // Topology consumption loop — the stream's single consumer: after each
     // debounced reconfiguration (or post-wake sober), re-discover displays,
     // re-arm the media-key tap, and drop departed displays' HUD panels.
@@ -274,6 +305,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // one is running, keeps re-asserting on its own schedule).
         self.restoreCoordinator.noteLaunchOrReconfigure()
         self.wireInterferenceHooks()
+        self.warmModeCatalogs()
+        self.reapplyStoredModes()
         // Fork parity: the counter zeroes on every configure so unrelated
         // events across a long session never add up to an offer.
         // `suspendedForSession` survives.
@@ -364,6 +397,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       updateStatusItemVisibility()
       wireInterferenceHooks()
       restoreCoordinator.noteLaunchOrReconfigure()
+      // Before the first open, for the same reason the display list is warmed
+      // here: nothing the panel starts can be relied on to run while the menu
+      // is tracking.
+      warmModeCatalogs()
+      reapplyStoredModes()
     }
 
     // D13: nobody else calls this. It is a no-op while the version key is
@@ -443,7 +481,54 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       refreshTapConfig()
       updateStatusItemVisibility()
       wireInterferenceHooks()
+      warmModeCatalogs()
     }
+  }
+
+  /// Enumerates the display-mode list for every external display, once each.
+  ///
+  /// Every external, not just the ones the panel is currently showing: a
+  /// display un-hidden in Settings would otherwise have no catalog on the next
+  /// open, and only get one on the close after that — the resolution control
+  /// would be missing exactly once, which is the hardest kind of missing to
+  /// report.
+  ///
+  /// Deliberately NOT driven from a `.task` inside the panel. Menu tracking
+  /// holds the main run loop in event-tracking mode and starves main-actor task
+  /// execution — the same reason the display refresh above is triggered from
+  /// here rather than from the view — so a view-driven enumeration would land
+  /// after the menu closed and the section would be missing on the open that
+  /// asked for it, appearing only on the next one.
+  ///
+  /// Enumeration is on demand and cached (DM7, never on a timer): this skips
+  /// displays that already have a catalog, and the coordinator keeps the rest
+  /// fresh from screen-parameters notifications.
+  private func warmModeCatalogs() {
+    for state in model.displays where model.displayModes.catalogs[state.id] == nil {
+      model.displayModes.refreshCatalog(for: state.id)
+    }
+  }
+
+  /// Reapplies remembered resolutions for displays that have just arrived.
+  ///
+  /// Driven from exactly two places — the launch warm task and the topology
+  /// loop above — and from nowhere else (DM7). The topology loop is this app's
+  /// `CGDisplayReconfigurationCallBack` intake, and its one-second quiet window
+  /// is why reapply hangs off it rather than off the raw screen-parameters
+  /// notification the coordinator already observes: applying a mode in the
+  /// middle of a reconfiguration burst is the case most likely to fail, and the
+  /// display that just arrived is still settling. The coordinator decides which
+  /// displays count as arrivals, so calling this on every quiet window is not
+  /// the same as reapplying continuously.
+  ///
+  /// Safe mode gates it here, where the flag lives. Safe mode is the launch you
+  /// perform when the app's unattended restores are suspected of making things
+  /// worse, and a stored resolution is the one restored value that can leave a
+  /// screen unreadable — with no countdown behind it, because nobody is
+  /// watching. The alert's copy names resolution for the same reason.
+  private func reapplyStoredModes() {
+    guard !isSafeMode else { return }
+    model.displayModes.reapplyStoredModes()
   }
 
   /// D12: full-domain wipe, explicitly confirmed by the caller (the General
