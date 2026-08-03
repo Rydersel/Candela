@@ -219,14 +219,24 @@ final class DisplayModeCoordinator {
     }
   }
 
+  /// `answered` is the preview the caller was LOOKING AT when it answered. It
+  /// is carried into the session, which refuses an answer that no longer names
+  /// the outstanding preview.
+  ///
+  /// This is what closes the last tail of the concurrency hazard. The button's
+  /// action runs one main-actor turn before the queued operation, so a
+  /// selection can still land in between — ordering alone cannot stop the
+  /// answer from resolving a preview the user never saw. Carrying the intent
+  /// makes "an answer only ever resolves the preview it was given for" a
+  /// property of the type, and demotes queue ordering to an optimisation.
   @discardableResult
-  func confirm() async -> ModePreviewOutcome {
-    await enqueueReturning { await self.performResolve(keeping: true) }
+  func confirm(_ answered: Preview) async -> ModePreviewOutcome {
+    await enqueueReturning { await self.performResolve(answered, keeping: true) }
   }
 
   @discardableResult
-  func revert() async -> ModePreviewOutcome {
-    await enqueueReturning { await self.performResolve(keeping: false) }
+  func revert(_ answered: Preview) async -> ModePreviewOutcome {
+    await enqueueReturning { await self.performResolve(answered, keeping: false) }
   }
 
   func dismissStartFailure() {
@@ -278,20 +288,27 @@ final class DisplayModeCoordinator {
     refreshCatalog(for: displayID)
   }
 
-  private func performResolve(keeping: Bool) async -> ModePreviewOutcome {
-    // Read from the SESSION, not from `preview`: what gets committed is what
-    // the session holds, so the mode we then store must be that one too.
-    guard let outstanding = await session.previewedMode else { return .reverted }
-    let outcome = keeping ? await session.confirm() : await session.revert()
-    if case .committed = outcome {
-      storeIfRemembering(outstanding.mode, on: outstanding.displayID)
-    }
-    if case let .failed(error) = outcome {
-      await adopt(.set(error))
-    } else {
+  private func performResolve(_ answered: Preview, keeping: Bool) async -> ModePreviewOutcome {
+    let intent = PreviewedMode(displayID: answered.displayID, mode: answered.mode)
+    let outcome = keeping ? await session.confirm(intent) : await session.revert(intent)
+    switch outcome {
+    case .committed:
+      // `.committed` is only reachable when the session agreed the answer named
+      // its outstanding preview, so the mode that was committed is exactly the
+      // one the user was reading — and therefore the one to store.
+      storeIfRemembering(answered.mode, on: answered.displayID)
       await adopt(.clear)
+    case .reverted:
+      await adopt(.clear)
+    case let .failed(error):
+      await adopt(.set(error))
+    case .stale:
+      // Nothing was resolved: the outstanding preview is not the one this
+      // answer was about. Re-read, and keep whatever failure is on screen —
+      // it belongs to the preview that is still there, not to this answer.
+      await adopt(.keep)
     }
-    refreshCatalog(for: outstanding.displayID)
+    refreshCatalog(for: answered.displayID)
     return outcome
   }
 

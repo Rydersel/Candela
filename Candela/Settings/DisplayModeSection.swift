@@ -101,14 +101,17 @@ struct DisplayModeSection: View {
         }
 
         HStack(spacing: 8) {
-          Button("Keep") { Task { await keep() } }
+          // Both answers carry the preview THIS banner is rendering, so a
+          // selection landing between the click and the queued operation is
+          // refused as stale rather than resolved by an answer given about
+          // something else.
+          Button("Keep") { Task { await keep(preview) } }
             .buttonStyle(.borderedProminent)
-          Button("Revert Now") { Task { await coordinator.revert() } }
+          Button("Revert Now") { Task { await coordinator.revert(preview) } }
         }
-        // Both answers would be QUEUED correctly while a selection is still
-        // landing — but they would resolve the preview that is arriving rather
-        // than the one named above, so the user would confirm something other
-        // than what they were reading.
+        // Belt to the intent check's braces: while a selection is still landing
+        // the banner is about to change, so offering an answer to the old one
+        // is pointless even though it is now harmless.
         .disabled(coordinator.isApplying)
       }
       .padding(.vertical, 2)
@@ -131,8 +134,8 @@ struct DisplayModeSection: View {
       : "Reverting to the previous resolution in \(seconds) seconds."
   }
 
-  private func keep() async {
-    let outcome = await coordinator.confirm()
+  private func keep(_ answered: DisplayModeCoordinator.Preview) async {
+    let outcome = await coordinator.confirm(answered)
     guard case .committed = outcome else { return }
     // The commit writes `storedDisplayMode` only while this display is being
     // remembered; the seam is told only when a pref actually changed (D27).

@@ -85,6 +85,12 @@ struct ModePreviewSessionTests {
                 isNative: false)
   }
 
+  /// The answer a UI gives about a preview it rendered. `confirm`/`revert` take
+  /// one so an answer can only ever resolve the preview it was given for.
+  private func answer(_ id: Int32, on displayID: CGDirectDisplayID = 7) -> PreviewedMode {
+    PreviewedMode(displayID: displayID, mode: mode(id))
+  }
+
   @Test func beginningAPreviewAppliesWithPreviewScopeNotSession() async {
     let fake = FakeConfigurator()
     fake.current = mode(1)
@@ -98,7 +104,7 @@ struct ModePreviewSessionTests {
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
-    let outcome = await session.confirm()
+    let outcome = await session.confirm(answer(2))
     #expect(outcome == .committed)
     #expect(fake.applied.last == .init(modeID: 2, scope: .session))
   }
@@ -123,7 +129,7 @@ struct ModePreviewSessionTests {
     fake.current = mode(42)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
-    let outcome = await session.revert()
+    let outcome = await session.revert(answer(2))
     #expect(outcome == .reverted)
     #expect(fake.applied.last == .init(modeID: 42, scope: .session))
   }
@@ -143,7 +149,7 @@ struct ModePreviewSessionTests {
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
     _ = await session.begin(mode: mode(2), on: 7)
-    #expect(await session.confirm() == .committed)
+    #expect(await session.confirm(answer(2)) == .committed)
     let countAfterConfirm = fake.applied.count
     #expect(await session.tick() == nil)
     #expect(fake.applied.count == countAfterConfirm)
@@ -161,7 +167,7 @@ struct ModePreviewSessionTests {
     _ = await session.begin(mode: mode(2), on: 7)
 
     fake.current = mode(1) // display reconfigured out from under the preview
-    #expect(await session.confirm() == .committed)
+    #expect(await session.confirm(answer(2)) == .committed)
     #expect(fake.applied.last == .init(modeID: 2, scope: .session))
   }
 
@@ -186,7 +192,7 @@ struct ModePreviewSessionTests {
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
     _ = await session.begin(mode: mode(3), on: 7)
-    #expect(await session.revert() == .reverted)
+    #expect(await session.revert(answer(3)) == .reverted)
     #expect(fake.applied.last == .init(modeID: 1, scope: .session))
   }
 
@@ -197,10 +203,10 @@ struct ModePreviewSessionTests {
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
-    #expect(await session.confirm() == .committed)
+    #expect(await session.confirm(answer(2)) == .committed)
     let countAfterConfirm = fake.applied.count
-    #expect(await session.confirm() == .committed)
-    #expect(await session.revert() == .committed)
+    #expect(await session.confirm(answer(2)) == .committed)
+    #expect(await session.revert(answer(2)) == .committed)
     #expect(fake.applied.count == countAfterConfirm)
   }
 
@@ -212,7 +218,7 @@ struct ModePreviewSessionTests {
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
     _ = await session.begin(mode: mode(3), on: 8)
-    #expect(await session.revert() == .reverted)
+    #expect(await session.revert(answer(3, on: 8)) == .reverted)
     #expect(fake.applied == [
       .init(modeID: 2, scope: .preview),
       .init(modeID: 1, scope: .session),
@@ -240,7 +246,7 @@ struct ModePreviewSessionTests {
     #expect(await session.tick() == nil) // the countdown fires once, not forever
 
     fake.failWith = nil // CoreGraphics recovers
-    #expect(await session.revert() == .reverted)
+    #expect(await session.revert(answer(2)) == .reverted)
     #expect(fake.applied.last == .init(modeID: 1, scope: .session))
     #expect(await session.hasOutstandingPreview == false)
   }
@@ -258,7 +264,7 @@ struct ModePreviewSessionTests {
 
     fake.failWith = nil
     _ = await session.begin(mode: mode(3), on: 7) // user tries a different mode
-    #expect(await session.revert() == .reverted)
+    #expect(await session.revert(answer(3)) == .reverted)
     #expect(fake.applied.last == .init(modeID: 1, scope: .session))
   }
 
@@ -269,11 +275,11 @@ struct ModePreviewSessionTests {
     _ = await session.begin(mode: mode(2), on: 7)
     fake.failWith = DisplayConfigError(cgErrorCode: 1001)
 
-    #expect(await session.confirm() == .failed(DisplayConfigError(cgErrorCode: 1001)))
+    #expect(await session.confirm(answer(2)) == .failed(DisplayConfigError(cgErrorCode: 1001)))
     #expect(await session.hasOutstandingPreview)
 
     fake.failWith = nil
-    #expect(await session.revert() == .reverted)
+    #expect(await session.revert(answer(2)) == .reverted)
     #expect(fake.applied.last == .init(modeID: 1, scope: .session))
   }
 
@@ -286,7 +292,7 @@ struct ModePreviewSessionTests {
     let session = ModePreviewSession(configurator: fake, countdownSeconds: 2)
     _ = await session.begin(mode: mode(2), on: 7)
     fake.failWith = DisplayConfigError(cgErrorCode: 1001)
-    #expect(await session.confirm() == .failed(DisplayConfigError(cgErrorCode: 1001)))
+    #expect(await session.confirm(answer(2)) == .failed(DisplayConfigError(cgErrorCode: 1001)))
 
     fake.failWith = nil
     #expect(await session.tick() == nil)
@@ -309,7 +315,7 @@ struct ModePreviewSessionTests {
     #expect(fake.applied == [.init(modeID: 2, scope: .preview)]) // 8 never previewed
 
     fake.failWith = nil
-    #expect(await session.revert() == .reverted) // 7 is still the outstanding one
+    #expect(await session.revert(answer(2)) == .reverted) // 7 is still the outstanding one
     #expect(fake.applied.last == .init(modeID: 1, scope: .session))
     #expect(fake.appliedDisplayIDs.last == 7)
   }
@@ -324,19 +330,19 @@ struct ModePreviewSessionTests {
     fake.current = mode(1)
     let session = ModePreviewSession(configurator: fake)
     _ = await session.begin(mode: mode(2), on: 7)
-    #expect(await session.confirm() == .committed)
+    #expect(await session.confirm(answer(2)) == .committed)
 
     fake.current = nil // no readable fallback: begin refuses before applying
     var result = await session.begin(mode: mode(3), on: 7)
     #expect(result.failureError == DisplayConfigError(cgErrorCode: CGError.failure.rawValue))
-    #expect(await session.confirm() == .committed)
-    #expect(await session.revert() == .committed)
+    #expect(await session.confirm(answer(3)) == .committed)
+    #expect(await session.revert(answer(3)) == .committed)
 
     fake.current = mode(2)
     fake.failWith = DisplayConfigError(cgErrorCode: 1001) // the apply itself throws
     result = await session.begin(mode: mode(3), on: 7)
     #expect(result.failureError == DisplayConfigError(cgErrorCode: 1001))
-    #expect(await session.confirm() == .committed)
+    #expect(await session.confirm(answer(3)) == .committed)
   }
 
   @Test func theCountdownStopsBeingReportedOnceResolved() async {
@@ -347,7 +353,7 @@ struct ModePreviewSessionTests {
     #expect(await session.secondsRemaining == 15)
     #expect(await session.tick() == nil)
     #expect(await session.secondsRemaining == 14)
-    _ = await session.confirm()
+    _ = await session.confirm(answer(2))
     #expect(await session.secondsRemaining == 0)
   }
 
@@ -364,7 +370,7 @@ struct ModePreviewSessionTests {
     #expect(await session.previewedMode == PreviewedMode(displayID: 7, mode: mode(2)))
     #expect(await session.isCountingDown)
 
-    _ = await session.confirm()
+    _ = await session.confirm(answer(2))
     #expect(await session.previewedMode == nil)
     #expect(await session.isCountingDown == false)
   }
@@ -387,7 +393,7 @@ struct ModePreviewSessionTests {
     let commitSession = ModePreviewSession(configurator: commit, countdownSeconds: 15)
     _ = await commitSession.begin(mode: mode(2), on: 7)
     commit.failWith = DisplayConfigError(cgErrorCode: 1001)
-    #expect(await commitSession.confirm() == .failed(DisplayConfigError(cgErrorCode: 1001)))
+    #expect(await commitSession.confirm(answer(2)) == .failed(DisplayConfigError(cgErrorCode: 1001)))
     #expect(await commitSession.isCountingDown)
   }
 
@@ -411,5 +417,62 @@ struct ModePreviewSessionTests {
     fake.current = mode(5)
     #expect(await session.begin(mode: mode(6), on: 8).failureError == nil)
     #expect(await session.previewedMode == PreviewedMode(displayID: 8, mode: mode(6)))
+  }
+
+  // MARK: - An answer only resolves the preview it was given for
+
+  /// The worst failure this type can produce: the user clicks Keep on a banner
+  /// naming one mode, a second selection lands in between, and the mode they
+  /// never saw becomes permanent at session scope while the UI reports success.
+  /// Ordering alone cannot prevent it — the click runs one turn before the call
+  /// — so the answer carries what it was about and the session refuses it.
+  @Test func anAnswerForASupersededPreviewCommitsNothing() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 7)
+    _ = await session.begin(mode: mode(3), on: 7) // a second selection lands
+
+    #expect(await session.confirm(answer(2)) == .stale)
+    #expect(fake.applied.allSatisfy { $0.scope == .preview }) // nothing committed
+    // Untouched and still resolvable: the preview that IS outstanding keeps its
+    // countdown and its fallback.
+    #expect(await session.previewedMode == PreviewedMode(displayID: 7, mode: mode(3)))
+    #expect(await session.isCountingDown)
+    #expect(await session.confirm(answer(3)) == .committed)
+    #expect(fake.applied.last == .init(modeID: 3, scope: .session))
+  }
+
+  /// Same rule for the other answer, across displays — a revert aimed at the
+  /// display the banner named must not restore a different display.
+  @Test func aRevertForAnotherDisplaysPreviewRestoresNothing() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 15)
+    _ = await session.begin(mode: mode(2), on: 7)
+    _ = await session.begin(mode: mode(3), on: 8) // 7 is reverted and released
+    let appliedBefore = fake.applied
+
+    #expect(await session.revert(answer(2, on: 7)) == .stale)
+    #expect(fake.applied == appliedBefore)
+    #expect(await session.previewedMode == PreviewedMode(displayID: 8, mode: mode(3)))
+    #expect(await session.isCountingDown)
+    #expect(await session.revert(answer(3, on: 8)) == .reverted)
+    #expect(fake.appliedDisplayIDs.last == 8)
+  }
+
+  /// A stale answer must not be mistaken for the retry path either: after a
+  /// failed commit the banner is still showing the SAME preview, so its answer
+  /// still matches and recovery keeps working.
+  @Test func theRetryPathStillMatchesAfterAFailedResolution() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 7)
+    fake.failWith = DisplayConfigError(cgErrorCode: 1001)
+    #expect(await session.confirm(answer(2)) == .failed(DisplayConfigError(cgErrorCode: 1001)))
+
+    fake.failWith = nil
+    #expect(await session.confirm(answer(2)) == .committed)
   }
 }
