@@ -7,6 +7,23 @@ public enum ModePreviewOutcome: Sendable, Equatable {
   case failed(DisplayConfigError)
 }
 
+/// The applied-but-unresolved preview, as a UI needs to describe it.
+///
+/// Exists so a caller can render the preview from the SESSION's state rather
+/// than from whatever it remembers passing to `begin()`. Those two disagree
+/// exactly when concurrent calls interleave — and a banner naming one mode
+/// while "Keep" commits another is how an unapproved mode becomes permanent
+/// while the UI reports success.
+public struct PreviewedMode: Sendable, Equatable {
+  public let displayID: CGDirectDisplayID
+  public let mode: DisplayMode
+
+  public init(displayID: CGDirectDisplayID, mode: DisplayMode) {
+    self.displayID = displayID
+    self.mode = mode
+  }
+}
+
 /// Preview → confirm → commit, with a countdown that **defaults to revert**.
 ///
 /// The whole reason this exists: a mode can leave a display unreadable, and at
@@ -63,6 +80,37 @@ public actor ModePreviewSession {
   /// resolution that threw. `revert()` is worth calling exactly while this
   /// holds.
   public var hasOutstandingPreview: Bool { outstanding != nil }
+
+  /// What is applied and unresolved, if anything. The authority a UI rebuilds
+  /// its own state from.
+  public var previewedMode: PreviewedMode? {
+    outstanding.map { PreviewedMode(displayID: $0.displayID, mode: $0.previewedMode) }
+  }
+
+  /// Whether the countdown can still expire into a revert. Reported rather
+  /// than inferred: a failed EXPIRY disarms it while a failed COMMIT leaves it
+  /// armed, and a caller that guesses wrong either shows a countdown that will
+  /// never fire or hides one that will.
+  public var isCountingDown: Bool { countdownArmed && outstanding != nil }
+
+  /// The display is gone. Drops the outstanding preview WITHOUT applying
+  /// anything — there is nothing left to apply it to.
+  ///
+  /// Not cosmetic: `begin()` on another display first reverts an outstanding
+  /// preview and REFUSES if that revert fails, so one departed display would
+  /// otherwise wedge mode switching for every other display until the app
+  /// restarts. `.preview` scope means the departed display keeps nothing: its
+  /// mode is app-scoped and renegotiated when it returns, so `.reverted` is the
+  /// honest outcome to report.
+  @discardableResult
+  public func discard(displayID: CGDirectDisplayID) -> Bool {
+    guard outstanding?.displayID == displayID else { return false }
+    outstanding = nil
+    remaining = 0
+    countdownArmed = false
+    lastOutcome = .reverted
+    return true
+  }
 
   public func begin(
     mode: DisplayMode, on displayID: CGDirectDisplayID

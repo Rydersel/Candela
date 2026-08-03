@@ -350,4 +350,66 @@ struct ModePreviewSessionTests {
     _ = await session.confirm()
     #expect(await session.secondsRemaining == 0)
   }
+
+  // MARK: - State a UI rebuilds itself from (Task 8)
+
+  @Test func theSessionReportsWhatIsPreviewedSoAUINeverHasToRemember() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 15)
+    #expect(await session.previewedMode == nil)
+    #expect(await session.isCountingDown == false)
+
+    _ = await session.begin(mode: mode(2), on: 7)
+    #expect(await session.previewedMode == PreviewedMode(displayID: 7, mode: mode(2)))
+    #expect(await session.isCountingDown)
+
+    _ = await session.confirm()
+    #expect(await session.previewedMode == nil)
+    #expect(await session.isCountingDown == false)
+  }
+
+  /// A failed expiry disarms the countdown; a failed commit does not. A UI that
+  /// inferred either one would show a countdown that never fires, or hide one
+  /// that will.
+  @Test func aFailedExpiryStopsCountingDownWhileAFailedCommitKeepsCounting() async {
+    let expiry = FakeConfigurator()
+    expiry.current = mode(1)
+    let expirySession = ModePreviewSession(configurator: expiry, countdownSeconds: 1)
+    _ = await expirySession.begin(mode: mode(2), on: 7)
+    expiry.failWith = DisplayConfigError(cgErrorCode: 1001)
+    #expect(await expirySession.tick() == .failed(DisplayConfigError(cgErrorCode: 1001)))
+    #expect(await expirySession.hasOutstandingPreview)
+    #expect(await expirySession.isCountingDown == false)
+
+    let commit = FakeConfigurator()
+    commit.current = mode(1)
+    let commitSession = ModePreviewSession(configurator: commit, countdownSeconds: 15)
+    _ = await commitSession.begin(mode: mode(2), on: 7)
+    commit.failWith = DisplayConfigError(cgErrorCode: 1001)
+    #expect(await commitSession.confirm() == .failed(DisplayConfigError(cgErrorCode: 1001)))
+    #expect(await commitSession.isCountingDown)
+  }
+
+  /// A departed display cannot be reverted onto. Without `discard`, `begin()`
+  /// on any OTHER display reverts the outstanding preview first, fails, and
+  /// refuses — so one unplug would wedge mode switching for the whole session.
+  @Test func discardingADepartedDisplayAppliesNothingAndUnblocksOtherDisplays() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 15)
+    _ = await session.begin(mode: mode(2), on: 7)
+    let appliedBefore = fake.applied
+
+    #expect(await session.discard(displayID: 9) == false) // not that display
+    #expect(await session.discard(displayID: 7))
+    #expect(fake.applied == appliedBefore) // nothing was applied to a dead display
+    #expect(await session.hasOutstandingPreview == false)
+    #expect(await session.isCountingDown == false)
+    #expect(await session.tick() == nil)
+
+    fake.current = mode(5)
+    #expect(await session.begin(mode: mode(6), on: 8).failureError == nil)
+    #expect(await session.previewedMode == PreviewedMode(displayID: 8, mode: mode(6)))
+  }
 }

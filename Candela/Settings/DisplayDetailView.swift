@@ -1,4 +1,3 @@
-import AppKit
 import CandelaKit
 import SwiftUI
 
@@ -60,16 +59,12 @@ struct DisplayDetailView: View {
     // Form is not reliably applied to the section itself (`listRowInsets` and
     // `listRowSeparator` are both measured no-ops there), and a lifecycle hook
     // that silently never fires would leave the resolution list empty.
+    // Any LATER resolution change — ours, System Settings', or a replug —
+    // re-enumerates through the coordinator's own screen-parameters observer,
+    // which must run whether or not this pane is on screen: a display can
+    // depart while the pane is being dismissed for exactly that reason, and its
+    // outstanding preview still has to be dropped.
     .task(id: state.id) { model.displayModes.refreshCatalog(for: state.id) }
-    // Any resolution change — ours, System Settings', or a replug — invalidates
-    // the current-mode checkmark and the refresh-rate list.
-    .onReceive(
-      NotificationCenter.default.publisher(
-        for: NSApplication.didChangeScreenParametersNotification
-      )
-    ) { _ in
-      model.displayModes.refreshCatalog(for: state.id)
-    }
     // Drafts seeded only in `.onAppear` survive a wipe: if this pane is on
     // screen when the user resets everything from General, the card still holds
     // "Desk" and the next focus/blur re-writes friendlyName.<pk> into the

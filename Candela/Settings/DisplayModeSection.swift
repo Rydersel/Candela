@@ -27,23 +27,38 @@ struct DisplayModeSection: View {
     Section("Resolution") {
       previewBanner
       startFailureBanner
-      if let catalog, !catalog.rows.isEmpty {
-        ForEach(catalog.rows) { row in
-          ModeChoice(
-            title: sizeLabel(row.mode),
-            detail: nil,
-            badges: badges(for: row, in: catalog),
-            isCurrent: isCurrentSize(row.mode, in: catalog)
-          ) {
-            select(size: row, in: catalog)
+      // A nil catalog is "not enumerated yet", NOT "no modes" — rendering the
+      // empty state for it flashes false copy on every pane switch.
+      if let catalog {
+        if !catalog.rows.isEmpty {
+          ForEach(catalog.rows) { row in
+            ModeChoice(
+              title: sizeLabel(row.mode),
+              detail: nil,
+              badges: badges(for: row, in: catalog),
+              isCurrent: isCurrentSize(row.mode, in: catalog)
+            ) {
+              select(size: row, in: catalog)
+            }
           }
+          curationCaption(catalog)
+          refreshPicker(catalog)
+        } else if !catalog.all.isEmpty {
+          // Every size this panel reports is under the usability floor. The
+          // curated list is empty, the full one is not — so the escape hatch
+          // below is the whole feature here, and saying "no resolutions" while
+          // holding dozens would be false.
+          SettingsCaption("Every size this display reports is too small to use as a desktop. All modes lists them.")
+        } else {
+          SettingsCaption("\(AppInfo.productName) found no resolutions it can switch between on this display.")
         }
-        curationCaption(catalog)
-        refreshPicker(catalog)
-        rememberToggle
-        allModes(catalog)
-      } else {
-        SettingsCaption("\(AppInfo.productName) found no resolutions it can switch between on this display.")
+
+        if !catalog.all.isEmpty {
+          rememberToggle
+          // Outside the curated branch on purpose: the escape hatch has to
+          // survive the case it exists for.
+          allModes(catalog)
+        }
       }
     }
   }
@@ -56,7 +71,7 @@ struct DisplayModeSection: View {
   /// usability floor — so this sentence is exactly true, not approximately.
   @ViewBuilder private func curationCaption(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
     if catalog.rows.count < catalog.distinctLogicalSizes {
-      SettingsCaption("Showing \(catalog.rows.count) of the \(catalog.distinctLogicalSizes) sizes this display reports — the rest are too small to use as a desktop. All modes lists every one.")
+      SettingsCaption("Showing \(catalog.rows.count) of the \(catalog.distinctLogicalSizes) sizes this display reports — the rest are too small to use as a desktop. All modes lists every size at every refresh rate.")
     }
   }
 
@@ -73,8 +88,10 @@ struct DisplayModeSection: View {
         if let failure = preview.failure {
           // Nothing auto-retries a failed resolution. Staying silent here would
           // leave the display on a mode the user never approved, held only
-          // until the app exits.
-          SettingsCaption("\(AppInfo.productName) could not complete that change (CoreGraphics error \(failure.cgErrorCode)). The display is still showing the preview — try again.")
+          // until the app exits. The CoreGraphics code is diagnostic, not
+          // something to read a sentence at: it belongs in the tooltip.
+          SettingsCaption("\(AppInfo.productName) could not complete that change. The display is still showing the preview — try again.")
+            .help("CoreGraphics error \(failure.cgErrorCode)")
         }
         if preview.isCountingDown {
           Text(verbatim: countdownText(preview.secondsRemaining))
@@ -96,7 +113,8 @@ struct DisplayModeSection: View {
   @ViewBuilder private var startFailureBanner: some View {
     if let failure = coordinator.startFailure, failure.displayID == displayID {
       VStack(alignment: .leading, spacing: 6) {
-        SettingsCaption("\(AppInfo.productName) could not switch this display (CoreGraphics error \(failure.error.cgErrorCode)). Nothing changed.")
+        SettingsCaption("\(AppInfo.productName) could not switch this display. Nothing changed.")
+          .help("CoreGraphics error \(failure.error.cgErrorCode)")
         Button("OK") { coordinator.dismissStartFailure() }
       }
     }
@@ -212,7 +230,7 @@ struct DisplayModeSection: View {
               badges: [],
               isCurrent: mode.ioModeID == catalog.current?.ioModeID
             ) {
-              apply(mode)
+              apply(mode, in: catalog)
             }
           }
         }
@@ -244,7 +262,7 @@ struct DisplayModeSection: View {
       pixelHeight: row.mode.pixelHeight,
       refreshHz: catalog.current?.refreshHz ?? row.mode.refreshHz
     )
-    apply(resolved(wanted, in: catalog, matching: row.mode) ?? row.mode)
+    apply(resolved(wanted, in: catalog, matching: row.mode) ?? row.mode, in: catalog)
   }
 
   private func select(refreshHz: Double, in catalog: DisplayModeCoordinator.Catalog) {
@@ -257,7 +275,7 @@ struct DisplayModeSection: View {
       refreshHz: refreshHz
     )
     guard let mode = resolved(wanted, in: catalog, matching: current) else { return }
-    apply(mode)
+    apply(mode, in: catalog)
   }
 
   private func resolved(
@@ -279,10 +297,17 @@ struct DisplayModeSection: View {
     return match
   }
 
-  private func apply(_ mode: DisplayMode) {
+  private func apply(_ mode: DisplayMode, in catalog: DisplayModeCoordinator.Catalog) {
+    // Clicking the mode already on screen used to apply a no-op and then demand
+    // "Keep this resolution?" with a 15-second countdown for a change nobody
+    // made.
+    guard mode.ioModeID != catalog.current?.ioModeID else { return }
     // Never speculative: this runs only from an explicit click naming this
-    // display's mode.
-    Task { await coordinator.select(mode, on: displayID) }
+    // display's mode. No `Task` here — `select` is fire-and-forget into the
+    // coordinator's queue, which is what serialises two fast clicks; spawning
+    // one per click is precisely how the banner ends up naming a different mode
+    // than the one "Keep" would commit.
+    coordinator.select(mode, on: displayID)
   }
 }
 
@@ -323,14 +348,32 @@ private struct ModeChoice: View {
       .padding(.vertical, 3)
       .padding(.horizontal, 4)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background(
-        RoundedRectangle(cornerRadius: 5)
-          .fill(isHovering ? AnyShapeStyle(.quinary) : AnyShapeStyle(.clear))
-      )
       .contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(ModeChoiceButtonStyle(isHovering: isHovering))
     .onHover { isHovering = $0 }
     .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
+  }
+}
+
+/// Hover and — required for any custom button (`buttons.md`) — a pressed state.
+/// Without one the row feels unresponsive and people wonder whether the click
+/// registered, which on a control that reconfigures the screen invites a second
+/// click.
+private struct ModeChoiceButtonStyle: ButtonStyle {
+  let isHovering: Bool
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .background(
+        RoundedRectangle(cornerRadius: 5)
+          .fill(fill(pressed: configuration.isPressed))
+      )
+      .opacity(configuration.isPressed ? 0.85 : 1)
+  }
+
+  private func fill(pressed: Bool) -> AnyShapeStyle {
+    if pressed { return AnyShapeStyle(.quaternary) }
+    return isHovering ? AnyShapeStyle(.quinary) : AnyShapeStyle(.clear)
   }
 }
