@@ -29,15 +29,17 @@ enum DisplayModeFixtures {
     m(1800, 3200, 3600, 6400), m(1890, 3360, 3780, 6720),
   ]
 
-  /// MSI MAG 341C OLED, panel native 3440×1440. Its ENTIRE HiDPI ladder —
-  /// nothing above the native framebuffer exists.
+  /// MSI MAG 341C OLED, panel native 3440×1440. Its ENTIRE HiDPI ladder — all
+  /// 17 distinct logical sizes. Nothing above the native framebuffer exists.
   static let magNativePixels = (3440, 1440)
 
   static let mag: [DisplayMode] = [
     m(400, 300, 800, 600), m(512, 384, 1024, 768), m(576, 432, 1152, 864),
-    m(640, 360, 1280, 720), m(672, 504, 1344, 1008), m(720, 450, 1440, 900),
+    m(640, 360, 1280, 720), m(640, 480, 1280, 960), m(640, 512, 1280, 1024),
+    m(672, 504, 1344, 1008), m(720, 450, 1440, 900), m(800, 335, 1600, 670),
     m(800, 600, 1600, 1200), m(840, 525, 1680, 1050), m(860, 360, 1720, 720),
-    m(960, 540, 1920, 1080), m(1024, 429, 2048, 858), m(1280, 720, 2560, 1440),
+    m(960, 402, 1920, 804), m(960, 540, 1920, 1080), m(1024, 429, 2048, 858),
+    m(1280, 720, 2560, 1440),
     m(1720, 720, 3440, 1440, native: true),
   ]
 
