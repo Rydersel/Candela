@@ -554,9 +554,15 @@ final class DisplayModeCoordinator {
     let outcome = keeping ? await session.confirm(intent) : await session.revert(intent)
     switch outcome {
     case .committed:
-      // `.committed` is only reachable when the session agreed the answer named
-      // its outstanding preview, so the mode that was committed is exactly the
-      // one the user was reading — and therefore the one to store.
+      // Reached only via the session's match check, so the mode committed is
+      // exactly the one the user was reading — and therefore the one to store.
+      //
+      // Not quite structural: `confirm()` returns `lastOutcome ?? .reverted`
+      // when nothing is outstanding, and `lastOutcome` can be `.committed` from
+      // an earlier commit, so that early return precedes the match check. It is
+      // unreachable in practice — a commit clears `preview`, which is what
+      // renders the buttons — and re-storing the same mode would be harmless if
+      // it were not. The guarantee is the flow, not the type.
       storeIfRemembering(answered.mode, on: answered.displayID)
       await adopt(.clear)
     case .reverted:
@@ -639,11 +645,13 @@ final class DisplayModeCoordinator {
   ///
   /// It reads TWO pieces of state — `preview` and `startFailure` — so it has
   /// two callers, not one: `adopt` (the sole writer of `preview`) and
-  /// `dismissStartFailure` (the sole writer of `startFailure`). Every write to
-  /// either must be followed by this call, which is why both are funnelled
-  /// through a single function rather than assigned at will. An un-synced write
-  /// does not merely leave the window stale — it leaves it rendering a state
-  /// that no longer exists, i.e. an empty floating panel.
+  /// `dismissStartFailure` (the sole writer of the CLEAR of `startFailure`).
+  /// The one non-clear write to `startFailure` is the bare assignment in
+  /// `performSelect`, which is synced by the `adopt(.set(error))` that must stay
+  /// immediately after it — by adjacency, not by a funnel. Every write to either
+  /// has to be followed by this call. An un-synced write does not merely leave
+  /// the window stale — it leaves it rendering a state that no longer exists,
+  /// i.e. an empty floating panel.
   ///
   /// Called on every countdown tick, so the presenter must treat a repeat
   /// present of unchanged content as a no-op.
@@ -652,7 +660,18 @@ final class DisplayModeCoordinator {
     // stake, and the failure is still on the panel's own row when it reopens.
     // (They can only coexist on DIFFERENT displays — `performSelect` clears the
     // failure before it begins.)
-    if let preview, origins[preview.displayID] == .panel {
+    //
+    // A FAILED preview gets this window whatever its origin, and that is the
+    // one place origin does not decide the surface. A settings-origin preview
+    // is normally answered by the banner in the settings window, but nothing
+    // keeps that window open: ⌘W or switching the sidebar to another display
+    // takes the banner away. While the countdown is armed that is survivable —
+    // expiry reverts on its own. A failed EXPIRY is not: the countdown is
+    // disarmed, nothing auto-retries, and the display is left on a mode the
+    // user never approved with no surface anywhere to revert it from, short of
+    // quitting the app. `DisplayModeSection` already documents two live
+    // surfaces for one preview as intended, so this is the existing design.
+    if let preview, origins[preview.displayID] == .panel || preview.failure != nil {
       confirmation?.presentConfirmation(.preview(preview.displayID))
       return
     }
