@@ -23,7 +23,14 @@ public struct DisplayConfigIdentity: Sendable, Hashable {
   /// pins it.
   public static func key(vendor: UInt32, model: UInt32, serial: UInt32, isBuiltIn: Bool) -> String {
     // One built-in panel per machine, and it cannot be swapped out.
-    guard !isBuiltIn else { return "builtin" }
+    //
+    // Spelling deliberately matches the `persistenceKey` that
+    // `BuiltInDisplayPane` and `AppModel` already pass to `DisplayPrefs`.
+    // Separate key namespaces, but the same physical panel — one spelling means
+    // a `defaults` dump reads as one display, not two. Do NOT "tidy" either
+    // side: both formats are frozen, and changing one silently orphans stored
+    // preferences.
+    guard !isBuiltIn else { return "builtIn" }
     return String(format: "%x-%x-%x", vendor, model, serial)
   }
 }
