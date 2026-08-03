@@ -50,15 +50,20 @@ enum DisplayModeFixtures {
   /// a mutable `static var` is a concurrency error under Swift 6 strict
   /// checking, and a derived ID is stable across reorderings of the arrays
   /// above, which keeps test failures readable.
+  ///
+  /// The removed `surfaced:` parameter never fed this derivation, so dropping
+  /// it leaves every fixture's `ioModeID` unchanged — which matters, because
+  /// `DisplayModeCatalog` tie-breaks on `ioModeID` and the ordered assertions
+  /// in `DisplayModeCatalogTests` would shift if these moved.
   private static func m(
     _ lw: Int, _ lh: Int, _ pw: Int, _ ph: Int,
-    hz: Double = 60, native: Bool = false, surfaced: Bool = false
+    hz: Double = 60, native: Bool = false
   ) -> DisplayMode {
     DisplayMode(
       ioModeID: Int32(truncatingIfNeeded: lw &* 100_003 &+ lh &* 397 &+ Int(hz)),
       logicalWidth: lw, logicalHeight: lh,
       pixelWidth: pw, pixelHeight: ph, refreshHz: hz,
-      isNative: native, surfacedByMacOS: surfaced
+      isNative: native
     )
   }
 }

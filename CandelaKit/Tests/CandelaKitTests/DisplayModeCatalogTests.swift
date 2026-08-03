@@ -53,13 +53,6 @@ struct DisplayModeCatalogTests {
     #expect(sizes.count == Set(sizes).count)
   }
 
-  /// The whole point of the feature: a mode macOS does not surface must still
-  /// reach the user.
-  @Test func modesMacOSHidesSurviveCuration() {
-    let hidden = curatedDell().filter { !$0.mode.surfacedByMacOS }
-    #expect(!hidden.isEmpty)
-  }
-
   /// Scaled-ness is relative to the panel, so the SAME logical size can be
   /// native on one panel and scaled on another. This is the bug that appears
   /// if isScaled is computed against the wrong reference.
@@ -91,11 +84,11 @@ struct DisplayModeCatalogTests {
   @Test func refreshRatesAreListedForOneLogicalSizeDescending() {
     let modes = [
       DisplayMode(ioModeID: 1, logicalWidth: 2560, logicalHeight: 1440, pixelWidth: 5120,
-                  pixelHeight: 2880, refreshHz: 60, isNative: false, surfacedByMacOS: true),
+                  pixelHeight: 2880, refreshHz: 60, isNative: false),
       DisplayMode(ioModeID: 2, logicalWidth: 2560, logicalHeight: 1440, pixelWidth: 5120,
-                  pixelHeight: 2880, refreshHz: 120, isNative: false, surfacedByMacOS: true),
+                  pixelHeight: 2880, refreshHz: 120, isNative: false),
       DisplayMode(ioModeID: 3, logicalWidth: 1920, logicalHeight: 1080, pixelWidth: 3840,
-                  pixelHeight: 2160, refreshHz: 60, isNative: false, surfacedByMacOS: true),
+                  pixelHeight: 2160, refreshHz: 60, isNative: false),
     ]
     #expect(DisplayModeCatalog.refreshRates(in: modes, logicalWidth: 2560, logicalHeight: 1440) == [120, 60])
   }
@@ -105,9 +98,9 @@ struct DisplayModeCatalogTests {
   @Test func theRepresentativeRowForASizeIsItsHighestRefreshRate() {
     let modes = [
       DisplayMode(ioModeID: 1, logicalWidth: 2560, logicalHeight: 1440, pixelWidth: 5120,
-                  pixelHeight: 2880, refreshHz: 24, isNative: false, surfacedByMacOS: true),
+                  pixelHeight: 2880, refreshHz: 24, isNative: false),
       DisplayMode(ioModeID: 2, logicalWidth: 2560, logicalHeight: 1440, pixelWidth: 5120,
-                  pixelHeight: 2880, refreshHz: 120, isNative: false, surfacedByMacOS: true),
+                  pixelHeight: 2880, refreshHz: 120, isNative: false),
     ]
     let rows = DisplayModeCatalog.curated(modes, nativePixelWidth: 5120, nativePixelHeight: 2880)
     #expect(rows.count == 1)

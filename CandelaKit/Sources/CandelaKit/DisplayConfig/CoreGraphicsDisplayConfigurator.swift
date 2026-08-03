@@ -25,30 +25,31 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     }
   }
 
-  /// Enumerates TWICE and diffs, so `surfacedByMacOS` is measured rather than
-  /// assumed. The plain call is what Displays settings shows; the option call
-  /// is everything macOS actually computed.
+  /// ONE enumeration, always with `kCGDisplayShowDuplicateLowResolutionModes`.
+  ///
+  /// Do not add a second, plain call back: it adds no coverage. Despite its
+  /// name, the option is what makes HiDPI modes appear at all — the plain call
+  /// returns none of them. Measured on three panels: plain gave 60/155/66 modes
+  /// with ZERO HiDPI in each, and was a strict subset of the revealed 132/332/120,
+  /// the difference being exactly the 72/177/54 HiDPI entries. Diffing the two
+  /// therefore computed nothing but `!isHiDPI`, which `DisplayMode` already
+  /// derives. Neither list corresponds to what Displays settings shows.
   public func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] {
-    let revealed = copyModes(displayID, revealHidden: true)
-    let surfacedIDs = Set(copyModes(displayID, revealHidden: false).map(\.0))
-    return revealed.map { ioID, mode in
-      Self.displayMode(ioModeID: ioID, mode: mode, surfaced: surfacedIDs.contains(ioID))
+    copyModes(displayID).map { ioID, mode in
+      Self.displayMode(ioModeID: ioID, mode: mode)
     }
   }
 
-  /// Resolved by LOOKUP into `modes(for:)`, not by constructing a fresh value
-  /// from `CGDisplayCopyDisplayMode`. Do not "optimise" this back into a direct
-  /// construction: building it standalone means guessing `surfacedByMacOS`, and
-  /// the only available guess — `true` — is wrong for exactly the hidden modes
-  /// this feature exists to let people choose. `DisplayMode` is `Equatable` over
-  /// all its stored properties, so a wrong flag makes the current mode compare
-  /// unequal to its own entry in the list (the checkmark in the picker, and the
-  /// stored-vs-available comparison, both break on it).
+  /// Resolved by LOOKUP into `modes(for:)` rather than constructed fresh from
+  /// `CGDisplayCopyDisplayMode`, so the value returned here is guaranteed to be
+  /// an element of the list — `==` to its own entry, and findable by `apply`.
+  /// A separately-constructed value would merely happen to match, and a picker
+  /// that marks the current row by comparing against the list would break on any
+  /// field the two paths ever disagreed about.
   ///
-  /// Going through the list makes every field consistent with the enumeration
-  /// by construction. The lookup is sound because `IODisplayModeID` stays unique
-  /// even under `kCGDisplayShowDuplicateLowResolutionModes` — measured on
-  /// hardware, 132/132, 332/332 and 120/120 unique across three panels.
+  /// The lookup is sound because `IODisplayModeID` stays unique even under
+  /// `kCGDisplayShowDuplicateLowResolutionModes` — measured on hardware,
+  /// 132/132, 332/332 and 120/120 unique across three panels.
   public func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
     guard let mode = CGDisplayCopyDisplayMode(displayID) else { return nil }
     let ioModeID = mode.ioDisplayModeID
@@ -63,7 +64,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   public func apply(
     _ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope
   ) throws {
-    guard let cgMode = copyModes(displayID, revealHidden: true)
+    guard let cgMode = copyModes(displayID)
       .first(where: { $0.0 == mode.ioModeID })?.1
     else {
       throw DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue)
@@ -97,21 +98,20 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
 
   // MARK: - Private
 
-  private func copyModes(
-    _ displayID: CGDirectDisplayID, revealHidden: Bool
-  ) -> [(Int32, CGDisplayMode)] {
-    let options: CFDictionary? = revealHidden
-      ? [kCGDisplayShowDuplicateLowResolutionModes as String: kCFBooleanTrue as Any] as CFDictionary
-      : nil
+  /// The option is not optional in practice: without it CoreGraphics returns
+  /// only 1x modes, so every HiDPI mode — including the one most displays are
+  /// currently running — would be missing from the list entirely.
+  private func copyModes(_ displayID: CGDirectDisplayID) -> [(Int32, CGDisplayMode)] {
+    let options = [
+      kCGDisplayShowDuplicateLowResolutionModes as String: kCFBooleanTrue as Any,
+    ] as CFDictionary
     guard let raw = CGDisplayCopyAllDisplayModes(displayID, options) as? [CGDisplayMode] else {
       return []
     }
     return raw.map { ($0.ioDisplayModeID, $0) }
   }
 
-  private static func displayMode(
-    ioModeID: Int32, mode: CGDisplayMode, surfaced: Bool
-  ) -> DisplayMode {
+  private static func displayMode(ioModeID: Int32, mode: CGDisplayMode) -> DisplayMode {
     // kDisplayModeNativeFlag is not exposed in the Swift overlay.
     let nativeFlag: UInt32 = 0x0200_0000
     return DisplayMode(
@@ -122,8 +122,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       pixelHeight: mode.pixelHeight,
       // Quantized at the boundary — see DisplayMode.quantizedRefresh.
       refreshHz: DisplayMode.quantizedRefresh(mode.refreshRate),
-      isNative: (mode.ioFlags & nativeFlag) != 0,
-      surfacedByMacOS: surfaced
+      isNative: (mode.ioFlags & nativeFlag) != 0
     )
   }
 }

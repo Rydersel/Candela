@@ -15,15 +15,11 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
   public let refreshHz: Double
   /// `kDisplayModeNativeFlag` — the panel's own timing.
   public let isNative: Bool
-  /// Whether macOS lists this mode WITHOUT
-  /// `kCGDisplayShowDuplicateLowResolutionModes`. Measured by diffing two
-  /// enumerations, not guessed.
-  public let surfacedByMacOS: Bool
 
   public init(
     ioModeID: Int32, logicalWidth: Int, logicalHeight: Int,
     pixelWidth: Int, pixelHeight: Int, refreshHz: Double,
-    isNative: Bool, surfacedByMacOS: Bool
+    isNative: Bool
   ) {
     self.ioModeID = ioModeID
     self.logicalWidth = logicalWidth
@@ -32,7 +28,6 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
     self.pixelHeight = pixelHeight
     self.refreshHz = refreshHz
     self.isNative = isNative
-    self.surfacedByMacOS = surfacedByMacOS
   }
 
   public var id: Int32 { ioModeID }

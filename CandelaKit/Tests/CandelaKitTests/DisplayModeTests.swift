@@ -6,12 +6,12 @@ import Testing
 struct DisplayModeTests {
   private func mode(
     logical: (Int, Int), pixels: (Int, Int), hz: Double = 60,
-    native: Bool = false, surfaced: Bool = true
+    native: Bool = false
   ) -> DisplayMode {
     DisplayMode(
       ioModeID: 1, logicalWidth: logical.0, logicalHeight: logical.1,
       pixelWidth: pixels.0, pixelHeight: pixels.1, refreshHz: hz,
-      isNative: native, surfacedByMacOS: surfaced
+      isNative: native
     )
   }
 
