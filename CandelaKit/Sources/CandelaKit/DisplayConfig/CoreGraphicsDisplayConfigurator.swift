@@ -69,6 +69,27 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     else {
       throw DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue)
     }
+    // `ioModeID` is a POSITIONAL handle, not a stable identity: it is reassigned
+    // whenever the display is reconfigured. Between the caller enumerating modes
+    // and this call, a replug or a sleep/wake can leave the same ID denoting a
+    // different mode — and the lookup above would find it, apply it, and return
+    // normally. The caller would then be told its mode was applied while the
+    // display sits at some other resolution entirely, which is the one failure
+    // neither `ModePreviewSession` nor the reapply path can detect afterwards.
+    //
+    // The geometry is re-derived from the CGDisplayMode we actually resolved and
+    // checked against what was asked for. `refreshHz` is compared with a
+    // tolerance for the usual reason (59.997 vs 60); `isNative` is deliberately
+    // not compared, since it is not part of the mode's identity.
+    let resolved = Self.displayMode(ioModeID: mode.ioModeID, mode: cgMode)
+    guard resolved.logicalWidth == mode.logicalWidth,
+          resolved.logicalHeight == mode.logicalHeight,
+          resolved.pixelWidth == mode.pixelWidth,
+          resolved.pixelHeight == mode.pixelHeight,
+          ModePersistence.refreshMatches(resolved.refreshHz, mode.refreshHz)
+    else {
+      throw DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue)
+    }
 
     var config: CGDisplayConfigRef?
     let begin = CGBeginDisplayConfiguration(&config)
