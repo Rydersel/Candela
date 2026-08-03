@@ -301,6 +301,14 @@ final class DisplayModeCoordinator {
   /// preview on ANOTHER, so an unattended caller could reconfigure a display
   /// nobody named.
   ///
+  /// Mirror SLAVES are excluded here and only here. The picker still offers them
+  /// every mode, because the two paths differ in the one way that matters: a pick
+  /// is a person asking for this display by name and getting fifteen seconds and
+  /// an auto-revert, while this pass asks nobody. Hiding the control instead
+  /// would make it vanish and reappear under the user's hands — mirroring is a
+  /// hotkey in this very app (`Mirroring.engageMirror`) — to protect them from a
+  /// mode change they explicitly requested and can undo by waiting.
+  ///
   /// It writes NO preferences — in particular a substitute is never stored over
   /// the user's choice. What they picked is what gets tried again the next time
   /// the display shows up, and a monitor that came back on a reduced link once
@@ -353,10 +361,23 @@ final class DisplayModeCoordinator {
       // `warmModeCatalogs` already makes on every menu close.
       let decision = ModeReapplyPolicy.decide(
         isEnabled: persistence.isEnabled(for: identity),
+        // Read from the entry the list handed us, not asked again now: the
+        // mirror state has to describe the same instant as the enumeration that
+        // claimed this arrival.
+        isMirroringAnotherDisplay: display.isMirrorSlave,
         stored: stored,
         available: configurator.modes(for: display.id),
         current: configurator.currentMode(for: display.id)
       )
+      // "Not now" — a mirror slave, or a display that cannot say what mode it is
+      // running. The claim goes back for the same reason it does above: the
+      // arrival has not been dealt with, and keeping it would mean "never", since
+      // only an observed ABSENCE re-arms one. Mirroring ends and a display wakes
+      // through reconfiguration events, and those events are what call this again.
+      if decision.isDeferred {
+        arrivals.release(display.id)
+        continue
+      }
       guard let requested = stored,
             decision.modeToApply != nil || decision.notice != nil
       else { continue }

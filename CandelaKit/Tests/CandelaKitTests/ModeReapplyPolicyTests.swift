@@ -76,14 +76,72 @@ struct ModeReapplyPolicyTests {
     #expect(decision == .doNothing)
   }
 
-  /// An unreadable current mode must not be guessed at. Applying is the
-  /// recoverable answer; skipping would silently drop the reapply.
-  @Test func anUnreadableCurrentModeStillApplies() {
+  /// A display that cannot say what mode it is running is not in a state to be
+  /// reconfigured — which in practice means asleep, or mirrored. The old
+  /// behaviour applied blind, on the grounds that skipping would silently drop
+  /// the reapply; the failure that made it wrong is that a blind apply which
+  /// FAILS reports a failure that stands until the display is physically
+  /// replugged, because a wake is not a departure and only an absence re-arms an
+  /// arrival. Deferring drops nothing: the claim goes back, and the wake is
+  /// itself a reconfiguration event that runs this again.
+  @Test func anUnreadableCurrentModeIsDeferredRatherThanAppliedBlind() {
     let decision = ModeReapplyPolicy.decide(
       isEnabled: true, stored: native.descriptor, available: [native], current: nil
     )
-    #expect(decision.modeToApply == native)
+    #expect(decision == .deferred)
+    #expect(decision.modeToApply == nil)
     #expect(decision.notice == nil)
+    #expect(decision.isDeferred)
+  }
+
+  /// Deferral is decided BEFORE resolution, so an unreadable display cannot
+  /// produce a failure report either. Its mode list is as untrustworthy as its
+  /// current mode, and "no acceptable mode on this display" is a permanent-
+  /// sounding statement to make about a display that was merely asleep.
+  @Test func anUnreadableDisplayIsNotReportedAsHavingNoCandidate() {
+    let decision = ModeReapplyPolicy.decide(
+      isEnabled: true, stored: native.descriptor, available: [], current: nil
+    )
+    #expect(decision == .deferred)
+  }
+
+  /// `displays()` enumerates ONLINE displays, so a hardware-mirrored secondary
+  /// is claimed as an arrival like any other. It must not take an unattended
+  /// session-scope mode change: the pixels on it are the master's, so this is a
+  /// reconfiguration nobody asked for and nobody can see the result of.
+  @Test func aMirrorSlaveIsNeverMovedUnattended() {
+    let decision = ModeReapplyPolicy.decide(
+      isEnabled: true, isMirroringAnotherDisplay: true, stored: native.descriptor,
+      available: [native, faster], current: faster
+    )
+    #expect(decision == .deferred)
+    #expect(decision.modeToApply == nil)
+  }
+
+  /// Deferred, not dismissed. Marking a mirror slave handled would mean it is
+  /// never reapplied for the rest of the connection — including after the user
+  /// breaks the mirror, which is exactly when its own resolution starts to
+  /// matter again.
+  @Test func aMirrorSlaveIsDeferredRatherThanSilentlyHandled() {
+    let decision = ModeReapplyPolicy.decide(
+      isEnabled: true, isMirroringAnotherDisplay: true, stored: native.descriptor,
+      available: [native], current: smaller
+    )
+    #expect(decision.isDeferred)
+    #expect(decision != .doNothing)
+    #expect(decision.notice == nil)
+  }
+
+  /// Only the slave. The master owns the framebuffer the whole set is showing,
+  /// so its resolution is the set's resolution and the stored choice applies to
+  /// it exactly as it would with no mirror at all.
+  @Test func theMasterOfAMirrorSetIsAnOrdinaryTarget() {
+    let decision = ModeReapplyPolicy.decide(
+      isEnabled: true, isMirroringAnotherDisplay: false, stored: native.descriptor,
+      available: [native, faster], current: faster
+    )
+    #expect(decision.modeToApply == native)
+    #expect(!decision.isDeferred)
   }
 
   @Test func aNearestRefreshRateIsAppliedAndReported() {
@@ -109,7 +167,8 @@ struct ModeReapplyPolicyTests {
   @Test func aSubstituteIsNeverSilent() {
     for available in [[faster], [smaller]] {
       let decision = ModeReapplyPolicy.decide(
-        isEnabled: true, stored: native.descriptor, available: available, current: nil
+        isEnabled: true, stored: native.descriptor, available: available,
+        current: available[0]
       )
       #expect(decision.notice != nil)
     }

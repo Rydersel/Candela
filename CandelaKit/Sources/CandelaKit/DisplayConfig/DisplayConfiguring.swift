@@ -22,12 +22,39 @@ public struct ConfiguredDisplay: Sendable, Equatable, Identifiable {
   public let identity: DisplayConfigIdentity
   public let name: String
   public let isBuiltIn: Bool
+  /// The display whose content this one is SHOWING, or `kCGNullDirectDisplay`
+  /// when it is showing its own — `CGDisplayMirrorsDisplay`, sampled at the same
+  /// instant as the list itself so a caller cannot ask about a topology that has
+  /// moved on.
+  ///
+  /// Carried because `displays()` enumerates ONLINE displays, and "online" means
+  /// active, asleep, **or mirrored**: a hardware-mirrored secondary appears here
+  /// while appearing in no active list at all. Reapply reads absence from this
+  /// list as a departure, so it necessarily sees mirror slaves as arrivals too,
+  /// and something has to be able to tell them apart.
+  ///
+  /// The MASTER of a mirror set reports null here and is a perfectly ordinary
+  /// display: it owns the framebuffer everyone in the set is showing, and its
+  /// resolution is the set's resolution.
+  public let mirrorsDisplay: CGDirectDisplayID
 
-  public init(id: CGDirectDisplayID, identity: DisplayConfigIdentity, name: String, isBuiltIn: Bool) {
+  /// True for the SLAVE of a mirror set only. Its own mode decides almost
+  /// nothing while the mirror lasts — the pixels on it come from the master —
+  /// so it is not a display an unattended pass should be reconfiguring.
+  public var isMirrorSlave: Bool { mirrorsDisplay != kCGNullDirectDisplay }
+
+  public init(
+    id: CGDirectDisplayID,
+    identity: DisplayConfigIdentity,
+    name: String,
+    isBuiltIn: Bool,
+    mirrorsDisplay: CGDirectDisplayID = kCGNullDirectDisplay
+  ) {
     self.id = id
     self.identity = identity
     self.name = name
     self.isBuiltIn = isBuiltIn
+    self.mirrorsDisplay = mirrorsDisplay
   }
 }
 

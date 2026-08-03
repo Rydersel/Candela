@@ -35,13 +35,27 @@ public struct ModeReapplyDecision: Sendable, Equatable {
   /// nil means "the stored choice was honoured exactly" — the only case that
   /// says nothing at all.
   public let notice: ModeReapplyNotice?
+  /// "Not now" as distinct from "nothing to do". Nothing is applied and nothing
+  /// is reported, and the caller is being told to give the arrival back
+  /// (`DisplayArrivalTracker.release`) so a later event tries again.
+  ///
+  /// A third outcome is needed because the two fields above cannot express it:
+  /// they say what to DO about this arrival, and this says the arrival has not
+  /// been dealt with at all. Silently returning `.doNothing` would mark the
+  /// display handled, and — since a display that never leaves is never an
+  /// arrival again (DM7) — "not now" would quietly mean "never until replug".
+  public let isDeferred: Bool
 
-  public init(modeToApply: DisplayMode?, notice: ModeReapplyNotice?) {
+  public init(modeToApply: DisplayMode?, notice: ModeReapplyNotice?, isDeferred: Bool = false) {
     self.modeToApply = modeToApply
     self.notice = notice
+    self.isDeferred = isDeferred
   }
 
   public static let doNothing = ModeReapplyDecision(modeToApply: nil, notice: nil)
+  public static let deferred = ModeReapplyDecision(
+    modeToApply: nil, notice: nil, isDeferred: true
+  )
 }
 
 /// The unattended half of stored-mode handling: given what was stored and what
@@ -57,16 +71,39 @@ public enum ModeReapplyPolicy {
   ///     decision rather than a call-site guard: "a display nobody opted in for
   ///     is never moved" is the property most worth having under test, and a
   ///     guard at the call site is a property of the caller instead.
+  ///   - isMirroringAnotherDisplay: this display is the SLAVE of a mirror set
+  ///     (`ConfiguredDisplay.isMirrorSlave`). Deferred, never applied: the
+  ///     pixels on it are the master's, so a resolution change there is
+  ///     something the user neither asked for nor can watch the consequences
+  ///     of — and the online list this pass reads makes every mirror slave look
+  ///     like an arrival. The MASTER is not this, and is a legitimate target.
   ///   - current: what the display is running, or nil when it could not be
-  ///     read. Unreadable is treated as "not necessarily there already", so the
-  ///     mode is applied rather than skipped on a guess.
+  ///     read. Deferred, not guessed at — see the `guard` below.
   public static func decide(
     isEnabled: Bool,
+    isMirroringAnotherDisplay: Bool = false,
     stored: DisplayModeDescriptor?,
     available: [DisplayMode],
     current: DisplayMode?
   ) -> ModeReapplyDecision {
     guard isEnabled, let stored else { return .doNothing }
+    // Both gates below are deliberately BEFORE resolution, and both defer
+    // rather than decide. Their common cause is that the display is not in a
+    // state to be reconfigured OR to be described: a display that cannot report
+    // its current mode generally cannot report a trustworthy mode list either,
+    // so resolving here would just as easily produce a `.unavailable` notice —
+    // a failure report about a display that was merely asleep.
+    guard !isMirroringAnotherDisplay else { return .deferred }
+    // Applying to a display whose current mode is unreadable used to be the
+    // recoverable answer, on the grounds that skipping would silently drop the
+    // reapply. It no longer is, in both halves. A blind apply is now the more
+    // dangerous move — it is precisely the sleeping and mirrored displays that
+    // read as unreadable, and an apply that fails there produces a failure
+    // report that stands until the display is physically replugged, because a
+    // wake is no longer a departure/arrival cycle. And skipping is no longer
+    // silent: deferring hands the arrival back, so the next topology event —
+    // the wake itself produces one — tries again with a display that can answer.
+    guard let current else { return .deferred }
 
     switch ModePersistence.resolve(stored, in: available) {
     case let .exact(mode):
@@ -96,9 +133,8 @@ public enum ModeReapplyPolicy {
   /// different ones. Refresh carries the usual tolerance — CoreGraphics reports
   /// 59.997, and an exact comparison would decide the display is never already
   /// where it is.
-  private static func isAlreadyRunning(_ mode: DisplayMode, _ current: DisplayMode?) -> Bool {
-    guard let current else { return false }
-    return current.logicalWidth == mode.logicalWidth
+  private static func isAlreadyRunning(_ mode: DisplayMode, _ current: DisplayMode) -> Bool {
+    current.logicalWidth == mode.logicalWidth
       && current.logicalHeight == mode.logicalHeight
       && current.pixelWidth == mode.pixelWidth
       && current.pixelHeight == mode.pixelHeight

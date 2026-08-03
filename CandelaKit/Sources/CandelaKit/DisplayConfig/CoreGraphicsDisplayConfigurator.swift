@@ -19,6 +19,12 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// It is also what every other enumeration in this codebase uses
   /// (`DisplayDiscovery`, `BuiltInDisplay`, `Mirroring`, `KeyActionExecutor`),
   /// so please do not "correct" this back.
+  ///
+  /// The price of "online" is that it also includes MIRROR SLAVES, which no
+  /// active list would show. Each entry therefore carries `mirrorsDisplay`,
+  /// read here rather than by the caller: the mirror state has to describe the
+  /// same instant as the list, and a caller asking `CGDisplayMirrorsDisplay`
+  /// later is asking about a topology that may already have changed.
   public func displays() -> [ConfiguredDisplay] {
     var ids = [CGDirectDisplayID](repeating: 0, count: 16)
     var count: UInt32 = 0
@@ -34,7 +40,8 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
           isBuiltIn: isBuiltIn
         ),
         name: isBuiltIn ? "Built-in Display" : "Display \(id)",
-        isBuiltIn: isBuiltIn
+        isBuiltIn: isBuiltIn,
+        mirrorsDisplay: CGDisplayMirrorsDisplay(id)
       )
     }
   }
