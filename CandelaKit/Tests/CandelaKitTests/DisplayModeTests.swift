@@ -65,6 +65,17 @@ struct DisplayModeTests {
     #expect(abs(ultrawide.aspectRatio - smaller.aspectRatio) < 0.0001)
   }
 
+  /// Third occurrence of the float-noise trap in this feature. Normalising at
+  /// the boundary is what stops it recurring downstream.
+  @Test func refreshRatesAreQuantizedAtTheBoundary() {
+    #expect(DisplayMode.quantizedRefresh(59.9998) == 60.0)
+    #expect(DisplayMode.quantizedRefresh(60.0) == 60.0)
+    #expect(DisplayMode.quantizedRefresh(119.88) == 119.9)
+    // 59.94 (NTSC) must NOT collapse into 60 — these are genuinely different.
+    #expect(DisplayMode.quantizedRefresh(59.94) == 59.9)
+    #expect(DisplayMode.quantizedRefresh(59.9) != DisplayMode.quantizedRefresh(60.0))
+  }
+
   /// Codable is this type's whole reason for existing — it is what lands in
   /// UserDefaults. Pin both the round trip and the on-disk key names, so a
   /// later property rename breaks a test instead of silently orphaning every

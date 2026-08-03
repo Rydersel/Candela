@@ -37,6 +37,16 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
 
   public var id: Int32 { ioModeID }
 
+  /// CoreGraphics reports refresh rates like 59.9998 rather than 60. Normalise
+  /// at the boundary so no consumer downstream has to reason about float noise:
+  /// the picker dedupes cleanly, and stored descriptors compare sanely.
+  ///
+  /// Rounds to one decimal, which keeps genuinely distinct rates apart
+  /// (59.94 NTSC vs 60) while collapsing measurement noise.
+  public static func quantizedRefresh(_ raw: Double) -> Double {
+    (raw * 10).rounded() / 10
+  }
+
   public var isHiDPI: Bool { logicalWidth > 0 && pixelWidth >= logicalWidth * 2 }
 
   public var scaleFactor: Double {
