@@ -33,6 +33,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.rydersel.Candela
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
+        # The icon ships as an asset catalog rather than a bare CFBundleIconFile.
+        # An LSUIElement app has no Dock tile, so the places the icon actually
+        # shows — About, notifications, System Settings > Login Items — are the
+        # ones that read the catalog. Masters and the .icns live in `icons/`.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Candela/Info.plist
       properties:
