@@ -31,11 +31,13 @@ final class ModeConfirmationWindow: ModeConfirmationPresenting {
   var displayName: (CGDirectDisplayID) -> String = { _ in "" }
 
   private var panel: NSPanel?
-  /// The display the panel is currently showing for, or nil while hidden.
+  /// What the window is currently showing, or nil while hidden.
   /// `presentConfirmation` is called on every countdown tick, so without this
   /// the window would be re-positioned and re-ordered-front once a second,
-  /// fighting anyone who dragged it out of the way.
-  private var shownFor: CGDirectDisplayID?
+  /// fighting anyone who dragged it out of the way. It holds the CONTENT rather
+  /// than the display: a preview and a start failure can follow each other on
+  /// one display, and an ID alone could not tell that the window had to change.
+  private var shown: ModeConfirmationContent?
 
   init(coordinator: DisplayModeCoordinator) {
     self.coordinator = coordinator
@@ -43,27 +45,29 @@ final class ModeConfirmationWindow: ModeConfirmationPresenting {
 
   // MARK: - ModeConfirmationPresenting
 
-  func presentConfirmation(on displayID: CGDirectDisplayID) {
-    guard shownFor != displayID else { return }
-    // No screen for the display this preview is on: either it has departed (the
+  func presentConfirmation(_ content: ModeConfirmationContent) {
+    guard shown != content else { return }
+    let displayID = content.displayID
+    // No screen for the display this is about: either it has departed (the
     // coordinator discards the preview on the next screen-parameters
     // notification) or the list has not caught up with the reconfiguration yet.
-    // Hide rather than leave a window naming the previous display up — this is
-    // retried on every countdown tick, so a momentarily stale screen list
+    // Hide rather than leave a window naming the previous display up — a preview
+    // retries this on every countdown tick, so a momentarily stale screen list
     // self-heals a second later.
     guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
       dismissConfirmation()
       return
     }
 
-    let panel = panel ?? makePanel()
+    let view = ModeConfirmationView(
+      coordinator: coordinator, content: content, displayName: displayName(displayID)
+    )
+    let panel = panel ?? makePanel(showing: view)
     self.panel = panel
-    shownFor = displayID
+    shown = content
 
     let hosting = panel.contentView as? ConfirmationHostingView
-    hosting?.rootView = ModeConfirmationView(
-      coordinator: coordinator, displayName: displayName(displayID)
-    )
+    hosting?.rootView = view
     if let hosting {
       // Measure the NEW root view, not the previous one: the origin below is
       // computed from the resulting frame, and centring against a stale size
@@ -84,17 +88,17 @@ final class ModeConfirmationWindow: ModeConfirmationPresenting {
   }
 
   func dismissConfirmation() {
-    guard shownFor != nil else { return }
-    shownFor = nil
+    guard shown != nil else { return }
+    shown = nil
     panel?.orderOut(nil)
   }
 
   // MARK: - The window
 
-  private func makePanel() -> NSPanel {
-    let hosting = ConfirmationHostingView(
-      rootView: ModeConfirmationView(coordinator: coordinator, displayName: "")
-    )
+  /// Built around the view it will first show, so its initial size is the size
+  /// of real content rather than of a placeholder.
+  private func makePanel(showing view: ModeConfirmationView) -> NSPanel {
+    let hosting = ConfirmationHostingView(rootView: view)
     hosting.frame.size = hosting.fittingSize
 
     // No `.closable`: a close button is an answer that resolves nothing, and it
@@ -122,8 +126,9 @@ final class ModeConfirmationWindow: ModeConfirmationPresenting {
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
     panel.isReleasedWhenClosed = false
     // Drawn nowhere (`titleVisibility` is hidden) — it exists so assistive
-    // technology has a name for the window.
-    panel.title = "Keep this resolution?"
+    // technology has a name for the window. Deliberately not the question,
+    // which is only one of the two things this window says.
+    panel.title = "Display resolution"
     return panel
   }
 }
@@ -162,20 +167,33 @@ private final class ConfirmationHostingView: NSHostingView<ModeConfirmationView>
   }
 }
 
-/// Reads `coordinator.preview` directly, so the countdown ticks and a failure
-/// appears without the window controller knowing anything about either.
+/// Reads the coordinator directly, so the countdown ticks and a failure appears
+/// without the window controller knowing anything about either. `content` says
+/// only WHICH of the two things this window is showing; the words come from the
+/// coordinator's own state.
 ///
-/// Deliberately the same words as the settings banner — this is the same
-/// question, and two spellings of it would be two things to keep true.
+/// Deliberately the same words as the settings banner and the panel's own rows —
+/// these are the same statements, and two spellings of one are two things to
+/// keep true.
 struct ModeConfirmationView: View {
   let coordinator: DisplayModeCoordinator
+  let content: ModeConfirmationContent
   let displayName: String
 
   var body: some View {
+    switch content {
+    case .preview: previewBody
+    case .startFailure: startFailureBody
+    }
+  }
+
+  // MARK: - A preview waiting to be answered
+
+  @ViewBuilder private var previewBody: some View {
     // Rendered from the coordinator's own answer, never from what the caller
     // remembered passing in.
     if let preview = coordinator.preview {
-      VStack(alignment: .leading, spacing: 8) {
+      card {
         Text("Keep this resolution?")
           .font(.headline)
         Text(verbatim: subtitle(preview))
@@ -213,9 +231,49 @@ struct ModeConfirmationView: View {
         // is pointless even though it is now harmless.
         .disabled(coordinator.isApplying)
       }
-      .padding(16)
-      .frame(width: 320, alignment: .leading)
     }
+  }
+
+  // MARK: - A selection that never took effect
+
+  /// The panel closes on a selection, so this is the ONLY place a
+  /// panel-initiated `begin()` failure is seen without the user happening to
+  /// reopen the panel: the screen did not change and there is no preview to
+  /// answer, so silence here is indistinguishable from the feature not working.
+  ///
+  /// No countdown and no revert — nothing was applied. One button, which
+  /// dismisses the report rather than resolving anything.
+  @ViewBuilder private var startFailureBody: some View {
+    if let failure = coordinator.startFailure {
+      card {
+        Text("Resolution not changed")
+          .font(.headline)
+        if !displayName.isEmpty {
+          Text(verbatim: displayName)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        caption(DisplayModeCopy.startFailure)
+          .help("CoreGraphics error \(failure.error.cgErrorCode)")
+
+        HStack(spacing: 8) {
+          Spacer(minLength: 0)
+          Button("OK") { coordinator.dismissStartFailure() }
+            .buttonStyle(.borderedProminent)
+        }
+      }
+    }
+  }
+
+  /// One shape for both states, so the window does not change size or alignment
+  /// language depending on what it has to say.
+  private func card(@ViewBuilder _ content: () -> some View) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      content()
+    }
+    .padding(16)
+    .frame(width: 320, alignment: .leading)
   }
 
   private func subtitle(_ preview: DisplayModeCoordinator.Preview) -> String {

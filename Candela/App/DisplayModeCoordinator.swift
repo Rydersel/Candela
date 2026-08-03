@@ -430,6 +430,9 @@ final class DisplayModeCoordinator {
 
   func dismissStartFailure() {
     startFailure = nil
+    // Not only for tidiness: when the failure IS what the standalone window is
+    // showing, dismissing it here is the only thing that takes the window down.
+    syncConfirmation()
   }
 
   // MARK: - Serialisation
@@ -581,11 +584,23 @@ final class DisplayModeCoordinator {
   /// Called on every countdown tick, so the presenter must treat a repeat
   /// present for the same display as a no-op.
   private func syncConfirmation() {
-    guard let preview, origins[preview.displayID] == .panel else {
-      confirmation?.dismissConfirmation()
+    // A preview outranks a start failure: it has a countdown and a screen at
+    // stake, and the failure is still on the panel's own row when it reopens.
+    // (They can only coexist on DIFFERENT displays — `performSelect` clears the
+    // failure before it begins.)
+    if let preview, origins[preview.displayID] == .panel {
+      confirmation?.presentConfirmation(.preview(preview.displayID))
       return
     }
-    confirmation?.presentConfirmation(on: preview.displayID)
+    // A failed `begin()` produces no preview, so without this a panel selection
+    // that fails would report nothing at all: the menu closes on selection now,
+    // taking the panel's own banner with it, and the screen does not change
+    // either. Silence on the quick path reads as the feature being broken.
+    if let startFailure, origins[startFailure.displayID] == .panel {
+      confirmation?.presentConfirmation(.startFailure(startFailure.displayID))
+      return
+    }
+    confirmation?.dismissConfirmation()
   }
 
   /// The countdown driver.
@@ -655,14 +670,36 @@ final class DisplayModeCoordinator {
   }
 }
 
-/// A surface that can answer a preview on its own, independently of whichever
-/// view started it. Declared beside the coordinator, and AppKit-free, so the
-/// contract belongs to the thing that needs it — the window that implements it
-/// is an app-target island like every other.
+/// What the standalone surface is showing.
+///
+/// Two cases, not one, because the two outcomes of a panel selection are
+/// genuinely different: a preview is a question with a countdown behind it, and
+/// a start failure is a statement with nothing outstanding. They also arrive in
+/// either order, so the presenter has to be able to tell that its content
+/// CHANGED for the same display — a display ID alone cannot say that.
+enum ModeConfirmationContent: Equatable {
+  /// A preview is applied and unresolved on this display.
+  case preview(CGDirectDisplayID)
+  /// `begin()` failed on this display. Nothing was applied and nothing is
+  /// outstanding; there is only something to report.
+  case startFailure(CGDirectDisplayID)
+
+  var displayID: CGDirectDisplayID {
+    switch self {
+    case let .preview(id), let .startFailure(id): id
+    }
+  }
+}
+
+/// A surface that reports on a mode change independently of whichever view
+/// started it. Declared beside the coordinator, and AppKit-free, so the contract
+/// belongs to the thing that needs it — the window that implements it is an
+/// app-target island like every other.
 @MainActor
 protocol ModeConfirmationPresenting: AnyObject {
-  /// Must be idempotent: called again on every countdown tick.
-  func presentConfirmation(on displayID: CGDirectDisplayID)
+  /// Must be idempotent for unchanged content: called again on every countdown
+  /// tick.
+  func presentConfirmation(_ content: ModeConfirmationContent)
   func dismissConfirmation()
 }
 

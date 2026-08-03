@@ -110,9 +110,16 @@ struct PanelResolutionSection: View {
     }
   }
 
-  /// A `begin()` that failed changed nothing on the display, so the menu is
-  /// still open and this is the right place to say so — unlike the confirm
-  /// panel, which exists for previews that ARE applied.
+  /// The SECOND place a failed `begin()` is reported, not the first.
+  ///
+  /// It used to be the only one, on the reasoning that a failed begin changes
+  /// nothing so the menu is still open. Ending tracking on selection made that
+  /// false — by the time the failure lands, this view is gone — and a failure
+  /// nobody is shown, on a path where the screen also did not change, is
+  /// indistinguishable from the feature not working. The confirmation window is
+  /// what actually reaches the user now (`DisplayModeCoordinator.syncConfirmation`).
+  /// This row stays because it is correct on reopen and the failure is about a
+  /// control that lives here.
   @ViewBuilder private var startFailure: some View {
     if let failure = coordinator.startFailure, failure.displayID == displayID {
       HStack(alignment: .firstTextBaseline, spacing: 6) {
