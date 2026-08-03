@@ -114,8 +114,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       alert.messageText = "Safe Mode"
       var informative = """
       Shift was held during launch. For this session, \(AppInfo.productName) will not restore your \
-      saved brightness, volume and contrast, will not read any values back from your displays, and \
-      will not write to them when you quit.
+      saved brightness, volume, contrast or resolution, will not read any values back from your \
+      displays, and will not write to them when you quit.
 
       Your sliders and keyboard shortcuts still work, and they still send commands to your displays. \
       Nothing about your settings has changed — relaunch without holding Shift to leave Safe Mode.
@@ -306,6 +306,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         self.restoreCoordinator.noteLaunchOrReconfigure()
         self.wireInterferenceHooks()
         self.warmModeCatalogs()
+        self.reapplyStoredModes()
         // Fork parity: the counter zeroes on every configure so unrelated
         // events across a long session never add up to an offer.
         // `suspendedForSession` survives.
@@ -400,6 +401,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // here: nothing the panel starts can be relied on to run while the menu
       // is tracking.
       warmModeCatalogs()
+      reapplyStoredModes()
     }
 
     // D13: nobody else calls this. It is a no-op while the version key is
@@ -505,6 +507,28 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     for state in model.displays where model.displayModes.catalogs[state.id] == nil {
       model.displayModes.refreshCatalog(for: state.id)
     }
+  }
+
+  /// Reapplies remembered resolutions for displays that have just arrived.
+  ///
+  /// Driven from exactly two places — the launch warm task and the topology
+  /// loop above — and from nowhere else (DM7). The topology loop is this app's
+  /// `CGDisplayReconfigurationCallBack` intake, and its one-second quiet window
+  /// is why reapply hangs off it rather than off the raw screen-parameters
+  /// notification the coordinator already observes: applying a mode in the
+  /// middle of a reconfiguration burst is the case most likely to fail, and the
+  /// display that just arrived is still settling. The coordinator decides which
+  /// displays count as arrivals, so calling this on every quiet window is not
+  /// the same as reapplying continuously.
+  ///
+  /// Safe mode gates it here, where the flag lives. Safe mode is the launch you
+  /// perform when the app's unattended restores are suspected of making things
+  /// worse, and a stored resolution is the one restored value that can leave a
+  /// screen unreadable — with no countdown behind it, because nobody is
+  /// watching. The alert's copy names resolution for the same reason.
+  private func reapplyStoredModes() {
+    guard !isSafeMode else { return }
+    model.displayModes.reapplyStoredModes()
   }
 
   /// D12: full-domain wipe, explicitly confirmed by the caller (the General

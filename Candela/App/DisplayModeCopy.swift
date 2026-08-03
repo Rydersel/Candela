@@ -13,7 +13,14 @@ enum DisplayModeCopy {
   /// framebuffer; everything else renders oversized and downsamples, so the
   /// honest claim is about how big things look, not about what the panel is.
   static func size(_ mode: DisplayMode) -> String {
-    "Looks like \(mode.logicalWidth) × \(mode.logicalHeight)"
+    size(mode.descriptor)
+  }
+
+  /// The same sentence for a STORED choice, which is a descriptor rather than a
+  /// live mode. Routed through one implementation so a remembered resolution is
+  /// named the same way as the row the user picked it from.
+  static func size(_ descriptor: DisplayModeDescriptor) -> String {
+    "Looks like \(descriptor.logicalWidth) × \(descriptor.logicalHeight)"
   }
 
   /// Rates are quantized to one decimal at the CoreGraphics boundary, so 59.9
@@ -54,5 +61,46 @@ enum DisplayModeCopy {
   /// is now the only thing that can end this.
   static var expiryAlreadyRan: LocalizedStringKey {
     "The automatic revert has already run, so it will not try again on its own."
+  }
+
+  // MARK: - Reapply
+  //
+  // Reapply happens at launch and on reconnect, with nobody watching. These
+  // three sentences are the entire difference between "Candela restored your
+  // resolution" and "Candela did something to your display and did not say
+  // what", so each one names the resolution that was ASKED FOR first — that is
+  // the thing the user recognises — and only then what actually happened.
+
+  /// Something adjacent was applied (or is already on screen). Never silent:
+  /// the user chose a resolution deliberately and is not on it.
+  static func reapplySubstituted(
+    requested: DisplayModeDescriptor, applied: DisplayMode
+  ) -> LocalizedStringKey {
+    "The resolution saved for this display — \(size(requested)), \(refresh(requested.refreshHz)) — is no longer available. \(AppInfo.productName) used \(size(applied)), \(refresh(applied.refreshHz)) instead."
+  }
+
+  /// Nothing close enough existed, so nothing was changed. Says so explicitly:
+  /// "we left it alone" is information, and its absence reads as a silent
+  /// failure of the whole feature.
+  static func reapplyUnavailable(requested: DisplayModeDescriptor) -> LocalizedStringKey {
+    "The resolution saved for this display — \(size(requested)), \(refresh(requested.refreshHz)) — is no longer available, and nothing close enough to use in its place. \(AppInfo.productName) left this display as it found it."
+  }
+
+  /// The apply itself failed. Distinct from `reapplyUnavailable` because the
+  /// mode still exists — trying again, from the list, is worth doing.
+  static func reapplyFailed(requested: DisplayModeDescriptor) -> LocalizedStringKey {
+    "\(AppInfo.productName) could not restore the resolution saved for this display — \(size(requested)), \(refresh(requested.refreshHz)). Nothing was changed."
+  }
+
+  /// One sentence for whichever of the three happened, so both surfaces make
+  /// the same statement about the same report.
+  static func reapply(
+    requested: DisplayModeDescriptor, notice: ModeReapplyNotice
+  ) -> LocalizedStringKey {
+    switch notice {
+    case let .substituted(mode): reapplySubstituted(requested: requested, applied: mode)
+    case .unavailable: reapplyUnavailable(requested: requested)
+    case .failed: reapplyFailed(requested: requested)
+    }
   }
 }

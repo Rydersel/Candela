@@ -27,6 +27,7 @@ struct DisplayModeSection: View {
     Section("Resolution") {
       previewBanner
       startFailureBanner
+      reapplyBanner
       // A nil catalog is "not enumerated yet", NOT "no modes" — rendering the
       // empty state for it flashes false copy on every pane switch.
       if let catalog {
@@ -133,6 +134,28 @@ struct DisplayModeSection: View {
           .help("CoreGraphics error \(failure.error.cgErrorCode)")
         Button("OK") { coordinator.dismissStartFailure() }
       }
+    }
+  }
+
+  /// What reapply could not do, said where the stored-mode toggle that asked
+  /// for it lives.
+  ///
+  /// Reapply runs at launch and on reconnect with nobody in front of the
+  /// screen, so this is not a notification the user missed — it is the whole
+  /// report, and it waits here until they dismiss it, choose a mode themselves,
+  /// or unplug the display. Rendering it in the section that owns "Remember
+  /// this resolution" is deliberate: the control that made the promise is the
+  /// one that has to admit it could not keep it.
+  @ViewBuilder private var reapplyBanner: some View {
+    if let report = coordinator.reapplyReports[displayID] {
+      VStack(alignment: .leading, spacing: 6) {
+        SettingsCaption(DisplayModeCopy.reapply(
+          requested: report.requested, notice: report.notice
+        ))
+        .modifier(ReapplyDiagnostic(notice: report.notice))
+        Button("OK") { coordinator.dismissReapplyReport(for: displayID) }
+      }
+      .padding(.vertical, 2)
     }
   }
 
@@ -273,6 +296,23 @@ struct DisplayModeSection: View {
     // `.settings`: the answer is the banner at the top of this section, in a
     // window that is still on screen when the countdown expires.
     coordinator.select(mode, on: displayID, from: .settings)
+  }
+}
+
+/// The CoreGraphics code stays out of the sentence and goes in a tooltip — it
+/// is diagnostic, and belongs nowhere near text someone reads while working out
+/// what happened to their screen. Only a `.failed` notice has one: for a
+/// substitution or an unavailable mode there is no error, and an empty tooltip
+/// would suggest there was.
+private struct ReapplyDiagnostic: ViewModifier {
+  let notice: ModeReapplyNotice
+
+  @ViewBuilder func body(content: Content) -> some View {
+    if case let .failed(error) = notice {
+      content.help("CoreGraphics error \(error.cgErrorCode)")
+    } else {
+      content
+    }
   }
 }
 

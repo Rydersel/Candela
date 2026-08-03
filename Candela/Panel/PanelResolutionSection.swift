@@ -44,6 +44,10 @@ struct PanelResolutionSection: View {
   /// here stand down rather than offering a second, competing change.
   private var isAwaitingAnswer: Bool { coordinator.preview?.displayID == displayID }
 
+  private var report: DisplayModeCoordinator.ReapplyReport? {
+    coordinator.reapplyReports[displayID]
+  }
+
   var body: some View {
     // One usable size is not a choice, so the control is absent rather than
     // present-and-dead. A nil catalog is "not enumerated yet" (never "no
@@ -68,7 +72,15 @@ struct PanelResolutionSection: View {
           caption("Waiting for you to keep or revert the new resolution on \(displayName).")
         }
         startFailure
+        reapplyReport
       }
+    } else if report != nil {
+      // The list is absent — one usable size, or none — and a reapply still had
+      // something to say about this display. Saying it anyway is the point:
+      // this is the surface most people see, and a report that renders only
+      // when a picker happens to be worth drawing is a report that goes missing
+      // exactly on the displays with the fewest options.
+      VStack(alignment: .leading, spacing: 2) { reapplyReport }
     }
   }
 
@@ -114,6 +126,26 @@ struct PanelResolutionSection: View {
           .fixedSize()
       }
       .help("CoreGraphics error \(failure.error.cgErrorCode)")
+    }
+  }
+
+  /// What reapply could not do on this display, at launch or when it
+  /// reconnected. Nobody was watching then, so this is the first moment the
+  /// user can be told — it stays until they dismiss it, pick a resolution
+  /// themselves, or unplug the display.
+  @ViewBuilder private var reapplyReport: some View {
+    if let report {
+      HStack(alignment: .firstTextBaseline, spacing: 6) {
+        Text(DisplayModeCopy.reapply(requested: report.requested, notice: report.notice))
+          .font(.system(size: 11))
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+        Button("OK") { coordinator.dismissReapplyReport(for: displayID) }
+          .buttonStyle(.link)
+          .font(.system(size: 11))
+          .fixedSize()
+      }
+      .padding(.horizontal, 4)
     }
   }
 

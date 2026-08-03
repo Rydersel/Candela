@@ -3,6 +3,7 @@ import CandelaKit
 import CoreGraphics
 import Foundation
 import Observation
+import os
 
 /// App-side owner of display-mode enumeration, the preview countdown, and
 /// stored-mode writes.
@@ -77,6 +78,22 @@ final class DisplayModeCoordinator {
     var isCountingDown: Bool
   }
 
+  /// A reapply that could not honour the stored mode exactly.
+  ///
+  /// Reapply is unattended, so this is the ONLY way the user finds out. It is
+  /// kept per display and survives until they dismiss it, pick a mode
+  /// themselves, or unplug the display — the point is that it is still there
+  /// the next time they look, not that it was true at the moment nobody was
+  /// watching.
+  struct ReapplyReport: Equatable {
+    let displayID: CGDirectDisplayID
+    /// What the user actually chose, not what we managed. Kept so the report
+    /// can name it — "we could not give you X" is a different sentence from
+    /// "you are on Y", and the first is the one that explains anything.
+    let requested: DisplayModeDescriptor
+    let notice: ModeReapplyNotice
+  }
+
   /// A `begin()` that never took effect. Separate from `Preview.failure`
   /// because nothing is outstanding: there is nothing to keep or revert, only
   /// something to report. Carries the display so one display's failure is not
@@ -89,6 +106,9 @@ final class DisplayModeCoordinator {
   private(set) var catalogs: [CGDirectDisplayID: Catalog] = [:]
   private(set) var preview: Preview?
   private(set) var startFailure: StartFailure?
+  /// Keyed by display so one display's disappointing reconnect is never
+  /// reported on another display's page.
+  private(set) var reapplyReports: [CGDirectDisplayID: ReapplyReport] = [:]
   /// True from the click until the reconfiguration it started has settled.
   /// `begin()` spans a real CoreGraphics mode change, and a Keep pressed inside
   /// that window is queued behind it and would commit the NEW mode while the
@@ -128,7 +148,17 @@ final class DisplayModeCoordinator {
   /// catalog now renders as "not enumerated yet", i.e. as nothing at all, and
   /// `.task(id:)` does not re-fire for an unchanged id.
   @ObservationIgnored private var observed: Set<CGDirectDisplayID> = []
+  /// Displays whose stored mode has already been reapplied since they arrived.
+  /// This set IS the "launch and reconnect, never continuously" rule (DM7) —
+  /// see `reapplyStoredModes`.
+  @ObservationIgnored private var reappliedDisplays: Set<CGDirectDisplayID> = []
   @ObservationIgnored private var screenObserver: (any NSObjectProtocol)?
+  /// Reapply happens with nobody in front of the screen, so every outcome is
+  /// also written where it can be read afterwards. The in-app report can be
+  /// dismissed and is gone; this is what a bug report can quote.
+  @ObservationIgnored private let log = Logger(
+    subsystem: "com.rydersel.Candela", category: "displayModes"
+  )
 
   init(
     configurator: any DisplayConfiguring = CoreGraphicsDisplayConfigurator(),
@@ -203,7 +233,124 @@ final class DisplayModeCoordinator {
         catalogs[displayID] = nil
       }
     }
+    // A departure is what makes the next arrival an arrival. Pruned HERE, on
+    // the undebounced screen-parameters notification, rather than only inside
+    // `reapplyStoredModes`: the app's topology signal coalesces a burst into
+    // one event, so an unplug and replug inside its quiet window would arrive
+    // as a single event with the display present at both ends — and the stored
+    // mode would never be reapplied for a replug that plainly happened.
+    reappliedDisplays.formIntersection(live)
+    // A report about a display that is gone describes nothing the user can act
+    // on, and would reappear on the pane of whatever takes its ID next.
+    reapplyReports = reapplyReports.filter { live.contains($0.key) }
     dropPreviewOnDepartedDisplay()
+  }
+
+  // MARK: - Reapply
+
+  /// Reapplies stored modes for displays that have ARRIVED since the last pass.
+  ///
+  /// Called from launch and from the app's debounced
+  /// `CGDisplayReconfigurationCallBack` intake, and from nowhere else — never
+  /// on a pref write, never on a timer (DM7).
+  ///
+  /// The arrival gate is the substance of DM7, not bookkeeping. A
+  /// reconfiguration event is ALSO what the user changing resolution in System
+  /// Settings produces, so a pass that reapplied on every event would undo that
+  /// change within a second, permanently, with no way to opt out short of
+  /// turning the feature off. Candela's opinion applies when the display
+  /// arrives; from then until it leaves, the display belongs to the user.
+  ///
+  /// Deliberately NOT a preview. Nobody is watching, and a fifteen-second
+  /// countdown that defaults to revert would undo every remembered mode a
+  /// moment after every reconnect — the exact opposite of the feature. It
+  /// commits at session scope directly, which is also why it never calls
+  /// `ModePreviewSession.begin()`: `begin()` on one display ends an outstanding
+  /// preview on ANOTHER, so an unattended caller could reconfigure a display
+  /// nobody named.
+  ///
+  /// It writes NO preferences — in particular a substitute is never stored over
+  /// the user's choice. What they picked is what gets tried again the next time
+  /// the display shows up, and a monitor that came back on a reduced link once
+  /// does not permanently rewrite their resolution. (Which is also why there is
+  /// no `prefDidChange` here: nothing changed.)
+  func reapplyStoredModes() {
+    let live = configurator.displays()
+    let liveIDs = Set(live.map(\.id))
+    reappliedDisplays.formIntersection(liveIDs)
+    let arrivals = live.filter { !reappliedDisplays.contains($0.id) }
+    guard !arrivals.isEmpty else { return }
+    // Marked BEFORE the work, not after: the work is queued and asynchronous,
+    // and a second call landing in between would otherwise queue a second pass
+    // over the same displays.
+    reappliedDisplays.formUnion(arrivals.map(\.id))
+    // Through the same queue as every session operation. Reapply does not touch
+    // the session, but it does apply modes at SESSION scope — landing that in
+    // the middle of a `begin()`/`confirm()` would move a display out from under
+    // a preview whose fallback was captured before it.
+    enqueue { await self.performReapply(arrivals) }
+  }
+
+  func dismissReapplyReport(for displayID: CGDirectDisplayID) {
+    reapplyReports[displayID] = nil
+  }
+
+  private func performReapply(_ displays: [ConfiguredDisplay]) async {
+    // Asked of the session rather than of `preview`, for the same reason
+    // `dropPreviewOnDepartedDisplay` does: the derived copy is nil for several
+    // awaits after `begin()` succeeds, and reapplying over a live preview would
+    // strand it — the countdown would then "revert" to a mode the display had
+    // already left.
+    let previewed = await session.previewedMode?.displayID
+    // Skipped outright, not deferred. A display that has only just arrived can
+    // hold a preview only if the user started one in the moment since — and an
+    // explicit choice they are looking at right now outranks a choice they made
+    // some other day.
+    for display in displays where display.id != previewed {
+      let identity = display.identity
+      let stored = persistence.storedMode(for: identity)
+      // Enumerated for every arrival, including displays that never opted in:
+      // the opt-in gate lives inside the tested policy, so the cost of asking
+      // is one `CGDisplayCopyAllDisplayModes` per arrival — the same call
+      // `warmModeCatalogs` already makes on every menu close.
+      let decision = ModeReapplyPolicy.decide(
+        isEnabled: persistence.isEnabled(for: identity),
+        stored: stored,
+        available: configurator.modes(for: display.id),
+        current: configurator.currentMode(for: display.id)
+      )
+      guard let requested = stored,
+            decision.modeToApply != nil || decision.notice != nil
+      else { continue }
+
+      var notice = decision.notice
+      if let mode = decision.modeToApply {
+        do {
+          try configurator.apply(mode, to: display.id, scope: .session)
+          log.log("reapplied stored mode on display \(display.id): \(mode.logicalWidth)x\(mode.logicalHeight) @\(mode.refreshHz)Hz")
+        } catch {
+          // `apply` throws when staging or completion fails AND when the
+          // resolved `CGDisplayMode`'s descriptor does not match the one asked
+          // for — a reassigned `ioModeID` now denoting a different mode. On the
+          // unattended path that is precisely the failure that must not be
+          // swallowed: `try?` here would leave the display on some third mode
+          // with the app reporting a successful restore.
+          let configError = error as? DisplayConfigError
+            ?? DisplayConfigError(cgErrorCode: -1)
+          notice = .failed(configError)
+        }
+        refreshCatalog(for: display.id)
+      }
+
+      if let notice {
+        reapplyReports[display.id] = ReapplyReport(
+          displayID: display.id, requested: requested, notice: notice
+        )
+        log.error("could not restore stored mode on display \(display.id): \(String(describing: notice), privacy: .public)")
+      } else {
+        reapplyReports[display.id] = nil
+      }
+    }
   }
 
   func isRemembering(_ displayID: CGDirectDisplayID) -> Bool {
@@ -320,6 +467,10 @@ final class DisplayModeCoordinator {
     // land, in the order they land.
     origins[displayID] = origin
     startFailure = nil
+    // The user has answered the report themselves — whatever reapply could not
+    // do for this display, they are now doing by hand. Leaving the notice up
+    // would have it contradict the choice they just made.
+    reapplyReports[displayID] = nil
     switch await session.begin(mode: mode, on: displayID) {
     case .success:
       await adopt(.clear)
