@@ -21,6 +21,7 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
   private var _appliedDisplayIDs: [CGDirectDisplayID] = []
   private var _current: DisplayMode?
   private var _failWith: DisplayConfigError?
+  private var _failOnlyDisplay: CGDirectDisplayID?
   private var _available: [DisplayMode] = []
 
   var applied: [Applied] { lock.withLock { _applied } }
@@ -37,6 +38,14 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
     set { lock.withLock { _failWith = newValue } }
   }
 
+  /// Scopes `failWith` to one display. Without it a fake that fails at all
+  /// masks the case where reverting display A fails while previewing display B
+  /// would have succeeded.
+  var failOnlyDisplay: CGDirectDisplayID? {
+    get { lock.withLock { _failOnlyDisplay } }
+    set { lock.withLock { _failOnlyDisplay = newValue } }
+  }
+
   var available: [DisplayMode] {
     get { lock.withLock { _available } }
     set { lock.withLock { _available = newValue } }
@@ -49,7 +58,9 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
 
   func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope) throws {
     try lock.withLock {
-      if let _failWith { throw _failWith }
+      if let _failWith, _failOnlyDisplay == nil || _failOnlyDisplay == displayID {
+        throw _failWith
+      }
       _applied.append(Applied(modeID: mode.ioModeID, scope: scope))
       _appliedDisplayIDs.append(displayID)
       _current = mode
@@ -209,6 +220,98 @@ struct ModePreviewSessionTests {
       .init(modeID: 1, scope: .session),
     ])
     #expect(fake.appliedDisplayIDs == [7, 7, 8, 8])
+  }
+
+  // MARK: - Failed resolutions
+  //
+  // An apply that throws moves nothing, so the preview is still on screen and
+  // the pre-preview mode is still the truth about where to go back to. These
+  // pin that a failed resolution is recoverable rather than terminal.
+
+  @Test func aFailedExpiryRevertStaysRevertibleAndRecovers() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
+    _ = await session.begin(mode: mode(2), on: 7)
+    fake.failWith = DisplayConfigError(cgErrorCode: 1001)
+
+    #expect(await session.tick() == .failed(DisplayConfigError(cgErrorCode: 1001)))
+    #expect(await session.hasOutstandingPreview)
+    #expect(await session.tick() == nil) // the countdown fires once, not forever
+
+    fake.failWith = nil // CoreGraphics recovers
+    #expect(await session.revert() == .reverted)
+    #expect(fake.applied.last == .init(modeID: 1, scope: .session))
+    #expect(await session.hasOutstandingPreview == false)
+  }
+
+  /// The state that used to be unescapable: after the expiry revert throws, a
+  /// fresh preview must still fall back to the mode the user started on — not
+  /// to the unapproved preview that is currently on screen.
+  @Test func aFailedResolutionDoesNotLoseTheOriginalMode() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 1)
+    _ = await session.begin(mode: mode(2), on: 7)
+    fake.failWith = DisplayConfigError(cgErrorCode: 1001)
+    #expect(await session.tick() == .failed(DisplayConfigError(cgErrorCode: 1001)))
+
+    fake.failWith = nil
+    _ = await session.begin(mode: mode(3), on: 7) // user tries a different mode
+    #expect(await session.revert() == .reverted)
+    #expect(fake.applied.last == .init(modeID: 1, scope: .session))
+  }
+
+  @Test func aFailedCommitLeavesThePreviewRevertible() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 7)
+    fake.failWith = DisplayConfigError(cgErrorCode: 1001)
+
+    #expect(await session.confirm() == .failed(DisplayConfigError(cgErrorCode: 1001)))
+    #expect(await session.hasOutstandingPreview)
+
+    fake.failWith = nil
+    #expect(await session.revert() == .reverted)
+    #expect(fake.applied.last == .init(modeID: 1, scope: .session))
+  }
+
+  /// A commit that could not be made permanent leaves the display on a mode
+  /// held only by process scope, so the countdown stays armed and still falls
+  /// back to something the user can definitely see.
+  @Test func aFailedCommitLeavesTheCountdownRunningSoItStillFallsBack() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake, countdownSeconds: 2)
+    _ = await session.begin(mode: mode(2), on: 7)
+    fake.failWith = DisplayConfigError(cgErrorCode: 1001)
+    #expect(await session.confirm() == .failed(DisplayConfigError(cgErrorCode: 1001)))
+
+    fake.failWith = nil
+    #expect(await session.tick() == nil)
+    #expect(await session.tick() == .reverted)
+    #expect(fake.applied.last == .init(modeID: 1, scope: .session))
+  }
+
+  /// Refuse rather than report success: previewing display 8 while display 7
+  /// cannot be restored would strand 7 on an unapproved mode silently.
+  @Test func previewingAnotherDisplayIsRefusedWhenTheFirstCannotBeReverted() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 7)
+    fake.failWith = DisplayConfigError(cgErrorCode: 1001)
+    fake.failOnlyDisplay = 7
+
+    let result = await session.begin(mode: mode(3), on: 8)
+    #expect(result.failureError == DisplayConfigError(cgErrorCode: 1001))
+    #expect(fake.applied == [.init(modeID: 2, scope: .preview)]) // 8 never previewed
+
+    fake.failWith = nil
+    #expect(await session.revert() == .reverted) // 7 is still the outstanding one
+    #expect(fake.applied.last == .init(modeID: 1, scope: .session))
+    #expect(fake.appliedDisplayIDs.last == 7)
   }
 
   @Test func theCountdownStopsBeingReportedOnceResolved() async {
