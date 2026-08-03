@@ -113,7 +113,12 @@ final class DisplayModeCoordinator {
   @ObservationIgnored var didStoreMode: (CGDirectDisplayID) -> Void = { _ in }
 
   @ObservationIgnored private let session: ModePreviewSession
-  @ObservationIgnored private var origin: PreviewOrigin = .settings
+  /// Per display, not one value for the coordinator. A settings-select on B
+  /// whose `begin()` fails leaves A's preview outstanding and reports the error
+  /// against A — with a single `origin` that select would have flipped the whole
+  /// coordinator to `.settings` and torn down A's confirmation window while A
+  /// was still counting down. Keyed, the surface follows the preview.
+  @ObservationIgnored private var origins: [CGDirectDisplayID: PreviewOrigin] = [:]
   @ObservationIgnored private var countdown: Task<Void, Never>?
   @ObservationIgnored private var pending: Task<Void, Never>?
   @ObservationIgnored private var inFlightSelects = 0
@@ -216,7 +221,12 @@ final class DisplayModeCoordinator {
     persistence.setEnabled(remembering, for: identity)
     guard remembering else { return }
     if let current = catalogs[displayID]?.current ?? configurator.currentMode(for: displayID) {
-      persistence.store(current.descriptor, for: identity)
+      // Through `store(_:on:)`, not `persistence.store` directly: this is the
+      // second place `storedDisplayMode` is written, and it announced nothing.
+      // Its caller happened to fan out the same name by hand, which is exactly
+      // the arrangement that broke the first time — the moment a second surface
+      // offers this toggle, a stored mode is written with no propagation.
+      store(current, on: displayID, for: identity)
     }
   }
 
@@ -304,11 +314,11 @@ final class DisplayModeCoordinator {
   private func performSelect(
     _ mode: DisplayMode, on displayID: CGDirectDisplayID, from origin: PreviewOrigin
   ) async {
-    // Adopted here rather than in `select` so it names the preview that is
+    // Recorded here rather than in `select` so it names the preview that is
     // about to become outstanding, not whichever click was most recent: two
     // queued selects from different surfaces each get their own surface as they
     // land, in the order they land.
-    self.origin = origin
+    origins[displayID] = origin
     startFailure = nil
     switch await session.begin(mode: mode, on: displayID) {
     case .success:
@@ -420,7 +430,7 @@ final class DisplayModeCoordinator {
   /// Called on every countdown tick, so the presenter must treat a repeat
   /// present for the same display as a no-op.
   private func syncConfirmation() {
-    guard origin == .panel, let preview else {
+    guard let preview, origins[preview.displayID] == .panel else {
       confirmation?.dismissConfirmation()
       return
     }
@@ -466,6 +476,14 @@ final class DisplayModeCoordinator {
     guard let identity = identity(for: displayID), persistence.isEnabled(for: identity) else {
       return
     }
+    store(mode, on: displayID, for: identity)
+  }
+
+  /// THE only writer of `storedDisplayMode`. Announcing the write is part of
+  /// making it, so no caller can perform one and forget the propagation.
+  private func store(
+    _ mode: DisplayMode, on displayID: CGDirectDisplayID, for identity: DisplayConfigIdentity
+  ) {
     persistence.store(mode.descriptor, for: identity)
     didStoreMode(displayID)
   }

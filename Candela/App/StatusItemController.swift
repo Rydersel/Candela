@@ -178,9 +178,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     item.behavior = .removalAllowed
     statusItem = item
 
-    // The panel's gear button lives inside this menu's tracking session and
-    // must end it before a window can take focus (see SettingsOpener).
-    SettingsOpener.statusMenu = menu
+    // Panel controls that have to end this tracking session reach it through
+    // here: the gear button (a window cannot take focus while it runs) and
+    // resolution selection (main-actor work queued from inside it is starved
+    // until it ends). See `PanelMenu`.
+    PanelMenu.menu = menu
 
     // The handler MUST run synchronously — a `Task { @MainActor … }` hop would
     // land after `isApplyingStatusItemVisibility` was already reset, and every

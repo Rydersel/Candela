@@ -280,6 +280,23 @@ struct PanelView: View {
   }
 }
 
+/// The panel's own menu tracking session, so a control inside the panel can end
+/// it. One holder, set once at launch by `StatusItemController`.
+///
+/// Two controls need this, for two consequences of the same fact — a tracking
+/// session holds the main run loop in event-tracking mode. `SettingsOpener` ends
+/// it because a window cannot take focus while it runs. `PanelResolutionSection`
+/// ends it because main-actor work queued from inside it is starved until it
+/// does.
+@MainActor
+enum PanelMenu {
+  static weak var menu: NSMenu?
+
+  static func endTracking() {
+    menu?.cancelTracking()
+  }
+}
+
 /// Section header for one display: name, an "HDR" state badge, and a trailing
 /// HDR-mode toggle button. Everything is secondary-colored — the slider is
 /// the row's only emphasis, the way Control Center keeps section chrome quiet.

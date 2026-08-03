@@ -146,9 +146,19 @@ private final class ConfirmationHostingView: NSHostingView<ModeConfirmationView>
     super.invalidateIntrinsicContentSize()
     guard let window else { return }
     let target = fittingSize
-    if frame.size != target {
-      window.setContentSize(target)
-    }
+    guard frame.size != target else { return }
+    // Grow around the window's CURRENT centre, not its bottom-left origin.
+    // AppKit's origin is bottom-left, so a failure caption appearing mid-preview
+    // would otherwise push the whole window upward — the buttons would move out
+    // from under the pointer at the moment the user is being told to try again.
+    // Reading the live centre (rather than re-centring on the screen) means a
+    // window the user has dragged stays where they put it.
+    let centre = NSPoint(x: window.frame.midX, y: window.frame.midY)
+    window.setContentSize(target)
+    window.setFrameOrigin(NSPoint(
+      x: centre.x - window.frame.width / 2,
+      y: centre.y - window.frame.height / 2
+    ))
   }
 }
 
@@ -176,9 +186,8 @@ struct ModeConfirmationView: View {
         if let failure = preview.failure {
           // Nothing auto-retries a failed resolution. Staying silent would
           // leave the display on a mode the user never approved, held only
-          // until the app exits. The CoreGraphics code is diagnostic, not
-          // something to read a sentence at: it belongs in the tooltip.
-          caption("\(AppInfo.productName) could not complete that change. The display is still showing the preview — try again.")
+          // until the app exits.
+          caption(DisplayModeCopy.resolveFailure)
             .help("CoreGraphics error \(failure.cgErrorCode)")
         }
         if preview.isCountingDown {
@@ -186,7 +195,7 @@ struct ModeConfirmationView: View {
             .font(.callout)
             .foregroundStyle(.secondary)
         } else if preview.failure != nil {
-          caption("The automatic revert has already run, so it will not try again on its own.")
+          caption(DisplayModeCopy.expiryAlreadyRan)
         }
 
         HStack(spacing: 8) {

@@ -55,6 +55,7 @@ struct PanelResolutionSection: View {
           ForEach(catalog.rows.prefix(Self.maximumRows)) { row in
             PanelModeRow(
               title: DisplayModeCopy.size(row.mode),
+              accessibilityName: displayName,
               isCurrent: catalog.isCurrentSize(row.mode)
             ) {
               apply(catalog.modeKeepingCurrentRefreshRate(for: row), in: catalog)
@@ -80,6 +81,7 @@ struct PanelResolutionSection: View {
       // be checked: they differ when the current size fell below the curation
       // floor, and the summary must describe the display, not our list.
       detail: catalog.current.map(DisplayModeCopy.size),
+      accessibilityName: displayName,
       isExpanded: isExpanded
     ) {
       expandedDisplayID = isExpanded ? nil : displayID
@@ -102,7 +104,7 @@ struct PanelResolutionSection: View {
   @ViewBuilder private var startFailure: some View {
     if let failure = coordinator.startFailure, failure.displayID == displayID {
       HStack(alignment: .firstTextBaseline, spacing: 6) {
-        Text("\(AppInfo.productName) could not switch this display. Nothing changed.")
+        Text(DisplayModeCopy.startFailure)
           .font(.system(size: 11))
           .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
@@ -137,6 +139,22 @@ struct PanelResolutionSection: View {
     // on the reconfiguration this very call performs, so the coordinator puts
     // the Keep/Revert surface in a window of its own.
     coordinator.select(mode, on: displayID, from: .panel)
+    // Ending tracking is the point of this line, not a courtesy.
+    //
+    // Everything `select` queues — the reconfiguration, the countdown, the
+    // confirmation window — is main-actor work, and a tracking session holds the
+    // run loop in event-tracking mode and starves exactly that. It is the same
+    // fact that moved enumeration out to `StatusItemController`, and it bites
+    // harder here: `isApplying` is raised synchronously, so a starved selection
+    // would grey out every display's rows while the screen did not change and
+    // nothing said why. Closing the menu makes the queued work runnable at once,
+    // whether or not the starvation turns out to be total.
+    //
+    // Nothing is lost by closing. The confirmation window was built to outlive
+    // this menu, so the answer is already somewhere else — and dismissing on a
+    // choice is what a menu does. Sliders and the HDR toggle stay put because
+    // they are in-place adjustments, not choices.
+    PanelMenu.endTracking()
   }
 }
 
@@ -145,6 +163,11 @@ struct PanelResolutionSection: View {
 private struct PanelDisclosureRow: View {
   let title: LocalizedStringKey
   let detail: String?
+  /// Owns the row for VoiceOver. Every other row in this section announces
+  /// itself as "<display> brightness" / "<display> volume"; without the same
+  /// prefix a four-display rig reads out "Resolution" four times with no way to
+  /// tell which display is being described.
+  let accessibilityName: String
   let isExpanded: Bool
   let action: () -> Void
 
@@ -175,8 +198,8 @@ private struct PanelDisclosureRow: View {
     // The menu can close without a mouse-exit event (Escape, or clicking the
     // status item), which would leave a phantom highlight on the next open.
     .onDisappear { isHovering = false }
-    .accessibilityLabel(Text(title))
-    .accessibilityValue(detail.map { Text(verbatim: $0) } ?? Text(verbatim: ""))
+    .accessibilityLabel(Text(verbatim: "\(accessibilityName) resolution"))
+    .accessibilityValue(Text(verbatim: detail ?? ""))
   }
 }
 
@@ -187,6 +210,9 @@ private struct PanelDisclosureRow: View {
 /// second one.
 private struct PanelModeRow: View {
   let title: String
+  /// Same rule as `PanelDisclosureRow`: a bare "Looks like 2560 × 1440" told
+  /// nobody which display it would change.
+  let accessibilityName: String
   let isCurrent: Bool
   let action: () -> Void
 
@@ -213,6 +239,7 @@ private struct PanelModeRow: View {
     .buttonStyle(PanelRowButtonStyle(isHovering: isHovering))
     .onHover { isHovering = $0 }
     .onDisappear { isHovering = false }
+    .accessibilityLabel(Text(verbatim: "\(accessibilityName), \(title)"))
     .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
   }
 }

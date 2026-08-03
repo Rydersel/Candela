@@ -77,6 +77,15 @@ struct DisplayModeSection: View {
 
   // MARK: - Preview
 
+  /// Gated on the DISPLAY, never on which surface started the preview.
+  ///
+  /// That is load-bearing, not an oversight: it is the recovery path for a
+  /// panel-started preview whose confirmation window cannot be used — a failed
+  /// revert on a mode that left the screen barely readable, a window that ended
+  /// up on a display the user cannot see, a first click that did not take. This
+  /// pane answers the same session with the same intent-carrying values, so
+  /// whichever surface is reachable can end it. Two live surfaces for one
+  /// preview is the point.
   @ViewBuilder private var previewBanner: some View {
     if let preview = coordinator.preview, preview.displayID == displayID {
       VStack(alignment: .leading, spacing: 6) {
@@ -88,16 +97,15 @@ struct DisplayModeSection: View {
         if let failure = preview.failure {
           // Nothing auto-retries a failed resolution. Staying silent here would
           // leave the display on a mode the user never approved, held only
-          // until the app exits. The CoreGraphics code is diagnostic, not
-          // something to read a sentence at: it belongs in the tooltip.
-          SettingsCaption("\(AppInfo.productName) could not complete that change. The display is still showing the preview — try again.")
+          // until the app exits.
+          SettingsCaption(DisplayModeCopy.resolveFailure)
             .help("CoreGraphics error \(failure.cgErrorCode)")
         }
         if preview.isCountingDown {
           Text(verbatim: countdownText(preview.secondsRemaining))
             .foregroundStyle(.secondary)
         } else if preview.failure != nil {
-          SettingsCaption("The automatic revert has already run, so it will not try again on its own.")
+          SettingsCaption(DisplayModeCopy.expiryAlreadyRan)
         }
 
         HStack(spacing: 8) {
@@ -121,7 +129,7 @@ struct DisplayModeSection: View {
   @ViewBuilder private var startFailureBanner: some View {
     if let failure = coordinator.startFailure, failure.displayID == displayID {
       VStack(alignment: .leading, spacing: 6) {
-        SettingsCaption("\(AppInfo.productName) could not switch this display. Nothing changed.")
+        SettingsCaption(DisplayModeCopy.startFailure)
           .help("CoreGraphics error \(failure.error.cgErrorCode)")
         Button("OK") { coordinator.dismissStartFailure() }
       }
@@ -187,15 +195,13 @@ struct DisplayModeSection: View {
       Toggle("Remember this resolution for this display", isOn: Binding(
         get: { coordinator.isRemembering(displayID) },
         set: { remembering in
+          // Only the flag is announced here. Turning it on ALSO stores the
+          // current mode, and that write announces itself from inside the
+          // coordinator (`didStoreMode`) — naming `.storedDisplayMode` here as
+          // well would put the rule in two places, which is how it was lost the
+          // first time.
           coordinator.setRemembering(remembering, for: displayID)
-          // Turning it on writes the flag AND stores the current mode, so the
-          // fan-out is the union of both rows, never one representative name.
-          if remembering {
-            actions.prefsDidChange([.rememberDisplayMode, .storedDisplayMode],
-                                   persistenceKey: persistenceKey)
-          } else {
-            actions.prefDidChange(.rememberDisplayMode, persistenceKey: persistenceKey)
-          }
+          actions.prefDidChange(.rememberDisplayMode, persistenceKey: persistenceKey)
         }
       ))
     }
@@ -212,7 +218,10 @@ struct DisplayModeSection: View {
         LazyVStack(alignment: .leading, spacing: 0) {
           ForEach(catalog.all) { mode in
             ModeChoice(
-              title: "\(mode.logicalWidth) × \(mode.logicalHeight)",
+              // The same label as the curated rows a few pixels above. A bare
+              // "1440 × 2560" here would put two names for one mode in one
+              // window, and would be the single site where RM11 does not hold.
+              title: sizeLabel(mode),
               detail: "\(refreshLabel(mode.refreshHz))\(mode.isHiDPI ? " · HiDPI" : "")",
               badges: [],
               isCurrent: mode.ioModeID == catalog.current?.ioModeID

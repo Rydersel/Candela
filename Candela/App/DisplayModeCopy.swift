@@ -1,5 +1,6 @@
 import CandelaKit
 import Foundation
+import SwiftUI
 
 /// The words every surface uses to name a display mode: the settings section,
 /// the panel's resolution list, and the floating confirmation panel.
@@ -26,5 +27,32 @@ enum DisplayModeCopy {
     seconds == 1
       ? "Reverting to the previous resolution in 1 second."
       : "Reverting to the previous resolution in \(seconds) seconds."
+  }
+
+  // The three sentences below are shown by two surfaces each and are stated
+  // once here for the same reason as the labels above: they agree today, and
+  // agreement is not a property two literals keep. The CoreGraphics code stays
+  // out of them deliberately — it is diagnostic, and belongs in a tooltip
+  // rather than in a sentence someone has to read while their screen is wrong.
+
+  // Computed, not stored: `LocalizedStringKey` is not `Sendable`, so a static
+  // `let` of one is a concurrency error under complete checking. Each of these
+  // is a literal with no state behind it.
+
+  /// A `begin()` that failed. Nothing was applied, so nothing needs answering.
+  static var startFailure: LocalizedStringKey {
+    "\(AppInfo.productName) could not switch this display. Nothing changed."
+  }
+
+  /// A `confirm()`/`revert()`/expiry that threw. The preview is still on the
+  /// display and nothing auto-retries, so this must invite another attempt.
+  static var resolveFailure: LocalizedStringKey {
+    "\(AppInfo.productName) could not complete that change. The display is still showing the preview — try again."
+  }
+
+  /// Said only alongside `resolveFailure`: the countdown is spent, so the user
+  /// is now the only thing that can end this.
+  static var expiryAlreadyRan: LocalizedStringKey {
+    "The automatic revert has already run, so it will not try again on its own."
   }
 }
