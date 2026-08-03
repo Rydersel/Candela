@@ -40,6 +40,11 @@ public struct DisplayConfigError: Error, Sendable, Equatable {
 /// decidable is tested against a fake conformance; the real one is a thin
 /// adapter with no judgement in it.
 public protocol DisplayConfiguring: Sendable {
+  /// Every display that is ONLINE — connected and powered, whether or not it is
+  /// currently drawing. Deliberately not "active": callers read absence from
+  /// this list as a DEPARTURE, and a display asleep on the idle timer is
+  /// inactive without having gone anywhere. See
+  /// `CoreGraphicsDisplayConfigurator.displays()`.
   func displays() -> [ConfiguredDisplay]
   func modes(for displayID: CGDirectDisplayID) -> [DisplayMode]
   func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode?

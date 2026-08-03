@@ -5,10 +5,24 @@ import Foundation
 public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   public init() {}
 
+  /// ONLINE, not ACTIVE, and the difference is not academic: a display that has
+  /// gone to sleep on the idle timer is still online but is NOT active.
+  ///
+  /// This list is what `DisplayModeCoordinator` samples to decide whether a
+  /// display has DEPARTED, and a departure is what makes the next appearance an
+  /// arrival that reapply acts on (DM7). Under the active-only list, every idle
+  /// display sleep read as an unplug and every wake as a replug — so with
+  /// "Remember this resolution" on, a resolution the user changed in System
+  /// Settings mid-session was silently undone the next time their screen slept.
+  /// DM7 exists to forbid exactly that.
+  ///
+  /// It is also what every other enumeration in this codebase uses
+  /// (`DisplayDiscovery`, `BuiltInDisplay`, `Mirroring`, `KeyActionExecutor`),
+  /// so please do not "correct" this back.
   public func displays() -> [ConfiguredDisplay] {
     var ids = [CGDirectDisplayID](repeating: 0, count: 16)
     var count: UInt32 = 0
-    guard CGGetActiveDisplayList(16, &ids, &count) == .success else { return [] }
+    guard CGGetOnlineDisplayList(16, &ids, &count) == .success else { return [] }
     return ids.prefix(Int(count)).map { id in
       let isBuiltIn = CGDisplayIsBuiltin(id) != 0
       return ConfiguredDisplay(
