@@ -181,4 +181,27 @@ struct ModePersistenceTests {
     #expect(!ModePersistence.refreshMatches(24, 25))
     #expect(ModePersistence.refreshMatches(120, 120))
   }
+
+  /// 59.9 and 60 BOTH sit inside the 0.5 Hz window, so step 1 has to pick the
+  /// NEARER one rather than the first one CoreGraphics happened to list.
+  ///
+  /// A user-visible rule, not a tidiness one. `quantizedRefresh` keeps 59.9 and
+  /// 60 apart and the picker draws them as separate rows, so a picked 59.9
+  /// resolving to the 60 mode hands back a mode whose `ioModeID` is the one
+  /// already current — which `DisplayModeSection.apply` early-returns on. The
+  /// picker snapped back and nothing happened.
+  ///
+  /// Asserted in both list orders: passing in one ordering only is exactly what
+  /// an enumeration-order-dependent implementation looks like.
+  @Test func theNearerOfTwoRatesInsideTheToleranceWins() {
+    let ntsc = mode(3, logical: (2560, 1440), pixels: (5120, 2880), hz: 59.9)
+    let sixty = mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 60)
+    // The premise: without both inside the window there is nothing to choose.
+    #expect(ModePersistence.refreshMatches(59.9, 60))
+
+    #expect(ModePersistence.resolve(ntsc.descriptor, in: [sixty, ntsc]) == .exact(ntsc))
+    #expect(ModePersistence.resolve(ntsc.descriptor, in: [ntsc, sixty]) == .exact(ntsc))
+    #expect(ModePersistence.resolve(sixty.descriptor, in: [ntsc, sixty]) == .exact(sixty))
+    #expect(ModePersistence.resolve(sixty.descriptor, in: [sixty, ntsc]) == .exact(sixty))
+  }
 }

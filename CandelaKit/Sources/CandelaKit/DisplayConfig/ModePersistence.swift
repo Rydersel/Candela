@@ -62,12 +62,13 @@ public final class ModePersistence: @unchecked Sendable {
   /// 4. nearest logical area OF THE SAME ASPECT RATIO
   /// 5. nothing
   ///
-  /// Every step past the first picks deterministically, ties broken on
-  /// `ioModeID`. A `min(by:)` over a real panel's list would otherwise be
-  /// decided by CoreGraphics' enumeration order — the nearest logical size
-  /// typically exists at two framebuffers and six refresh rates, and "whichever
-  /// came back first" is not an answer we can explain to the user or reproduce
-  /// in a bug report.
+  /// EVERY step picks deterministically, ties broken on `ioModeID` — including
+  /// the first, which is the same nearest-rate selection as the second and
+  /// merely reports `.exact` when the winner lands inside the tolerance. A
+  /// selection decided by CoreGraphics' enumeration order is not an answer we
+  /// can explain to the user or reproduce in a bug report: the nearest logical
+  /// size typically exists at two framebuffers and six refresh rates, and even
+  /// at exact geometry two rates can sit inside the match window at once.
   public static func resolve(
     _ descriptor: DisplayModeDescriptor, in modes: [DisplayMode]
   ) -> ModeMatch {
@@ -79,15 +80,28 @@ public final class ModePersistence: @unchecked Sendable {
         && $0.pixelWidth == descriptor.pixelWidth
         && $0.pixelHeight == descriptor.pixelHeight
     }
+    // Steps 1 and 2 are ONE selection, not two: pick the nearest rate, then ask
+    // whether it is near enough to call exact.
+    //
     // Refresh rates are compared with a tolerance, NOT with ==. CoreGraphics
     // reports rates like 59.997 rather than 60, so an exact Double comparison
     // means a stored mode never matches on real hardware and every reconnect
-    // silently degrades to a fallback branch.
-    if let exact = sameGeometry.first(where: { Self.refreshMatches($0.refreshHz, descriptor.refreshHz) }) {
-      return .exact(exact)
-    }
+    // silently degrades to a fallback branch. But the tolerance is wider than
+    // the gap between an NTSC rate and its integer twin — 59.9 and 60 are 0.1
+    // apart and BOTH match — so "first in the window" answers a question the
+    // window cannot answer, and answers it with CoreGraphics' enumeration order.
+    //
+    // That was a visible defect, not a theoretical one: `quantizedRefresh`
+    // keeps 59.9 and 60 apart and `DisplayModeCopy` renders them as separate
+    // picker rows, so selecting 59.9 could resolve to the 60 mode — whose
+    // `ioModeID` is the one already current, which `DisplayModeSection.apply`
+    // then early-returns on. The picker snapped back and nothing happened.
+    // Taking the nearest also makes this the only step that does not depend on
+    // enumeration order, matching steps 2–4.
     if let nearestRefresh = sameGeometry.min(by: { closerRefresh($0, $1, to: descriptor) }) {
-      return .refreshRateDiffers(nearestRefresh)
+      return Self.refreshMatches(nearestRefresh.refreshHz, descriptor.refreshHz)
+        ? .exact(nearestRefresh)
+        : .refreshRateDiffers(nearestRefresh)
     }
 
     // Same logical size, different framebuffer. Prefer the HiDPI candidate —
