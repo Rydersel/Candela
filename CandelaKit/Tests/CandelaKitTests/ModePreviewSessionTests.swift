@@ -314,6 +314,31 @@ struct ModePreviewSessionTests {
     #expect(fake.appliedDisplayIDs.last == 7)
   }
 
+  /// A `begin()` that fails establishes nothing, so it must not erase what the
+  /// session already reported. Otherwise a commit followed by a failed begin
+  /// leaves the session claiming a reversion — telling the UI the opposite of
+  /// what happened to the screen. Both of `begin()`'s failure exits are
+  /// exercised: the unreadable fallback and the throwing apply.
+  @Test func aFailedBeginDoesNotEraseTheOutcomeAlreadyReported() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 7)
+    #expect(await session.confirm() == .committed)
+
+    fake.current = nil // no readable fallback: begin refuses before applying
+    var result = await session.begin(mode: mode(3), on: 7)
+    #expect(result.failureError == DisplayConfigError(cgErrorCode: CGError.failure.rawValue))
+    #expect(await session.confirm() == .committed)
+    #expect(await session.revert() == .committed)
+
+    fake.current = mode(2)
+    fake.failWith = DisplayConfigError(cgErrorCode: 1001) // the apply itself throws
+    result = await session.begin(mode: mode(3), on: 7)
+    #expect(result.failureError == DisplayConfigError(cgErrorCode: 1001))
+    #expect(await session.confirm() == .committed)
+  }
+
   @Test func theCountdownStopsBeingReportedOnceResolved() async {
     let fake = FakeConfigurator()
     fake.current = mode(1)

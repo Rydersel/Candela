@@ -67,7 +67,6 @@ public actor ModePreviewSession {
   public func begin(
     mode: DisplayMode, on displayID: CGDirectDisplayID
   ) -> Result<Void, DisplayConfigError> {
-    lastOutcome = nil
     let previous: DisplayMode
 
     if let outstanding {
@@ -110,6 +109,11 @@ public actor ModePreviewSession {
     outstanding = OutstandingPreview(
       displayID: displayID, previousMode: previous, previewedMode: mode
     )
+    // Cleared HERE, not on entry: a begin() that fails establishes nothing, so
+    // the last thing that actually happened to the display is still the last
+    // outcome. Wiping it on the way in would make a later confirm() report a
+    // reversion that never happened, after a commit that did.
+    lastOutcome = nil
     remaining = countdownSeconds
     countdownArmed = true
     return .success(())
