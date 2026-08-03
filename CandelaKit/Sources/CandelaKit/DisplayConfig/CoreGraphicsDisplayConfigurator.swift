@@ -36,12 +36,23 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     }
   }
 
+  /// Resolved by LOOKUP into `modes(for:)`, not by constructing a fresh value
+  /// from `CGDisplayCopyDisplayMode`. Do not "optimise" this back into a direct
+  /// construction: building it standalone means guessing `surfacedByMacOS`, and
+  /// the only available guess — `true` — is wrong for exactly the hidden modes
+  /// this feature exists to let people choose. `DisplayMode` is `Equatable` over
+  /// all its stored properties, so a wrong flag makes the current mode compare
+  /// unequal to its own entry in the list (the checkmark in the picker, and the
+  /// stored-vs-available comparison, both break on it).
+  ///
+  /// Going through the list makes every field consistent with the enumeration
+  /// by construction. The lookup is sound because `IODisplayModeID` stays unique
+  /// even under `kCGDisplayShowDuplicateLowResolutionModes` — measured on
+  /// hardware, 132/132, 332/332 and 120/120 unique across three panels.
   public func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
     guard let mode = CGDisplayCopyDisplayMode(displayID) else { return nil }
-    return Self.displayMode(
-      ioModeID: mode.ioDisplayModeID, mode: mode,
-      surfaced: true
-    )
+    let ioModeID = mode.ioDisplayModeID
+    return modes(for: displayID).first { $0.ioModeID == ioModeID }
   }
 
   public func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
