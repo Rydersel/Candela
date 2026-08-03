@@ -74,6 +74,13 @@ final class DisplayModeCoordinator {
   private(set) var catalogs: [CGDirectDisplayID: Catalog] = [:]
   private(set) var preview: Preview?
   private(set) var startFailure: StartFailure?
+  /// True from the click until the reconfiguration it started has settled.
+  /// `begin()` spans a real CoreGraphics mode change, and a Keep pressed inside
+  /// that window is queued behind it and would commit the NEW mode while the
+  /// banner still named the old one — correct ordering, wrong intent. Set
+  /// synchronously so the disable lands in the same body evaluation as the
+  /// click that caused it.
+  private(set) var isApplying = false
 
   let configurator: any DisplayConfiguring
   let persistence: ModePersistence
@@ -81,6 +88,13 @@ final class DisplayModeCoordinator {
   @ObservationIgnored private let session: ModePreviewSession
   @ObservationIgnored private var countdown: Task<Void, Never>?
   @ObservationIgnored private var pending: Task<Void, Never>?
+  @ObservationIgnored private var inFlightSelects = 0
+  /// Displays anything has asked about. `handleDisplaysChanged` re-enumerates
+  /// these rather than only the currently cached ones, so a display that
+  /// departs and returns under the same ID gets its catalog back — a nil
+  /// catalog now renders as "not enumerated yet", i.e. as nothing at all, and
+  /// `.task(id:)` does not re-fire for an unchanged id.
+  @ObservationIgnored private var observed: Set<CGDirectDisplayID> = []
   @ObservationIgnored private var screenObserver: (any NSObjectProtocol)?
 
   init(
@@ -117,9 +131,10 @@ final class DisplayModeCoordinator {
   /// configuration changes, and after any mode this app applies — never on a
   /// timer (DM7).
   func refreshCatalog(for displayID: CGDirectDisplayID) {
+    observed.insert(displayID)
     guard let display = configurator.displays().first(where: { $0.id == displayID }) else {
       catalogs[displayID] = nil
-      dropPreviewIfDeparted(displayID)
+      dropPreviewOnDepartedDisplay()
       return
     }
     let all = DisplayModeCatalog.full(configurator.modes(for: displayID))
@@ -146,16 +161,16 @@ final class DisplayModeCoordinator {
   /// refuses, so one unplug would wedge mode switching for the whole session.
   func handleDisplaysChanged() {
     let live = Set(configurator.displays().map(\.id))
-    for displayID in Array(catalogs.keys) {
+    // Over `observed`, not over `catalogs`: a departed display's entry is nil,
+    // so iterating the cache would never re-enumerate it when it comes back.
+    for displayID in observed {
       if live.contains(displayID) {
         refreshCatalog(for: displayID)
       } else {
         catalogs[displayID] = nil
       }
     }
-    if let previewID = preview?.displayID, !live.contains(previewID) {
-      dropPreviewIfDeparted(previewID)
-    }
+    dropPreviewOnDepartedDisplay()
   }
 
   func isRemembering(_ displayID: CGDirectDisplayID) -> Bool {
@@ -190,7 +205,18 @@ final class DisplayModeCoordinator {
   /// so no caller can create a second in-flight `begin()` by spawning its own
   /// task.
   func select(_ mode: DisplayMode, on displayID: CGDirectDisplayID) {
-    enqueue { await self.performSelect(mode, on: displayID) }
+    // Raised HERE, synchronously, not inside the queued operation: the whole
+    // point is that the banner's buttons are already disabled by the time the
+    // reconfiguration starts, so nobody can confirm a mode they are not
+    // reading. Counted rather than boolean — two queued selects must not have
+    // the first one's completion clear the flag for the second.
+    inFlightSelects += 1
+    isApplying = true
+    enqueue {
+      await self.performSelect(mode, on: displayID)
+      self.inFlightSelects -= 1
+      if self.inFlightSelects == 0 { self.isApplying = false }
+    }
   }
 
   @discardableResult
@@ -269,10 +295,22 @@ final class DisplayModeCoordinator {
     return outcome
   }
 
-  private func dropPreviewIfDeparted(_ displayID: CGDirectDisplayID) {
-    guard preview?.displayID == displayID else { return }
+  /// Ends an outstanding preview whose display has gone.
+  ///
+  /// Asks the SESSION which display is outstanding, and re-reads the live list
+  /// inside the queue. Gating on `preview?.displayID` instead — the derived
+  /// copy — leaves a hole: between `begin()` succeeding and `adopt()` finishing
+  /// there are three awaits during which `preview` is still nil while the
+  /// session is outstanding, so a departure landing in that window would be
+  /// skipped, the countdown would expire onto a dead display, and the session
+  /// would wedge. That is the exact case this exists to prevent, so it must not
+  /// consult the copy.
+  private func dropPreviewOnDepartedDisplay() {
     enqueue {
-      await self.session.discard(displayID: displayID)
+      guard let outstanding = await self.session.previewedMode else { return }
+      let stillHere = self.configurator.displays().contains { $0.id == outstanding.displayID }
+      guard !stillHere else { return }
+      await self.session.discard(displayID: outstanding.displayID)
       await self.adopt(.clear)
     }
   }

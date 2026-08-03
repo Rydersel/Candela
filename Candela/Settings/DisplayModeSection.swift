@@ -105,6 +105,11 @@ struct DisplayModeSection: View {
             .buttonStyle(.borderedProminent)
           Button("Revert Now") { Task { await coordinator.revert() } }
         }
+        // Both answers would be QUEUED correctly while a selection is still
+        // landing — but they would resolve the preview that is arriving rather
+        // than the one named above, so the user would confirm something other
+        // than what they were reading.
+        .disabled(coordinator.isApplying)
       }
       .padding(.vertical, 2)
     }
