@@ -46,6 +46,12 @@ final class AppModel {
   /// test target can fake it; production uses CoreAudio.
   let audioDevices: any AudioDeviceProviding
 
+  /// Display-mode enumeration, the preview countdown and stored-mode writes.
+  /// Owned here rather than by a view because the countdown must outlive
+  /// whatever window started it, and because the settings pane and the panel
+  /// have to drive the same session.
+  let displayModes = DisplayModeCoordinator()
+
   /// App-level M4 prefs (startupAction, multiKeyboardVolume, showContrast)
   /// read through one DisplayPrefs like the engine does; the persistence key
   /// is irrelevant for unsuffixed accessors. Assigned in `init` rather than

@@ -1,3 +1,4 @@
+import AppKit
 import CandelaKit
 import SwiftUI
 
@@ -45,6 +46,7 @@ struct DisplayDetailView: View {
     Form {
       identitySection
       panelSection
+      displayModeSection
       controlMethodSection
       volumeSection
       tuningSection
@@ -52,6 +54,22 @@ struct DisplayDetailView: View {
     }
     .formStyle(.grouped)
     .onAppear { seedDrafts() }
+    // Mode enumeration is several CoreGraphics round-trips, so it runs here
+    // rather than per body evaluation. It hangs off the Form, not off
+    // `DisplayModeSection`: a modifier applied to a `Section` inside a grouped
+    // Form is not reliably applied to the section itself (`listRowInsets` and
+    // `listRowSeparator` are both measured no-ops there), and a lifecycle hook
+    // that silently never fires would leave the resolution list empty.
+    .task(id: state.id) { model.displayModes.refreshCatalog(for: state.id) }
+    // Any resolution change — ours, System Settings', or a replug — invalidates
+    // the current-mode checkmark and the refresh-rate list.
+    .onReceive(
+      NotificationCenter.default.publisher(
+        for: NSApplication.didChangeScreenParametersNotification
+      )
+    ) { _ in
+      model.displayModes.refreshCatalog(for: state.id)
+    }
     // Drafts seeded only in `.onAppear` survive a wipe: if this pane is on
     // screen when the user resets everything from General, the card still holds
     // "Desk" and the next focus/blur re-writes friendlyName.<pk> into the
@@ -118,6 +136,12 @@ struct DisplayDetailView: View {
         ))
       }
     }
+  }
+
+  // MARK: - Resolution
+
+  private var displayModeSection: some View {
+    DisplayModeSection(state: state, coordinator: model.displayModes, actions: actions)
   }
 
   /// Candela's equivalent of the fork's `controlMethod` subtitle. The BRANCH
