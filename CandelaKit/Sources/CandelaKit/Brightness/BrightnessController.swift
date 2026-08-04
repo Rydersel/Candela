@@ -71,7 +71,14 @@ public final class BrightnessController {
   /// has no DDC wire and no combined/software routing — every path-selection
   /// consumer (applyPaths, step's combined math, handleReconfigure) short-
   /// circuits to the native leg through this one gate.
-  private var usesNative: Bool { role == .builtIn || (hdrMode != .off && cachedHDRActive) }
+  ///
+  /// Now a CALL into the shared table (B1) rather than a second copy of it: the
+  /// rule and its evidence live in `BrightnessPathPolicy.usesNative`, which is
+  /// pinned against the full table by
+  /// `theStandalonePredicateAgreesWithTheTableEverywhere`.
+  private var usesNative: Bool {
+    BrightnessPathPolicy.usesNative(role: role, hdrMode: hdrMode, isHDRActive: cachedHDRActive)
+  }
 
   /// Whether the display reports HDR capability — a published mirror of the
   /// async-refreshed cache (T10 fix round 1). Computed off the stored cache,
@@ -84,6 +91,36 @@ public final class BrightnessController {
   /// reads STATE from here; `hdrMode` is only the POLICY, so an externally
   /// toggled HDR (mode still `.off`) still reports engaged.
   public var isHDREngaged: Bool { cachedHDRActive }
+
+  /// What is actually driving this display's brightness right now — the same
+  /// answer `applyPaths` acts on, not a description of it (B1).
+  ///
+  /// Computed, not stored: it reads only cached scalars and prefs, and both of
+  /// its invalidation signals already exist — `isHDREngaged` is observable, and
+  /// any pref change bumps `prefsRevision`, which every pane body already reads.
+  /// A stored mirror would need a third invalidation nobody would remember to
+  /// fire, and a path that is stale is worse than no path at all: the whole
+  /// point of the row is that it cannot lie.
+  public var brightnessPath: BrightnessPath {
+    BrightnessPathPolicy.path(pathInputs(tuning: prefs.tuning(for: .brightness)))
+  }
+
+  /// Takes the tuning as an argument rather than reading it: `applyPaths` runs
+  /// on the 60 Hz drag path and already reads the tuning once for the DDC
+  /// conversion, and `prefs.tuning(for:)` is six UserDefaults lookups plus a
+  /// string parse. One read per call, as before this refactor.
+  private func pathInputs(tuning: CommandTuning) -> BrightnessPathPolicy.Inputs {
+    BrightnessPathPolicy.Inputs(
+      role: role,
+      hdrMode: hdrMode,
+      isHDRActive: cachedHDRActive,
+      forceSoftware: prefs.forceSoftware,
+      avoidGamma: prefs.avoidGamma,
+      disableCombinedBrightness: prefs.disableCombinedBrightness,
+      unavailableDDC: tuning.unavailableDDC,
+      switchingValue: switchingValue
+    )
+  }
 
   /// HDR state caches, refreshed by async tasks (init, mode changes,
   /// `noteHDRStateMayHaveChanged`) and only ever *read* on the
@@ -346,8 +383,17 @@ public final class BrightnessController {
 
   /// The four-way fork contract (dossier §2/§10), decided synchronously from
   /// cached state — `cachedHDRActive` is never awaited on the drag path.
+  ///
+  /// The BRANCH now lives in `BrightnessPathPolicy` and this switches over its
+  /// answer (B1). That is what makes the diagnostics pane structurally unable to
+  /// drift from the engine: there is one table, and the engine is what runs it.
+  /// The order the fork's contract depends on is preserved inside the policy,
+  /// where it is pinned by `BrightnessPathPolicyTests`; a `switch` here is
+  /// order-free by construction.
   private func applyPaths(_ value: Double) {
-    if usesNative {
+    let tuning = prefs.tuning(for: .brightness)
+    switch BrightnessPathPolicy.path(pathInputs(tuning: tuning)) {
+    case .native:
       // Local native-leg write: record the expected echo at call time (I15)
       // and invalidate any queued adoption (I9).
       echo.withLock { state in
@@ -356,29 +402,49 @@ public final class BrightnessController {
         state.converging = false
       }
       submitHardware(.native(Float(value)), applier: backends.applierNative)
-      return
-    }
-    if prefs.forceSoftware {
+
+    case .software:
+      // `applySoftware` re-reads `avoidGamma` itself; the backend carried on the
+      // path is for REPORTING. Left alone deliberately — routing the backend
+      // through here would be a behaviour change wearing a refactor's clothes.
       applySoftware(value)
-      return
-    }
-    let tuning = prefs.tuning(for: .brightness)
-    if !prefs.disableCombinedBrightness {
-      let split = DimmingMath.combinedSplit(value: value, switching: switchingValue)
-      if !tuning.unavailableDDC {
-        submitHardware(
-          .ddc(raw: brightnessRaw(split.ddc, tuning: tuning)),
-          applier: brightnessApplier(tuning: tuning)
-        )
-      }
+
+    case let .combined(switching, _):
+      // No `unavailableDDC` guard here any more, and its absence is the point:
+      // ruling R-A makes `.combined` unreachable with a dead DDC leg, so the old
+      // inner `if !tuning.unavailableDDC` was dead code that also implied the
+      // opposite. That state is `.softwareOnly` below, which is where the
+      // skipped submit now lives.
+      let split = DimmingMath.combinedSplit(value: value, switching: switching)
+      submitHardware(
+        .ddc(raw: brightnessRaw(split.ddc, tuning: tuning)),
+        applier: brightnessApplier(tuning: tuning)
+      )
       applySoftware(split.sw)
+
+    case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
+      // Combined mode with its DDC brightness command turned off: the register
+      // write is skipped and the software leg still runs — but on the COMBINED
+      // SPLIT value, never on the raw value. `applySoftware(value)` here would
+      // silently convert this display to full-range software dimming, which is a
+      // different feature. `PathSelectionTests` pins it under the name
+      // `aDisabledBrightnessCommandWritesNoDDCButStillFixesTheSoftwareLeg`.
+      applySoftware(DimmingMath.combinedSplit(value: value, switching: dimsBelow).sw)
+
+    case .hardware:
+      submitHardware(
+        .ddc(raw: brightnessRaw(value, tuning: tuning)),
+        applier: brightnessApplier(tuning: tuning)
+      )
+
+    case .unavailable:
+      // DDC brightness turned off with no software leg left to carry the value —
+      // combined mode disabled, or combined mode with a zero-width software band.
+      // The old code expressed the first of those as a bare `guard … else
+      // { return }` and reached the second by handing the software leg a flat 1;
+      // it is now a NAMED state the pane can report.
       return
     }
-    guard !tuning.unavailableDDC else { return }
-    submitHardware(
-      .ddc(raw: brightnessRaw(value, tuning: tuning)),
-      applier: brightnessApplier(tuning: tuning)
-    )
   }
 
   /// M4 tuning on the DDC leg: min/max overrides, 9-step curve, invert. The
@@ -784,12 +850,43 @@ public final class BrightnessController {
   /// `handleReconfigure`'s early `return` failed to act on.
   private enum SoftwareBackendChoice { case none, gamma, shade }
 
+  /// A projection of the same table (B1) — the third copy of the rule, retired.
+  ///
+  /// `.softwareOnly` must answer with its backend exactly as `.software` and
+  /// `.combined` do: folding it into `.none` would strand a scaled gamma table
+  /// installed forever, because `reapplyAfterPrefChange` tears down only the
+  /// backend this does NOT name.
+  ///
+  /// RECORDED BEHAVIOUR CHANGE, `.unavailable → .none`.
+  /// `BrightnessPath` cannot tell apart the two engine states that reach
+  /// `.unavailable(.ddcTurnedOffWithNoSoftwareLeg)`, and the pre-refactor
+  /// prefs-shaped version answered them differently:
+  ///
+  /// - (A) combined DISABLED + `unavailableDDC` — answered `.none`, as here.
+  /// - (B) combined ON + `unavailableDDC` + `switchingValue == 0` (pref point
+  ///   −8, "pure hardware") — answered `.gamma`/`.shade`, because that arm keys
+  ///   off `!disableCombinedBrightness` alone. This now answers `.none` too.
+  ///
+  /// Safe TODAY because the only consumer is `reapplyAfterPrefChange`, and in
+  /// state (B) `combinedSplit`'s hardware branch always wins, so the software
+  /// leg is pinned at `sw == 1` — "reset gamma to 1.0 / remove the shade" and
+  /// "apply sw 1" land on the same screen. `PathSelectionTests` pins that
+  /// equivalence rather than leaving it assumed
+  /// (`combinedWithDDCOffAndAZeroWidthBandLeavesNoDimmingBehind`).
+  ///
+  /// It stops being safe the moment a consumer other than
+  /// `reapplyAfterPrefChange` acts differently on `.none` than on
+  /// `.gamma`/`.shade` — a backend-liveness readout, say, or anything that
+  /// treats `.none` as "this display has no software leg configured" rather
+  /// than "nothing needs to be left installed". At that point state (B) needs a
+  /// distinguishable path, not a distinguishable branch here.
   private var softwareBackendChoice: SoftwareBackendChoice {
-    guard !usesNative else { return .none }
-    if prefs.forceSoftware || !prefs.disableCombinedBrightness {
-      return prefs.avoidGamma ? .shade : .gamma
+    switch BrightnessPathPolicy.path(pathInputs(tuning: prefs.tuning(for: .brightness))) {
+    case .native, .hardware, .unavailable:
+      .none
+    case let .software(backend), let .combined(_, backend), let .softwareOnly(backend, _, _):
+      backend == .overlay ? .shade : .gamma
     }
-    return .none
   }
 
   /// The ONE door for "a pref that affects dimming just changed" (D28).
