@@ -52,6 +52,17 @@ final class AppModel {
   /// have to drive the same session.
   let displayModes = DisplayModeCoordinator()
 
+  /// THE topology sample every part of the app resolves through (DT15). Handed
+  /// to every `BrightnessController` so the shade and the gamma activity
+  /// enforcer get an ID that is already guaranteed drawable; every reader gets
+  /// a value, never a query.
+  ///
+  /// NOTHING UPDATES IT YET — a later task wires the sampler that calls
+  /// `update(_:)` at launch and on every screen-parameters change. Until then
+  /// it holds the empty topology, whose resolution is the identity function, so
+  /// the engine behaves exactly as it did before this seam existed.
+  let mirrorTopology = MirrorTopologyStore()
+
   /// App-level M4 prefs (startupAction, multiKeyboardVolume, showContrast)
   /// read through one DisplayPrefs like the engine does; the persistence key
   /// is irrelevant for unsuffixed accessors. Assigned in `init` rather than
@@ -525,7 +536,8 @@ final class AppModel {
         legacyKey: "brightness.\(persistenceKey)",
         // Seeded here so the next pass's rebind — which happens on every
         // refresh — is not mistaken for a panel swap.
-        panelIdentity: persistenceKey
+        panelIdentity: persistenceKey,
+        mirrorTopology: mirrorTopology
       )
       let volume = DDCValueController(
         writer: entry.writer, command: .volume, prefs: prefs,
@@ -643,10 +655,11 @@ final class AppModel {
       ),
       prefs: DisplayPrefs(persistenceKey: "builtIn"), // role .builtIn ignores prefs
       displayID: found.id,
-      role: .builtIn
+      role: .builtIn,
       // store/storageKey/legacyKey stay nil (re-review T10-E): macOS owns
       // built-in brightness across launches; the controller seeds from a
       // native read at init.
+      mirrorTopology: mirrorTopology
     )
     // Inert value controllers: the built-in has no DDC wire, so their
     // `isAvailable` stays true but every write no-ops on `NoopDDCWriter`.

@@ -645,13 +645,20 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       let persistenceKey = state.display.persistenceKey
       let monitor = interferenceMonitor
       let gamma = gammaController
+      // Hoisted like the two above so the hook never captures `self`.
+      let topology = model.mirrorTopology
       state.controller.preGammaApplyHook = { [weak controller = state.controller] in
         monitor.checkBeforeApply(displayID: displayID, displayName: displayName) {
           // Accept: this display stops using gamma for good...
           DisplayPrefs(persistenceKey: persistenceKey).avoidGamma = true
           // ...hand its table back (per-display; `resetAllGamma` would drop
           // every other display's dimming too)...
-          gamma.applyGammaScale(1.0, on: displayID)
+          // Scale 1.0 is a hand-back, so the write target and the enforcer
+          // target are the same display; the enforcer still has to be on a
+          // drawable one, which is the store's job to say (DT15).
+          gamma.applyGammaScale(
+            1.0, on: displayID, enforcerOn: topology.drawableDisplayID(for: displayID)
+          )
           // ...and re-apply the current brightness through the shade backend.
           // `handleReconfigure` is the public door for that: it clears the
           // software dedupe memo (which `setBrightness` alone would trip over,

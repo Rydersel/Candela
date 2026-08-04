@@ -43,8 +43,10 @@ final class FakeShade: ShadeRendering {
   private(set) var removedAllCount = 0
   private(set) var repinCount = 0
 
-  func setShadeAlpha(_ alpha: Double, on displayID: CGDirectDisplayID) {
+  @discardableResult
+  func setShadeAlpha(_ alpha: Double, on displayID: CGDirectDisplayID) -> Bool {
     alphaCalls.append((alpha, displayID))
+    return true
   }
 
   func removeShade(for displayID: CGDirectDisplayID) { removed.append(displayID) }
@@ -59,7 +61,9 @@ final class FakeGamma: GammaApplying {
   private(set) var resetCount = 0
 
   @discardableResult
-  func applyGammaScale(_ scale: Double, on _: CGDirectDisplayID) -> Bool {
+  func applyGammaScale(
+    _ scale: Double, on _: CGDirectDisplayID, enforcerOn _: CGDirectDisplayID
+  ) -> Bool {
     scales.append(scale)
     return true
   }

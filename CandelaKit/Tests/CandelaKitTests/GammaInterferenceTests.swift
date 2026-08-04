@@ -27,7 +27,9 @@ final class FakeInterferenceGamma: GammaApplying {
   }
 
   @discardableResult
-  func applyGammaScale(_ scale: Double, on _: CGDirectDisplayID) -> Bool {
+  func applyGammaScale(
+    _ scale: Double, on _: CGDirectDisplayID, enforcerOn _: CGDirectDisplayID
+  ) -> Bool {
     events.append(.apply(scale))
     return true
   }

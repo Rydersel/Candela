@@ -211,6 +211,11 @@ public final class BrightnessController {
   /// fork's (review M35): a fresh controller always applies its first value.
   @ObservationIgnored private var lastAppliedSw: Double?
 
+  /// The engine boundary (DT15). Consulted for anything that needs a display
+  /// with a DESKTOP — the shade window and the gamma activity enforcer — and
+  /// never for the DDC or gamma write targets, which stay the raw panel ID.
+  @ObservationIgnored private let mirrorTopology: any MirrorTopologyProviding
+
   /// Gamma-interference hook (Task 9 wires the monitor): invoked ONLY when
   /// the gamma backend — not the shade — is about to apply and the sw dedupe
   /// did not skip. The C1 clearing's restore-to-1.0 bypasses it on purpose:
@@ -261,8 +266,13 @@ public final class BrightnessController {
     store: (any BrightnessStoring)? = nil,
     storageKey: String? = nil,
     legacyKey: String? = nil,
-    panelIdentity: String? = nil
+    panelIdentity: String? = nil,
+    // Defaulted to an empty store, whose resolution is the identity function:
+    // an unwired engine degrades to exactly today's behaviour. Appended LAST so
+    // every existing construction site compiles unchanged.
+    mirrorTopology: any MirrorTopologyProviding = MirrorTopologyStore()
   ) {
+    self.mirrorTopology = mirrorTopology
     self.writer = writer
     self.backends = backends
     self.prefs = prefs
@@ -553,19 +563,50 @@ public final class BrightnessController {
     )
   }
 
+  /// Where this display's pixels actually are: itself, or its mirror master.
+  /// Read fresh on every use — the topology is a sample of one instant and a
+  /// cached copy would be a promise about a machine that has moved on.
+  private var drawableDisplayID: CGDirectDisplayID {
+    mirrorTopology.drawableDisplayID(for: displayID)
+  }
+
   /// The software leg, inline and synchronous on the main actor. `sw` is the
   /// raw 0…1 software value; the backend receives the transformed physical
   /// multiplier (dossier §3: the transform applies before any gamma/shade
   /// write). Deduped on the last-applied sw value.
+  ///
+  /// DT17: the dedupe memo is now written ONLY when the backend says the write
+  /// landed. Before, `lastAppliedSw` was set before the backend was even asked,
+  /// so a shade that could not be created (a mirror slave has no `NSScreen`)
+  /// dimmed nothing and then deduped every identical retry away forever — the
+  /// display stayed bright while the engine reported the value as applied.
   private func applySoftware(_ sw: Double) {
     guard lastAppliedSw != sw else { return }
-    lastAppliedSw = sw
     let transformed = DimmingMath.swTransform(sw, allowZero: prefs.allowZeroSwBrightness, reverse: false)
+    let drawable = drawableDisplayID
+    let landed: Bool
     if prefs.avoidGamma {
-      backends.shade?.setShadeAlpha(DimmingMath.shadeAlpha(fromValue: transformed), on: displayID)
+      // `?? true` is "no backend is configured, so there is nothing that could
+      // have failed" — the same meaning the optional chain had before.
+      landed = backends.shade.map {
+        $0.setShadeAlpha(DimmingMath.shadeAlpha(fromValue: transformed), on: drawable)
+      } ?? true
     } else if let gamma = backends.gamma {
       preGammaApplyHook?()
-      gamma.applyGammaScale(transformed, on: displayID)
+      // The WRITE target stays the RAW panel ID; only the enforcer resolves.
+      landed = gamma.applyGammaScale(transformed, on: displayID, enforcerOn: drawable)
+    } else {
+      landed = true
+    }
+    if landed {
+      lastAppliedSw = sw
+    } else {
+      // Left nil rather than set, so the next identical value is attempted
+      // again instead of being deduped into silence.
+      lastAppliedSw = nil
+      pathLog.error(
+        "Software dimming did not land on display \(self.displayID, privacy: .public) (drawable \(drawable, privacy: .public))"
+      )
     }
   }
 
@@ -579,8 +620,9 @@ public final class BrightnessController {
   /// on entering always-on — those are per-display user choices (documented
   /// divergence).
   private func clearSoftwareLeg() {
-    backends.shade?.removeShade(for: displayID)
-    backends.gamma?.applyGammaScale(1.0, on: displayID)
+    let drawable = drawableDisplayID
+    backends.shade?.removeShade(for: drawable)
+    backends.gamma?.applyGammaScale(1.0, on: displayID, enforcerOn: drawable)
     lastAppliedSw = nil
   }
 
@@ -1046,8 +1088,9 @@ public final class BrightnessController {
   /// replugs — but it is a behavior change, not part of this fix.)
   public func reapplyAfterPrefChange() {
     let choice = softwareBackendChoice
-    if choice != .shade { backends.shade?.removeShade(for: displayID) }
-    if choice != .gamma { backends.gamma?.applyGammaScale(1.0, on: displayID) }
+    let drawable = drawableDisplayID
+    if choice != .shade { backends.shade?.removeShade(for: drawable) }
+    if choice != .gamma { backends.gamma?.applyGammaScale(1.0, on: displayID, enforcerOn: drawable) }
     lastAppliedSw = nil
     coalescer.resetDuplicateState()
     applyPaths(brightness)
