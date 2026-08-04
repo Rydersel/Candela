@@ -50,6 +50,19 @@ public struct MirrorTopology: Sendable, Equatable {
 
   /// The master whose picture `displayID` is showing, or nil when it is showing
   /// its own.
+  ///
+  /// MAY NAME AN ID THAT IS NOT IN `displays`, and that is deliberate. A slave
+  /// names its master by ID; that master need not be in the sample, because the
+  /// sample can be stale or can have been built from a filtered list (externals
+  /// only, say, dropping a built-in master). This is the honest report of what
+  /// the slave says, so it is not intersected the way `setMembers(containing:)`
+  /// is — the difference is that `setMembers` feeds `disengage`, which STAGES a
+  /// change per member into an all-or-nothing transaction, where one phantom
+  /// would stop a perfectly breakable set from breaking at all. Nothing stages
+  /// from this.
+  ///
+  /// So: fine to display, fine to compare; look the result up in `displays`
+  /// before treating it as a display you can act on.
   public func master(of displayID: CGDirectDisplayID) -> CGDirectDisplayID? {
     guard let entry = displays.first(where: { $0.id == displayID }), entry.isMirrorSlave
     else { return nil }

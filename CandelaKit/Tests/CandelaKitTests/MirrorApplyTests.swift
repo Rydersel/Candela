@@ -111,4 +111,76 @@ struct MirrorApplyTests {
     try fake.applyMirroring([], scope: .session)
     #expect(fake.appliedMirroring.isEmpty)
   }
+
+  /// The fake must not be able to fail where production cannot.
+  /// `CoreGraphicsDisplayConfigurator.applyMirroring` returns on its empty-batch
+  /// guard BEFORE it reaches anything that can fail, so an empty batch cannot
+  /// throw no matter what CoreGraphics would have done.
+  ///
+  /// The fake has an injection point production does not, and if it were
+  /// checked first, an empty batch WOULD throw. That is not a theoretical
+  /// asymmetry: `MirrorTopologyPolicy.changes(from:to:)` returns `[]` whenever
+  /// the live topology already matches the capture — the common case on a
+  /// revert — so a session test that set `failMirroringWith` and drove a revert
+  /// would exercise, and then enshrine, a "revert failed" branch unreachable in
+  /// shipped code.
+  @Test func anEmptyBatchCannotFailEvenWithFailureInjected() throws {
+    let fake = FakeConfigurator()
+    fake.failMirroringWith = DisplayConfigError(cgErrorCode: 1001)
+    try fake.applyMirroring([], scope: .session)
+    #expect(fake.appliedMirroring.isEmpty)
+    // Still armed for a batch that actually stages something.
+    #expect(throws: DisplayConfigError(cgErrorCode: 1001)) {
+      try fake.applyMirroring([MirrorChange(display: 1, master: 2)], scope: .session)
+    }
+  }
+
+  /// The fake computes MASTER membership itself; a SLAVE gets
+  /// `isInMirrorSet == true` only because `ConfiguredDisplay.init` ORs in
+  /// `mirrorsDisplay != kCGNullDirectDisplay`. That is a real dependency on
+  /// another type's derivation, and nothing else asserts it — so without this
+  /// test, deleting that OR would leave the fake reporting every slave as
+  /// outside the set it is plainly in, with the whole suite still green.
+  ///
+  /// `setMembers(containing:)` is asserted from BOTH ends because it is the
+  /// predicate `MirrorTopologyPolicy.disengage` breaks a set with: asked about
+  /// the slave or about the master, one set, same members.
+  @Test func theFakeReportsSlaveMembershipAndSetMembersLikeCoreGraphicsDoes() throws {
+    let fake = FakeConfigurator()
+    fake.configuredDisplays = [
+      ConfiguredDisplay(id: 1, identity: .init(vendor: 1, model: 1, serial: 1, isBuiltIn: true),
+                        name: "Built-in Display", isBuiltIn: true),
+      ConfiguredDisplay(id: 2, identity: .init(vendor: 2, model: 2, serial: 2, isBuiltIn: false),
+                        name: "Display 2", isBuiltIn: false),
+      ConfiguredDisplay(id: 3, identity: .init(vendor: 3, model: 3, serial: 3, isBuiltIn: false),
+                        name: "Display 3", isBuiltIn: false),
+    ]
+    try fake.applyMirroring(
+      [MirrorChange(display: 2, master: 1), MirrorChange(display: 3, master: 1)],
+      scope: .session
+    )
+
+    let live = MirrorTopology(fake.displays())
+    let slaves = live.displays.filter { $0.id == 2 || $0.id == 3 }
+    // The rig read exactly this off real CoreGraphics: inMirrorSet=1 on the
+    // slave while engaged, 0 after the break.
+    // Closure form, not `allSatisfy(\.isInMirrorSet)`: the `#expect` macro
+    // decomposes a function call into a `rethrows` invocation whose argument it
+    // cannot prove non-throwing, so the keypath spelling does not compile.
+    #expect(slaves.allSatisfy { $0.isInMirrorSet })
+    #expect(slaves.allSatisfy { $0.isMirrorSlave })
+    #expect(slaves.allSatisfy { !$0.isMirrorMaster })
+    #expect(live.setMembers(containing: 2) == [1, 2, 3])
+    #expect(live.setMembers(containing: 1) == [1, 2, 3])
+
+    try fake.applyMirroring(
+      [MirrorChange(display: 2, master: kCGNullDirectDisplay),
+       MirrorChange(display: 3, master: kCGNullDirectDisplay)],
+      scope: .session
+    )
+    let after = MirrorTopology(fake.displays())
+    #expect(after.displays.allSatisfy { !$0.isInMirrorSet })
+    #expect(after.setMembers(containing: 2).isEmpty)
+    #expect(after.setMembers(containing: 1).isEmpty)
+  }
 }

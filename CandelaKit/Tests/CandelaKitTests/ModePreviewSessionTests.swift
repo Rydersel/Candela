@@ -96,21 +96,43 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
 
   func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws {
     try lock.withLock {
-      if let _failMirroringWith { throw _failMirroringWith }
+      // ORDER IS LOAD-BEARING: the empty-batch guard runs BEFORE the injection
+      // point, because `CoreGraphicsDisplayConfigurator.applyMirroring` returns
+      // on its own empty guard before it can reach anything that fails. A fake
+      // that checked `failMirroringWith` first would throw for an empty batch —
+      // a failure production cannot produce.
+      //
+      // Not hypothetical. `MirrorTopologyPolicy.changes(from:to:)` returns `[]`
+      // whenever the live topology already matches the capture, which is the
+      // COMMON case on a revert. A session test that set `failMirroringWith`
+      // and drove a revert would otherwise exercise, and then enshrine, a
+      // "revert failed" branch that is unreachable in shipped code.
       guard !changes.isEmpty else { return }
+      if let _failMirroringWith { throw _failMirroringWith }
       _appliedMirroring.append(AppliedMirroring(changes: changes, scope: scope))
       // The fake's topology follows the change, so a session that re-reads
       // `displays()` after applying sees what it asked for — which is what
       // makes the revert-path tests real rather than tautological.
       //
-      // Membership is RECOMPUTED over the whole post-state rather than read off
-      // the batch, and that distinction is load-bearing. A master is usually not
-      // named in `changes` at all (engaging names only the slaves), so deriving
-      // its membership from the batch leaves it `isInMirrorSet == false` — and
-      // `isMirrorMaster` requires the flag, so `MirrorTopology.masters` would
-      // come back EMPTY from a topology that plainly has a master. The mirror
-      // that a test then "breaks" would be one no policy could see. CoreGraphics
-      // reports the master as a set member; so does this.
+      // MASTER membership is RECOMPUTED over the whole post-state rather than
+      // read off the batch, and that distinction is load-bearing. A master is
+      // usually not named in `changes` at all (engaging names only the slaves),
+      // so deriving its membership from the batch leaves it
+      // `isInMirrorSet == false` — and `isMirrorMaster` requires the flag, so
+      // `MirrorTopology.masters` would come back EMPTY from a topology that
+      // plainly has a master. The mirror that a test then "breaks" would be one
+      // no policy could see. CoreGraphics reports the master as a set member;
+      // so does this.
+      //
+      // SLAVE membership is NOT computed here. The expression below asks only
+      // "does anyone mirror me", which is true of masters and false of slaves;
+      // a slave arrives at `isInMirrorSet == true` solely because
+      // `ConfiguredDisplay.init` ORs in `mirrorsDisplay != kCGNullDirectDisplay`
+      // (`DisplayConfiguring.swift:96`). That is a real dependency on another
+      // type's derivation, not an accident, and
+      // `theFakeReportsSlaveMembershipAndSetMembersLikeCoreGraphicsDoes` asserts
+      // it — otherwise deleting that OR would leave the fake lying about every
+      // slave with this suite still green.
       let post = _configuredDisplays.map { display in
         (display, changes.first { $0.display == display.id }?.master ?? display.mirrorsDisplay)
       }
