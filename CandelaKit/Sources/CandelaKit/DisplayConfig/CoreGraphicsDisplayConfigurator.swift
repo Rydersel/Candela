@@ -41,7 +41,12 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
         ),
         name: isBuiltIn ? "Built-in Display" : "Display \(id)",
         isBuiltIn: isBuiltIn,
-        mirrorsDisplay: CGDisplayMirrorsDisplay(id)
+        mirrorsDisplay: CGDisplayMirrorsDisplay(id),
+        // Both mirror-set calls, in the same loop iteration as everything else:
+        // the mirror state has to describe the same instant as the list, and a
+        // caller asking later is asking about a topology that may have moved on.
+        isInMirrorSet: CGDisplayIsInHWMirrorSet(id) != 0 || CGDisplayIsInMirrorSet(id) != 0,
+        isAlwaysInMirrorSet: CGDisplayIsAlwaysInMirrorSet(id) != 0
       )
     }
   }

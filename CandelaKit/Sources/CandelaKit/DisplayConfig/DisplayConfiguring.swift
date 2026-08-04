@@ -38,23 +38,63 @@ public struct ConfiguredDisplay: Sendable, Equatable, Identifiable {
   /// resolution is the set's resolution.
   public let mirrorsDisplay: CGDirectDisplayID
 
+  /// This display belongs to a mirror set — as MASTER or as slave. Sampled in
+  /// the same `displays()` loop as everything else here, so it describes the
+  /// same instant as the list.
+  ///
+  /// The DISJUNCTION of `CGDisplayIsInHWMirrorSet` and `CGDisplayIsInMirrorSet`.
+  /// The header says the general call is the superset, so the hardware call is
+  /// redundant on a conforming driver — but both shipped Candela paths already
+  /// tested the disjunction, it costs one branch, and it survives a driver that
+  /// reports one and not the other. Preserved deliberately, not incidentally.
+  public let isInMirrorSet: Bool
+
+  /// This display is in a mirror set it CANNOT be removed from
+  /// (`CGDisplayIsAlwaysInMirrorSet`). Sidecar and AirPlay receivers are the
+  /// suspects; which displays actually report it on macOS 26 is UNVERIFIED,
+  /// which is exactly why it is a field and a policy row rather than a special
+  /// case.
+  ///
+  /// The defect it closes: the transplanted `Mirroring.engageMirror` saw such a
+  /// display as "in a mirror set", took the break branch, staged a change that
+  /// could not succeed, discarded the return, and reported success — forever.
+  public let isAlwaysInMirrorSet: Bool
+
   /// True for the SLAVE of a mirror set only. Its own mode decides almost
   /// nothing while the mirror lasts — the pixels on it come from the master —
   /// so it is not a display an unattended pass should be reconfiguring.
   public var isMirrorSlave: Bool { mirrorsDisplay != kCGNullDirectDisplay }
+
+  /// The display that OWNS the framebuffer a mirror set is showing.
+  ///
+  /// Requires BOTH halves. `CGDisplayMirrorsDisplay` returns null for a master
+  /// and for a standalone display alike, so it is not a membership test on its
+  /// own — this is the exact predicate that was hand-written at
+  /// `KeyActionExecutor.swift:250-251` before this type carried it.
+  public var isMirrorMaster: Bool {
+    isInMirrorSet && mirrorsDisplay == kCGNullDirectDisplay
+  }
 
   public init(
     id: CGDirectDisplayID,
     identity: DisplayConfigIdentity,
     name: String,
     isBuiltIn: Bool,
-    mirrorsDisplay: CGDirectDisplayID = kCGNullDirectDisplay
+    mirrorsDisplay: CGDirectDisplayID = kCGNullDirectDisplay,
+    isInMirrorSet: Bool = false,
+    isAlwaysInMirrorSet: Bool = false
   ) {
     self.id = id
     self.identity = identity
     self.name = name
     self.isBuiltIn = isBuiltIn
     self.mirrorsDisplay = mirrorsDisplay
+    // DERIVED here rather than trusted from the caller: a slave that claims not
+    // to be in a mirror set is not a state any caller should have to defend
+    // against, and the defaulted parameters make it constructible by accident
+    // in every fixture that sets only `mirrorsDisplay`.
+    self.isInMirrorSet = isInMirrorSet || mirrorsDisplay != kCGNullDirectDisplay
+    self.isAlwaysInMirrorSet = isAlwaysInMirrorSet
   }
 }
 
