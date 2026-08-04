@@ -103,6 +103,24 @@ public struct DisplayConfigError: Error, Sendable, Equatable {
   public init(cgErrorCode: Int32) { self.cgErrorCode = cgErrorCode }
 }
 
+/// One staged mirror change. `master == kCGNullDirectDisplay` REMOVES `display`
+/// from any mirror set it is in — the only removal path there is; the API has
+/// no dissolve-the-set call.
+///
+/// A named struct rather than the tuple the research sketched, for one concrete
+/// reason: the fake conformance has to record what it was asked for and a test
+/// has to `#expect` it against an expected list, and a tuple array is not
+/// `Equatable`.
+public struct MirrorChange: Sendable, Equatable {
+  public let display: CGDirectDisplayID
+  public let master: CGDirectDisplayID
+
+  public init(display: CGDirectDisplayID, master: CGDirectDisplayID) {
+    self.display = display
+    self.master = master
+  }
+}
+
 /// The seam between display-configuration policy and CoreGraphics. Everything
 /// decidable is tested against a fake conformance; the real one is a thin
 /// adapter with no judgement in it.

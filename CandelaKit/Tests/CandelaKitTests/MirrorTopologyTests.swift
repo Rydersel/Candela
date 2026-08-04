@@ -1,0 +1,128 @@
+import CoreGraphics
+import Foundation
+import Testing
+@testable import CandelaKit
+
+/// Fixtures for a topology. Shared by both mirror suites: the policy tests
+/// reason about the same shapes these pin.
+enum MirrorFixtures {
+  static func display(
+    _ id: CGDirectDisplayID,
+    mirrors: CGDirectDisplayID = kCGNullDirectDisplay,
+    inSet: Bool = false,
+    always: Bool = false,
+    builtIn: Bool = false
+  ) -> ConfiguredDisplay {
+    ConfiguredDisplay(
+      id: id,
+      identity: DisplayConfigIdentity(vendor: 1, model: 2, serial: id, isBuiltIn: builtIn),
+      name: builtIn ? "Built-in Display" : "Display \(id)",
+      isBuiltIn: builtIn,
+      mirrorsDisplay: mirrors,
+      isInMirrorSet: inSet,
+      isAlwaysInMirrorSet: always
+    )
+  }
+
+  /// Built-in 1 (standalone) + external 2 (standalone). The rig the hotkey sees
+  /// on a laptop with one monitor plugged in.
+  static var unmirroredPair: MirrorTopology {
+    MirrorTopology([display(1, builtIn: true), display(2)])
+  }
+
+  /// External 2 is the master; the built-in 1 and external 3 mirror it. This is
+  /// what the fork's toggle produces — it picks the first non-built-in as
+  /// master and makes the built-in a slave, deliberately.
+  static var mirroredTrio: MirrorTopology {
+    MirrorTopology([
+      display(1, mirrors: 2, builtIn: true),
+      display(2, inSet: true),
+      display(3, mirrors: 2),
+    ])
+  }
+}
+
+@Suite("Mirror topology reconstruction (DT13)")
+struct MirrorTopologyTests {
+  private func display(
+    _ id: CGDirectDisplayID,
+    mirrors: CGDirectDisplayID = kCGNullDirectDisplay,
+    inSet: Bool = false,
+    always: Bool = false,
+    builtIn: Bool = false
+  ) -> ConfiguredDisplay {
+    MirrorFixtures.display(id, mirrors: mirrors, inSet: inSet, always: always, builtIn: builtIn)
+  }
+
+  @Test func aSetIsReconstructedByGroupingOnTheMasterEachSlaveNames() {
+    let topology = MirrorFixtures.mirroredTrio
+    #expect(topology.masters == [2])
+    #expect(topology.slaves(of: 2) == [1, 3])
+    #expect(topology.master(of: 1) == 2)
+    #expect(topology.master(of: 2) == nil)
+    #expect(topology.setMembers(containing: 3) == [1, 2, 3])
+  }
+
+  @Test func anUnmirroredRigHasNoMastersAndNoSets() {
+    let topology = MirrorFixtures.unmirroredPair
+    #expect(topology.masters.isEmpty)
+    #expect(topology.slaves(of: 2).isEmpty)
+    #expect(topology.master(of: 2) == nil)
+    #expect(topology.setMembers(containing: 2).isEmpty)
+  }
+
+  /// The exact replacement for `KeyActionExecutor.expandToMirrorSet`: a master
+  /// expands to its set so every member gets the same brightness step, and
+  /// anything else expands to itself.
+  @Test func expandingAMasterYieldsTheWholeSetAndAnythingElseYieldsItself() {
+    let topology = MirrorFixtures.mirroredTrio
+    #expect(topology.expand(2) == [2, 1, 3])
+    #expect(topology.expand(1) == [1])
+    #expect(topology.expand(99) == [99])
+  }
+
+  /// THE ENGINE BOUNDARY. A slave's pixels live on its master, so anything that
+  /// needs a drawable display — an `NSScreen`, a window origin, the gamma
+  /// activity enforcer — asks for this and gets an ID that has one.
+  @Test func aSlaveResolvesToItsMasterAndEverythingElseResolvesToItself() {
+    let topology = MirrorFixtures.mirroredTrio
+    #expect(topology.drawableDisplayID(for: 1) == 2)
+    #expect(topology.drawableDisplayID(for: 3) == 2)
+    #expect(topology.drawableDisplayID(for: 2) == 2)
+  }
+
+  /// A stale or empty sample must never INVENT a target. Returning the
+  /// display's own ID is exactly today's behaviour, which then fails its
+  /// `NSScreen` lookup and is reported as a failure (DT17) rather than guessed.
+  @Test func anUnknownDisplayResolvesToItselfRatherThanToAGuess() {
+    #expect(MirrorTopology([]).drawableDisplayID(for: 42) == 42)
+    #expect(MirrorFixtures.mirroredTrio.drawableDisplayID(for: 42) == 42)
+  }
+
+  @Test func aDisplayLockedIntoASetIsReportedAsUnbreakable() {
+    let topology = MirrorTopology([display(1, builtIn: true), display(2, mirrors: 1, always: true)])
+    #expect(topology.cannotBeUnmirrored(2))
+    #expect(!topology.cannotBeUnmirrored(1))
+    #expect(!topology.cannotBeUnmirrored(99))
+  }
+
+  /// Every list this type hands out is `id`-ascending, never in
+  /// `CGGetOnlineDisplayList` order. "Whichever came back first" is not an
+  /// answer that can be reproduced in a bug report.
+  @Test func everyListIsSortedByDisplayIDRegardlessOfSampleOrder() {
+    let topology = MirrorTopology([
+      display(7, mirrors: 4), display(4, inSet: true), display(2, mirrors: 4),
+    ])
+    #expect(topology.slaves(of: 4) == [2, 7])
+    #expect(topology.expand(4) == [4, 2, 7])
+    #expect(topology.setMembers(containing: 7) == [2, 4, 7])
+  }
+
+  /// `kCGNullDirectDisplay` is what EVERY standalone display names, so asking
+  /// for its slaves would otherwise gather up every unmirrored display on the
+  /// machine and call it a set. Null is not a display and never has members.
+  @Test func theNullDisplayIsNeverASetNoMatterHowManyDisplaysNameIt() {
+    #expect(MirrorFixtures.unmirroredPair.slaves(of: kCGNullDirectDisplay).isEmpty)
+    #expect(MirrorFixtures.mirroredTrio.slaves(of: kCGNullDirectDisplay).isEmpty)
+  }
+}
