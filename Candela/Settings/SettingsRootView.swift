@@ -17,11 +17,27 @@ import SwiftUI
 @MainActor
 struct SettingsRootView: View {
   @State private var selection: SettingsDestination? = .pane(.general)
+  /// Pinned to `.all`, and it has to be BOUND rather than left `.automatic`.
+  ///
+  /// Without it, AppKit's `NSSplitView` may collapse the sidebar when the window
+  /// is squeezed — and it autosaves that under
+  /// `"NSSplitView Subview Frames …SidebarNavigationSplitView"`, so the collapse
+  /// survives relaunch. There is no sidebar-toggle item in this window's
+  /// toolbar, so once collapsed there was **no way back from inside the app**:
+  /// every pane and every display disappeared from navigation permanently.
+  ///
+  /// Measured 2026-08-04. A display being rotated and mirrored under an open
+  /// settings window squeezed it, the sidebar collapsed, and the stored frames
+  /// came back `"0, 0, 208, 568, YES, NO"` — collapsed — on every subsequent
+  /// launch. Recovery took a `defaults delete`, which is not a thing to ask of
+  /// anyone. Re-asserting `.all` on appearance is what makes the state
+  /// unstickable.
+  @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
   @Environment(AppModel.self) private var model
 
   var body: some View {
-    NavigationSplitView {
+    NavigationSplitView(columnVisibility: $columnVisibility) {
       SettingsSidebar(selection: $selection)
         .navigationSplitViewColumnWidth(min: 190, ideal: 200, max: 240)
     } detail: {
