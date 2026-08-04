@@ -61,13 +61,43 @@ struct MirroringSection: View {
       .sorted { $0.id < $1.id }
   }
 
-  private var isInSet: Bool { !topology.setMembers(containing: displayID).isEmpty }
+  /// The set this display belongs to, as `MirrorTopologyPolicy.disengage` will
+  /// read it: the members, id-ascending, intersected with the sample.
+  private var setMembers: [CGDirectDisplayID] { topology.setMembers(containing: displayID) }
+
+  private var isInSet: Bool { !setMembers.isEmpty }
   private var isLocked: Bool { topology.cannotBeUnmirrored(displayID) }
+
+  /// Members macOS will not release. Not the same question as `isLocked`, which
+  /// is about THIS display only — a perfectly free master can be in a set full
+  /// of them, and that is the shape every overclaim below was hiding.
+  private var lockedMembers: [ConfiguredDisplay] {
+    let members = Set(setMembers)
+    return topology.displays.filter { members.contains($0.id) && $0.isAlwaysInMirrorSet }
+  }
+
+  /// `MirrorTopologyPolicy.dissolve`'s eligibility rule, re-read here from the
+  /// same sample the button will act on: **a set is broken by removing its
+  /// SLAVES**, so if no slave can be removed the set survives whatever is
+  /// staged, and the policy REFUSES rather than disengaging.
+  ///
+  /// Read so the button can be dead-with-a-reason instead of live-and-refusing.
+  /// Clicking it in that state was reachable and printed a sentence about this
+  /// display being mirrored and locked when it is neither — this is the same
+  /// judgement, made before the click instead of after it. It is not a second
+  /// opinion about the topology: the answer comes from `topology`, the
+  /// coordinator's own sample, and the policy re-decides on a fresh one anyway.
+  private var canBreakSet: Bool {
+    let members = Set(setMembers)
+    return topology.displays.contains {
+      members.contains($0.id) && $0.isMirrorSlave && !$0.isAlwaysInMirrorSet
+    }
+  }
 
   var body: some View {
     let _ = model.prefsRevision
     Section(MirroringCopy.sectionTitle) {
-      LabeledContent("Status") {
+      LabeledContent(MirroringCopy.statusLabel) {
         Text(verbatim: MirroringCopy.state(
           topology: topology, displayID: displayID, name: name
         ))
@@ -83,24 +113,19 @@ struct MirroringSection: View {
         // displays actually report `isAlwaysInMirrorSet` on macOS 26 is
         // UNVERIFIED — Sidecar and AirPlay are the suspects — which is exactly
         // why it is a stated reason rather than a bare grey button.
-        stopControl(enabled: false, caption: MirroringCopy.cannotBeUnmirrored)
+        stopControl(enabled: false, caption: SettingsCaption(MirroringCopy.cannotBeUnmirrored))
       } else if isInSet {
-        stopControl(
-          enabled: !coordinator.isApplying,
-          caption: "Returns every display in the set to its own desktop. Nothing else changes."
-        )
+        stopControl(enabled: canBreakSet && !coordinator.isApplying, caption: stopCaption)
       } else {
         startControls
       }
 
       // Every refusal states a reason and there are SEVEN of them, each with its
-      // own sentence in `MirroringCopy.refusal`, which switches exhaustively.
-      // No `default:` arm here or there: one case used to carry three meanings,
-      // one of which was false — telling someone who has just named a perfectly
-      // good master that no display can be the master is a wrong statement about
-      // their machine, not a rounding error.
+      // own sentence — and three of the seven are the only ones this pane can
+      // say without asserting something it does not know. See `refusalCaption`,
+      // which switches over all seven with no `default:` arm.
       if let refusal = coordinator.lastRefusal {
-        SettingsCaption(MirroringCopy.refusal(refusal))
+        refusalCaption(refusal)
       }
       if let failure = coordinator.lastFailure {
         // The CoreGraphics code is diagnostic and stays out of the sentence.
@@ -114,14 +139,61 @@ struct MirroringSection: View {
       // "mirroring off" over a set the user is still looking at — the
       // silent-success defect this whole feature exists to close, re-created one
       // layer out.
+      //
+      // Rendered in EVERY display's pane, unlike the four suppressed refusals
+      // above, and that is deliberate rather than an oversight: this sentence
+      // NAMES the displays it is about (or falls back to a count), so it makes
+      // no claim about the pane it lands in and cannot be false there.
       if !coordinator.lastPartialBreak.isEmpty {
-        Text(verbatim: MirroringCopy.partialBreak(
+        SettingsCaption(verbatim: MirroringCopy.partialBreak(
           residual: coordinator.lastPartialBreak, name: name
         ))
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
       }
+    }
+  }
+
+  /// The refusals this pane can state TRUTHFULLY, and no others.
+  ///
+  /// `lastRefusal` is ONE property on the coordinator, written by the hotkey and
+  /// by every display's pane alike, and nothing on it records which display it
+  /// was about. Four of the seven sentences name a display deictically, and this
+  /// pane cannot vouch for the referent: a hotkey refusal of `.notInASet` would
+  /// otherwise render "This display is not mirroring anything." inside the pane
+  /// of a display that IS mirroring, contradicting the Status row two rows above
+  /// it. Even a refusal this pane caused can be about a different display — the
+  /// picker names the master, and `.masterIsAlwaysMirrored` is a fact about that
+  /// display, not about this one.
+  ///
+  /// Nothing is unreachable as a result. `MirroringCoordinator.syncConfirmation`
+  /// presents the report window for exactly the condition that sets any of these
+  /// three properties, so every refusal is on screen — with the button that
+  /// clears it — whether or not this section repeats it.
+  ///
+  /// The complete fix is a coordinator change: attribute each signal to the
+  /// display it concerns, then gate on that instead of on the phrasing. Until
+  /// then this is the half a view can do without asserting something it does not
+  /// know. NO `default:` arm — a new case must be a compile error here, not a
+  /// silent suppression.
+  @ViewBuilder private func refusalCaption(_ refusal: MirrorRefusal) -> some View {
+    switch refusal {
+    // A statement about the MACHINE. True in any pane on it.
+    case .onlyOneDisplay: SettingsCaption(MirroringCopy.needsASecondDisplay)
+    // Also about the machine: no display on it can own a set.
+    case .noEligibleMaster: SettingsCaption(MirroringCopy.noEligibleMaster)
+    // Names its members, so it asserts nothing about this display.
+    case let .setCannotBeBroken(members):
+      SettingsCaption(verbatim: MirroringCopy.setCannotBeBroken(members: members, name: name))
+    // "That display is no longer connected." — no referent in a pane that did
+    // not necessarily ask about it.
+    case .noSuchDisplay: EmptyView()
+    // "macOS keeps this display mirrored to another one…" — about the master
+    // that was named, which is frequently not this display.
+    case .masterIsAlwaysMirrored: EmptyView()
+    // "…mirrored onto this one" — same problem, same direction.
+    case .nothingToMirror: EmptyView()
+    // "This display is not mirroring anything." — the one that contradicts the
+    // Status row outright.
+    case .notInASet: EmptyView()
     }
   }
 
@@ -137,8 +209,8 @@ struct MirroringSection: View {
   /// after it: a caption as its own row gets a divider above it and full row
   /// padding, so it reads as a separate setting rather than as the explanation
   /// for the button — measured in the forced-render capture for this task.
-  private func stopControl(enabled: Bool, caption: LocalizedStringKey) -> some View {
-    SettingRow(caption) {
+  private func stopControl(enabled: Bool, caption: SettingsCaption) -> some View {
+    SettingRow(caption: caption) {
       Button(MirroringCopy.stopMirroring) {
         // Fire-and-forget into the coordinator's queue — the queue is what
         // serialises two fast clicks, so wrapping this in a `Task` here would
@@ -149,11 +221,46 @@ struct MirroringSection: View {
     }
   }
 
+  /// What the Stop button will actually do, or why it will do nothing — one of
+  /// four sentences, because there are four shapes and the brief's single
+  /// sentence ("Returns every display in the set to its own desktop. Nothing
+  /// else changes.") is a promise only the first of them keeps.
+  ///
+  /// Ordered by which fact outlives the others: a set that cannot be broken
+  /// stays unbreakable after the current apply finishes, so that reason comes
+  /// first; `isApplying` is transient and comes next; the two working shapes
+  /// differ only in what the apply will leave behind.
+  private var stopCaption: SettingsCaption {
+    if !canBreakSet {
+      // The same members `dissolve` would refuse with, named the same way — the
+      // sentence is about them, never about this display, which in this shape is
+      // typically an unlocked master that is neither mirrored nor locked.
+      return SettingsCaption(
+        verbatim: MirroringCopy.setCannotBeBroken(members: setMembers, name: name)
+      )
+    }
+    if coordinator.isApplying { return SettingsCaption(MirroringCopy.applyInProgress) }
+    return SettingsCaption(
+      lockedMembers.isEmpty
+        ? MirroringCopy.stopExplanation
+        : MirroringCopy.stopExplanationSomeLocked
+    )
+  }
+
   // MARK: - Building a set
 
   @ViewBuilder private var startControls: some View {
-    SettingRow("The display you pick shows its picture on every other display. You get fifteen seconds to keep it.") {
-      Picker("Show the picture from", selection: Binding(
+    // "on every other display" is what `MirrorTopologyPolicy.engage` does only
+    // when nothing on the machine is locked into a set: a locked display is
+    // never staged, because the change cannot succeed and one failed stage
+    // cancels the whole transaction. On a rig that has one, the promise is
+    // narrower and the sentence says so.
+    SettingRow(
+      topology.displays.contains(where: \.isAlwaysInMirrorSet)
+        ? MirroringCopy.startExplanationSomeLocked
+        : MirroringCopy.startExplanation
+    ) {
+      Picker(MirroringCopy.pickMaster, selection: Binding(
         get: { selectedMaster },
         set: { chosenMaster = $0 }
       )) {
@@ -176,18 +283,26 @@ struct MirroringSection: View {
     }
   }
 
-  private var canStart: Bool { cannotStartReason == nil && !coordinator.isApplying }
+  private var canStart: Bool { cannotStartReason == nil }
 
   /// Why mirroring cannot be started right now, or nil when it can.
   ///
-  /// Three different sentences rather than one, for the same reason
+  /// Four different sentences rather than one, for the same reason
   /// `MirrorTopologyPolicy.engage` has three refusals rather than one:
   /// "mirroring needs a second display" is FALSE on a machine that has two, one
   /// of which macOS keeps locked to a set. The Kit already refuses to conflate
   /// those; a UI that conflated them anyway would put the wrong sentence on
   /// screen before the Kit ever got asked.
+  ///
+  /// The fourth is `isApplying`, and it is here rather than in a separate
+  /// `.disabled` because that is what made the button grey with NOTHING attached
+  /// while a change was in flight — the one shape R8 forbids outright. It is
+  /// checked last: the structural reasons still hold once the apply finishes,
+  /// and this one does not.
   private var cannotStartReason: LocalizedStringKey? {
-    guard eligibleMasters.count < 2 else { return nil }
+    guard eligibleMasters.count < 2 else {
+      return coordinator.isApplying ? MirroringCopy.applyInProgress : nil
+    }
     // An empty sample lands here too, and this is the truth on the rig it
     // actually happens on — a laptop with nothing plugged in. Same reading as
     // `MirrorRefusal.onlyOneDisplay`.

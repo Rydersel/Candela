@@ -223,7 +223,9 @@ struct MirrorConfirmationView: View {
       // switches exhaustively so a new case is a compile error rather than a
       // silently generic sentence.
       if let refusal = coordinator.lastRefusal {
-        caption(MirroringCopy.refusal(refusal))
+        // Named through the coordinator, because one of the seven refusals
+        // carries the displays it is about and says nothing true without them.
+        caption(MirroringCopy.refusal(refusal, name: coordinator.displayName))
       }
       if let failure = coordinator.lastFailure {
         caption(MirroringCopy.applyFailure)
@@ -267,7 +269,14 @@ struct MirrorConfirmationView: View {
   }
 
   private func caption(_ text: LocalizedStringKey) -> some View {
-    Text(text)
+    caption(Text(text))
+  }
+
+  /// The same three modifiers for a sentence that had to be built from a
+  /// payload, so a named refusal cannot end up styled differently from a written
+  /// one.
+  private func caption(_ text: Text) -> some View {
+    text
       .font(.callout)
       .foregroundStyle(.secondary)
       .fixedSize(horizontal: false, vertical: true)
