@@ -402,6 +402,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // is tracking.
       warmModeCatalogs()
       reapplyStoredModes()
+      #if DEBUG
+        // Screenshot hook (DT6). After `model.refresh()`, so `display:first`
+        // has a display list to resolve against.
+        DebugSettingsHook.openIfRequested(
+          externalKeys: model.displays.map(\.display.persistenceKey)
+        )
+      #endif
     }
 
     // D13: nobody else calls this. It is a no-op while the version key is

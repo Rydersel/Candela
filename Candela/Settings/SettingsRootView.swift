@@ -75,6 +75,18 @@ struct SettingsRootView: View {
       minHeight: 480, idealHeight: 560, maxHeight: .infinity
     )
     .background(SettingsWindowConfigurator(title: currentTitle))
+    // Debug-only screenshot hook: the window has no URL scheme and cannot be
+    // driven by clicking without an Accessibility grant, so a capture run says
+    // which destination it wants through `CANDELA_DEBUG_SETTINGS` and this
+    // adopts it once, here, where the `@State` selection actually lives.
+    .onAppear {
+      #if DEBUG
+        if let pending = DebugSettingsHook.pendingSelection {
+          DebugSettingsHook.pendingSelection = nil
+          selection = pending
+        }
+      #endif
+    }
     // A destination for an absent display must never render, so a display that
     // is unplugged while selected drops the selection back to a pane. Keyed on
     // persistence keys, not display IDs: an ID changes across a replug and
