@@ -843,7 +843,7 @@ final class DisplayModeCoordinator {
 /// a start failure is a statement with nothing outstanding. They also arrive in
 /// either order, so the presenter has to be able to tell that its content
 /// CHANGED for the same display — a display ID alone cannot say that.
-enum ModeConfirmationContent: Equatable {
+enum ModeConfirmationContent: Hashable {
   /// A preview is applied and unresolved on this display.
   case preview(CGDirectDisplayID)
   /// `begin()` failed on this display. Nothing was applied and nothing is

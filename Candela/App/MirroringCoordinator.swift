@@ -114,6 +114,7 @@ final class MirroringCoordinator {
 
   #if DEBUG
     @ObservationIgnored private var debugObserver: (any NSObjectProtocol)?
+    @ObservationIgnored private var debugPreviewObserver: (any NSObjectProtocol)?
   #endif
 
   init(
@@ -174,6 +175,23 @@ final class MirroringCoordinator {
           guard let self else { return }
           self.lastRefusal = .setCannotBeBroken([1])
           self.syncConfirmation()
+        }
+      }
+
+      // The other half of the same problem: the PREVIEW card is the one with two
+      // answers, so it is the one where "which is the primary?" can go wrong —
+      // and it is unreachable from a script. Driving Settings' own button needs
+      // an Accessibility grant this machine does not have, and the hotkey needs
+      // the same grant. So this posts the real thing: the genuine `engage` path
+      // on the main display, with the genuine countdown behind it. It cannot
+      // strand a topology the feature would not itself revert.
+      debugPreviewObserver = DistributedNotificationCenter.default().addObserver(
+        forName: Notification.Name("com.rydersel.Candela.debug.showMirrorPreview"),
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated {
+          self?.engage(master: CGMainDisplayID())
         }
       }
     #endif
@@ -581,7 +599,7 @@ protocol MirrorConfirmationPresenting: AnyObject {
 /// What the standalone surface is showing. Two cases, not one, because the two
 /// outcomes are genuinely different: a preview is a question with a countdown
 /// behind it, and a report is a statement with nothing outstanding.
-enum MirrorConfirmationContent: Equatable {
+enum MirrorConfirmationContent: Hashable {
   /// A preview waiting to be answered, placed on the MASTER — the display the
   /// request named has no `NSScreen` from the instant the preview applies.
   case preview(CGDirectDisplayID)
