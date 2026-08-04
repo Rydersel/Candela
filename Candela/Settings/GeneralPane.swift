@@ -201,7 +201,10 @@ struct GeneralPane: View {
         }
         SettingsCaption("Shift was held at launch. Relaunch without holding Shift to restore normal startup and wake behavior. Your setting above is unchanged and will be used then.")
       }
-      SettingsCaption(startupCaption)
+      // `startupCaption` is NOT repeated here: `SettingRow` above already
+      // renders it beneath the picker. Rendering it a second time printed the
+      // same sentence twice, once tight under the control and once adrift
+      // below the safe-mode block.
       if prefs.startupAction == .read {
         SettingsCaption("Some displays never answer DDC reads (write-only panels); values then stay as last saved.")
       }
