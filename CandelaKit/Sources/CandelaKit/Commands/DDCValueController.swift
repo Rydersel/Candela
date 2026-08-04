@@ -41,8 +41,22 @@ public final class DDCValueController {
   private let store: (any BrightnessStoring)?
   private let storageKey: String?
   /// Validated readback max (nil until a successful `.read` pass); feeds
-  /// `CommandTuning.effectiveMaxDDC`.
-  @ObservationIgnored private var readMax: Int?
+  /// `CommandTuning.effectiveMaxDDC`. `public private(set)` and OBSERVABLE
+  /// (B5) — `@ObservationIgnored` is gone deliberately: "the panel said 100"
+  /// and "we assumed 100 because the read failed" are different facts and the
+  /// pane has to be able to tell them apart. `nil` IS the second fact; nothing
+  /// else in this type records it.
+  public private(set) var readMax: Int?
+
+  /// What this command's reads have proved (B3).
+  ///
+  /// Published per COMMAND, not per display, because `AppModel.DisplayState`
+  /// holds brightness, volume and contrast as siblings with no owner among
+  /// them: the display-level verdict is `DDCReadEvidence.worst` of the three,
+  /// folded at whatever reads them. Moved only through `worse`, so the
+  /// retry loop below cannot let a late `continue` erase an earlier zeros
+  /// observation.
+  public private(set) var readEvidence: DDCReadEvidence = .notAttempted
   /// Test seam, mirroring `BrightnessController._onSubmit`.
   @ObservationIgnored var _onSubmit: ((HardwareTarget) -> Void)?
 
@@ -215,7 +229,25 @@ public final class DDCValueController {
     // setMuted(false)+persist over the user's fresh mute.
     let muteIssuedAtStart = issuedMuteGeneration
     for _ in 0 ..< tries {
-      guard let result = await writer.read(command: readCode), result.max > 0 else { continue }
+      // The old single `guard … , result.max > 0 else { continue }` treated a
+      // silent bus and a panel that answers zeros as the same non-event (B3).
+      // They are different facts: only the second is the write-only signature,
+      // and it is the one the MAG 341C produces on every one of `tries`
+      // attempts. Same number of reads, same `continue`, same values — the
+      // loop's DDC behaviour is untouched; it just stops forgetting.
+      guard let result = await writer.read(command: readCode) else {
+        readEvidence = DDCReadEvidence.worse(readEvidence, .noReply)
+        continue
+      }
+      guard result.max > 0 else {
+        readEvidence = DDCReadEvidence.worse(readEvidence, .allZeros)
+        continue
+      }
+      // Recorded BEFORE the staleness fence: the panel answered, and that is
+      // true whether or not user input superseded the value we were about to
+      // adopt. Returning here without recording would hide a good panel behind
+      // a race.
+      readEvidence = DDCReadEvidence.worse(readEvidence, .answered)
       guard issuedGeneration == issuedAtStart else { return }
       // The max is real information on every validated read (the loop guard
       // proved `max > 0`); learn it BEFORE the artifact skip below, which

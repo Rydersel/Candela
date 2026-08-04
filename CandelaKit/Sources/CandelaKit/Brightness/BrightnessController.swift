@@ -59,6 +59,25 @@ public final class BrightnessController {
   public private(set) var brightness: Double = 1.0
   public private(set) var maxDDCValue: UInt16 = 100
 
+  /// What this display's brightness reads have proved (B3). Published so the
+  /// diagnostics section can say "this display accepts commands but does not
+  /// answer reads" rather than showing last-written values as though the panel
+  /// had reported them.
+  ///
+  /// Only ever moved through `DDCReadEvidence.worse` — a display whose read
+  /// answered zeros once must not look pristine again just because the next
+  /// `refreshFromHardware` returned early (native path, `unavailableDDC`, or
+  /// role `.builtIn`, all of which attempt nothing).
+  public private(set) var readEvidence: DDCReadEvidence = .notAttempted
+
+  /// Whether `maxDDCValue` came from the PANEL or is the assumed default
+  /// (B5). `maxDDCValue` defaults to 100, which is indistinguishable from a
+  /// real read of 100 — and on a write-only panel the assumption is always the
+  /// true story. Presenting an assumed maximum as a reported one is exactly the
+  /// honesty gap this feature exists to close, so the provenance is recorded
+  /// beside the number rather than inferred from it.
+  public private(set) var didReadMaxDDC = false
+
   /// Mirror of `prefs.hdrMode`, published for the panel (`DisplayPrefs` is
   /// plain UserDefaults and not observable). Change it via `setHDRMode`.
   public private(set) var hdrMode: HDRMode
@@ -293,12 +312,30 @@ public final class BrightnessController {
     let tuning = prefs.tuning(for: .brightness)
     guard !tuning.unavailableDDC else { return }
     // Fork parity: reads use only the FIRST remap code.
-    guard let result = await writer.read(command: tuning.remapCodes.first ?? VCP.brightness),
-          result.max > 0
-    else {
+    //
+    // Split into three named outcomes (B3) where there used to be one `guard`
+    // with a compound condition. No DDC traffic changes — same call, same
+    // single attempt, same early returns — but "the panel never replied" and
+    // "the panel replied with zeros" stop collapsing into the same silence.
+    // Only the second is the MAG 341C's write-only signature, and the old
+    // shape could not tell the diagnostics pane which one happened.
+    guard let result = await writer.read(command: tuning.remapCodes.first ?? VCP.brightness) else {
+      readEvidence = DDCReadEvidence.worse(readEvidence, .noReply)
       return
     }
+    // `(0, 0)` and `max == 0` are FAILED reads, not a brightness of zero — the
+    // MAG341C answers every read this way, and the fork's unvalidated read
+    // clobbers saved values to 0. Recorded rather than merely rejected (B3).
+    guard result.max > 0 else {
+      readEvidence = DDCReadEvidence.worse(readEvidence, .allZeros)
+      return
+    }
+    readEvidence = DDCReadEvidence.worse(readEvidence, .answered)
     maxDDCValue = result.max
+    // B5: from here on `maxDDCValue` is the panel's own answer, not the 100
+    // default. Set only on the answered arm — every other exit leaves the
+    // assumption standing, and says so.
+    didReadMaxDDC = true
     // Read mirrors write (fork convDDCToValue): un-apply curve/invert through
     // the same tuning, or a tuned readable panel adopts a corrupted
     // brightness at every launch. Identical to M3 when the tuning is unset
