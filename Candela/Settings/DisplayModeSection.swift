@@ -32,17 +32,11 @@ struct DisplayModeSection: View {
       // empty state for it flashes false copy on every pane switch.
       if let catalog {
         if !catalog.rows.isEmpty {
-          ForEach(catalog.rows) { row in
-            ModeChoice(
-              title: sizeLabel(row.mode),
-              detail: nil,
-              badges: badges(for: row, in: catalog),
-              isCurrent: catalog.isCurrentSize(row.mode)
-            ) {
-              select(size: row, in: catalog)
-            }
+          // The caption rides with the control it explains rather than as a row
+          // of its own — same reason `SettingRow` exists at all.
+          SettingRow(caption: curationCaption(catalog)) {
+            sizePicker(catalog)
           }
-          curationCaption(catalog)
           refreshPicker(catalog)
         } else if !catalog.all.isEmpty {
           // Every size this panel reports is under the usability floor. The
@@ -70,10 +64,13 @@ struct DisplayModeSection: View {
   /// per-mode "hidden" flag was cut from the mode model. Both numbers count
   /// distinct sizes, and the only sizes dropped are the ones below the
   /// usability floor — so this sentence is exactly true, not approximately.
-  @ViewBuilder private func curationCaption(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
-    if catalog.rows.count < catalog.distinctLogicalSizes {
-      SettingsCaption("Showing \(catalog.rows.count) of the \(catalog.distinctLogicalSizes) sizes this display reports — the rest are too small to use as a desktop. All modes lists every size at every refresh rate.")
-    }
+  ///
+  /// Returns the caption rather than rendering it so `SettingRow` can bind it to
+  /// the dropdown; nil when nothing was curated out, because a menu that holds
+  /// everything has nothing to explain.
+  private func curationCaption(_ catalog: DisplayModeCoordinator.Catalog) -> SettingsCaption? {
+    guard catalog.rows.count < catalog.distinctLogicalSizes else { return nil }
+    return SettingsCaption(verbatim: "Showing \(catalog.rows.count) of the \(catalog.distinctLogicalSizes) sizes this display reports — the rest are too small to use as a desktop. All modes lists every size at every refresh rate.")
   }
 
   // MARK: - Preview
@@ -189,6 +186,68 @@ struct DisplayModeSection: View {
     return badges
   }
 
+  /// The badges, folded into one menu item's label.
+  ///
+  /// A popup item is drawn by AppKit from the label it is given, so the capsules
+  /// the full-list rows wear cannot come along — but the words must, and
+  /// "Scaled" especially: it is the only thing standing between a user and the
+  /// belief that an oversized-render mode is what the panel actually is. Folding
+  /// them in also means the CLOSED popup states them about the mode currently on
+  /// screen, which the old list only did next to a checkmark.
+  private func menuLabel(for row: DisplayModeRow, in catalog: DisplayModeCoordinator.Catalog) -> String {
+    let badges = badges(for: row, in: catalog)
+    guard !badges.isEmpty else { return sizeLabel(row.mode) }
+    return "\(sizeLabel(row.mode)) (\(badges.joined(separator: ", ")))"
+  }
+
+  // MARK: - Size
+
+  /// The curated sizes as a dropdown.
+  ///
+  /// **The binding is one-way in practice, and deliberately so.** The getter
+  /// reads the catalog's CURRENT mode — never a `@State` mirror, which would
+  /// drift the moment a preview reverted, System Settings changed the mode, or
+  /// the display was replugged. The setter is the only writer, and it does not
+  /// assign anything: it calls `select(size:in:)`, the same entry the rows used,
+  /// so a choice still enters the preview-with-countdown-revert flow instead of
+  /// stranding someone on a mode they cannot see. A plain `@State` selection
+  /// would have bypassed that flow — and would have fired it again on the way
+  /// back when the countdown reverted.
+  ///
+  /// The popup therefore snaps back to the running mode until the change lands,
+  /// which is the truth: nothing is applied until the preview is kept.
+  @ViewBuilder private func sizePicker(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
+    Picker("Resolution:", selection: Binding(
+      get: { curatedSelection(in: catalog) },
+      set: { id in
+        guard let id, let row = catalog.rows.first(where: { $0.id == id }) else { return }
+        select(size: row, in: catalog)
+      }
+    )) {
+      // The size on screen is not always one we curated — a display left below
+      // the usability floor by System Settings is still running something, and a
+      // popup that named none of it would read as broken. Offered as an item so
+      // the closed control tells the truth; choosing it is the no-op that
+      // choosing the current size has always been.
+      if curatedSelection(in: catalog) == nil {
+        Text(verbatim: catalog.current.map(sizeLabel) ?? "Unknown")
+          .tag(DisplayModeRow.ID?.none)
+      }
+      ForEach(catalog.rows) { row in
+        Text(verbatim: menuLabel(for: row, in: catalog))
+          .tag(DisplayModeRow.ID?.some(row.id))
+      }
+    }
+  }
+
+  /// The curated row the display is running, by SIZE — `ioModeID` would come up
+  /// empty whenever the user is at a size's slower refresh rate, since the row's
+  /// representative mode is that size's fastest. nil means the running size is
+  /// not one of ours.
+  private func curatedSelection(in catalog: DisplayModeCoordinator.Catalog) -> DisplayModeRow.ID? {
+    catalog.rows.first { catalog.isCurrentSize($0.mode) }?.id
+  }
+
   // MARK: - Refresh rate
 
   @ViewBuilder private func refreshPicker(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
@@ -246,7 +305,6 @@ struct DisplayModeSection: View {
               // window, and would be the single site where RM11 does not hold.
               title: sizeLabel(mode),
               detail: "\(refreshLabel(mode.refreshHz))\(mode.isHiDPI ? " · HiDPI" : "")",
-              badges: [],
               isCurrent: mode.ioModeID == catalog.current?.ioModeID
             ) {
               apply(mode, in: catalog)
@@ -316,13 +374,17 @@ private struct ReapplyDiagnostic: ViewModifier {
   }
 }
 
-/// One selectable mode. A row-shaped button: the whole row is the hit region
-/// (a bare `.plain` button is only as clickable as its text is wide), and it
-/// carries hover and pressed states, without which it reads as static text.
+/// One selectable mode in the full list. A row-shaped button: the whole row is
+/// the hit region (a bare `.plain` button is only as clickable as its text is
+/// wide), and it carries hover and pressed states, without which it reads as
+/// static text.
+///
+/// It no longer carries badge capsules: the curated sizes — the only rows that
+/// ever had them — are a dropdown now, and their badges are folded into the menu
+/// labels. A capsule nobody can pass a badge to is a style rule waiting to drift.
 private struct ModeChoice: View {
   let title: String
   let detail: String?
-  let badges: [String]
   let isCurrent: Bool
   let action: () -> Void
 
@@ -341,14 +403,6 @@ private struct ModeChoice: View {
             .foregroundStyle(.secondary)
         }
         Spacer(minLength: 8)
-        ForEach(badges, id: \.self) { badge in
-          Text(verbatim: badge)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(.quaternary, in: Capsule())
-        }
       }
       .padding(.vertical, 3)
       .padding(.horizontal, 4)
