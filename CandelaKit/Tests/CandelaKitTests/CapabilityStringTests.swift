@@ -148,3 +148,93 @@ struct CapabilityStringTests {
     }
   }
 }
+
+/// A real MAG-shaped capability string, plus the malformed variants D24 exists
+/// for. Same matrix as the `support(forVCP:in:)` suite above, because the new
+/// API inherits the same rule and inheriting a rule is not the same as obeying
+/// it.
+@Suite("Capability string detail (D24)")
+struct CapabilityStringDetailTests {
+  private let real = "(prot(monitor)type(LCD)model(MAG341CQR)cmds(01 02 03 07 0C E3 F3)"
+    + "vcp(02 04 05 08 10 12 14(01 05 08 0B) 16 18 1A 52 60(0F 11 12) 62 6C 6E 70 8D AC AE B6 C6 C8 C9 D6(01 04 05) DF)"
+    + "mccs_ver(2.1))"
+
+  @Test func everyTopLevelCodeIsReportedAndNestedValuesAreNot() {
+    let codes = CapabilityString.codes(in: real)
+    #expect(codes?.contains(0x10) == true)
+    #expect(codes?.contains(0x62) == true)
+    #expect(codes?.contains(0x8D) == true)
+    #expect(codes?.contains(0x12) == true)
+    // 0x0F, 0x11 and 0x05 appear only INSIDE 60(...) and 14(...) as permitted
+    // VALUES. 0x05 is separately a top-level code here, so the one that proves
+    // the rule is 0x0F.
+    #expect(codes?.contains(0x0F) == false)
+    #expect(codes?.contains(0x11) == false)
+  }
+
+  @Test func theMCCSVersionAndTheDescriptiveTagsAreReadable() {
+    #expect(CapabilityString.tag("mccs_ver", in: real) == "2.1")
+    #expect(CapabilityString.tag("type", in: real) == "LCD")
+    #expect(CapabilityString.tag("model", in: real) == "MAG341CQR")
+    #expect(CapabilityString.tag("prot", in: real) == "monitor")
+  }
+
+  @Test func anAbsentTagIsNilRatherThanEmpty() {
+    #expect(CapabilityString.tag("mswhql", in: real) == nil)
+  }
+
+  /// The whole-tag boundary check, generalised. `prot_type(` is a different
+  /// key from `type(`, and matching it would report another field's value as
+  /// this one's — a fact invented out of unrelated data.
+  @Test func aTagOnlyMatchesAWholeTagNeverASuffixOfALongerOne() {
+    #expect(CapabilityString.tag("type", in: "(prot_type(RGB)vcp(10))") == nil)
+    #expect(CapabilityString.codes(in: "(vcpname(brightness)vcp(10))")?.contains(0x10) == true)
+    #expect(CapabilityString.codes(in: "(mccs_vcp(99))") == nil)
+  }
+
+  /// D24's fail-to-nil rule, in every shape the field produces. A string we
+  /// cannot fully account for earns silence, never a partial answer that reads
+  /// like a complete one.
+  @Test func anythingWeCannotFullyAccountForIsNilNotAPartialAnswer() {
+    // Truncated: the vcp group never closes.
+    #expect(CapabilityString.codes(in: "(prot(monitor)vcp(02 10 12") == nil)
+    // Unbalanced: a close-paren that never opened.
+    #expect(CapabilityString.codes(in: "(vcp(02 10) 62))") == nil)
+    #expect(CapabilityString.tag("prot", in: "(prot(monitor)vcp(10) ))") == nil)
+    // No vcp tag at all.
+    #expect(CapabilityString.codes(in: "(prot(monitor)type(LCD))") == nil)
+    // Empty vcp list.
+    #expect(CapabilityString.codes(in: "(vcp())") == nil)
+    // Non-hex, 1-digit and 3-digit tokens.
+    #expect(CapabilityString.codes(in: "(vcp(10 ZZ))") == nil)
+    #expect(CapabilityString.codes(in: "(vcp(10 2))") == nil)
+    #expect(CapabilityString.codes(in: "(vcp(10 123))") == nil)
+    // U+FFFD replacement characters from a lossy ASCII decode.
+    #expect(CapabilityString.codes(in: "(vcp(10 \u{FFFD}\u{FFFD}))") == nil)
+  }
+
+  /// A tag whose body is empty is a real answer ("declared, and blank") and is
+  /// NOT the same as an absent tag. nil ≠ empty (DT30 rule e).
+  @Test func aDeclaredButEmptyTagIsEmptyNotAbsent() {
+    #expect(CapabilityString.tag("model", in: "(model()vcp(10))") == "")
+    #expect(CapabilityString.tag("model", in: "(vcp(10))") == nil)
+  }
+
+  /// Degenerate inputs that must not crash or index out of bounds. The empty
+  /// string and a bare tag name with no group are what a garbled or
+  /// zero-length DDC read decodes to on hardware like the MAG 341C, and both
+  /// must be silence rather than a fabricated answer.
+  @Test func degenerateInputsAreSilentNotFatal() {
+    #expect(CapabilityString.codes(in: "") == nil)
+    #expect(CapabilityString.codes(in: "   ") == nil)
+    #expect(CapabilityString.tag("", in: real) == nil)
+    #expect(CapabilityString.tag("model", in: "") == nil)
+    #expect(CapabilityString.tag("mccs_ver", in: "mccs_ver") == nil)
+    // A tag name longer than the whole string: the scan must simply not run.
+    #expect(CapabilityString.tag("mccs_ver", in: "(m)") == nil)
+    // Balanced, but the group we want never closes is unreachable — an
+    // unbalanced string is rejected before the scan, which is the point of
+    // running the balance check first.
+    #expect(CapabilityString.tag("vcp", in: "(vcp(10)") == nil)
+  }
+}
