@@ -11,9 +11,18 @@ import SwiftUI
 struct PanelView: View {
   @Environment(AppModel.self) private var model
 
-  /// At most one display's resolution list is open at a time, and it collapses
-  /// when the menu closes so the panel never reopens taller than it needs.
-  @State private var expandedResolution: CGDirectDisplayID?
+  /// At most ONE disclosure is open in the whole panel — one display's
+  /// resolution list or one display's mirroring row, never two of either and
+  /// never one of each. Both sections bind to this, which is what makes opening
+  /// mirroring close resolution; a binding per section would let a four-display
+  /// rig open eight lists and push the footer off the screen. It collapses when
+  /// the menu closes so the panel never reopens taller than it needs.
+  ///
+  /// It identifies a (display, SECTION) pair, and it has to. Keyed by display
+  /// alone — which is what it was while resolution was the only disclosure —
+  /// both of one display's sections test the binding against that same id, so
+  /// opening either one opens the other underneath it.
+  @State private var expandedSection: PanelDisclosureID?
 
   var body: some View {
     // Prefs are plain UserDefaults, not observable. Touching prefsRevision
@@ -106,7 +115,20 @@ struct PanelView: View {
               displayID: state.id,
               displayName: name,
               coordinator: model.displayModes,
-              expandedDisplayID: $expandedResolution
+              expanded: $expandedSection
+            )
+            // Same expansion binding, deliberately: these two are the only
+            // disclosures in the panel and only one of them may be open.
+            //
+            // Renders NOTHING on a rig with one usable display, and that
+            // absence is the point — `VStack(spacing: 14)` would otherwise
+            // reserve a gap for an empty section, so this must stay a view that
+            // resolves to nothing rather than one that draws nothing.
+            PanelMirroringSection(
+              displayID: state.id,
+              displayName: name,
+              coordinator: model.mirroring,
+              expanded: $expandedSection
             )
           }
         }
@@ -119,7 +141,7 @@ struct PanelView: View {
     .frame(width: 280)
     // The menu can close without a mouse-exit event, and it takes the panel's
     // view hierarchy with it — the same signal the hover fixes below rely on.
-    .onDisappear { expandedResolution = nil }
+    .onDisappear { expandedSection = nil }
   }
 
   // MARK: - What the panel renders

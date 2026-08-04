@@ -34,10 +34,15 @@ struct PanelResolutionSection: View {
   let coordinator: DisplayModeCoordinator
   /// One expansion for the whole panel: a rig with four displays must not be
   /// able to open four lists at once and push the footer off the screen.
-  @Binding var expandedDisplayID: CGDirectDisplayID?
+  ///
+  /// Keyed by (display, SECTION) rather than by display alone since mirroring
+  /// gained a disclosure of its own — see `PanelDisclosureID`. With a bare id,
+  /// opening this display's mirroring row would have opened its resolution list
+  /// underneath at the same time, because both tests are `== displayID`.
+  @Binding var expanded: PanelDisclosureID?
 
   private var catalog: DisplayModeCoordinator.Catalog? { coordinator.catalogs[displayID] }
-  private var isExpanded: Bool { expandedDisplayID == displayID }
+  private var isExpanded: Bool { expanded == PanelDisclosureID(displayID, .resolution) }
 
   /// True while this display has a preview waiting to be kept or reverted. The
   /// answer is in the confirmation panel on the display itself, so the rows
@@ -94,9 +99,10 @@ struct PanelResolutionSection: View {
       // floor, and the summary must describe the display, not our list.
       detail: catalog.current.map(DisplayModeCopy.size),
       accessibilityName: displayName,
+      accessibilityRole: "resolution",
       isExpanded: isExpanded
     ) {
-      expandedDisplayID = isExpanded ? nil : displayID
+      expanded = isExpanded ? nil : PanelDisclosureID(displayID, .resolution)
     }
   }
 
@@ -197,51 +203,6 @@ struct PanelResolutionSection: View {
   }
 }
 
-/// The collapsed header: a title, the current value, and a chevron — the shape
-/// Control Center uses for a module that opens.
-private struct PanelDisclosureRow: View {
-  let title: LocalizedStringKey
-  let detail: String?
-  /// Owns the row for VoiceOver. Every other row in this section announces
-  /// itself as "<display> brightness" / "<display> volume"; without the same
-  /// prefix a four-display rig reads out "Resolution" four times with no way to
-  /// tell which display is being described.
-  let accessibilityName: String
-  let isExpanded: Bool
-  let action: () -> Void
-
-  @State private var isHovering = false
-
-  var body: some View {
-    Button(action: action) {
-      HStack(spacing: 6) {
-        Text(title)
-          .font(.system(size: 12))
-        Spacer(minLength: 8)
-        if let detail {
-          Text(verbatim: detail)
-            .font(.system(size: 12))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-        }
-        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-          .font(.system(size: 9, weight: .semibold))
-          .foregroundStyle(.secondary)
-      }
-      .padding(.horizontal, 4)
-      .frame(height: 22)
-      .contentShape(Rectangle())
-    }
-    .buttonStyle(PanelRowButtonStyle(isHovering: isHovering))
-    .onHover { isHovering = $0 }
-    // The menu can close without a mouse-exit event (Escape, or clicking the
-    // status item), which would leave a phantom highlight on the next open.
-    .onDisappear { isHovering = false }
-    .accessibilityLabel(Text(verbatim: "\(accessibilityName) resolution"))
-    .accessibilityValue(Text(verbatim: detail ?? ""))
-  }
-}
-
 /// One selectable size. A row-shaped button: the whole row is the hit region (a
 /// bare `.plain` button is only as clickable as its text is wide), with hover
 /// and pressed states, without which it reads as static text — and on a control
@@ -280,27 +241,5 @@ private struct PanelModeRow: View {
     .onDisappear { isHovering = false }
     .accessibilityLabel(Text(verbatim: "\(accessibilityName), \(title)"))
     .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
-  }
-}
-
-/// Hover plus — required for any custom button (`buttons.md`) — a distinct
-/// pressed state, in the same visual language as the panel's footer buttons.
-private struct PanelRowButtonStyle: ButtonStyle {
-  let isHovering: Bool
-  @Environment(\.isEnabled) private var isEnabled
-
-  func makeBody(configuration: Configuration) -> some View {
-    let hovering = isHovering && isEnabled
-    let background: AnyShapeStyle = if configuration.isPressed, isEnabled {
-      AnyShapeStyle(.tertiary)
-    } else if hovering {
-      AnyShapeStyle(.quaternary)
-    } else {
-      AnyShapeStyle(.clear)
-    }
-    return configuration.label
-      .foregroundStyle(isEnabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
-      .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(background))
-      .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
   }
 }
