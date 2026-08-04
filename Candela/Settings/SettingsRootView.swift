@@ -77,16 +77,21 @@ struct SettingsRootView: View {
     .background(SettingsWindowConfigurator(title: currentTitle))
     // Debug-only screenshot hook: the window has no URL scheme and cannot be
     // driven by clicking without an Accessibility grant, so a capture run says
-    // which destination it wants through `CANDELA_DEBUG_SETTINGS` and this
-    // adopts it once, here, where the `@State` selection actually lives.
-    .onAppear {
-      #if DEBUG
+    // which destination it wants through an env var and this adopts it once,
+    // here, where the `@State` selection actually lives.
+    //
+    // The `#if` wraps the MODIFIER, not the closure body: guarding the body
+    // instead leaves Release with a live, empty `.onAppear { }` in the chain
+    // and a comment naming the debug env var — residue, and a quiet lie in
+    // `DebugSettingsHook`'s claim that both call sites are compiled out.
+    #if DEBUG
+      .onAppear {
         if let pending = DebugSettingsHook.pendingSelection {
           DebugSettingsHook.pendingSelection = nil
           selection = pending
         }
-      #endif
-    }
+      }
+    #endif
     // A destination for an absent display must never render, so a display that
     // is unplugged while selected drops the selection back to a pane. Keyed on
     // persistence keys, not display IDs: an ID changes across a replug and
