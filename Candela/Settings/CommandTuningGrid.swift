@@ -51,11 +51,27 @@ struct CommandTuningGrid: View {
   @FocusState private var focus: FocusTarget?
 
   private var prefs: DisplayPrefs { writer.prefs }
-  /// The whole grid is inert on a software-only display: `forceSoftware` turns
-  /// off the DDC wire entirely. Disable, don't hide (panel §5.4). The mute
-  /// recovery affordance that D29 rule 3 requires for this state lives in
-  /// `DisplayCard` (Task 13), above the grid and never disabled.
-  private var isInert: Bool { prefs.forceSoftware }
+
+  /// Why no DDC command is reaching this display, if none is — read from the
+  /// ENGINE'S OWN PATH, the same one the Diagnostics section renders.
+  ///
+  /// It used to be `prefs.forceSoftware`, computed here, which made this the
+  /// second and contradicting claim about the control path on a page that
+  /// already had one. It was wrong in both directions: it missed live HDR (DDC
+  /// is dead outright there, yet the grid presented itself as live), and the
+  /// caption below it fired on the brightness command's `unavailableDDC`, so a
+  /// display whose Diagnostics row read "Nothing is moving this display's
+  /// brightness" was told three sections down that it "dims in software only".
+  /// Both now come off `BrightnessPath`, so the page gives one answer.
+  ///
+  /// Disable, don't hide (panel §5.4). The mute recovery affordance that D29
+  /// rule 3 requires for this state lives in `DisplayCard` (Task 13), above the
+  /// grid and never disabled.
+  private var trafficBlock: DDCTrafficBlock? {
+    DisplayCardPolicy.ddcTrafficBlock(for: state.controller.brightnessPath)
+  }
+
+  private var isInert: Bool { trafficBlock != nil }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -206,13 +222,20 @@ struct CommandTuningGrid: View {
   // MARK: - Captions
 
   @ViewBuilder private var captions: some View {
-    if isInert {
-      SettingsCaption("Hardware (DDC) control is off for this display, so these settings have no effect.")
+    if let trafficBlock {
+      switch trafficBlock {
+      // This grid renders only under an EXTERNAL display (`DisplayDetailView`),
+      // and `BrightnessPathPolicy.usesNative` has exactly one way to answer yes
+      // for an external: an HDR mode is set and HDR is live. So the sentence
+      // can name HDR rather than shrugging at "macOS is doing it".
+      case .macOSDrivesBrightness:
+        SettingsCaption("This display is in HDR mode. macOS is setting its brightness directly and no hardware commands are reaching it, so these settings have no effect until HDR turns off.")
+      case .hardwareControlOff:
+        SettingsCaption("Hardware (DDC) control is off for this display, so these settings have no effect.")
+      }
     } else {
       SettingsCaption("Most displays need none of this. Use it when a display bottoms out or tops out early, or runs backwards. Leave a box empty to use the display's own range.")
-      if prefs.tuning(for: .brightness).unavailableDDC {
-        SettingsCaption("With brightness off, this display dims in software only.")
-      }
+      brightnessLegCaption
       let ignored = ignoredMaxCommands
       if ignored.count == 1 {
         SettingsCaption("The maximum you set for \(rowName(ignored[0])) is not above its minimum, so \(AppInfo.productName) ignores it and uses the display's own maximum.")
@@ -220,6 +243,27 @@ struct CommandTuningGrid: View {
         SettingsCaption("The maximums you set for \(ignoredList(ignored)) are not above their minimums, so \(AppInfo.productName) ignores them and uses the display's own maximums.")
       }
     }
+  }
+
+  /// What turning the BRIGHTNESS command off actually did, in the same words
+  /// the Diagnostics section uses, because it is derived from the same value.
+  ///
+  /// The old caption read `tuning(for: .brightness).unavailableDDC` and always
+  /// said "dims in software only" — true on one of the two paths that flag can
+  /// produce, and flatly contradicted by the Diagnostics row on the other.
+  @ViewBuilder private var brightnessLegCaption: some View {
+    switch state.controller.brightnessPath {
+    case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
+      SettingsCaption("With brightness off, this display dims in software only below \(percent(dimsBelow)). Above that, nothing moves.")
+    case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
+      SettingsCaption("With brightness off, nothing is moving this display's brightness.")
+    case .native, .software, .hardware, .combined:
+      EmptyView()
+    }
+  }
+
+  private func percent(_ value: Double) -> String {
+    "\(Int((value * 100).rounded()))%"
   }
 
   /// Commands whose stored max override is silently inert — the rule the fork

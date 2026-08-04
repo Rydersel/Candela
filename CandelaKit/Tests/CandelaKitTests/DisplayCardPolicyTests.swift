@@ -117,6 +117,63 @@ struct DisplayCardPolicyTests {
     }
   }
 
+  // MARK: - DDC traffic
+
+  /// The defect the projection exists to remove. `CommandTuningGrid` gated on
+  /// `prefs.forceSoftware` alone, so a display in live HDR — where DDC is dead
+  /// outright — presented an editable grid whose every write went nowhere.
+  @Test func liveHDRSilencesTheWireAndTheGridHasToSaySo() {
+    #expect(DisplayCardPolicy.ddcTrafficBlock(for: .native) == .macOSDrivesBrightness)
+  }
+
+  @Test func hardwareControlOffIsNamedSeparatelyFromMacOSDrivingBrightness() {
+    #expect(DisplayCardPolicy.ddcTrafficBlock(for: .software(.gamma)) == .hardwareControlOff)
+    #expect(DisplayCardPolicy.ddcTrafficBlock(for: .software(.overlay)) == .hardwareControlOff)
+  }
+
+  /// The direction that would COST the user controls. Both of these paths are
+  /// reached from the BRIGHTNESS command's own `unavailableDDC`, and that says
+  /// nothing whatever about volume or contrast — they still write over the same
+  /// wire. Greying the grid here would remove two working controls to report a
+  /// third one's setting.
+  @Test func aBrightnessOnlyBlockNeverGreysVolumeAndContrast() {
+    for backend: SoftwareDimmingBackend in [.gamma, .overlay] {
+      #expect(DisplayCardPolicy.ddcTrafficBlock(
+        for: .softwareOnly(backend: backend, reason: .ddcTurnedOff, dimsBelow: 0.4)
+      ) == nil)
+    }
+    #expect(DisplayCardPolicy.ddcTrafficBlock(
+      for: .unavailable(.ddcTurnedOffWithNoSoftwareLeg)
+    ) == nil)
+  }
+
+  @Test func aLiveWireReportsNoBlock() {
+    #expect(DisplayCardPolicy.ddcTrafficBlock(for: .hardware) == nil)
+    #expect(DisplayCardPolicy.ddcTrafficBlock(
+      for: .combined(switchingValue: 0.47, backend: .gamma)
+    ) == nil)
+  }
+
+  /// Same sweep, same reason as `everyPathTheEngineCanProduceHasAnAnswer`: the
+  /// property is over every path the engine can actually produce, not over a
+  /// hand-picked list a seventh case would fall out of.
+  @Test func everyPathTheEngineCanProduceHasATrafficVerdict() {
+    var reached = Set<String>()
+    for path in Self.everyReachablePath() {
+      reached.insert(Self.caseTag(path))
+      let block = DisplayCardPolicy.ddcTrafficBlock(for: path)
+      switch path {
+      case .native:
+        #expect(block == .macOSDrivesBrightness, "\(path)")
+      case .software:
+        #expect(block == .hardwareControlOff, "\(path)")
+      case .hardware, .combined, .softwareOnly, .unavailable:
+        #expect(block == nil, "\(path)")
+      }
+    }
+    #expect(reached.count == 6, "reached \(reached.sorted())")
+  }
+
   /// "" means "use the name the display reports". The rule has to be the same
   /// one the panel's title fallback uses, or a pasted name with a trailing
   /// newline persists as non-empty and still renders as the hardware name.
