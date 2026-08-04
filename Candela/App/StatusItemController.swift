@@ -57,9 +57,18 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     let gamma = GammaController()
     shadeOverlay = shade
     gammaController = gamma
-    interferenceMonitor = GammaInterferenceMonitor(gamma: gamma, alerts: EngineAlerts())
+    // Bound to a local as well as to the property: reading `self`'s stored
+    // properties before `super.init()` is not allowed, and the handoff below
+    // needs the same instance.
+    let monitor = GammaInterferenceMonitor(gamma: gamma, alerts: EngineAlerts())
+    interferenceMonitor = monitor
     let model = AppModel(shade: shade, gamma: gamma, safeMode: safeMode)
     self.model = model
+    // Reporting-only handoff (B7): the monitor is constructed here because it
+    // needs the AppKit alert island, and read there because the diagnostics
+    // pane has no other way to say how often another app took a display's
+    // color profile back.
+    model.gammaInterference = monitor
     settingsActions = SettingsActions(model: model)
     // The coordinator gates on `startupAction` internally, so reading it
     // through a safe-mode prefs object disables startup AND wake restore for
@@ -659,8 +668,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
   private func startMediaKeyTap() {
     guard let mediaKeyTap else { return }
+    // Computed once and recorded only on success: `lastArmedTapConfig` is
+    // "what is actually being watched", and a config that failed to arm is
+    // not that (B9).
+    let config = model.tapConfig
     do {
-      try mediaKeyTap.start(config: model.tapConfig)
+      try mediaKeyTap.start(config: config)
+      model.noteTapArmed(config)
     } catch {
       log.error("media-key tap failed to start: \(error) — keys disabled until relaunch")
     }
@@ -670,7 +684,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// slice of the fork's updateMediaKeyTap. No-op unless the tap is running.
   private func refreshTapConfig() {
     guard let mediaKeyTap, mediaKeyTap.isRunning else { return }
-    mediaKeyTap.update(config: model.tapConfig)
+    let config = model.tapConfig
+    mediaKeyTap.update(config: config)
+    model.noteTapArmed(config)
   }
 
   /// Applies the `menuIcon` mode to the status item (D5). Called at launch,

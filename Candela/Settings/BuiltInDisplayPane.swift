@@ -52,7 +52,27 @@ struct BuiltInDisplayPane: View {
           Button("Open Menu Bar Settings") { selection = .pane(.menuBar) }
         }
       }
+
+      // DT45: the built-in gets the Diagnostics section too. "Why can't
+      // hardware control reach my laptop screen?" is one of the questions this
+      // feature exists to answer, and the answer belongs on the page for the
+      // display it is about — not only on the pages of displays that do not
+      // have the problem. The section omits every row that describes a cable,
+      // an EDID or a DDC answer.
+      if let state = model.builtIn {
+        DisplayDiagnosticsSection(state: state)
+      }
     }
     .formStyle(.grouped)
+    // The built-in never passes through the launch warm-up (that walks
+    // `model.displays`, which is external-only), so without this its catalog
+    // stays absent and the Diagnostics "Current mode" row has nothing to
+    // report. Hung off the `Form` rather than the section for the reason
+    // recorded in `DisplayDetailView`: a lifecycle modifier on a `Section`
+    // inside a grouped Form is not reliably applied.
+    .task(id: model.builtIn?.id) {
+      guard let id = model.builtIn?.id else { return }
+      model.displayModes.refreshCatalog(for: id)
+    }
   }
 }

@@ -49,6 +49,7 @@ struct DisplayDetailView: View {
       controlMethodSection
       volumeSection
       tuningSection
+      diagnosticsSection
       resetSection
     }
     .formStyle(.grouped)
@@ -333,6 +334,16 @@ struct DisplayDetailView: View {
     Section("Tuning") {
       CommandTuningGrid(state: state, writer: writer)
     }
+  }
+
+  // MARK: - Diagnostics
+
+  /// One line and one property, per DT28. No `PaneID` case, no
+  /// `SettingsRegistry` row, no `SettingsDestination` change — per-display
+  /// destinations are not registry panes (R2, R3), and adding a case here
+  /// would be a change with no reader.
+  private var diagnosticsSection: some View {
+    DisplayDiagnosticsSection(state: state)
   }
 
   // MARK: - Reset

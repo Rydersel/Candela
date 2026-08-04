@@ -67,6 +67,46 @@ final class AppModel {
   /// menu close.
   private(set) var volumeSupport: [String: VCPSupport] = [:]
 
+  /// The raw MCCS capability string, keyed by persistence key, stored ONLY on
+  /// a successful read (B2).
+  ///
+  /// Absence means "not probed, or the display did not answer" — which
+  /// `volumeSupport` already distinguishes: an entry stored as `.unknown`
+  /// there is "the probe ran and failed". A `[String: String?]` would encode
+  /// the same two states twice, in a shape nobody reads correctly.
+  ///
+  /// The string was on the wire, was reassembled by a fragment loop that
+  /// deliberately refuses to return a truncated result, was mapped to ONE bit
+  /// for ONE VCP code, and then fell out of scope. `candela-probe caps` has
+  /// printed it all along; the app did not.
+  private(set) var capabilityString: [String: String] = [:]
+
+  /// IOKit facts read on every discovery pass and, until now, discarded (B8).
+  /// Keyed by persistence key so it survives a replug, and evicted through the
+  /// same `performRefresh` line as `volumeSupport`.
+  ///
+  /// External displays only — the built-in slot never passes through
+  /// `DisplayDiscovery`, so its entry is permanently absent. That is not a gap
+  /// to paper over: the rows this feeds are rows about a data cable, and the
+  /// built-in has none, so its pane omits them rather than reporting them
+  /// unenumerated.
+  private(set) var hardwareFacts: [String: DisplayHardwareFacts] = [:]
+
+  /// The `WatchConfig` most recently ARMED, not the one most recently computed
+  /// (B9). Those differ exactly when a rearm failed — which is the case the row
+  /// exists for. Recorded at the arm site in `StatusItemController`, never at
+  /// the compute site here.
+  private(set) var lastArmedTapConfig: MediaKeyEventTap.WatchConfig?
+
+  func noteTapArmed(_ config: MediaKeyEventTap.WatchConfig) {
+    lastArmedTapConfig = config
+  }
+
+  /// The gamma-interference monitor, injected by `StatusItemController` after
+  /// construction (it owns the AppKit alert island the monitor needs). Read
+  /// ONLY for reporting — nothing here drives it.
+  @ObservationIgnored var gammaInterference: GammaInterferenceMonitor?
+
   @ObservationIgnored private var capabilityProbesInFlight: Set<String> = []
 
   /// D11: session-only hardware gate, injected once and never re-read from
@@ -277,6 +317,10 @@ final class AppModel {
         // describe a wire that no longer exists. Discard rather than cache; the
         // entry stays absent and the next pass re-probes.
         guard manager.isEpochCurrent(epoch) else { return }
+        // Stored only on a SUCCESSFUL read. A nil answer leaves the entry
+        // absent, and `volumeSupport`'s stored `.unknown` below is what carries
+        // "the probe ran and failed" — one state, one place.
+        if let capabilities { self.capabilityString[persistenceKey] = capabilities }
         self.volumeSupport[persistenceKey] = capabilities.map {
           CapabilityString.support(forVCP: VCP.audioSpeakerVolume, in: $0)
         } ?? .unknown
@@ -428,6 +472,11 @@ final class AppModel {
     var appeared: [DisplayState] = []
     var kept: [DisplayState] = []
     displays = DisplayDiscovery.discover().map { entry in
+      // B8: discovery has always read these and always thrown them away. Kept
+      // for BOTH branches below — a kept display re-reports its facts on every
+      // pass, and a link renegotiation is exactly when the transport string can
+      // change under a display we already know.
+      hardwareFacts[entry.display.persistenceKey] = entry.facts
       if let previous = existing.removeValue(forKey: entry.display.id) {
         // Fresh DisplayState (name may change), reused controllers, fresh
         // writer for all three (rebind also resets each duplicate memo).
@@ -541,6 +590,10 @@ final class AppModel {
     // IOAVService, so an old answer is not evidence about the new wire.
     let live = Set(displays.map(\.display.persistenceKey))
     volumeSupport = volumeSupport.filter { live.contains($0.key) }
+    // Same rule, same reason: a replug hands out a fresh IOAVService, so an old
+    // answer is not evidence about the new wire.
+    capabilityString = capabilityString.filter { live.contains($0.key) }
+    hardwareFacts = hardwareFacts.filter { live.contains($0.key) }
     probeVolumeCapabilities()
     return Array(existing.keys)
   }
