@@ -46,6 +46,7 @@ struct DisplayDetailView: View {
       identitySection
       panelSection
       displayModeSection
+      rotationSection
       mirroringSection
       controlMethodSection
       volumeSection
@@ -139,6 +140,18 @@ struct DisplayDetailView: View {
 
   private var displayModeSection: some View {
     DisplayModeSection(state: state, coordinator: model.displayModes, actions: actions)
+  }
+
+  // MARK: - Rotation
+
+  /// Between resolution and mirroring, which is where it belongs in the pane's
+  /// existing progression: what the display shows, then how that picture is
+  /// oriented, then how the display is arranged against the others. It is also
+  /// the ordering the two share a consequence through — RS3 measured that a
+  /// rotation swaps the reported mode, so a curated list captured before one
+  /// describes the other orientation.
+  private var rotationSection: some View {
+    RotationSection(state: state, coordinator: model.rotation)
   }
 
   // MARK: - Mirroring

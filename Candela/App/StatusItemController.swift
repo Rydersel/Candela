@@ -98,6 +98,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// window above — and additionally because the hotkey has no other surface at
   /// all, so this is the only thing that can say anything about it.
   private var mirrorConfirmation: MirrorConfirmationWindow?
+  private var rotationConfirmation: RotationConfirmationWindow?
   /// Stored (review M23) so the topology loop can `cleanupDisplay` departed
   /// displays' HUD panels; the executor shares this same instance.
   private let hud = BrightnessHUD()
@@ -341,6 +342,23 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // wherever it is named.
       return PanelView.title(for: state.display)
     }
+    // Rotation's own surface, the third caller of `ConfirmationPanel`. It needs
+    // one for the settings window's reason rather than the hotkey's — there is
+    // no rotation hotkey (RT1) — but the settings window is very often on a
+    // DIFFERENT display from the one that just rotated, which is exactly the
+    // "answered blind" case the window exists to prevent.
+    let rotationConfirmation = RotationConfirmationWindow(coordinator: model.rotation)
+    rotationConfirmation.drawableDisplayID = { [weak self] displayID in
+      self?.model.mirrorTopology.drawableDisplayID(for: displayID) ?? displayID
+    }
+    rotationConfirmation.displayName = { [weak self] displayID in
+      guard let state = self?.model.allControlledStates.first(where: { $0.id == displayID })
+      else { return "" }
+      return PanelView.title(for: state.display)
+    }
+    self.rotationConfirmation = rotationConfirmation
+    model.rotation.confirmation = rotationConfirmation
+
     // The orphaned-shade fix (see `MirroringCoordinator.rebuildSoftwareDimming`).
     // Wired here because it needs an AppKit island and the display list; D28
     // decides WHICH door — `reapplyAfterPrefChange()`, never

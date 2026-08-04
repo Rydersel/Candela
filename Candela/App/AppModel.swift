@@ -77,6 +77,12 @@ final class AppModel {
     store: mirrorTopology, modes: displayModes
   )
 
+  /// Rotation requests and the rotation countdown. Owned here for
+  /// `displayModes`' reason — the countdown must outlive whatever window started
+  /// it. Unlike the other two it persists nothing: a rotation is already system
+  /// state the instant it applies (RT2).
+  let rotation = RotationCoordinator()
+
   /// App-level M4 prefs (startupAction, multiKeyboardVolume, showContrast)
   /// read through one DisplayPrefs like the engine does; the persistence key
   /// is irrelevant for unsuffixed accessors. Assigned in `init` rather than
