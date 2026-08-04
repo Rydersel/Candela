@@ -18,6 +18,7 @@ struct DDCValueControllerTests {
     init(
       command: DDCCommand, savedValue: Double? = nil,
       writer: (any DDCWriting)? = nil, // e.g. ScriptedDDC for retry/failure tests
+      panelIdentity: String? = nil, // only the rebind tests care which panel this is
       configure: (DisplayPrefs) -> Void = { _ in }
     ) {
       defaults = InMemoryDefaults()
@@ -27,7 +28,7 @@ struct DDCValueControllerTests {
       if let savedValue { store.saveBrightness(savedValue, for: storageKey) }
       controller = DDCValueController(
         writer: writer ?? fake, command: command, prefs: prefs,
-        displayID: 1, store: store, storageKey: storageKey
+        displayID: 1, store: store, storageKey: storageKey, panelIdentity: panelIdentity
       )
     }
 
@@ -555,7 +556,7 @@ struct DDCValueControllerTests {
     harness.controller.setValue(0.5)
     _ = await harness.drainedWrites()
     let replacement = FakeDDC(readResult: nil)
-    harness.controller.rebind(writer: replacement)
+    harness.controller.rebind(writer: replacement, panelIdentity: nil)
     harness.controller.setValue(0.5) // unchanged value → no write at all (value dedupe)
     harness.controller.setValue(0.6)
     await harness.controller.waitForPendingWrites()
@@ -650,25 +651,74 @@ struct DDCValueControllerTests {
     #expect(harness.controller.readEvidence == .allZeros)
   }
 
-  /// A rebind is a new wire, so both read-derived facts go back to their
-  /// "nothing learned" state. Not academic: `AppModel.performRefresh` REUSES
-  /// these controllers for any display whose `CGDirectDisplayID` reappears,
-  /// and macOS reassigns those IDs across a replug — a different physical
-  /// monitor on the same port inherits this object.
+  /// A DIFFERENT panel on the same object, so both read-derived facts go back
+  /// to their "nothing learned" state. Not academic: `AppModel.performRefresh`
+  /// REUSES these controllers for any display whose `CGDirectDisplayID`
+  /// reappears, and macOS reassigns those IDs across a replug — a different
+  /// physical monitor on the same port inherits this object.
   ///
   /// `readMax` is the one that moves bytes: `nil` means "assume 100", so a
   /// panel that had reported a max below 100 is written against 100 again
-  /// until the new wire answers. Deliberate, and asserted rather than left to
-  /// be discovered — see `rebind(writer:)`.
-  @Test func arebindReturnsTheReadbackMaxToAssumed() async {
-    let harness = Harness(command: .contrast, savedValue: 0.6) { $0.startupAction = .read }
+  /// until the new panel answers. Deliberate, and asserted rather than left to
+  /// be discovered — see `rebind(writer:panelIdentity:)`.
+  @Test func arebindToADifferentPanelReturnsTheReadbackMaxToAssumed() async {
+    let harness = Harness(command: .contrast, savedValue: 0.6, panelIdentity: "panel-A") {
+      $0.startupAction = .read
+    }
     await harness.fake.setReadResult((current: 30, max: 80))
     await harness.controller.refreshFromHardware()
     #expect(harness.controller.readMax == 80)
     #expect(harness.controller.readEvidence == .answered)
 
-    harness.controller.rebind(writer: FakeDDC(readResult: nil))
+    harness.controller.rebind(writer: FakeDDC(readResult: nil), panelIdentity: "panel-B")
     #expect(harness.controller.readMax == nil)
     #expect(harness.controller.readEvidence == .notAttempted)
+  }
+
+  /// The counterpart, and the regression the first ruling shipped:
+  /// `AppModel.performRefresh` rebinds every KEPT display on EVERY pass, not
+  /// only after a replug, so a reset keyed on the CALL rather than on a change
+  /// of panel drops a readable panel's reported maximum on every wake and
+  /// every reconfiguration. Here that costs real bytes — `readMax == nil`
+  /// means writes scale against 100 — and the recovering re-read is a no-op
+  /// unless `startupAction == .read`, which it usually is not.
+  @Test func arebindToTheSamePanelKeepsWhatThatPanelReported() async {
+    let harness = Harness(command: .contrast, savedValue: 0.6, panelIdentity: "panel-A") {
+      $0.startupAction = .read
+    }
+    await harness.fake.setReadResult((current: 30, max: 80))
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.readMax == 80)
+
+    harness.controller.rebind(writer: FakeDDC(readResult: nil), panelIdentity: "panel-A")
+    #expect(harness.controller.readMax == 80)
+    #expect(harness.controller.readEvidence == .answered)
+  }
+
+  /// The clause the whole per-pass scope rests on, and until now the only one
+  /// nothing pinned: `refreshFromHardware` seeds `passEvidence` from
+  /// `.notAttempted`, not from the standing `readEvidence`. Seeding it from
+  /// `readEvidence` — the obvious "surely we should keep folding" edit —
+  /// left every other test in this suite green.
+  ///
+  /// The case that separates them: pass 1 gets the MAG's zeros answer, pass 2
+  /// goes completely silent. `allZeros` outranks `noReply`, so the carried
+  /// seed would republish `.allZeros` — "this panel answers with zeros" about
+  /// a panel that, on the only evidence this pass has, is not answering at
+  /// all. The verdict is the CURRENT pass's, and the current pass heard
+  /// nothing.
+  ///
+  /// Note what is NOT weakened: within pass 2 every attempt still folds
+  /// worst-wins (`withinOnePassASilentRetryDoesNotEraseAZerosAnswer` pins that
+  /// half). Only the seed changed scope.
+  @Test func apassThatHearsOnlySilenceReportsSilenceNotTheOldZeros() async {
+    let harness = Harness(command: .contrast, savedValue: 0.6) { $0.startupAction = .read }
+    await harness.fake.setReadResult((current: 0, max: 0))
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.readEvidence == .allZeros)
+
+    await harness.fake.setReadResult(nil) // the bus goes quiet: every try returns nil
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.readEvidence == .noReply)
   }
 }

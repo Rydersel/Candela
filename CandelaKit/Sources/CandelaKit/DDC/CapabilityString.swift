@@ -115,10 +115,47 @@ public enum CapabilityString {
   /// capability string at all. Measured: that shape, and only that shape, was
   /// the entire `unknown → .unsupported` class in the differential fuzz.
   ///
+  /// That class is not the whole of what the depth fix moves, and the note
+  /// used to stop there. The same counter also moves verdicts the other way
+  /// round the D24 axis, `.supported → .unsupported`:
+  /// `support(forVCP: 0x10, in: "(vcpname(vcp(10))vcp(20))")` answered
+  /// `.supported` before it and answers `.unsupported` now. The new answer is
+  /// the correct one — the `10` sits inside `vcpname`'s body, where it is a
+  /// permitted VALUE and not a feature the display advertises, and the real
+  /// top-level list is `vcp(20)` — but it is worth writing down that a
+  /// depth-counter fix can *withdraw* support as well as withdraw a denial.
+  /// `.unsupported` greys a control, so a wrong answer in this direction is
+  /// the expensive kind; it is right here only because the string parsed
+  /// cleanly, end to end, and genuinely does not list the code.
+  ///
   /// The consequence, taken deliberately: a capability string with no outer
   /// group — `vcp(10)` rather than `(vcp(10))` — is not well-formed MCCS and
-  /// returns `nil`. D24 makes that free, because `nil` reaches the UI as
-  /// `.unknown`, which `VolumeSliderPolicy` resolves to *enabled*.
+  /// returns `nil`.
+  ///
+  /// That `nil` used to be described as free, on the grounds that D24 lets it
+  /// reach the UI as `.unknown`, which `VolumeSliderPolicy` resolves to
+  /// *enabled*. That remains true of `VolumeSliderPolicy`, and is false of
+  /// `DisplayDiagnosticsSection`, which is now also a consumer and reads the
+  /// same `nil` as a statement about the DISPLAY rather than about our parser:
+  ///
+  /// - `CapabilityString.tag("mccs_ver"/"model"/"type", …)` renders "Not
+  ///   stated" — attributing silence to a panel that stated all three.
+  /// - `CapabilityString.codes(in:)` renders "The description did not parse,
+  ///   so Candela makes no claim about it", which is honest, but sits next to
+  ///   a "Capability request: The display answered" row and a disclosure group
+  ///   showing the raw string — so the pane displays a legible vcp list while
+  ///   telling the reader it could not read one.
+  ///
+  /// It is reachable without malformed firmware, because
+  /// `Arm64DDCService.readCapabilityString` concatenates fragments with no
+  /// trimming: one trailing NUL byte turns `"(vcp(10))"` into `"(vcp(10))\0"`,
+  /// whose last character is not `)` and is not whitespace, so
+  /// `outerGroupInterior` rejects the whole string. A parseable list plus
+  /// trailing junk is exactly the shape a display sends and the pane then
+  /// disclaims. Fixing that belongs in the reassembly (trim trailing NULs and
+  /// control bytes there, where the wire's own noise is), not by loosening the
+  /// wrapper rule here — D24 would still rather say nothing than guess at a
+  /// wrapper.
   ///
   /// The scan is hand-rolled rather than a regex because capability strings
   /// nest: only a depth counter can tell `60(0F 11 12)`'s closing paren from

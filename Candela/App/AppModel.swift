@@ -480,9 +480,17 @@ final class AppModel {
       if let previous = existing.removeValue(forKey: entry.display.id) {
         // Fresh DisplayState (name may change), reused controllers, fresh
         // writer for all three (rebind also resets each duplicate memo).
-        previous.controller.rebind(writer: entry.writer)
-        previous.volume.rebind(writer: entry.writer)
-        previous.contrast.rebind(writer: entry.writer)
+        //
+        // The persistence key rides along because this branch runs on EVERY
+        // pass, not only after a replug, while the identity of the panel on the
+        // other end is what decides whether the controllers' read-derived facts
+        // still describe anything real. macOS reassigns display IDs across a
+        // replug and this reconciliation is keyed on the ID, so "same ID" is
+        // NOT "same monitor"; the persistence key (EDID UUID) is the only thing
+        // here that tells the two apart. See `rebind(writer:panelIdentity:)`.
+        previous.controller.rebind(writer: entry.writer, panelIdentity: entry.display.persistenceKey)
+        previous.volume.rebind(writer: entry.writer, panelIdentity: entry.display.persistenceKey)
+        previous.contrast.rebind(writer: entry.writer, panelIdentity: entry.display.persistenceKey)
         let state = DisplayState(
           display: entry.display, controller: previous.controller,
           volume: previous.volume, contrast: previous.contrast, writer: entry.writer
@@ -514,17 +522,22 @@ final class AppModel {
         store: UserDefaultsBrightnessStore(),
         // M3 key; the M2 key is read once for migration, then ignored.
         storageKey: "combinedBrightness.\(persistenceKey)",
-        legacyKey: "brightness.\(persistenceKey)"
+        legacyKey: "brightness.\(persistenceKey)",
+        // Seeded here so the next pass's rebind — which happens on every
+        // refresh — is not mistaken for a panel swap.
+        panelIdentity: persistenceKey
       )
       let volume = DDCValueController(
         writer: entry.writer, command: .volume, prefs: prefs,
         displayID: entry.display.id,
-        store: UserDefaultsBrightnessStore(), storageKey: "volume.\(persistenceKey)"
+        store: UserDefaultsBrightnessStore(), storageKey: "volume.\(persistenceKey)",
+        panelIdentity: persistenceKey
       )
       let contrast = DDCValueController(
         writer: entry.writer, command: .contrast, prefs: prefs,
         displayID: entry.display.id,
-        store: UserDefaultsBrightnessStore(), storageKey: "contrast.\(persistenceKey)"
+        store: UserDefaultsBrightnessStore(), storageKey: "contrast.\(persistenceKey)",
+        panelIdentity: persistenceKey
       )
       let state = DisplayState(
         display: entry.display, controller: controller, volume: volume, contrast: contrast,

@@ -31,6 +31,10 @@ public final class DDCValueController {
   }
 
   @ObservationIgnored private var writer: any DDCWriting
+  /// Which physical panel this controller's read-derived state is evidence
+  /// ABOUT — see `rebind(writer:panelIdentity:)` for why it is a panel
+  /// identity and not the writer object.
+  @ObservationIgnored private var boundPanelIdentity: String?
   @ObservationIgnored private let prefs: DisplayPrefs
   @ObservationIgnored let displayID: CGDirectDisplayID
   private let coalescer: BrightnessWriteCoalescer
@@ -79,12 +83,19 @@ public final class DDCValueController {
     prefs: DisplayPrefs,
     displayID: CGDirectDisplayID,
     store: (any BrightnessStoring)? = nil,
-    storageKey: String? = nil
+    storageKey: String? = nil,
+    panelIdentity: String? = nil
   ) {
     self.writer = writer
     self.command = command
     self.prefs = prefs
     self.displayID = displayID
+    // Seeded at construction, not left nil: without it the FIRST rebind would
+    // always look like an identity change and reset a verdict this controller
+    // had just earned. `nil` is honest for callers with no notion of panel
+    // identity (tests, and any writer that never rebinds) — nil compares equal
+    // to nil, so those controllers simply never reset on rebind.
+    self.boundPanelIdentity = panelIdentity
     self.store = store
     self.storageKey = storageKey
     self.coalescer = BrightnessWriteCoalescer()
@@ -309,27 +320,79 @@ public final class DDCValueController {
     await muteCoalescer.waitUntilCompleted(through: issuedMuteGeneration)
   }
 
-  /// Every read-derived fact resets with the writer, for one reason: a read is
-  /// evidence about a WIRE, and this is a new wire. `AppModel.performRefresh`
-  /// reuses these controllers for any display whose `CGDirectDisplayID`
-  /// reappears, and macOS reassigns display IDs across a replug — so a
-  /// different physical monitor on the same port inherits this object and
-  /// would otherwise inherit the previous panel's readback and verdict about
-  /// itself. (`BrightnessController.rebind` carries the same reset.)
+  /// Swaps the DDC writer, and — only when `panelIdentity` says the panel on
+  /// the other end has CHANGED — drops the read-derived facts that were
+  /// evidence about the old one.
   ///
-  /// `readMax` back to `nil` is the load-bearing one, and it is the only part
-  /// of this change that moves bytes on the wire: `nil` means "assume 100",
-  /// so a panel that had reported a max BELOW 100 will, after a rebind and
-  /// until the next successful read, be written against 100 instead. That is
-  /// the same state a freshly discovered display starts in, and scaling
-  /// writes against a maximum the panel on the other end never reported is
-  /// the worse of the two — but it IS a behaviour change on the write path,
-  /// stated here rather than buried, and pinned by
-  /// `arebindReturnsTheReadbackMaxToAssumed`.
-  public func rebind(writer: any DDCWriting) {
+  /// The motivating defect is real: `AppModel.performRefresh` reuses these
+  /// controllers for any display whose `CGDirectDisplayID` reappears, and
+  /// macOS reassigns display IDs across a replug — so a different physical
+  /// monitor swapped onto the same port inherits this object, and without a
+  /// reset would inherit the previous panel's readback max and read verdict
+  /// about ITSELF. (`BrightnessController.rebind` carries the same reset,
+  /// under the same condition.)
+  ///
+  /// WHY A PANEL IDENTITY AND NOT THE WRITER. The first version of this reset
+  /// fired on every `rebind` call, which was wrong because `performRefresh`
+  /// rebinds every KEPT display on EVERY pass — every wake, every
+  /// reconfiguration — not only on replug. A readable panel that reported a
+  /// max below 100 was therefore dropped back to the assumed 100 several times
+  /// a session, and the recovering re-read is a no-op unless
+  /// `startupAction == .read` and fails outright on a write-only panel. The
+  /// obvious repair — compare the writer instead — does not work, and the
+  /// reason is in the discovery path rather than here:
+  ///
+  /// - `DisplayDiscovery.discover()` builds a FRESH `Arm64DDCService` on every
+  ///   pass, so object identity (`===`) changes every pass, replug or not.
+  /// - The `IOAVService` inside it is freshly created per pass too
+  ///   (`IOAVServiceCreateWithService(...).takeRetainedValue()` in
+  ///   `Arm64DDC.getIoregServicesForMatching`), and a plain CFTypeRef compares
+  ///   by pointer — so the underlying service handle changes every pass as
+  ///   well. There is no stable service identity to compare.
+  /// - `Arm64Service.serviceLocation` IS stable across passes, but it names
+  ///   the PORT, and is therefore unchanged in exactly the scenario this reset
+  ///   exists for: a different monitor plugged into the same port.
+  ///
+  /// What does distinguish the panels is the identity discovery already
+  /// computes for them — `ExternalDisplay.persistenceKey`, the EDID UUID with
+  /// a productName/manufacturer/serial fallback. It is also the key this
+  /// controller's own `storageKey` is derived from, so "the panel changed" and
+  /// "this controller's saved value belongs to someone else" are one fact, not
+  /// two. Its known limitation is inherited: identical twin monitors can share
+  /// an EDID UUID, so swapping one twin for another is not detected. Those two
+  /// panels also share a saved value and a prefs domain, so the verdict they
+  /// share is the least of that scenario's problems.
+  ///
+  /// COST OF THE NARROWER TRIGGER: a rebind of the SAME panel through a new
+  /// route (different port, or a newly interposed dock that eats DDC) keeps
+  /// the old verdict until the next read pass overwrites it. That is the right
+  /// trade — the verdict is about a panel, the next pass that asks supersedes
+  /// it, and the alternative is the regression above, which fires on every
+  /// wake.
+  ///
+  /// `readMax` back to `nil` is the load-bearing reset and the only part of
+  /// this that moves bytes: `nil` means "assume 100", so a panel that had
+  /// reported a max BELOW 100 is, from an identity change until the next
+  /// successful read, written against 100 instead. That is the same state a
+  /// freshly discovered display starts in, and scaling writes against a
+  /// maximum the panel on the other end never reported is the worse of the
+  /// two. Stated here rather than buried, and pinned by
+  /// `arebindToADifferentPanelReturnsTheReadbackMaxToAssumed` /
+  /// `arebindToTheSamePanelKeepsWhatThatPanelReported`.
+  ///
+  /// The duplicate memos reset UNCONDITIONALLY, and the asymmetry is
+  /// deliberate: they are not evidence about anything, they are a claim that
+  /// a particular value is already sitting in the register. A rebind means the
+  /// register was reached through a service we no longer hold, so re-asserting
+  /// a value must not be suppressed as a duplicate (review I10) — the same
+  /// argument whether or not the panel changed.
+  public func rebind(writer: any DDCWriting, panelIdentity: String?) {
     self.writer = writer
-    readMax = nil
-    readEvidence = .notAttempted
+    if panelIdentity != boundPanelIdentity {
+      boundPanelIdentity = panelIdentity
+      readMax = nil
+      readEvidence = .notAttempted
+    }
     coalescer.resetDuplicateState()
     muteCoalescer.resetDuplicateState()
   }

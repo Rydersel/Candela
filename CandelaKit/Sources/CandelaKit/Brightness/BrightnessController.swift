@@ -18,7 +18,8 @@ let pathLog = Logger(subsystem: "com.rydersel.Candela", category: "path")
 /// drops. The native applier is required; when the DisplayServices shim is
 /// unavailable the app injects a closure that returns false. The DDC applier
 /// is not held here — it is built per submit from the controller's writer
-/// (Task 3), so `rebind(writer:)` takes effect on the very next write.
+/// (Task 3), so `rebind(writer:panelIdentity:)` takes effect on the very next
+/// write.
 /// `readNative` is the native readback (re-review T10-B): role `.builtIn`
 /// seeds from it at init and reads it in `refreshFromHardware` instead of DDC
 /// (fork: `AppleDisplay.getAppleBrightness`); the app passes
@@ -57,7 +58,16 @@ public struct BrightnessBackends {
 @MainActor @Observable
 public final class BrightnessController {
   public private(set) var brightness: Double = 1.0
-  public private(set) var maxDDCValue: UInt16 = 100
+
+  /// The maximum a panel is assumed to accept until it reports one of its own
+  /// (fork parity). Named rather than repeated, because it is written in two
+  /// places now — the initial value below and the reset in
+  /// `rebind(writer:panelIdentity:)` — and a reset that drifted from the
+  /// default would put a display into a state no freshly discovered display
+  /// can be in.
+  private static let assumedMaxDDC: UInt16 = 100
+
+  public private(set) var maxDDCValue: UInt16 = BrightnessController.assumedMaxDDC
 
   /// What this display's brightness reads have proved (B3). Published so the
   /// diagnostics section can say "this display accepts commands but does not
@@ -168,10 +178,13 @@ public final class BrightnessController {
   /// the display blanks and re-modes.
   @ObservationIgnored private var settleInProgress = false
 
-  /// Mutable so `rebind(writer:)` can swap in the writer a replugged display
-  /// gets from rediscovery; the DDC applier is built per submit, so a swap
-  /// takes effect on the very next write.
+  /// Mutable so `rebind(writer:panelIdentity:)` can swap in the writer a
+  /// replugged display gets from rediscovery; the DDC applier is built per
+  /// submit, so a swap takes effect on the very next write.
   @ObservationIgnored private var writer: any DDCWriting
+  /// Which physical panel `maxDDCValue`, `didReadMaxDDC` and `readEvidence`
+  /// are evidence ABOUT — see `rebind(writer:panelIdentity:)`.
+  @ObservationIgnored private var boundPanelIdentity: String?
   @ObservationIgnored private let backends: BrightnessBackends
   @ObservationIgnored private let prefs: DisplayPrefs
   /// Module-internal (not private) so in-module collaborators — `BrightnessSync`'s
@@ -247,13 +260,18 @@ public final class BrightnessController {
     role: DisplayRole = .external,
     store: (any BrightnessStoring)? = nil,
     storageKey: String? = nil,
-    legacyKey: String? = nil
+    legacyKey: String? = nil,
+    panelIdentity: String? = nil
   ) {
     self.writer = writer
     self.backends = backends
     self.prefs = prefs
     self.displayID = displayID
     self.role = role
+    // Seeded at construction so the FIRST rebind is not mistaken for a panel
+    // swap; `nil` is the honest answer for callers with no notion of panel
+    // identity, and nil == nil means they never reset on rebind.
+    self.boundPanelIdentity = panelIdentity
     self.store = store
     self.storageKey = storageKey
     self.coalescer = BrightnessWriteCoalescer()
@@ -849,43 +867,67 @@ public final class BrightnessController {
   }
 
   /// Swaps the stored DDC writer (used by both the hardware write leg and
-  /// `refreshFromHardware`) after a display replug/rediscovery. The replugged
-  /// hardware is in a state we didn't write, so the coalescer's duplicate
-  /// memo is reset — otherwise re-asserting the current value would be
-  /// skipped as a duplicate forever.
+  /// `refreshFromHardware`) after a display rediscovery, and — only when
+  /// `panelIdentity` says the panel on the other end has CHANGED — drops the
+  /// three read-derived facts that were evidence about the old one.
   ///
-  /// Both read-derived facts reset here, and the reason is the same one: a
-  /// read is evidence about a WIRE, and a rebind is a new wire.
+  /// The coalescer's duplicate memo resets UNCONDITIONALLY: rediscovered
+  /// hardware is in a state we did not write through the service we now hold,
+  /// so re-asserting the current value must not be skipped as a duplicate
+  /// (review I10). That is true of every rebind, panel swap or not, and is why
+  /// it sits outside the identity check.
+  ///
+  /// WHAT RESETS ON A PANEL CHANGE, and why each one has to:
   ///
   /// - `didReadMaxDDC` (B5) was introduced write-once-true. A display that
-  ///   replugs into a read-failing state would then keep reporting "this
-  ///   maximum was read from the panel" on the strength of a read from a
-  ///   previous binding — the exact class of untruth the diagnostics work
-  ///   exists to remove.
+  ///   replugs into a read-failing state would keep reporting "this maximum
+  ///   was read from the panel" on the strength of a read from a previous
+  ///   binding — the exact class of untruth the diagnostics work exists to
+  ///   remove.
   /// - `readEvidence` (B3) goes back to `.notAttempted`, the floor: we have
-  ///   asked THIS binding nothing. Not a weakening of worst-wins — that fold
+  ///   asked THIS panel nothing. Not a weakening of worst-wins — that fold
   ///   governs a pass and this display's sibling controllers, and neither
-  ///   survives the cable.
+  ///   survives a swapped monitor.
+  /// - `maxDDCValue` back to `assumedMaxDDC`. Adding this one is a correction:
+  ///   the earlier ruling reset the provenance flag and left the number, on
+  ///   the grounds that the number feeds the write path. But that leaves the
+  ///   motivating scenario alive on the write path itself — a previous panel
+  ///   that reported 80 would leave the NEW panel's writes scaled against 80
+  ///   indefinitely (the new panel never reports, so nothing ever corrects it)
+  ///   while `didReadMaxDDC` says "assumed". Two facts about one number, only
+  ///   one of them honest, and the dishonest one is the one on the wire.
   ///
-  /// This is not hypothetical. `AppModel.performRefresh` REUSES a controller
-  /// for any display whose `CGDirectDisplayID` reappears, and macOS reassigns
-  /// display IDs across a replug — so a different physical monitor swapped
-  /// onto the same port inherits this object, and would otherwise inherit the
-  /// previous panel's verdict about itself.
+  /// WHY A PANEL IDENTITY AND NOT THE WRITER. The first version of this reset
+  /// fired on every `rebind` call. `AppModel.performRefresh` rebinds every
+  /// KEPT display on EVERY pass — wake, reconfiguration, menu open — not only
+  /// on replug, so that dropped a readable panel's reported maximum several
+  /// times a session, with the recovering re-read a no-op unless
+  /// `startupAction == .read` and useless on a write-only panel. Comparing the
+  /// writer instead does not work: `DisplayDiscovery.discover()` builds a
+  /// fresh `Arm64DDCService` per pass, and the `IOAVService` inside it is
+  /// freshly created per pass too (a CFTypeRef compared by pointer), so
+  /// neither object nor service identity is stable across a plain refresh.
+  /// `Arm64Service.serviceLocation` is stable, but it names the PORT and so is
+  /// unchanged in precisely the swap this reset exists for.
   ///
-  /// `maxDDCValue` itself is deliberately NOT reset, and the asymmetry is the
-  /// point: the number feeds the DDC write path, so resetting it would change
-  /// what lands on the wire — out of bounds for a change that is meant to
-  /// record what already happens, and a gratuitous risk to the one-writer
-  /// discipline. The honest reading of the pair after a replug is "the value
-  /// we are still using, which we can no longer vouch for", which is exactly
-  /// what an assumed maximum is. (`DDCValueController.readMax` is reset,
-  /// because there `nil` IS the "assumed" state and there is no other way to
-  /// say it; that one does move written values, and is noted there.)
-  public func rebind(writer: any DDCWriting) {
+  /// `ExternalDisplay.persistenceKey` — EDID UUID, falling back to
+  /// productName/manufacturer/serial — is what discovery already computes to
+  /// tell panels apart, and is the key this controller's `storageKey` is
+  /// derived from. Its known limitation is inherited: identical twins can
+  /// share an EDID UUID and would not be told apart here (they already share a
+  /// saved value and a prefs domain, so this is not the first casualty of
+  /// that). The cost of the narrower trigger is that the SAME panel rebound
+  /// through a DDC-hostile new route keeps its old verdict until the next read
+  /// pass supersedes it — which, for this controller, is the very next refresh
+  /// (`refreshFromHardware` here is ungated on `startupAction`).
+  public func rebind(writer: any DDCWriting, panelIdentity: String?) {
     self.writer = writer
-    didReadMaxDDC = false
-    readEvidence = .notAttempted
+    if panelIdentity != boundPanelIdentity {
+      boundPanelIdentity = panelIdentity
+      maxDDCValue = Self.assumedMaxDDC
+      didReadMaxDDC = false
+      readEvidence = .notAttempted
+    }
     coalescer.resetDuplicateState()
   }
 
@@ -1086,8 +1128,8 @@ actor BrightnessWriteCoalescer {
   struct PendingWrite: Sendable {
     let target: HardwareTarget
     /// Carried per write so one coalescer serves any hardware path — and so
-    /// a controller-level `rebind(writer:)` takes effect on the next
-    /// submitted write (the applier is rebuilt at submit, not held here).
+    /// a controller-level `rebind(writer:panelIdentity:)` takes effect on the
+    /// next submitted write (the applier is rebuilt at submit, not held here).
     let applier: any BrightnessApplying
     /// Display-reconfiguration epoch stamped at submit time; the drain skips
     /// targets whose epoch is no longer current.

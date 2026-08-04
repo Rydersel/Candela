@@ -310,9 +310,14 @@ actor GatedApplier: BrightnessApplying {
   #expect(await fake.recordedWrites().isEmpty)
 }
 
-/// `rebind(writer:)` swaps the writer for subsequent writes (the applier is
-/// built per submit) and resets the duplicate memo, so re-asserting the same
-/// value after a replug reaches the new hardware.
+/// `rebind(writer:panelIdentity:)` swaps the writer for subsequent writes (the
+/// applier is built per submit) and resets the duplicate memo, so re-asserting
+/// the same value after a replug reaches the new hardware.
+///
+/// The identity is UNCHANGED here (nil on both sides), deliberately: the memo
+/// reset is not conditional on the panel, and this pins that. The memo is a
+/// claim that a value is already in the register, reached through a service we
+/// no longer hold — which is true of every rebind, panel swap or not.
 @MainActor
 @Test func rebindSwapsWriterAndResetsDuplicateState() async {
   let first = FakeDDC()
@@ -322,7 +327,7 @@ actor GatedApplier: BrightnessApplying {
   await controller.waitForPendingWrites()
   #expect(await first.recordedWrites().map(\.value) == [40])
 
-  controller.rebind(writer: second)
+  controller.rebind(writer: second, panelIdentity: nil)
   controller.setBrightness(0.4) // same target: only valid because rebind reset the memo
   await controller.waitForPendingWrites()
   #expect(await first.recordedWrites().map(\.value) == [40]) // old writer untouched

@@ -164,38 +164,67 @@ struct MaxDDCProvenanceTests {
     #expect(controller.didReadMaxDDC == false)
   }
 
-  /// A replug is a new wire, and evidence is about a wire. This matters more
-  /// than it sounds: `AppModel.performRefresh` REUSES the controller for any
-  /// display whose `CGDirectDisplayID` reappears, and macOS reassigns those
-  /// IDs across a replug — so a different physical monitor on the same port
-  /// inherits this object and, without the reset, the previous panel's claims
-  /// about itself.
-  @Test func arebindReturnsTheMaximumToAssumedAndTheEvidenceToTheFloor() async {
-    let controller = makeLegacyPathController(writer: FakeDDC(readResult: (current: 30, max: 120)))
+  /// A DIFFERENT panel is a different subject, and evidence is about a
+  /// subject. This matters more than it sounds: `AppModel.performRefresh`
+  /// REUSES the controller for any display whose `CGDirectDisplayID`
+  /// reappears, and macOS reassigns those IDs across a replug — so a different
+  /// physical monitor on the same port inherits this object and, without the
+  /// reset, the previous panel's claims about itself.
+  ///
+  /// All THREE facts reset, `maxDDCValue` included. An earlier ruling reset
+  /// only the two flags and left the number, which left the motivating
+  /// scenario alive on the write path: the new panel's writes would stay
+  /// scaled against the old panel's 120 indefinitely (a write-only panel never
+  /// reports, so nothing corrects it) while `didReadMaxDDC` said "assumed".
+  @Test func arebindToADifferentPanelReturnsTheMaximumToAssumed() async {
+    let controller = makeLegacyPathController(
+      writer: FakeDDC(readResult: (current: 30, max: 120)), panelIdentity: "panel-A"
+    )
     await controller.refreshFromHardware()
     #expect(controller.didReadMaxDDC == true)
     #expect(controller.readEvidence == .answered)
+    #expect(controller.maxDDCValue == 120)
 
-    controller.rebind(writer: FakeDDC(readResult: nil))
+    controller.rebind(writer: FakeDDC(readResult: nil), panelIdentity: "panel-B")
     #expect(controller.didReadMaxDDC == false)
     #expect(controller.readEvidence == .notAttempted)
-    // The number itself is deliberately NOT reset: `maxDDCValue` feeds the DDC
-    // write path, and rewriting it here would change what lands on the wire.
-    // The honest reading of the pair after a replug is "120, which we can no
-    // longer vouch for" — which is what an assumed maximum is.
-    #expect(controller.maxDDCValue == 120)
+    #expect(controller.maxDDCValue == 100) // the assumed default, as for any fresh display
   }
 
-  /// …and the claim is earned back by this binding's own read, not carried.
-  @Test func areadOnTheNewBindingEarnsTheClaimBack() async {
-    let controller = makeLegacyPathController(writer: FakeDDC(readResult: (current: 30, max: 120)))
+  /// The other half, and the one the first ruling got wrong.
+  /// `AppModel.performRefresh` rebinds every KEPT display on EVERY pass — a
+  /// wake, a resolution change, a menu open — not only after a replug. A reset
+  /// that fires on the call rather than on a change therefore drops a readable
+  /// panel's reported maximum back to the assumed 100 several times a session,
+  /// and the recovering re-read is gated (`startupAction == .read` for the
+  /// volume/contrast siblings) and useless on a write-only panel. The panel is
+  /// the same panel; what it reported is still what it reported.
+  @Test func arebindToTheSamePanelKeepsWhatThatPanelReported() async {
+    let controller = makeLegacyPathController(
+      writer: FakeDDC(readResult: (current: 30, max: 120)), panelIdentity: "panel-A"
+    )
     await controller.refreshFromHardware()
 
-    controller.rebind(writer: FakeDDC(readResult: nil))
-    await controller.refreshFromHardware() // the new wire answers nothing
-    #expect(controller.didReadMaxDDC == false)
+    controller.rebind(writer: FakeDDC(readResult: nil), panelIdentity: "panel-A")
+    #expect(controller.maxDDCValue == 120)
+    #expect(controller.didReadMaxDDC == true)
+    #expect(controller.readEvidence == .answered)
+  }
 
-    controller.rebind(writer: FakeDDC(readResult: (current: 40, max: 80)))
+  /// …and after a panel change the claim is earned back by the new panel's own
+  /// read, not carried.
+  @Test func areadOnTheNewPanelEarnsTheClaimBack() async {
+    let controller = makeLegacyPathController(
+      writer: FakeDDC(readResult: (current: 30, max: 120)), panelIdentity: "panel-A"
+    )
+    await controller.refreshFromHardware()
+
+    controller.rebind(writer: FakeDDC(readResult: nil), panelIdentity: "panel-B")
+    await controller.refreshFromHardware() // the new panel answers nothing
+    #expect(controller.didReadMaxDDC == false)
+    #expect(controller.maxDDCValue == 100)
+
+    controller.rebind(writer: FakeDDC(readResult: (current: 40, max: 80)), panelIdentity: "panel-C")
     await controller.refreshFromHardware()
     #expect(controller.didReadMaxDDC == true)
     #expect(controller.maxDDCValue == 80)

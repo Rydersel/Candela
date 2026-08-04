@@ -11,7 +11,8 @@ import Testing
 func makeLegacyPathController(
   writer: any DDCWriting,
   store: (any BrightnessStoring)? = nil,
-  storageKey: String? = nil
+  storageKey: String? = nil,
+  panelIdentity: String? = nil
 ) -> BrightnessController {
   // Per-call in-memory store: the only key ever written is the app-level
   // combined-disable flag, and no two callers share state.
@@ -28,7 +29,8 @@ func makeLegacyPathController(
     prefs: DisplayPrefs(defaults: defaults, persistenceKey: "legacy"),
     displayID: 1,
     store: store,
-    storageKey: storageKey
+    storageKey: storageKey,
+    panelIdentity: panelIdentity
   )
 }
 
