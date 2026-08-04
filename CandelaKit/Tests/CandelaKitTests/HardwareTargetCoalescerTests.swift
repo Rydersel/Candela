@@ -310,9 +310,14 @@ actor GatedApplier: BrightnessApplying {
   #expect(await fake.recordedWrites().isEmpty)
 }
 
-/// `rebind(writer:)` swaps the writer for subsequent writes (the applier is
-/// built per submit) and resets the duplicate memo, so re-asserting the same
-/// value after a replug reaches the new hardware.
+/// `rebind(writer:panelIdentity:)` swaps the writer for subsequent writes (the
+/// applier is built per submit) and resets the duplicate memo, so re-asserting
+/// the same value after a replug reaches the new hardware.
+///
+/// The identity is UNCHANGED here (nil on both sides), deliberately: the memo
+/// reset is not conditional on the panel, and this pins that. The memo is a
+/// claim that a value is already in the register, reached through a service we
+/// no longer hold — which is true of every rebind, panel swap or not.
 @MainActor
 @Test func rebindSwapsWriterAndResetsDuplicateState() async {
   let first = FakeDDC()
@@ -322,9 +327,164 @@ actor GatedApplier: BrightnessApplying {
   await controller.waitForPendingWrites()
   #expect(await first.recordedWrites().map(\.value) == [40])
 
-  controller.rebind(writer: second)
+  controller.rebind(writer: second, panelIdentity: nil)
   controller.setBrightness(0.4) // same target: only valid because rebind reset the memo
   await controller.waitForPendingWrites()
   #expect(await first.recordedWrites().map(\.value) == [40]) // old writer untouched
   #expect(await second.recordedWrites().map(\.value) == [40]) // re-applied to the new writer
+}
+
+// MARK: - Last write outcome (B4)
+
+/// The `Bool` that `DDCCommandApplier` hands back used to advance the
+/// duplicate memo and then evaporate: nothing anywhere retained "the last
+/// write to this display failed", so the diagnostics section could not tell a
+/// display that is accepting commands from one that has been refusing every
+/// one of them since the cable was plugged in. These pin the two facts the
+/// coalescer now keeps — and, just as importantly, the cases where it must
+/// keep NEITHER.
+@Suite("Last DDC write outcome (B4)")
+struct LastAppliedTargetTests {
+  /// A fresh controller has written nothing, and "nothing written" must not
+  /// read as "the last write failed" — the row would then accuse a display
+  /// that has never been asked for anything.
+  @Test func aControllerThatHasWrittenNothingReportsNoTargetAndNoFailure() async {
+    let coalescer = BrightnessWriteCoalescer()
+    #expect(coalescer.lastAppliedTarget() == nil)
+    #expect(coalescer.lastApplyFailed() == false)
+    coalescer.finishSubmissions()
+  }
+
+  @Test func aSuccessfulApplyIsRetainedAsTheLastTarget() async {
+    let applier = RecordingApplier()
+    let coalescer = BrightnessWriteCoalescer()
+    coalescer.submit(.init(target: .ddc(raw: 42), applier: applier, epoch: 0, generation: 1))
+    await coalescer.waitUntilCompleted(through: 1)
+    #expect(coalescer.lastAppliedTarget() == .ddc(raw: 42))
+    #expect(coalescer.lastApplyFailed() == false)
+    coalescer.finishSubmissions()
+  }
+
+  /// A failed apply must NOT advance `lastApplied` — that is the shipped
+  /// duplicate-skip rule (a failure that advanced the memo would make the
+  /// retry of the same value look like a duplicate and strand the panel at
+  /// the old level) — and must still be reportable.
+  @Test func aFailedApplyIsRememberedAndDoesNotBecomeTheLastTarget() async {
+    let applier = RecordingApplier(scriptedResults: [false])
+    let coalescer = BrightnessWriteCoalescer()
+    coalescer.submit(.init(target: .ddc(raw: 7), applier: applier, epoch: 0, generation: 1))
+    await coalescer.waitUntilCompleted(through: 1)
+    #expect(coalescer.lastApplyFailed() == true)
+    #expect(coalescer.lastAppliedTarget() == nil)
+    coalescer.finishSubmissions()
+  }
+
+  /// The failure flag tracks the LATEST attempt, not the worst one: a display
+  /// that failed once and has worked ever since is working, and a row that
+  /// latched the old failure would send someone hunting a cable that is fine.
+  @Test func aLaterSuccessClearsAnEarlierFailure() async {
+    let applier = RecordingApplier(scriptedResults: [false])
+    let coalescer = BrightnessWriteCoalescer()
+    coalescer.submit(.init(target: .ddc(raw: 7), applier: applier, epoch: 0, generation: 1))
+    await coalescer.waitUntilCompleted(through: 1)
+    coalescer.submit(.init(target: .ddc(raw: 8), applier: applier, epoch: 0, generation: 2))
+    await coalescer.waitUntilCompleted(through: 2)
+    #expect(coalescer.lastApplyFailed() == false)
+    #expect(coalescer.lastAppliedTarget() == .ddc(raw: 8))
+    coalescer.finishSubmissions()
+  }
+
+  /// A reset means the hardware is in a state we did not write — a replug or
+  /// an HDR exit. Carrying the old failure across it would report a fault
+  /// against a wire that no longer exists.
+  @Test func aDuplicateResetClearsTheFailureAlongWithTheTarget() async {
+    let applier = RecordingApplier(scriptedResults: [false])
+    let coalescer = BrightnessWriteCoalescer()
+    coalescer.submit(.init(target: .ddc(raw: 7), applier: applier, epoch: 0, generation: 1))
+    await coalescer.waitUntilCompleted(through: 1)
+    coalescer.resetDuplicateState()
+    #expect(coalescer.lastApplyFailed() == false)
+    #expect(coalescer.lastAppliedTarget() == nil)
+    coalescer.finishSubmissions()
+  }
+
+  /// Review I1 applied to the failure flag as well as to the target: a reset
+  /// that lands while an apply is in flight must win over that apply's
+  /// OUTCOME, whichever way the outcome went. The failing write went to the
+  /// old panel; recording it after the rebind would make the new one look
+  /// broken before it had been asked for anything.
+  @Test func aResetDuringAnInFlightFailingApplyStillClearsTheFailure() async {
+    let applier = GatedFailingApplier()
+    let coalescer = BrightnessWriteCoalescer()
+    coalescer.submit(.init(target: .ddc(raw: 7), applier: applier, epoch: 0, generation: 1))
+    await applier.waitUntilApplyStarted()
+    coalescer.resetDuplicateState() // mid-apply: must win over the apply's failure
+    await applier.release()
+    await coalescer.waitUntilCompleted(through: 1)
+    #expect(coalescer.lastApplyFailed() == false)
+    #expect(coalescer.lastAppliedTarget() == nil)
+    coalescer.finishSubmissions()
+  }
+}
+
+/// `GatedApplier`'s sibling for the failure race: same block-until-released
+/// shape, but every apply reports failure. Separate rather than a flag on
+/// `GatedApplier` so the existing I1 test's expectations stay untouched.
+actor GatedFailingApplier: BrightnessApplying {
+  private var started = false
+  private var startObservers: [CheckedContinuation<Void, Never>] = []
+  private var permits = 0
+  private var gateWaiters: [CheckedContinuation<Void, Never>] = []
+
+  func waitUntilApplyStarted() async {
+    while !started {
+      await withCheckedContinuation { startObservers.append($0) }
+    }
+  }
+
+  func release() {
+    permits += 1
+    if !gateWaiters.isEmpty {
+      permits -= 1
+      gateWaiters.removeFirst().resume()
+    }
+  }
+
+  func apply(_: HardwareTarget) async -> Bool {
+    started = true
+    for observer in startObservers {
+      observer.resume()
+    }
+    startObservers.removeAll()
+    if permits > 0 {
+      permits -= 1
+    } else {
+      await withCheckedContinuation { gateWaiters.append($0) }
+    }
+    return false
+  }
+}
+
+/// The controller's B4 accessors are pass-throughs over the coalescer's
+/// existing lock (the `_duplicateResetCount()` precedent), so what they need
+/// pinning for is the WIRING: that they read the coalescer this controller
+/// actually writes through, and that a real DDC failure — not a synthetic
+/// applier — shows up in them.
+@MainActor
+@Test func controllerReportsTheLastWriteOutcomeItActuallyPerformed() async {
+  let fake = FakeDDC()
+  let controller = makeLegacyPathController(writer: fake)
+  #expect(controller.lastAppliedTarget() == nil)
+  #expect(controller.lastApplyFailed() == false)
+
+  controller.setBrightness(0.4)
+  await controller.waitForPendingWrites()
+  #expect(controller.lastAppliedTarget() == .ddc(raw: 40))
+  #expect(controller.lastApplyFailed() == false)
+
+  await fake.setWritesSucceed(false)
+  controller.setBrightness(0.6)
+  await controller.waitForPendingWrites()
+  #expect(controller.lastApplyFailed() == true)
+  #expect(controller.lastAppliedTarget() == .ddc(raw: 40)) // the failed write never landed
 }

@@ -43,8 +43,10 @@ final class FakeShade: ShadeRendering {
   private(set) var removedAllCount = 0
   private(set) var repinCount = 0
 
-  func setShadeAlpha(_ alpha: Double, on displayID: CGDirectDisplayID) {
+  @discardableResult
+  func setShadeAlpha(_ alpha: Double, on displayID: CGDirectDisplayID) -> Bool {
     alphaCalls.append((alpha, displayID))
+    return true
   }
 
   func removeShade(for displayID: CGDirectDisplayID) { removed.append(displayID) }
@@ -59,7 +61,9 @@ final class FakeGamma: GammaApplying {
   private(set) var resetCount = 0
 
   @discardableResult
-  func applyGammaScale(_ scale: Double, on _: CGDirectDisplayID) -> Bool {
+  func applyGammaScale(
+    _ scale: Double, on _: CGDirectDisplayID, enforcerOn _: CGDirectDisplayID
+  ) -> Bool {
     scales.append(scale)
     return true
   }
@@ -508,8 +512,12 @@ struct ReapplyAfterPrefChangeTests {
   }
 
   @Test func aDisabledBrightnessCommandWritesNoDDCButStillFixesTheSoftwareLeg() async {
-    // `unavailableDDC.brightness` routes through the combined branch's
-    // `if !tuning.unavailableDDC` guard: no register write, software leg only.
+    // `unavailableDDC.brightness` routes to `BrightnessPath.softwareOnly`: no
+    // register write, software leg only — and on the COMBINED SPLIT value, not
+    // the raw one, which is what the 0.83 below pins. (It used to route through
+    // an `if !tuning.unavailableDDC` guard inside the combined branch; ruling
+    // R-A gave the state its own case. The BEHAVIOUR asserted here is
+    // unchanged — that is the point of the row.)
     let h = Harness()
     h.controller.setBrightness(0.4)
     #expect(h.submitted == [.ddc(raw: 0)])
@@ -521,6 +529,38 @@ struct ReapplyAfterPrefChangeTests {
 
     #expect(h.submitted == [.ddc(raw: 0)]) // nothing new on the wire
     #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 0.83)) // re-asserted
+  }
+
+  /// The corner where combined mode has BOTH legs dead: the brightness
+  /// command's DDC leg is turned off AND the switching point is −8, so
+  /// `combinedSplit`'s hardware branch always wins and the software band has
+  /// zero width. Nothing moves the display at all.
+  ///
+  /// This is state (B) of the collapse recorded on
+  /// `BrightnessController.softwareBackendChoice`. Before path selection moved
+  /// into `BrightnessPathPolicy` it answered `.gamma` here and re-applied
+  /// `sw == 1`; it now answers `.none` and tears the backend down instead.
+  /// Pinned because the two are equivalent only by arithmetic —
+  /// `swTransform(1, allowZero: false) == 1` — and an arithmetic coincidence
+  /// nobody asserts is a regression waiting for the next reader who
+  /// "simplifies" one side of it.
+  @Test func combinedWithDDCOffAndAZeroWidthBandLeavesNoDimmingBehind() {
+    let h = Harness { prefs, _ in
+      prefs.combinedSwitchingPoint = -8 // s == 0: the software band has no width
+      var tuning = prefs.tuning(for: .brightness)
+      tuning.unavailableDDC = true
+      prefs.setTuning(tuning, for: .brightness)
+    }
+    h.controller.setBrightness(0.4)
+    #expect(h.submitted.isEmpty) // no register write: the DDC leg is off
+    #expect(h.gamma.scales.isEmpty) // and no software write: the band is empty
+
+    h.controller.reapplyAfterPrefChange()
+    #expect(h.submitted.isEmpty)
+    // The same screen the pre-refactor `applySoftware(1)` produced, reached by
+    // the other route: the table is handed back at 1.0 and no shade is drawn.
+    #expect(h.gamma.scales == [1.0])
+    #expect(h.shade.removed == [Harness.displayID])
   }
 }
 

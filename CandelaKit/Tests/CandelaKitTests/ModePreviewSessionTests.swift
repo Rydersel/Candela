@@ -16,6 +16,13 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
     let scope: DisplayConfigScope
   }
 
+  /// One `applyMirroring` call. A struct, not a tuple, so a test can `#expect`
+  /// a whole batch against an expected list.
+  struct AppliedMirroring: Equatable {
+    let changes: [MirrorChange]
+    let scope: DisplayConfigScope
+  }
+
   private let lock = NSLock()
   private var _applied: [Applied] = []
   private var _appliedDisplayIDs: [CGDirectDisplayID] = []
@@ -23,6 +30,9 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
   private var _failWith: DisplayConfigError?
   private var _failOnlyDisplay: CGDirectDisplayID?
   private var _available: [DisplayMode] = []
+  private var _appliedMirroring: [AppliedMirroring] = []
+  private var _configuredDisplays: [ConfiguredDisplay] = []
+  private var _failMirroringWith: DisplayConfigError?
 
   var applied: [Applied] { lock.withLock { _applied } }
   /// Kept alongside rather than inside `Applied` so the scope assertions stay
@@ -51,7 +61,24 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
     set { lock.withLock { _available = newValue } }
   }
 
-  func displays() -> [ConfiguredDisplay] { [] }
+  var appliedMirroring: [AppliedMirroring] { lock.withLock { _appliedMirroring } }
+
+  /// What `displays()` reports. Settable because the mirror session captures a
+  /// topology from it before every preview.
+  var configuredDisplays: [ConfiguredDisplay] {
+    get { lock.withLock { _configuredDisplays } }
+    set { lock.withLock { _configuredDisplays = newValue } }
+  }
+
+  /// Scoped separately from `failWith` on purpose: a fake that fails BOTH
+  /// applies masks the case where a mode revert succeeds and a mirror commit
+  /// does not, which is the ordering rule between the two sessions.
+  var failMirroringWith: DisplayConfigError? {
+    get { lock.withLock { _failMirroringWith } }
+    set { lock.withLock { _failMirroringWith = newValue } }
+  }
+
+  func displays() -> [ConfiguredDisplay] { configuredDisplays }
   func modes(for _: CGDirectDisplayID) -> [DisplayMode] { available }
   func currentMode(for _: CGDirectDisplayID) -> DisplayMode? { current }
   func nativePixels(for _: CGDirectDisplayID) -> (width: Int, height: Int)? { nil }
@@ -64,6 +91,65 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
       _applied.append(Applied(modeID: mode.ioModeID, scope: scope))
       _appliedDisplayIDs.append(displayID)
       _current = mode
+    }
+  }
+
+  func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws {
+    try lock.withLock {
+      // ORDER IS LOAD-BEARING: the empty-batch guard runs BEFORE the injection
+      // point, because `CoreGraphicsDisplayConfigurator.applyMirroring` returns
+      // on its own empty guard before it can reach anything that fails. A fake
+      // that checked `failMirroringWith` first would throw for an empty batch —
+      // a failure production cannot produce.
+      //
+      // Not hypothetical. `MirrorTopologyPolicy.changes(from:to:)` returns `[]`
+      // whenever the live topology already matches the capture, which is the
+      // COMMON case on a revert. A session test that set `failMirroringWith`
+      // and drove a revert would otherwise exercise, and then enshrine, a
+      // "revert failed" branch that is unreachable in shipped code.
+      guard !changes.isEmpty else { return }
+      if let _failMirroringWith { throw _failMirroringWith }
+      _appliedMirroring.append(AppliedMirroring(changes: changes, scope: scope))
+      // The fake's topology follows the change, so a session that re-reads
+      // `displays()` after applying sees what it asked for — which is what
+      // makes the revert-path tests real rather than tautological.
+      //
+      // MASTER membership is RECOMPUTED over the whole post-state rather than
+      // read off the batch, and that distinction is load-bearing. A master is
+      // usually not named in `changes` at all (engaging names only the slaves),
+      // so deriving its membership from the batch leaves it
+      // `isInMirrorSet == false` — and `isMirrorMaster` requires the flag, so
+      // `MirrorTopology.masters` would come back EMPTY from a topology that
+      // plainly has a master. The mirror that a test then "breaks" would be one
+      // no policy could see. CoreGraphics reports the master as a set member;
+      // so does this.
+      //
+      // SLAVE membership is NOT computed here. The expression below asks only
+      // "does anyone mirror me", which is true of masters and false of slaves;
+      // a slave arrives at `isInMirrorSet == true` solely because
+      // `ConfiguredDisplay.init` ORs in `mirrorsDisplay != kCGNullDirectDisplay`
+      // (`DisplayConfiguring.swift:96`). That is a real dependency on another
+      // type's derivation, not an accident, and
+      // `theFakeReportsSlaveMembershipAndSetMembersLikeCoreGraphicsDoes` asserts
+      // it — otherwise deleting that OR would leave the fake lying about every
+      // slave with this suite still green.
+      let post = _configuredDisplays.map { display in
+        (display, changes.first { $0.display == display.id }?.master ?? display.mirrorsDisplay)
+      }
+      _configuredDisplays = post.map { display, mirrors in
+        ConfiguredDisplay(
+          id: display.id,
+          identity: display.identity,
+          name: display.name,
+          isBuiltIn: display.isBuiltIn,
+          mirrorsDisplay: mirrors,
+          // A master's membership ends with its last slave: recomputing from the
+          // post-state is what makes a break leave NOBODY in a set, rather than
+          // a masterless set with one stale member.
+          isInMirrorSet: post.contains { $0.1 == display.id && $0.1 != kCGNullDirectDisplay },
+          isAlwaysInMirrorSet: display.isAlwaysInMirrorSet
+        )
+      }
     }
   }
 }

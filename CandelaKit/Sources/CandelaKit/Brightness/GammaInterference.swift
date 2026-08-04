@@ -32,8 +32,29 @@ public final class GammaInterferenceMonitor {
   /// Clobber events per display this session (backlog #5a: one global count
   /// let N displays trip the threshold on the FIRST real event, and the alert
   /// named whichever display came third). Internal: the offer is the public
-  /// signal, the counts are a test seam.
+  /// signal, the counts are a test seam — `interferenceCount(for:)` below is
+  /// the public reading of one entry.
   private(set) var interferenceCounts: [CGDirectDisplayID: Int] = [:]
+
+  /// How many times another app has taken THIS display's color profile back
+  /// this session (B7). The count already drives the fallback offer; until now
+  /// it was unsayable, so the pane could not explain WHY the offer appeared —
+  /// or, for a user still below the threshold, that a fight was going on at
+  /// all.
+  ///
+  /// An accessor rather than the dictionary made public: a view has no
+  /// business iterating displays it does not own, and a display nobody
+  /// clobbered must read zero rather than a nil every caller re-interprets.
+  /// `suspendedForSession` is already public, so the pair is complete.
+  ///
+  /// This type is not `@Observable`, so a row reading this refreshes on the
+  /// pane's existing invalidation rather than the instant a clobber is
+  /// detected. Acceptable for a count that is read while someone is working
+  /// out why their screen keeps changing; a live badge would need the monitor
+  /// to become observable, which is a bigger change than this row is worth.
+  public func interferenceCount(for displayID: CGDirectDisplayID) -> Int {
+    interferenceCounts[displayID, default: 0]
+  }
 
   private var lastVerified: [CGDirectDisplayID: ContinuousClock.Instant] = [:]
 

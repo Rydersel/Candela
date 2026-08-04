@@ -27,7 +27,9 @@ final class FakeInterferenceGamma: GammaApplying {
   }
 
   @discardableResult
-  func applyGammaScale(_ scale: Double, on _: CGDirectDisplayID) -> Bool {
+  func applyGammaScale(
+    _ scale: Double, on _: CGDirectDisplayID, enforcerOn _: CGDirectDisplayID
+  ) -> Bool {
     events.append(.apply(scale))
     return true
   }
@@ -303,4 +305,35 @@ private struct Fixture {
   fixture.monitor.checkBeforeApply(displayID: 3, displayName: "A", onSwitchToShade: {})
 
   #expect(fixture.gamma.verifyCount == 2)
+}
+
+// MARK: - Per-display interference count (B7)
+
+/// An accessor rather than the dictionary: a view has no business iterating
+/// displays it does not own, and per-display counts are the whole point — one
+/// global count let N displays trip the threshold on the first real event, and
+/// the alert named whichever display came third (backlog #5a).
+@MainActor
+@Test func interferenceIsCountedPerDisplayAndReadableForOne() {
+  // Threshold far above anything this test reaches: the offer would suspend
+  // the monitor for the session and stop the counting we are measuring.
+  let fixture = Fixture(threshold: 99)
+  fixture.gamma.intact = false
+
+  #expect(fixture.monitor.interferenceCount(for: Fixture.displayID) == 0)
+  fixture.monitor.checkBeforeApply(
+    displayID: Fixture.displayID, displayName: Fixture.displayName, onSwitchToShade: {}
+  )
+  #expect(fixture.monitor.interferenceCount(for: Fixture.displayID) == 1)
+  // The display nobody clobbered reads zero, not the neighbour's count.
+  #expect(fixture.monitor.interferenceCount(for: 4) == 0)
+}
+
+/// A display that has never been checked is a legitimate query — the pane asks
+/// about every display it lists, including the ones with no gamma leg at all.
+/// Zero, not a crash and not a nil the caller has to re-interpret.
+@MainActor
+@Test func interferenceCountForAnUnknownDisplayIsZero() {
+  let fixture = Fixture()
+  #expect(fixture.monitor.interferenceCount(for: 999) == 0)
 }

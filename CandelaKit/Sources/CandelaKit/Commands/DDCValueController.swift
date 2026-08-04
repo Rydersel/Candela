@@ -31,6 +31,10 @@ public final class DDCValueController {
   }
 
   @ObservationIgnored private var writer: any DDCWriting
+  /// Which physical panel this controller's read-derived state is evidence
+  /// ABOUT — see `rebind(writer:panelIdentity:)` for why it is a panel
+  /// identity and not the writer object.
+  @ObservationIgnored private var boundPanelIdentity: String?
   @ObservationIgnored private let prefs: DisplayPrefs
   @ObservationIgnored let displayID: CGDirectDisplayID
   private let coalescer: BrightnessWriteCoalescer
@@ -41,8 +45,35 @@ public final class DDCValueController {
   private let store: (any BrightnessStoring)?
   private let storageKey: String?
   /// Validated readback max (nil until a successful `.read` pass); feeds
-  /// `CommandTuning.effectiveMaxDDC`.
-  @ObservationIgnored private var readMax: Int?
+  /// `CommandTuning.effectiveMaxDDC`. `public private(set)` and OBSERVABLE
+  /// (B5) — `@ObservationIgnored` is gone deliberately: "the panel said 100"
+  /// and "we assumed 100 because the read failed" are different facts and the
+  /// pane has to be able to tell them apart. `nil` IS the second fact; nothing
+  /// else in this type records it.
+  public private(set) var readMax: Int?
+
+  /// What this command's reads have proved (B3).
+  ///
+  /// Published per COMMAND, not per display, because `AppModel.DisplayState`
+  /// holds brightness, volume and contrast as siblings with no owner among
+  /// them: the display-level verdict is `DDCReadEvidence.worst` of the three,
+  /// folded at whatever reads them.
+  ///
+  /// Scope: the verdict of the most recent pass that actually asked the panel
+  /// something, folded worst-wins over the FAILED attempts within that pass —
+  /// so a late `continue` still cannot erase an earlier zeros observation from
+  /// the same pass, and a pass that returns early (`startupAction != .read`,
+  /// `!isAvailable`, `tries == 0`) leaves the previous verdict standing.
+  ///
+  /// What it is deliberately NOT is a fold across passes and across retries.
+  /// The retry loop exists because DDC reads are flaky, so the common healthy
+  /// case is attempt 1 returning nil and attempt 2 answering; folding those
+  /// monotonically published "this display does not reply" about a panel that
+  /// had just replied, then adopted its value in the same breath. A read that
+  /// eventually succeeded is a read that succeeded, so a successful attempt
+  /// supersedes the failures that preceded it in its pass. The ordering in
+  /// `DDCReadEvidence` is untouched; only the scope of the fold changed.
+  public private(set) var readEvidence: DDCReadEvidence = .notAttempted
   /// Test seam, mirroring `BrightnessController._onSubmit`.
   @ObservationIgnored var _onSubmit: ((HardwareTarget) -> Void)?
 
@@ -52,12 +83,19 @@ public final class DDCValueController {
     prefs: DisplayPrefs,
     displayID: CGDirectDisplayID,
     store: (any BrightnessStoring)? = nil,
-    storageKey: String? = nil
+    storageKey: String? = nil,
+    panelIdentity: String? = nil
   ) {
     self.writer = writer
     self.command = command
     self.prefs = prefs
     self.displayID = displayID
+    // Seeded at construction, not left nil: without it the FIRST rebind would
+    // always look like an identity change and reset a verdict this controller
+    // had just earned. `nil` is honest for callers with no notion of panel
+    // identity (tests, and any writer that never rebinds) — nil compares equal
+    // to nil, so those controllers simply never reset on rebind.
+    self.boundPanelIdentity = panelIdentity
     self.store = store
     self.storageKey = storageKey
     self.coalescer = BrightnessWriteCoalescer()
@@ -214,8 +252,34 @@ public final class DDCValueController {
     // would blind the 0x8D-readback guard to it — the readback could then
     // setMuted(false)+persist over the user's fresh mute.
     let muteIssuedAtStart = issuedMuteGeneration
+    // This pass's own evidence, folded from `.notAttempted` rather than from
+    // whatever the last pass concluded — see `readEvidence`. Only the FAILED
+    // attempts fold together (worst-wins, so a silent retry after a zeros
+    // answer still reports the more specific write-only finding); a success
+    // supersedes them outright, which is also why it needs no fold.
+    var passEvidence = DDCReadEvidence.notAttempted
     for _ in 0 ..< tries {
-      guard let result = await writer.read(command: readCode), result.max > 0 else { continue }
+      // The old single `guard … , result.max > 0 else { continue }` treated a
+      // silent bus and a panel that answers zeros as the same non-event (B3).
+      // They are different facts: only the second is the write-only signature,
+      // and it is the one the MAG 341C produces on every one of `tries`
+      // attempts. Same number of reads, same `continue`, same values — the
+      // loop's DDC behaviour is untouched; it just stops forgetting.
+      guard let result = await writer.read(command: readCode) else {
+        passEvidence = DDCReadEvidence.worse(passEvidence, .noReply)
+        readEvidence = passEvidence
+        continue
+      }
+      guard result.max > 0 else {
+        passEvidence = DDCReadEvidence.worse(passEvidence, .allZeros)
+        readEvidence = passEvidence
+        continue
+      }
+      // Recorded BEFORE the staleness fence: the panel answered, and that is
+      // true whether or not user input superseded the value we were about to
+      // adopt. Returning here without recording would hide a good panel behind
+      // a race.
+      readEvidence = .answered
       guard issuedGeneration == issuedAtStart else { return }
       // The max is real information on every validated read (the loop guard
       // proved `max > 0`); learn it BEFORE the artifact skip below, which
@@ -256,8 +320,79 @@ public final class DDCValueController {
     await muteCoalescer.waitUntilCompleted(through: issuedMuteGeneration)
   }
 
-  public func rebind(writer: any DDCWriting) {
+  /// Swaps the DDC writer, and — only when `panelIdentity` says the panel on
+  /// the other end has CHANGED — drops the read-derived facts that were
+  /// evidence about the old one.
+  ///
+  /// The motivating defect is real: `AppModel.performRefresh` reuses these
+  /// controllers for any display whose `CGDirectDisplayID` reappears, and
+  /// macOS reassigns display IDs across a replug — so a different physical
+  /// monitor swapped onto the same port inherits this object, and without a
+  /// reset would inherit the previous panel's readback max and read verdict
+  /// about ITSELF. (`BrightnessController.rebind` carries the same reset,
+  /// under the same condition.)
+  ///
+  /// WHY A PANEL IDENTITY AND NOT THE WRITER. The first version of this reset
+  /// fired on every `rebind` call, which was wrong because `performRefresh`
+  /// rebinds every KEPT display on EVERY pass — every wake, every
+  /// reconfiguration — not only on replug. A readable panel that reported a
+  /// max below 100 was therefore dropped back to the assumed 100 several times
+  /// a session, and the recovering re-read is a no-op unless
+  /// `startupAction == .read` and fails outright on a write-only panel. The
+  /// obvious repair — compare the writer instead — does not work, and the
+  /// reason is in the discovery path rather than here:
+  ///
+  /// - `DisplayDiscovery.discover()` builds a FRESH `Arm64DDCService` on every
+  ///   pass, so object identity (`===`) changes every pass, replug or not.
+  /// - The `IOAVService` inside it is freshly created per pass too
+  ///   (`IOAVServiceCreateWithService(...).takeRetainedValue()` in
+  ///   `Arm64DDC.getIoregServicesForMatching`), and a plain CFTypeRef compares
+  ///   by pointer — so the underlying service handle changes every pass as
+  ///   well. There is no stable service identity to compare.
+  /// - `Arm64Service.serviceLocation` IS stable across passes, but it names
+  ///   the PORT, and is therefore unchanged in exactly the scenario this reset
+  ///   exists for: a different monitor plugged into the same port.
+  ///
+  /// What does distinguish the panels is the identity discovery already
+  /// computes for them — `ExternalDisplay.persistenceKey`, the EDID UUID with
+  /// a productName/manufacturer/serial fallback. It is also the key this
+  /// controller's own `storageKey` is derived from, so "the panel changed" and
+  /// "this controller's saved value belongs to someone else" are one fact, not
+  /// two. Its known limitation is inherited: identical twin monitors can share
+  /// an EDID UUID, so swapping one twin for another is not detected. Those two
+  /// panels also share a saved value and a prefs domain, so the verdict they
+  /// share is the least of that scenario's problems.
+  ///
+  /// COST OF THE NARROWER TRIGGER: a rebind of the SAME panel through a new
+  /// route (different port, or a newly interposed dock that eats DDC) keeps
+  /// the old verdict until the next read pass overwrites it. That is the right
+  /// trade — the verdict is about a panel, the next pass that asks supersedes
+  /// it, and the alternative is the regression above, which fires on every
+  /// wake.
+  ///
+  /// `readMax` back to `nil` is the load-bearing reset and the only part of
+  /// this that moves bytes: `nil` means "assume 100", so a panel that had
+  /// reported a max BELOW 100 is, from an identity change until the next
+  /// successful read, written against 100 instead. That is the same state a
+  /// freshly discovered display starts in, and scaling writes against a
+  /// maximum the panel on the other end never reported is the worse of the
+  /// two. Stated here rather than buried, and pinned by
+  /// `arebindToADifferentPanelReturnsTheReadbackMaxToAssumed` /
+  /// `arebindToTheSamePanelKeepsWhatThatPanelReported`.
+  ///
+  /// The duplicate memos reset UNCONDITIONALLY, and the asymmetry is
+  /// deliberate: they are not evidence about anything, they are a claim that
+  /// a particular value is already sitting in the register. A rebind means the
+  /// register was reached through a service we no longer hold, so re-asserting
+  /// a value must not be suppressed as a duplicate (review I10) — the same
+  /// argument whether or not the panel changed.
+  public func rebind(writer: any DDCWriting, panelIdentity: String?) {
     self.writer = writer
+    if panelIdentity != boundPanelIdentity {
+      boundPanelIdentity = panelIdentity
+      readMax = nil
+      readEvidence = .notAttempted
+    }
     coalescer.resetDuplicateState()
     muteCoalescer.resetDuplicateState()
   }

@@ -49,6 +49,7 @@ struct DisplayDetailView: View {
       controlMethodSection
       volumeSection
       tuningSection
+      diagnosticsSection
       resetSection
     }
     .formStyle(.grouped)
@@ -140,31 +141,58 @@ struct DisplayDetailView: View {
   }
 
   /// Candela's equivalent of the fork's `controlMethod` subtitle. The BRANCH
-  /// lives in CandelaKit under test (`DisplayCardPolicy`); this is the
-  /// presentation of its three cases, in the user's terms — never the pref
-  /// name (D25).
-  private var controlMethod: DisplayControlMethod {
-    DisplayCardPolicy.controlMethod(
-      forceSoftware: prefs.forceSoftware, avoidGamma: prefs.avoidGamma
-    )
-  }
+  /// lives in CandelaKit under test (`BrightnessPathPolicy`, projected by
+  /// `DisplayCardPolicy.controlMethod(for:)`); this is the presentation of its
+  /// cases, in the user's terms — never the pref name (D25).
+  ///
+  /// Read from the CONTROLLER, not recomputed from `prefs`: the engine and this
+  /// row now answer the same call, so the row cannot claim a path the engine is
+  /// not on. The body's `model.prefsRevision` read is what re-evaluates it after
+  /// a pref write, and `isHDREngaged` is observable, so the HDR-native path
+  /// updates on its own.
+  private var brightnessPath: BrightnessPath { state.controller.brightnessPath }
 
   private var controlMethodLabel: LocalizedStringKey {
-    switch controlMethod {
+    switch DisplayCardPolicy.controlMethod(for: brightnessPath) {
     case .hardwareDDC: "Hardware (DDC) control"
     case .softwareGamma: "Software dimming, color profile"
     case .softwareOverlay: "Software dimming, screen overlay"
+    case .none: pathWithoutACardWord
     }
   }
 
+  /// The two paths the card has no word for. Split out rather than folded into
+  /// the switch above so a nil can never render as a blank value — a row that
+  /// promised a fact and shows nothing is worse than one that says less.
+  private var pathWithoutACardWord: LocalizedStringKey {
+    if case .unavailable = brightnessPath {
+      return "Nothing is controlling brightness"
+    }
+    return "Native brightness"
+  }
+
   private var controlMethodExplanation: LocalizedStringKey {
-    switch controlMethod {
-    case .hardwareDDC:
+    switch brightnessPath {
+    case .native:
+      "Brightness is set through macOS itself. Hardware commands over the data cable do not apply on this path."
+    case .hardware:
       "This display accepts hardware brightness, volume and contrast commands over its data cable."
-    case .softwareGamma:
+    case .combined:
+      "Brightness is carried over the data cable at the top of the range and dimmed in software below it."
+    // The row ruling R-A exists to make honest: the display really is dimming,
+    // so "software dimming" alone would be true — and would still mislead,
+    // because it implies the whole slider works. The dead zone above the split
+    // is the fact the user needs, so it is the fact this sentence leads with.
+    case let .softwareOnly(backend, .ddcTurnedOff, _):
+      backend == .overlay
+        ? "The hardware brightness command is turned off for this display, so only the lower part of the slider dims — with a dark overlay — and the rest of it moves nothing."
+        : "The hardware brightness command is turned off for this display, so only the lower part of the slider dims — through the color profile — and the rest of it moves nothing."
+    case .software(.gamma):
       "Brightness is dimmed by adjusting the display's color profile. Volume and contrast are unavailable on this path."
-    case .softwareOverlay:
+    case .software(.overlay):
       "Brightness is dimmed by drawing a dark overlay over the screen. The pointer is unaffected and full-screen transitions can flicker."
+    case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
+      "Combined dimming is off for this display and its hardware brightness command is turned off, so nothing is left to carry the value."
     }
   }
 
@@ -306,6 +334,16 @@ struct DisplayDetailView: View {
     Section("Tuning") {
       CommandTuningGrid(state: state, writer: writer)
     }
+  }
+
+  // MARK: - Diagnostics
+
+  /// One line and one property, per DT28. No `PaneID` case, no
+  /// `SettingsRegistry` row, no `SettingsDestination` change — per-display
+  /// destinations are not registry panes (R2, R3), and adding a case here
+  /// would be a change with no reader.
+  private var diagnosticsSection: some View {
+    DisplayDiagnosticsSection(state: state)
   }
 
   // MARK: - Reset

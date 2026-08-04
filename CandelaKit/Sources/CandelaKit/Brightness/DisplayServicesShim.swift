@@ -51,6 +51,25 @@ public enum DisplayServices {
     )
   }()
 
+  /// Whether DisplayServices.framework resolved at all on this machine (B6).
+  ///
+  /// The shim logs ONCE at resolve time if the framework or a symbol is
+  /// missing and then degrades silently to nil/false forever — correct
+  /// behaviour, and completely invisible: "native brightness cannot work on
+  /// this machine at all" is a fact the process learns on first use and, until
+  /// now, could not state. Two lines make it sayable, which is the project's
+  /// private-API rule (spec §6) made VISIBLE rather than merely obeyed.
+  ///
+  /// Keyed on `setBrightness` rather than on both symbols because setting is
+  /// what the native path requires: a machine that resolves the setter but not
+  /// the getter can still drive brightness, and reporting that as unavailable
+  /// would be a second untruth in the other direction.
+  ///
+  /// Reading this forces the lazy resolve — i.e. one `dlopen` of a system
+  /// framework, on whatever thread asks first, thereafter cached by static-let
+  /// semantics. No new calls into the private API itself.
+  public static var isAvailable: Bool { symbols.setBrightness != nil }
+
   /// nil when the symbol is unavailable, the call fails, or the value is
   /// out of range (fork convention: success == (ret == 0 && value >= 0),
   /// OtherDisplay.swift:330).

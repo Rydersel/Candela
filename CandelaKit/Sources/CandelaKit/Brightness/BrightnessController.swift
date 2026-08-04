@@ -18,7 +18,8 @@ let pathLog = Logger(subsystem: "com.rydersel.Candela", category: "path")
 /// drops. The native applier is required; when the DisplayServices shim is
 /// unavailable the app injects a closure that returns false. The DDC applier
 /// is not held here — it is built per submit from the controller's writer
-/// (Task 3), so `rebind(writer:)` takes effect on the very next write.
+/// (Task 3), so `rebind(writer:panelIdentity:)` takes effect on the very next
+/// write.
 /// `readNative` is the native readback (re-review T10-B): role `.builtIn`
 /// seeds from it at init and reads it in `refreshFromHardware` instead of DDC
 /// (fork: `AppleDisplay.getAppleBrightness`); the app passes
@@ -57,7 +58,51 @@ public struct BrightnessBackends {
 @MainActor @Observable
 public final class BrightnessController {
   public private(set) var brightness: Double = 1.0
-  public private(set) var maxDDCValue: UInt16 = 100
+
+  /// The maximum a panel is assumed to accept until it reports one of its own
+  /// (fork parity). Named rather than repeated, because it is written in two
+  /// places now — the initial value below and the reset in
+  /// `rebind(writer:panelIdentity:)` — and a reset that drifted from the
+  /// default would put a display into a state no freshly discovered display
+  /// can be in.
+  private static let assumedMaxDDC: UInt16 = 100
+
+  public private(set) var maxDDCValue: UInt16 = BrightnessController.assumedMaxDDC
+
+  /// What this display's brightness reads have proved (B3). Published so the
+  /// diagnostics section can say "this display accepts commands but does not
+  /// answer reads" rather than showing last-written values as though the panel
+  /// had reported them.
+  ///
+  /// Scope: this is the verdict of the most recent pass that actually ASKED
+  /// the panel something, not the worst thing ever observed on this display.
+  /// The distinction is the whole correctness argument, so both halves:
+  ///
+  /// - A pass that attempts nothing must not touch it. `refreshFromHardware`
+  ///   returns early under the native path, `unavailableDDC`, and role
+  ///   `.builtIn` — a display that answered zeros once would otherwise look
+  ///   pristine again simply because the next pass never reached the wire.
+  ///   The assignments below therefore sit AFTER every such early return.
+  /// - A pass that does ask supersedes the previous pass's verdict. A
+  ///   monotonic worst-wins fold across passes reads "this display does not
+  ///   reply" about a panel that just replied — a false sentence produced by
+  ///   the feature built to stop false sentences. `worse` is still exactly
+  ///   right for folding WITHIN a pass and across this display's sibling
+  ///   controllers (`DDCReadEvidence.worst`); it was the scope of the fold,
+  ///   never the ordering, that was wrong.
+  ///
+  /// This controller reads one code, once, per pass, so the within-pass fold
+  /// here is trivial and the assignments are plain. `DDCValueController`,
+  /// which retries, has to spell the fold out.
+  public private(set) var readEvidence: DDCReadEvidence = .notAttempted
+
+  /// Whether `maxDDCValue` came from the PANEL or is the assumed default
+  /// (B5). `maxDDCValue` defaults to 100, which is indistinguishable from a
+  /// real read of 100 — and on a write-only panel the assumption is always the
+  /// true story. Presenting an assumed maximum as a reported one is exactly the
+  /// honesty gap this feature exists to close, so the provenance is recorded
+  /// beside the number rather than inferred from it.
+  public private(set) var didReadMaxDDC = false
 
   /// Mirror of `prefs.hdrMode`, published for the panel (`DisplayPrefs` is
   /// plain UserDefaults and not observable). Change it via `setHDRMode`.
@@ -71,7 +116,14 @@ public final class BrightnessController {
   /// has no DDC wire and no combined/software routing — every path-selection
   /// consumer (applyPaths, step's combined math, handleReconfigure) short-
   /// circuits to the native leg through this one gate.
-  private var usesNative: Bool { role == .builtIn || (hdrMode != .off && cachedHDRActive) }
+  ///
+  /// Now a CALL into the shared table (B1) rather than a second copy of it: the
+  /// rule and its evidence live in `BrightnessPathPolicy.usesNative`, which is
+  /// pinned against the full table by
+  /// `theStandalonePredicateAgreesWithTheTableEverywhere`.
+  private var usesNative: Bool {
+    BrightnessPathPolicy.usesNative(role: role, hdrMode: hdrMode, isHDRActive: cachedHDRActive)
+  }
 
   /// Whether the display reports HDR capability — a published mirror of the
   /// async-refreshed cache (T10 fix round 1). Computed off the stored cache,
@@ -85,6 +137,36 @@ public final class BrightnessController {
   /// toggled HDR (mode still `.off`) still reports engaged.
   public var isHDREngaged: Bool { cachedHDRActive }
 
+  /// What is actually driving this display's brightness right now — the same
+  /// answer `applyPaths` acts on, not a description of it (B1).
+  ///
+  /// Computed, not stored: it reads only cached scalars and prefs, and both of
+  /// its invalidation signals already exist — `isHDREngaged` is observable, and
+  /// any pref change bumps `prefsRevision`, which every pane body already reads.
+  /// A stored mirror would need a third invalidation nobody would remember to
+  /// fire, and a path that is stale is worse than no path at all: the whole
+  /// point of the row is that it cannot lie.
+  public var brightnessPath: BrightnessPath {
+    BrightnessPathPolicy.path(pathInputs(tuning: prefs.tuning(for: .brightness)))
+  }
+
+  /// Takes the tuning as an argument rather than reading it: `applyPaths` runs
+  /// on the 60 Hz drag path and already reads the tuning once for the DDC
+  /// conversion, and `prefs.tuning(for:)` is six UserDefaults lookups plus a
+  /// string parse. One read per call, as before this refactor.
+  private func pathInputs(tuning: CommandTuning) -> BrightnessPathPolicy.Inputs {
+    BrightnessPathPolicy.Inputs(
+      role: role,
+      hdrMode: hdrMode,
+      isHDRActive: cachedHDRActive,
+      forceSoftware: prefs.forceSoftware,
+      avoidGamma: prefs.avoidGamma,
+      disableCombinedBrightness: prefs.disableCombinedBrightness,
+      unavailableDDC: tuning.unavailableDDC,
+      switchingValue: switchingValue
+    )
+  }
+
   /// HDR state caches, refreshed by async tasks (init, mode changes,
   /// `noteHDRStateMayHaveChanged`) and only ever *read* on the
   /// synchronous keypress/drag paths — never awaited there.
@@ -96,10 +178,13 @@ public final class BrightnessController {
   /// the display blanks and re-modes.
   @ObservationIgnored private var settleInProgress = false
 
-  /// Mutable so `rebind(writer:)` can swap in the writer a replugged display
-  /// gets from rediscovery; the DDC applier is built per submit, so a swap
-  /// takes effect on the very next write.
+  /// Mutable so `rebind(writer:panelIdentity:)` can swap in the writer a
+  /// replugged display gets from rediscovery; the DDC applier is built per
+  /// submit, so a swap takes effect on the very next write.
   @ObservationIgnored private var writer: any DDCWriting
+  /// Which physical panel `maxDDCValue`, `didReadMaxDDC` and `readEvidence`
+  /// are evidence ABOUT — see `rebind(writer:panelIdentity:)`.
+  @ObservationIgnored private var boundPanelIdentity: String?
   @ObservationIgnored private let backends: BrightnessBackends
   @ObservationIgnored private let prefs: DisplayPrefs
   /// Module-internal (not private) so in-module collaborators — `BrightnessSync`'s
@@ -125,6 +210,11 @@ public final class BrightnessController {
   /// or shade. In-memory only, deliberately not pref-persisted like the
   /// fork's (review M35): a fresh controller always applies its first value.
   @ObservationIgnored private var lastAppliedSw: Double?
+
+  /// The engine boundary (DT15). Consulted for anything that needs a display
+  /// with a DESKTOP — the shade window and the gamma activity enforcer — and
+  /// never for the DDC or gamma write targets, which stay the raw panel ID.
+  @ObservationIgnored private let mirrorTopology: any MirrorTopologyProviding
 
   /// Gamma-interference hook (Task 9 wires the monitor): invoked ONLY when
   /// the gamma backend — not the shade — is about to apply and the sw dedupe
@@ -175,13 +265,23 @@ public final class BrightnessController {
     role: DisplayRole = .external,
     store: (any BrightnessStoring)? = nil,
     storageKey: String? = nil,
-    legacyKey: String? = nil
+    legacyKey: String? = nil,
+    panelIdentity: String? = nil,
+    // Defaulted to an empty store, whose resolution is the identity function:
+    // an unwired engine degrades to exactly today's behaviour. Appended LAST so
+    // every existing construction site compiles unchanged.
+    mirrorTopology: any MirrorTopologyProviding = MirrorTopologyStore()
   ) {
+    self.mirrorTopology = mirrorTopology
     self.writer = writer
     self.backends = backends
     self.prefs = prefs
     self.displayID = displayID
     self.role = role
+    // Seeded at construction so the FIRST rebind is not mistaken for a panel
+    // swap; `nil` is the honest answer for callers with no notion of panel
+    // identity, and nil == nil means they never reset on rebind.
+    self.boundPanelIdentity = panelIdentity
     self.store = store
     self.storageKey = storageKey
     self.coalescer = BrightnessWriteCoalescer()
@@ -256,12 +356,36 @@ public final class BrightnessController {
     let tuning = prefs.tuning(for: .brightness)
     guard !tuning.unavailableDDC else { return }
     // Fork parity: reads use only the FIRST remap code.
-    guard let result = await writer.read(command: tuning.remapCodes.first ?? VCP.brightness),
-          result.max > 0
-    else {
+    //
+    // Split into three named outcomes (B3) where there used to be one `guard`
+    // with a compound condition. No DDC traffic changes — same call, same
+    // single attempt, same early returns — but "the panel never replied" and
+    // "the panel replied with zeros" stop collapsing into the same silence.
+    // Only the second is the MAG 341C's write-only signature, and the old
+    // shape could not tell the diagnostics pane which one happened.
+    //
+    // Assignment, not a fold against the previous value: everything above this
+    // line has already returned for the passes that ask nothing, so reaching
+    // here means the panel WAS asked, and this pass's answer is the current
+    // fact about it. Folding across passes instead published "does not reply"
+    // about panels that had since replied (see `readEvidence`).
+    guard let result = await writer.read(command: tuning.remapCodes.first ?? VCP.brightness) else {
+      readEvidence = .noReply
       return
     }
+    // `(0, 0)` and `max == 0` are FAILED reads, not a brightness of zero — the
+    // MAG341C answers every read this way, and the fork's unvalidated read
+    // clobbers saved values to 0. Recorded rather than merely rejected (B3).
+    guard result.max > 0 else {
+      readEvidence = .allZeros
+      return
+    }
+    readEvidence = .answered
     maxDDCValue = result.max
+    // B5: from here on `maxDDCValue` is the panel's own answer, not the 100
+    // default. Set only on the answered arm — every other exit leaves the
+    // assumption standing, and says so.
+    didReadMaxDDC = true
     // Read mirrors write (fork convDDCToValue): un-apply curve/invert through
     // the same tuning, or a tuned readable panel adopts a corrupted
     // brightness at every launch. Identical to M3 when the tuning is unset
@@ -346,8 +470,17 @@ public final class BrightnessController {
 
   /// The four-way fork contract (dossier §2/§10), decided synchronously from
   /// cached state — `cachedHDRActive` is never awaited on the drag path.
+  ///
+  /// The BRANCH now lives in `BrightnessPathPolicy` and this switches over its
+  /// answer (B1). That is what makes the diagnostics pane structurally unable to
+  /// drift from the engine: there is one table, and the engine is what runs it.
+  /// The order the fork's contract depends on is preserved inside the policy,
+  /// where it is pinned by `BrightnessPathPolicyTests`; a `switch` here is
+  /// order-free by construction.
   private func applyPaths(_ value: Double) {
-    if usesNative {
+    let tuning = prefs.tuning(for: .brightness)
+    switch BrightnessPathPolicy.path(pathInputs(tuning: tuning)) {
+    case .native:
       // Local native-leg write: record the expected echo at call time (I15)
       // and invalidate any queued adoption (I9).
       echo.withLock { state in
@@ -356,29 +489,49 @@ public final class BrightnessController {
         state.converging = false
       }
       submitHardware(.native(Float(value)), applier: backends.applierNative)
-      return
-    }
-    if prefs.forceSoftware {
+
+    case .software:
+      // `applySoftware` re-reads `avoidGamma` itself; the backend carried on the
+      // path is for REPORTING. Left alone deliberately — routing the backend
+      // through here would be a behaviour change wearing a refactor's clothes.
       applySoftware(value)
-      return
-    }
-    let tuning = prefs.tuning(for: .brightness)
-    if !prefs.disableCombinedBrightness {
-      let split = DimmingMath.combinedSplit(value: value, switching: switchingValue)
-      if !tuning.unavailableDDC {
-        submitHardware(
-          .ddc(raw: brightnessRaw(split.ddc, tuning: tuning)),
-          applier: brightnessApplier(tuning: tuning)
-        )
-      }
+
+    case let .combined(switching, _):
+      // No `unavailableDDC` guard here any more, and its absence is the point:
+      // ruling R-A makes `.combined` unreachable with a dead DDC leg, so the old
+      // inner `if !tuning.unavailableDDC` was dead code that also implied the
+      // opposite. That state is `.softwareOnly` below, which is where the
+      // skipped submit now lives.
+      let split = DimmingMath.combinedSplit(value: value, switching: switching)
+      submitHardware(
+        .ddc(raw: brightnessRaw(split.ddc, tuning: tuning)),
+        applier: brightnessApplier(tuning: tuning)
+      )
       applySoftware(split.sw)
+
+    case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
+      // Combined mode with its DDC brightness command turned off: the register
+      // write is skipped and the software leg still runs — but on the COMBINED
+      // SPLIT value, never on the raw value. `applySoftware(value)` here would
+      // silently convert this display to full-range software dimming, which is a
+      // different feature. `PathSelectionTests` pins it under the name
+      // `aDisabledBrightnessCommandWritesNoDDCButStillFixesTheSoftwareLeg`.
+      applySoftware(DimmingMath.combinedSplit(value: value, switching: dimsBelow).sw)
+
+    case .hardware:
+      submitHardware(
+        .ddc(raw: brightnessRaw(value, tuning: tuning)),
+        applier: brightnessApplier(tuning: tuning)
+      )
+
+    case .unavailable:
+      // DDC brightness turned off with no software leg left to carry the value —
+      // combined mode disabled, or combined mode with a zero-width software band.
+      // The old code expressed the first of those as a bare `guard … else
+      // { return }` and reached the second by handing the software leg a flat 1;
+      // it is now a NAMED state the pane can report.
       return
     }
-    guard !tuning.unavailableDDC else { return }
-    submitHardware(
-      .ddc(raw: brightnessRaw(value, tuning: tuning)),
-      applier: brightnessApplier(tuning: tuning)
-    )
   }
 
   /// M4 tuning on the DDC leg: min/max overrides, 9-step curve, invert. The
@@ -410,19 +563,60 @@ public final class BrightnessController {
     )
   }
 
+  /// Where this display's pixels actually are: itself, or its mirror master.
+  /// Read fresh on every use — the topology is a sample of one instant and a
+  /// cached copy would be a promise about a machine that has moved on.
+  ///
+  /// **In a mirror set, every member's controller resolves to the SAME id**, so
+  /// they all drive one shade window and one gamma enforcer position, each
+  /// memoising its own `lastAppliedSw` as applied. Two controllers therefore
+  /// believe they own a surface only the last writer actually set. This is not a
+  /// defect to fix: a mirror set is ONE framebuffer, so one dimming surface is
+  /// the only physically meaningful answer — dimming a slave separately from its
+  /// master is not a thing the hardware can do. Recorded because the memo makes
+  /// it look like two independent applies succeeded, and someone reading
+  /// `lastAppliedSw` for a slave will otherwise expect a surface of its own.
+  private var drawableDisplayID: CGDirectDisplayID {
+    mirrorTopology.drawableDisplayID(for: displayID)
+  }
+
   /// The software leg, inline and synchronous on the main actor. `sw` is the
   /// raw 0…1 software value; the backend receives the transformed physical
   /// multiplier (dossier §3: the transform applies before any gamma/shade
   /// write). Deduped on the last-applied sw value.
+  ///
+  /// DT17: the dedupe memo is now written ONLY when the backend says the write
+  /// landed. Before, `lastAppliedSw` was set before the backend was even asked,
+  /// so a shade that could not be created (a mirror slave has no `NSScreen`)
+  /// dimmed nothing and then deduped every identical retry away forever — the
+  /// display stayed bright while the engine reported the value as applied.
   private func applySoftware(_ sw: Double) {
     guard lastAppliedSw != sw else { return }
-    lastAppliedSw = sw
     let transformed = DimmingMath.swTransform(sw, allowZero: prefs.allowZeroSwBrightness, reverse: false)
+    let drawable = drawableDisplayID
+    let landed: Bool
     if prefs.avoidGamma {
-      backends.shade?.setShadeAlpha(DimmingMath.shadeAlpha(fromValue: transformed), on: displayID)
+      // `?? true` is "no backend is configured, so there is nothing that could
+      // have failed" — the same meaning the optional chain had before.
+      landed = backends.shade.map {
+        $0.setShadeAlpha(DimmingMath.shadeAlpha(fromValue: transformed), on: drawable)
+      } ?? true
     } else if let gamma = backends.gamma {
       preGammaApplyHook?()
-      gamma.applyGammaScale(transformed, on: displayID)
+      // The WRITE target stays the RAW panel ID; only the enforcer resolves.
+      landed = gamma.applyGammaScale(transformed, on: displayID, enforcerOn: drawable)
+    } else {
+      landed = true
+    }
+    if landed {
+      lastAppliedSw = sw
+    } else {
+      // Left nil rather than set, so the next identical value is attempted
+      // again instead of being deduped into silence.
+      lastAppliedSw = nil
+      pathLog.error(
+        "Software dimming did not land on display \(self.displayID, privacy: .public) (drawable \(drawable, privacy: .public))"
+      )
     }
   }
 
@@ -436,8 +630,9 @@ public final class BrightnessController {
   /// on entering always-on — those are per-display user choices (documented
   /// divergence).
   private func clearSoftwareLeg() {
-    backends.shade?.removeShade(for: displayID)
-    backends.gamma?.applyGammaScale(1.0, on: displayID)
+    let drawable = drawableDisplayID
+    backends.shade?.removeShade(for: drawable)
+    backends.gamma?.applyGammaScale(1.0, on: displayID, enforcerOn: drawable)
     lastAppliedSw = nil
   }
 
@@ -724,12 +919,67 @@ public final class BrightnessController {
   }
 
   /// Swaps the stored DDC writer (used by both the hardware write leg and
-  /// `refreshFromHardware`) after a display replug/rediscovery. The replugged
-  /// hardware is in a state we didn't write, so the coalescer's duplicate
-  /// memo is reset — otherwise re-asserting the current value would be
-  /// skipped as a duplicate forever.
-  public func rebind(writer: any DDCWriting) {
+  /// `refreshFromHardware`) after a display rediscovery, and — only when
+  /// `panelIdentity` says the panel on the other end has CHANGED — drops the
+  /// three read-derived facts that were evidence about the old one.
+  ///
+  /// The coalescer's duplicate memo resets UNCONDITIONALLY: rediscovered
+  /// hardware is in a state we did not write through the service we now hold,
+  /// so re-asserting the current value must not be skipped as a duplicate
+  /// (review I10). That is true of every rebind, panel swap or not, and is why
+  /// it sits outside the identity check.
+  ///
+  /// WHAT RESETS ON A PANEL CHANGE, and why each one has to:
+  ///
+  /// - `didReadMaxDDC` (B5) was introduced write-once-true. A display that
+  ///   replugs into a read-failing state would keep reporting "this maximum
+  ///   was read from the panel" on the strength of a read from a previous
+  ///   binding — the exact class of untruth the diagnostics work exists to
+  ///   remove.
+  /// - `readEvidence` (B3) goes back to `.notAttempted`, the floor: we have
+  ///   asked THIS panel nothing. Not a weakening of worst-wins — that fold
+  ///   governs a pass and this display's sibling controllers, and neither
+  ///   survives a swapped monitor.
+  /// - `maxDDCValue` back to `assumedMaxDDC`. Adding this one is a correction:
+  ///   the earlier ruling reset the provenance flag and left the number, on
+  ///   the grounds that the number feeds the write path. But that leaves the
+  ///   motivating scenario alive on the write path itself — a previous panel
+  ///   that reported 80 would leave the NEW panel's writes scaled against 80
+  ///   indefinitely (the new panel never reports, so nothing ever corrects it)
+  ///   while `didReadMaxDDC` says "assumed". Two facts about one number, only
+  ///   one of them honest, and the dishonest one is the one on the wire.
+  ///
+  /// WHY A PANEL IDENTITY AND NOT THE WRITER. The first version of this reset
+  /// fired on every `rebind` call. `AppModel.performRefresh` rebinds every
+  /// KEPT display on EVERY pass — wake, reconfiguration, menu open — not only
+  /// on replug, so that dropped a readable panel's reported maximum several
+  /// times a session, with the recovering re-read a no-op unless
+  /// `startupAction == .read` and useless on a write-only panel. Comparing the
+  /// writer instead does not work: `DisplayDiscovery.discover()` builds a
+  /// fresh `Arm64DDCService` per pass, and the `IOAVService` inside it is
+  /// freshly created per pass too (a CFTypeRef compared by pointer), so
+  /// neither object nor service identity is stable across a plain refresh.
+  /// `Arm64Service.serviceLocation` is stable, but it names the PORT and so is
+  /// unchanged in precisely the swap this reset exists for.
+  ///
+  /// `ExternalDisplay.persistenceKey` — EDID UUID, falling back to
+  /// productName/manufacturer/serial — is what discovery already computes to
+  /// tell panels apart, and is the key this controller's `storageKey` is
+  /// derived from. Its known limitation is inherited: identical twins can
+  /// share an EDID UUID and would not be told apart here (they already share a
+  /// saved value and a prefs domain, so this is not the first casualty of
+  /// that). The cost of the narrower trigger is that the SAME panel rebound
+  /// through a DDC-hostile new route keeps its old verdict until the next read
+  /// pass supersedes it — which, for this controller, is the very next refresh
+  /// (`refreshFromHardware` here is ungated on `startupAction`).
+  public func rebind(writer: any DDCWriting, panelIdentity: String?) {
     self.writer = writer
+    if panelIdentity != boundPanelIdentity {
+      boundPanelIdentity = panelIdentity
+      maxDDCValue = Self.assumedMaxDDC
+      didReadMaxDDC = false
+      readEvidence = .notAttempted
+    }
     coalescer.resetDuplicateState()
   }
 
@@ -784,12 +1034,43 @@ public final class BrightnessController {
   /// `handleReconfigure`'s early `return` failed to act on.
   private enum SoftwareBackendChoice { case none, gamma, shade }
 
+  /// A projection of the same table (B1) — the third copy of the rule, retired.
+  ///
+  /// `.softwareOnly` must answer with its backend exactly as `.software` and
+  /// `.combined` do: folding it into `.none` would strand a scaled gamma table
+  /// installed forever, because `reapplyAfterPrefChange` tears down only the
+  /// backend this does NOT name.
+  ///
+  /// RECORDED BEHAVIOUR CHANGE, `.unavailable → .none`.
+  /// `BrightnessPath` cannot tell apart the two engine states that reach
+  /// `.unavailable(.ddcTurnedOffWithNoSoftwareLeg)`, and the pre-refactor
+  /// prefs-shaped version answered them differently:
+  ///
+  /// - (A) combined DISABLED + `unavailableDDC` — answered `.none`, as here.
+  /// - (B) combined ON + `unavailableDDC` + `switchingValue == 0` (pref point
+  ///   −8, "pure hardware") — answered `.gamma`/`.shade`, because that arm keys
+  ///   off `!disableCombinedBrightness` alone. This now answers `.none` too.
+  ///
+  /// Safe TODAY because the only consumer is `reapplyAfterPrefChange`, and in
+  /// state (B) `combinedSplit`'s hardware branch always wins, so the software
+  /// leg is pinned at `sw == 1` — "reset gamma to 1.0 / remove the shade" and
+  /// "apply sw 1" land on the same screen. `PathSelectionTests` pins that
+  /// equivalence rather than leaving it assumed
+  /// (`combinedWithDDCOffAndAZeroWidthBandLeavesNoDimmingBehind`).
+  ///
+  /// It stops being safe the moment a consumer other than
+  /// `reapplyAfterPrefChange` acts differently on `.none` than on
+  /// `.gamma`/`.shade` — a backend-liveness readout, say, or anything that
+  /// treats `.none` as "this display has no software leg configured" rather
+  /// than "nothing needs to be left installed". At that point state (B) needs a
+  /// distinguishable path, not a distinguishable branch here.
   private var softwareBackendChoice: SoftwareBackendChoice {
-    guard !usesNative else { return .none }
-    if prefs.forceSoftware || !prefs.disableCombinedBrightness {
-      return prefs.avoidGamma ? .shade : .gamma
+    switch BrightnessPathPolicy.path(pathInputs(tuning: prefs.tuning(for: .brightness))) {
+    case .native, .hardware, .unavailable:
+      .none
+    case let .software(backend), let .combined(_, backend), let .softwareOnly(backend, _, _):
+      backend == .overlay ? .shade : .gamma
     }
-    return .none
   }
 
   /// The ONE door for "a pref that affects dimming just changed" (D28).
@@ -817,8 +1098,9 @@ public final class BrightnessController {
   /// replugs — but it is a behavior change, not part of this fix.)
   public func reapplyAfterPrefChange() {
     let choice = softwareBackendChoice
-    if choice != .shade { backends.shade?.removeShade(for: displayID) }
-    if choice != .gamma { backends.gamma?.applyGammaScale(1.0, on: displayID) }
+    let drawable = drawableDisplayID
+    if choice != .shade { backends.shade?.removeShade(for: drawable) }
+    if choice != .gamma { backends.gamma?.applyGammaScale(1.0, on: displayID, enforcerOn: drawable) }
     lastAppliedSw = nil
     coalescer.resetDuplicateState()
     applyPaths(brightness)
@@ -850,6 +1132,29 @@ public final class BrightnessController {
   nonisolated func _duplicateResetCount() -> UInt64 {
     coalescer.duplicateResetCount()
   }
+
+  /// The last brightness target that actually reached this display's hardware
+  /// (B4), or nil if nothing has — nothing submitted, everything failed, or a
+  /// reset invalidated what had landed.
+  ///
+  /// `nonisolated` over the coalescer's existing lock, exactly like
+  /// `_duplicateResetCount()`: no executor hop for what a settings row reads
+  /// during a refresh. Public rather than a test seam because the diagnostics
+  /// section is a real (later-task) consumer.
+  public nonisolated func lastAppliedTarget() -> HardwareTarget? {
+    coalescer.lastAppliedTarget()
+  }
+
+  /// Whether the most recent apply ATTEMPT on this display failed (B4).
+  ///
+  /// The fact this exposes was previously computed and discarded on every
+  /// single write: `DDCCommandApplier` returns a `Bool`, the coalescer used it
+  /// to decide whether to advance its duplicate memo, and then it was gone.
+  /// "This monitor is ignoring us" was observable to the code and unsayable to
+  /// the user.
+  public nonisolated func lastApplyFailed() -> Bool {
+    coalescer.lastApplyFailed()
+  }
 }
 
 /// Drains hardware brightness targets off the main actor, coalescing
@@ -876,8 +1181,8 @@ actor BrightnessWriteCoalescer {
   struct PendingWrite: Sendable {
     let target: HardwareTarget
     /// Carried per write so one coalescer serves any hardware path — and so
-    /// a controller-level `rebind(writer:)` takes effect on the next
-    /// submitted write (the applier is rebuilt at submit, not held here).
+    /// a controller-level `rebind(writer:panelIdentity:)` takes effect on the
+    /// next submitted write (the applier is rebuilt at submit, not held here).
     let applier: any BrightnessApplying
     /// Display-reconfiguration epoch stamped at submit time; the drain skips
     /// targets whose epoch is no longer current.
@@ -919,9 +1224,23 @@ actor BrightnessWriteCoalescer {
   /// over that apply's success — on a rebind the in-flight value reached the
   /// OLD hardware, so recording it would duplicate-skip the next same-value
   /// write to the new panel forever. The drain captures `resets` before
-  /// applying and only records the target if no reset intervened.
+  /// applying and only records the outcome if no reset intervened.
+  ///
+  /// `lastFailed` rides in the same slot (B4). Until now the `Bool` an applier
+  /// returned advanced this memo and was then dropped on the floor, so nothing
+  /// anywhere could say "the last write to this display failed" — the
+  /// diagnostics section could not distinguish a panel that is accepting
+  /// commands from one that has been refusing every one of them since the
+  /// cable was plugged in. It is the LATEST attempt's outcome, not the worst
+  /// one: a display that failed once and has worked ever since is working, and
+  /// a latched flag would send someone hunting a cable that is fine. It is not
+  /// a second piece of state needing a second lock — it is a second field of
+  /// the fact this lock already guards, written in the same critical section
+  /// under the same `resets` guard.
   private nonisolated let lastApplied =
-    OSAllocatedUnfairLock<(target: HardwareTarget?, resets: UInt64)>(initialState: (nil, 0))
+    OSAllocatedUnfairLock<(target: HardwareTarget?, resets: UInt64, lastFailed: Bool)>(
+      initialState: (nil, 0, false)
+    )
 
   private var completedGeneration: UInt64 = 0
   private var waiters: [(generation: UInt64, continuation: CheckedContinuation<Void, Never>)] = []
@@ -947,14 +1266,36 @@ actor BrightnessWriteCoalescer {
   /// would be skipped forever (review I10).
   nonisolated func resetDuplicateState() {
     // Bumping `resets` invalidates any apply currently in flight — see the
-    // `lastApplied` comment.
-    lastApplied.withLock { $0 = (nil, $0.resets + 1) }
+    // `lastApplied` comment. `lastFailed` clears with it: a reset means the
+    // hardware is in a state we did not write, so a failure recorded against
+    // the OLD wire is not a fact about the new one, and reporting it would
+    // accuse a freshly plugged panel of a fault the previous one had.
+    lastApplied.withLock { $0 = (nil, $0.resets + 1, false) }
   }
 
   /// Test seam: the `resets` version counter (bumps once per
   /// `resetDuplicateState`).
   nonisolated func duplicateResetCount() -> UInt64 {
     lastApplied.withLock { $0.resets }
+  }
+
+  /// The last target that actually reached hardware (B4). `nonisolated` over
+  /// the lock this memo already lives in — `duplicateResetCount()` is the
+  /// precedent, not new machinery, and reading it must not require an
+  /// executor hop into the drain's actor for what is a settings-pane refresh.
+  ///
+  /// `nil` means nothing has landed: either nothing was ever submitted, or
+  /// every attempt failed, or a reset invalidated what had landed. All three
+  /// are honestly "we cannot name a value that is on this panel".
+  nonisolated func lastAppliedTarget() -> HardwareTarget? {
+    lastApplied.withLock { $0.target }
+  }
+
+  /// Whether the most recent apply ATTEMPT failed (B4) — see `lastApplied`.
+  /// Distinct from `lastAppliedTarget() == nil`, which cannot separate "the
+  /// write failed" from "we never wrote".
+  nonisolated func lastApplyFailed() -> Bool {
+    lastApplied.withLock { $0.lastFailed }
   }
 
   /// Synchronous and nonisolated on purpose — see the type comment.
@@ -1014,11 +1355,19 @@ actor BrightnessWriteCoalescer {
           // record its target: a reset that raced this apply means the value
           // landed on hardware we no longer trust (review I1) — the `resets`
           // captured in `memo` above detects that.
-          if await write.applier.apply(write.target) {
-            lastApplied.withLock { state in
-              if state.resets == memo.resets {
-                state.target = write.target
-              }
+          //
+          // The outcome `Bool` is now KEPT rather than dropped (B4). Review
+          // I1's guard covers the failure flag too, not just the target: a
+          // reset that raced this apply means the failure was against the old
+          // wire, and recording it afterwards would make a freshly rebound
+          // panel report a fault it never had. Both fields therefore move
+          // together, inside one critical section, or neither does.
+          let didApply = await write.applier.apply(write.target)
+          lastApplied.withLock { state in
+            guard state.resets == memo.resets else { return }
+            state.lastFailed = !didApply
+            if didApply {
+              state.target = write.target
             }
           }
         }

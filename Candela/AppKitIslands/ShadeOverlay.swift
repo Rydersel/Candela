@@ -25,11 +25,17 @@ final class ShadeOverlay: ShadeRendering {
 
   // MARK: - ShadeRendering
 
-  func setShadeAlpha(_ alpha: Double, on displayID: CGDirectDisplayID) {
+  @discardableResult
+  func setShadeAlpha(_ alpha: Double, on displayID: CGDirectDisplayID) -> Bool {
+    // DT17: `false` is the honest answer when no shade could be created, and it
+    // is what stops the engine memoising a dimming that never happened. The
+    // fork — and Candela until now — returned void here, so a mirrored display
+    // stopped dimming entirely with nothing propagated anywhere.
     guard let shade = self.shade(for: displayID) else {
-      return
+      return false
     }
     shade.contentView?.alphaValue = CGFloat(min(max(alpha, 0), 1))
+    return true
   }
 
   func removeShade(for displayID: CGDirectDisplayID) {
@@ -56,7 +62,7 @@ final class ShadeOverlay: ShadeRendering {
 
   func repinFrames() {
     for (displayID, shade) in self.shades {
-      guard let screen = Self.screen(for: displayID) else {
+      guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
         // The display is gone (or not yet back). Leave the window alone rather
         // than guessing a frame; whoever owns reconfiguration decides whether
         // this shade should survive at all.
@@ -82,12 +88,13 @@ final class ShadeOverlay: ShadeRendering {
   }
 
   private func createShade(on displayID: CGDirectDisplayID) -> NSWindow? {
-    // DIVERGENCE (fork bug): the fork creates/frames shades under the *raw*
-    // display ID but sets alpha under the mirror-resolved ID, so a mirrored
-    // slave grows a shade nothing ever dims. We use the raw ID for both, which
-    // is self-consistent. Mirroring + shade is out of Milestone 3's test scope;
-    // when it arrives, resolve the ID once, at the engine boundary.
-    guard let screen = Self.screen(for: displayID) else {
+    // The ID arriving here is ALREADY RESOLVED to a drawable display by
+    // `BrightnessController` (DT15), so a mirror set has ONE shade and it is on
+    // the master — which is where the pixels are. (The fork created and framed
+    // shades under the raw ID but set alpha under the mirror-resolved one, so a
+    // mirrored slave grew a shade nothing ever dimmed.) A lookup that still
+    // fails is a genuine failure and is reported, not swallowed.
+    guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
       Self.log.info("No screen matches display \(displayID, privacy: .public); shade not created")
       return nil
     }
@@ -118,9 +125,5 @@ final class ShadeOverlay: ShadeRendering {
     shade.contentView?.setNeedsDisplay(shade.contentView?.bounds ?? .zero)
     Self.log.info("Shade created for display \(displayID, privacy: .public)")
     return shade
-  }
-
-  private static func screen(for displayID: CGDirectDisplayID) -> NSScreen? {
-    NSScreen.screens.first { $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID == displayID }
   }
 }

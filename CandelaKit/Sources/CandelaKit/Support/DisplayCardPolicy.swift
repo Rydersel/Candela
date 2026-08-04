@@ -12,15 +12,89 @@ public enum DisplayControlMethod: Sendable, Equatable, CaseIterable {
   case softwareOverlay
 }
 
-/// The two rules the Displays pane's card needs that are not pure bindings.
-/// They live here rather than inline in the view because both have a wrong
-/// answer that is invisible without a test (D21, lens-4 H6).
+/// Why NO DDC command reaches a display — the fact that makes the per-command
+/// tuning grid inert.
+///
+/// Per-COMMAND reasons are deliberately absent. Turning brightness off leaves
+/// the volume and contrast rows perfectly live, so greying the whole grid on
+/// that would remove two working controls; only a display-level silence
+/// belongs here.
+public enum DDCTrafficBlock: Sendable, Equatable {
+  /// macOS is setting this display's brightness itself and the DDC wire is not
+  /// being used at all. Constitutive for the built-in panel (no wire); for an
+  /// external it means HDR is live, and DDC stops working entirely while a
+  /// display is in HDR mode [MEASURED, MAG 341C].
+  case macOSDrivesBrightness
+  /// Hardware control is turned off for this display (`forceSoftware`), which
+  /// silences DDC for EVERY command — `DDCValueController.isAvailable` reads it
+  /// for volume and contrast too, not only for brightness.
+  case hardwareControlOff
+}
+
+/// The rules the Displays pane's card and its tuning grid need that are not
+/// pure bindings. They live here rather than inline in the view because each
+/// has a wrong answer that is invisible without a test (D21, lens-4 H6).
 public enum DisplayCardPolicy {
-  /// Mirrors `BrightnessController.applyPaths`: the software backend choice
-  /// only applies once the software leg is in use at all.
-  public static func controlMethod(forceSoftware: Bool, avoidGamma: Bool) -> DisplayControlMethod {
-    guard forceSoftware else { return .hardwareDDC }
-    return avoidGamma ? .softwareOverlay : .softwareGamma
+  /// The card's three-way summary, DERIVED from the engine's own path so the
+  /// two cannot disagree.
+  ///
+  /// REPLACES `controlMethod(forceSoftware:avoidGamma:)`, whose own doc admitted
+  /// it "mirrors `applyPaths`" while ignoring HDR-native, combined mode and
+  /// `unavailableDDC` — so the shipped row was wrong on the built-in panel (no
+  /// DDC wire, yet it reported "Hardware (DDC) control") and wrong under live
+  /// HDR. Do not re-add a prefs-shaped overload: a second copy of the branch
+  /// table is exactly what this projection exists to retire.
+  ///
+  /// nil for `.native` and `.unavailable`, which the card has no vocabulary for.
+  /// The caller renders those two from the path itself; the diagnostics section
+  /// states them in full.
+  public static func controlMethod(for path: BrightnessPath) -> DisplayControlMethod? {
+    switch path {
+    case .native, .unavailable:
+      nil
+    // Combined is the DEFAULT path and DDC carries the top of its range, so the
+    // three-way summary calls it hardware. The split point is a sentence, and a
+    // sentence does not fit in this row.
+    case .hardware, .combined:
+      .hardwareDDC
+    // `.softwareOnly` is combined mode with its hardware half NOT running
+    // (controller ruling R-A). It must never answer `.hardwareDDC`: that would
+    // reintroduce, one layer above the type that forbids it, the very untruth
+    // the case was carved out to make unrepresentable — a dead DDC wire
+    // captioned as hardware control.
+    case let .software(backend), let .softwareOnly(backend, _, _):
+      backend == .overlay ? .softwareOverlay : .softwareGamma
+    }
+  }
+
+  /// Whether any DDC command can reach this display, and if not, why —
+  /// derived from the SAME `BrightnessPath` the diagnostics section renders,
+  /// so one settings page cannot give two answers about one display.
+  ///
+  /// The defect this retires: `CommandTuningGrid` gated itself on
+  /// `prefs.forceSoftware` alone. That is wrong in both directions. It missed
+  /// live HDR, where the grid presented itself as live while every DDC write
+  /// was going nowhere; and its sibling caption fired on
+  /// `tuning(for: .brightness).unavailableDDC`, so a display whose diagnostics
+  /// row read "Nothing is moving this display's brightness" was told three
+  /// sections below that it "dims in software only".
+  ///
+  /// nil — the grid is live — for `.hardware`, `.combined`, and BOTH
+  /// brightness-only blocks. `.softwareOnly` and `.unavailable` say nothing
+  /// about volume or contrast: they are reached from the brightness command's
+  /// own `unavailableDDC`, and that display's volume slider still writes over
+  /// the same wire.
+  public static func ddcTrafficBlock(for path: BrightnessPath) -> DDCTrafficBlock? {
+    switch path {
+    case .native:
+      .macOSDrivesBrightness
+    // The ONLY path reachable from `forceSoftware`, which is the display-level
+    // opt-out `DDCValueController.isAvailable` also reads.
+    case .software:
+      .hardwareControlOff
+    case .hardware, .combined, .softwareOnly, .unavailable:
+      nil
+    }
   }
 
   /// A friendly name is "unset" when it is blank under ANY whitespace,

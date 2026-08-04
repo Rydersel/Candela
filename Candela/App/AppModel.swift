@@ -52,6 +52,19 @@ final class AppModel {
   /// have to drive the same session.
   let displayModes = DisplayModeCoordinator()
 
+  /// THE topology sample every part of the app resolves through (DT15). Handed
+  /// to every `BrightnessController` so the shade and the gamma activity
+  /// enforcer get an ID that is already guaranteed drawable; every reader gets
+  /// a value, never a query.
+  ///
+  /// Its ONE writer is `MirrorTopologySampler`, which `StatusItemController`
+  /// starts at launch and which then follows every screen-parameters change.
+  /// Before it starts — and if `CGGetOnlineDisplayList` ever fails — this holds
+  /// the empty topology, whose resolution is the identity function, i.e. exactly
+  /// the behaviour that predates this seam. It degrades to the status quo, never
+  /// to a guess.
+  let mirrorTopology = MirrorTopologyStore()
+
   /// App-level M4 prefs (startupAction, multiKeyboardVolume, showContrast)
   /// read through one DisplayPrefs like the engine does; the persistence key
   /// is irrelevant for unsuffixed accessors. Assigned in `init` rather than
@@ -66,6 +79,46 @@ final class AppModel {
   /// session so a write-only panel (the MAG 341C) is not re-probed on every
   /// menu close.
   private(set) var volumeSupport: [String: VCPSupport] = [:]
+
+  /// The raw MCCS capability string, keyed by persistence key, stored ONLY on
+  /// a successful read (B2).
+  ///
+  /// Absence means "not probed, or the display did not answer" — which
+  /// `volumeSupport` already distinguishes: an entry stored as `.unknown`
+  /// there is "the probe ran and failed". A `[String: String?]` would encode
+  /// the same two states twice, in a shape nobody reads correctly.
+  ///
+  /// The string was on the wire, was reassembled by a fragment loop that
+  /// deliberately refuses to return a truncated result, was mapped to ONE bit
+  /// for ONE VCP code, and then fell out of scope. `candela-probe caps` has
+  /// printed it all along; the app did not.
+  private(set) var capabilityString: [String: String] = [:]
+
+  /// IOKit facts read on every discovery pass and, until now, discarded (B8).
+  /// Keyed by persistence key so it survives a replug, and evicted through the
+  /// same `performRefresh` line as `volumeSupport`.
+  ///
+  /// External displays only — the built-in slot never passes through
+  /// `DisplayDiscovery`, so its entry is permanently absent. That is not a gap
+  /// to paper over: the rows this feeds are rows about a data cable, and the
+  /// built-in has none, so its pane omits them rather than reporting them
+  /// unenumerated.
+  private(set) var hardwareFacts: [String: DisplayHardwareFacts] = [:]
+
+  /// The `WatchConfig` most recently ARMED, not the one most recently computed
+  /// (B9). Those differ exactly when a rearm failed — which is the case the row
+  /// exists for. Recorded at the arm site in `StatusItemController`, never at
+  /// the compute site here.
+  private(set) var lastArmedTapConfig: MediaKeyEventTap.WatchConfig?
+
+  func noteTapArmed(_ config: MediaKeyEventTap.WatchConfig) {
+    lastArmedTapConfig = config
+  }
+
+  /// The gamma-interference monitor, injected by `StatusItemController` after
+  /// construction (it owns the AppKit alert island the monitor needs). Read
+  /// ONLY for reporting — nothing here drives it.
+  @ObservationIgnored var gammaInterference: GammaInterferenceMonitor?
 
   @ObservationIgnored private var capabilityProbesInFlight: Set<String> = []
 
@@ -277,6 +330,10 @@ final class AppModel {
         // describe a wire that no longer exists. Discard rather than cache; the
         // entry stays absent and the next pass re-probes.
         guard manager.isEpochCurrent(epoch) else { return }
+        // Stored only on a SUCCESSFUL read. A nil answer leaves the entry
+        // absent, and `volumeSupport`'s stored `.unknown` below is what carries
+        // "the probe ran and failed" — one state, one place.
+        if let capabilities { self.capabilityString[persistenceKey] = capabilities }
         self.volumeSupport[persistenceKey] = capabilities.map {
           CapabilityString.support(forVCP: VCP.audioSpeakerVolume, in: $0)
         } ?? .unknown
@@ -428,12 +485,25 @@ final class AppModel {
     var appeared: [DisplayState] = []
     var kept: [DisplayState] = []
     displays = DisplayDiscovery.discover().map { entry in
+      // B8: discovery has always read these and always thrown them away. Kept
+      // for BOTH branches below — a kept display re-reports its facts on every
+      // pass, and a link renegotiation is exactly when the transport string can
+      // change under a display we already know.
+      hardwareFacts[entry.display.persistenceKey] = entry.facts
       if let previous = existing.removeValue(forKey: entry.display.id) {
         // Fresh DisplayState (name may change), reused controllers, fresh
         // writer for all three (rebind also resets each duplicate memo).
-        previous.controller.rebind(writer: entry.writer)
-        previous.volume.rebind(writer: entry.writer)
-        previous.contrast.rebind(writer: entry.writer)
+        //
+        // The persistence key rides along because this branch runs on EVERY
+        // pass, not only after a replug, while the identity of the panel on the
+        // other end is what decides whether the controllers' read-derived facts
+        // still describe anything real. macOS reassigns display IDs across a
+        // replug and this reconciliation is keyed on the ID, so "same ID" is
+        // NOT "same monitor"; the persistence key (EDID UUID) is the only thing
+        // here that tells the two apart. See `rebind(writer:panelIdentity:)`.
+        previous.controller.rebind(writer: entry.writer, panelIdentity: entry.display.persistenceKey)
+        previous.volume.rebind(writer: entry.writer, panelIdentity: entry.display.persistenceKey)
+        previous.contrast.rebind(writer: entry.writer, panelIdentity: entry.display.persistenceKey)
         let state = DisplayState(
           display: entry.display, controller: previous.controller,
           volume: previous.volume, contrast: previous.contrast, writer: entry.writer
@@ -465,17 +535,23 @@ final class AppModel {
         store: UserDefaultsBrightnessStore(),
         // M3 key; the M2 key is read once for migration, then ignored.
         storageKey: "combinedBrightness.\(persistenceKey)",
-        legacyKey: "brightness.\(persistenceKey)"
+        legacyKey: "brightness.\(persistenceKey)",
+        // Seeded here so the next pass's rebind — which happens on every
+        // refresh — is not mistaken for a panel swap.
+        panelIdentity: persistenceKey,
+        mirrorTopology: mirrorTopology
       )
       let volume = DDCValueController(
         writer: entry.writer, command: .volume, prefs: prefs,
         displayID: entry.display.id,
-        store: UserDefaultsBrightnessStore(), storageKey: "volume.\(persistenceKey)"
+        store: UserDefaultsBrightnessStore(), storageKey: "volume.\(persistenceKey)",
+        panelIdentity: persistenceKey
       )
       let contrast = DDCValueController(
         writer: entry.writer, command: .contrast, prefs: prefs,
         displayID: entry.display.id,
-        store: UserDefaultsBrightnessStore(), storageKey: "contrast.\(persistenceKey)"
+        store: UserDefaultsBrightnessStore(), storageKey: "contrast.\(persistenceKey)",
+        panelIdentity: persistenceKey
       )
       let state = DisplayState(
         display: entry.display, controller: controller, volume: volume, contrast: contrast,
@@ -541,6 +617,10 @@ final class AppModel {
     // IOAVService, so an old answer is not evidence about the new wire.
     let live = Set(displays.map(\.display.persistenceKey))
     volumeSupport = volumeSupport.filter { live.contains($0.key) }
+    // Same rule, same reason: a replug hands out a fresh IOAVService, so an old
+    // answer is not evidence about the new wire.
+    capabilityString = capabilityString.filter { live.contains($0.key) }
+    hardwareFacts = hardwareFacts.filter { live.contains($0.key) }
     probeVolumeCapabilities()
     return Array(existing.keys)
   }
@@ -577,10 +657,11 @@ final class AppModel {
       ),
       prefs: DisplayPrefs(persistenceKey: "builtIn"), // role .builtIn ignores prefs
       displayID: found.id,
-      role: .builtIn
+      role: .builtIn,
       // store/storageKey/legacyKey stay nil (re-review T10-E): macOS owns
       // built-in brightness across launches; the controller seeds from a
       // native read at init.
+      mirrorTopology: mirrorTopology
     )
     // Inert value controllers: the built-in has no DDC wire, so their
     // `isAvailable` stays true but every write no-ops on `NoopDDCWriter`.

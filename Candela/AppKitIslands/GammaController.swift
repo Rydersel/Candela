@@ -46,7 +46,9 @@ final class GammaController: GammaApplying {
   // MARK: - GammaApplying
 
   @discardableResult
-  func applyGammaScale(_ scale: Double, on displayID: CGDirectDisplayID) -> Bool {
+  func applyGammaScale(
+    _ scale: Double, on displayID: CGDirectDisplayID, enforcerOn drawableDisplayID: CGDirectDisplayID
+  ) -> Bool {
     guard let table = self.defaultTable(for: displayID) else {
       return false
     }
@@ -57,9 +59,25 @@ final class GammaController: GammaApplying {
     let red = table.red.map { $0 * factor }
     let green = table.green.map { $0 * factor }
     let blue = table.blue.map { $0 * factor }
-    // Fork order, and it matters: park the enforcer on the target display, write
-    // the table, then force a composite pass on that display.
-    self.moveEnforcer(to: displayID)
+    // Fork order, and it matters: park the enforcer on the drawable display,
+    // write the table to the PANEL, then force a composite pass.
+    //
+    // DT17: if the enforcer has no screen the write is not attempted at all and
+    // this returns false. Before, the enforcer silently stayed where it was,
+    // the write got no composite pass, and `lastAppliedScale` was recorded
+    // ANYWAY — so `verifyTableIntact` disagreed with itself, reported
+    // interference, and drove the fallback to the shade path, which was also
+    // broken on the same display.
+    guard self.moveEnforcer(to: drawableDisplayID) else {
+      Self.log.error(
+        "No screen for display \(drawableDisplayID, privacy: .public); gamma write for \(displayID, privacy: .public) not attempted"
+      )
+      return false
+    }
+    // The WRITE keeps the raw panel ID: gamma is per-display and the slave's own
+    // panel is what we want dimmed. Whether it reaches a hardware mirror slave
+    // is UNVERIFIED — and nothing depends on the answer, because a failure is
+    // now reported.
     let result = CGSetDisplayTransferByTable(displayID, table.sampleCount, red, green, blue)
     guard result == .success else {
       Self.log.error("CGSetDisplayTransferByTable failed for display \(displayID, privacy: .public): \(result.rawValue)")
@@ -178,16 +196,21 @@ final class GammaController: GammaApplying {
 
   /// One enforcer window shared by all displays: it can only enforce on one
   /// display at a time, which is fine because every gamma write moves it first.
-  private func moveEnforcer(to displayID: CGDirectDisplayID) {
-    // DIVERGENCE: the fork resolves mirroring here. Mirroring is out of
-    // Milestone 3's scope and resolution belongs at the engine boundary, so the
-    // raw display ID is used — consistent with `ShadeOverlay`.
-    if let screen = Self.screen(for: displayID) {
-      self.enforcer.setFrameOrigin(screen.frame.origin)
+  ///
+  /// The ID is ALREADY RESOLVED to a drawable display by the engine (DT15) —
+  /// the fork resolved mirroring here instead, at each of nine such sites.
+  ///
+  /// Returns whether it actually has a screen. The old version ordered it front
+  /// regardless "because a stale position still composites somewhere" — which
+  /// is true and is exactly the problem: it composites on the WRONG display,
+  /// and the write it was supposed to enable is never applied.
+  private func moveEnforcer(to displayID: CGDirectDisplayID) -> Bool {
+    guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
+      return false
     }
-    // Ordered front even if the screen lookup failed (fork behavior): a stale
-    // position still composites somewhere.
+    self.enforcer.setFrameOrigin(screen.frame.origin)
     self.enforcer.orderFrontRegardless()
+    return true
   }
 
   private func enforceActivity() {
@@ -196,9 +219,5 @@ final class GammaController: GammaApplying {
     // toggle without the exact float compare.
     self.enforcerToggled.toggle()
     self.enforcer.alphaValue = self.enforcerToggled ? Self.enforcerToggledAlpha : Self.enforcerBaseAlpha
-  }
-
-  private static func screen(for displayID: CGDirectDisplayID) -> NSScreen? {
-    NSScreen.screens.first { $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID == displayID }
   }
 }

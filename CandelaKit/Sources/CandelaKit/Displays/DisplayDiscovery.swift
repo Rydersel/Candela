@@ -1,8 +1,21 @@
 import CoreGraphics
 
 public enum DisplayDiscovery {
-  /// External, non-dummy, DDC-capable displays with a ready writer for each.
-  public static func discover() -> [(display: ExternalDisplay, writer: any DDCWriting)] {
+  /// External, non-dummy, DDC-capable displays with a ready writer and the
+  /// IOKit facts for each.
+  ///
+  /// The third element is B8: every one of those facts (bar the panel size,
+  /// which comes from a dictionary the match scorer was already building) was
+  /// read on this very pass and thrown away by this very `.map`. Returning it
+  /// costs no additional IOKit iteration and, emphatically, no DDC traffic.
+  ///
+  /// A third tuple element rather than three fields on `ExternalDisplay`: that
+  /// type is three fields under the engine's one-submitter invariant, and
+  /// widening it would touch every construction site and every fixture for the
+  /// benefit of one read-only pane. Callers that want only the display and the
+  /// writer keep compiling — they already destructure by label.
+  public static func discover()
+    -> [(display: ExternalDisplay, writer: any DDCWriting, facts: DisplayHardwareFacts)] {
     #if arch(arm64)
       var displayIDs = [CGDirectDisplayID](repeating: 0, count: 16)
       var count: UInt32 = 0
@@ -16,7 +29,12 @@ public enum DisplayDiscovery {
           (ExternalDisplay(id: match.displayID,
                            name: displayName(from: match.serviceDetails, displayID: match.displayID),
                            persistenceKey: persistenceKey(from: match.serviceDetails)),
-           Arm64DDCService.create(service: match.service))
+           Arm64DDCService.create(service: match.service),
+           DisplayHardwareFacts.from(
+             service: match.serviceDetails,
+             matchScore: match.matchScore,
+             physicalSizeCm: Arm64DDC.physicalSizeCm(displayID: match.displayID)
+           ))
         }
     #else
       return [] // Intel adapter arrives in a later milestone (spec §2 keeps IntelDDC compiled).
