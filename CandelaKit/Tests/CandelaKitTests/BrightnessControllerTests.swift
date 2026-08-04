@@ -36,6 +36,12 @@ func makeLegacyPathController(
 actor FakeDDC: DDCWriting {
   private(set) var writes: [(command: UInt8, value: UInt16)] = []
   var readResult: (current: UInt16, max: UInt16)?
+  /// Defaults to the historical "every write succeeds"; flip it to model a
+  /// panel that stops accepting commands mid-session (the B4 accessors have
+  /// nothing to report otherwise). The write is still RECORDED when it fails —
+  /// the transaction was attempted, which is exactly the distinction the
+  /// failure flag exists to preserve.
+  var writesSucceed = true
 
   init(readResult: (current: UInt16, max: UInt16)? = (current: 50, max: 100)) {
     self.readResult = readResult
@@ -43,7 +49,7 @@ actor FakeDDC: DDCWriting {
 
   func write(command: UInt8, value: UInt16) async -> Bool {
     writes.append((command, value))
-    return true
+    return writesSucceed
   }
 
   func read(command: UInt8) async -> (current: UInt16, max: UInt16)? {
@@ -53,6 +59,8 @@ actor FakeDDC: DDCWriting {
   func recordedWrites() async -> [(command: UInt8, value: UInt16)] { writes }
 
   func setReadResult(_ result: (current: UInt16, max: UInt16)?) { readResult = result }
+
+  func setWritesSucceed(_ value: Bool) { writesSucceed = value }
 }
 
 @MainActor
@@ -127,3 +135,26 @@ actor FakeDDC: DDCWriting {
 // duplicate-skip, retry-after-failed-apply, superseded-generation waits,
 // epoch gate) live in HardwareTargetCoalescerTests.swift — the coalescer's
 // payload is now an applier-carrying HardwareTarget.
+
+// MARK: - DisplayServices availability (B6)
+
+/// The shim degrades silently by design: a missing framework or symbol logs
+/// once at resolve time and every call thereafter returns nil/false forever.
+/// Correct, and invisible — "native brightness cannot work on this machine at
+/// all" was a fact the process learned on first use and could not state.
+///
+/// This is a real macOS host, so the framework is in the dyld shared cache and
+/// the symbol resolves. The assertion is not a tautology: it fails the day a
+/// macOS release renames or drops `DisplayServicesSetBrightness`, which is
+/// exactly when the native path silently stops working and someone needs the
+/// pane to say why.
+@Test func displayServicesReportsItsOwnAvailability() {
+  #expect(DisplayServices.isAvailable)
+}
+
+/// The read half of the degradation contract, on a display ID that is never a
+/// real display: nil, not a crash and not a plausible-looking zero. Nothing is
+/// written — the private setter is left alone, one-writer discipline.
+@Test func displayServicesReadOfANullDisplayIsNil() {
+  #expect(DisplayServices.getBrightness(for: 0) == nil)
+}

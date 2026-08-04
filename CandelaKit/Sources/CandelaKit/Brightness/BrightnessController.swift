@@ -64,10 +64,26 @@ public final class BrightnessController {
   /// answer reads" rather than showing last-written values as though the panel
   /// had reported them.
   ///
-  /// Only ever moved through `DDCReadEvidence.worse` — a display whose read
-  /// answered zeros once must not look pristine again just because the next
-  /// `refreshFromHardware` returned early (native path, `unavailableDDC`, or
-  /// role `.builtIn`, all of which attempt nothing).
+  /// Scope: this is the verdict of the most recent pass that actually ASKED
+  /// the panel something, not the worst thing ever observed on this display.
+  /// The distinction is the whole correctness argument, so both halves:
+  ///
+  /// - A pass that attempts nothing must not touch it. `refreshFromHardware`
+  ///   returns early under the native path, `unavailableDDC`, and role
+  ///   `.builtIn` — a display that answered zeros once would otherwise look
+  ///   pristine again simply because the next pass never reached the wire.
+  ///   The assignments below therefore sit AFTER every such early return.
+  /// - A pass that does ask supersedes the previous pass's verdict. A
+  ///   monotonic worst-wins fold across passes reads "this display does not
+  ///   reply" about a panel that just replied — a false sentence produced by
+  ///   the feature built to stop false sentences. `worse` is still exactly
+  ///   right for folding WITHIN a pass and across this display's sibling
+  ///   controllers (`DDCReadEvidence.worst`); it was the scope of the fold,
+  ///   never the ordering, that was wrong.
+  ///
+  /// This controller reads one code, once, per pass, so the within-pass fold
+  /// here is trivial and the assignments are plain. `DDCValueController`,
+  /// which retries, has to spell the fold out.
   public private(set) var readEvidence: DDCReadEvidence = .notAttempted
 
   /// Whether `maxDDCValue` came from the PANEL or is the assumed default
@@ -319,18 +335,24 @@ public final class BrightnessController {
     // "the panel replied with zeros" stop collapsing into the same silence.
     // Only the second is the MAG 341C's write-only signature, and the old
     // shape could not tell the diagnostics pane which one happened.
+    //
+    // Assignment, not a fold against the previous value: everything above this
+    // line has already returned for the passes that ask nothing, so reaching
+    // here means the panel WAS asked, and this pass's answer is the current
+    // fact about it. Folding across passes instead published "does not reply"
+    // about panels that had since replied (see `readEvidence`).
     guard let result = await writer.read(command: tuning.remapCodes.first ?? VCP.brightness) else {
-      readEvidence = DDCReadEvidence.worse(readEvidence, .noReply)
+      readEvidence = .noReply
       return
     }
     // `(0, 0)` and `max == 0` are FAILED reads, not a brightness of zero — the
     // MAG341C answers every read this way, and the fork's unvalidated read
     // clobbers saved values to 0. Recorded rather than merely rejected (B3).
     guard result.max > 0 else {
-      readEvidence = DDCReadEvidence.worse(readEvidence, .allZeros)
+      readEvidence = .allZeros
       return
     }
-    readEvidence = DDCReadEvidence.worse(readEvidence, .answered)
+    readEvidence = .answered
     maxDDCValue = result.max
     // B5: from here on `maxDDCValue` is the panel's own answer, not the 100
     // default. Set only on the answered arm — every other exit leaves the
@@ -831,8 +853,39 @@ public final class BrightnessController {
   /// hardware is in a state we didn't write, so the coalescer's duplicate
   /// memo is reset — otherwise re-asserting the current value would be
   /// skipped as a duplicate forever.
+  ///
+  /// Both read-derived facts reset here, and the reason is the same one: a
+  /// read is evidence about a WIRE, and a rebind is a new wire.
+  ///
+  /// - `didReadMaxDDC` (B5) was introduced write-once-true. A display that
+  ///   replugs into a read-failing state would then keep reporting "this
+  ///   maximum was read from the panel" on the strength of a read from a
+  ///   previous binding — the exact class of untruth the diagnostics work
+  ///   exists to remove.
+  /// - `readEvidence` (B3) goes back to `.notAttempted`, the floor: we have
+  ///   asked THIS binding nothing. Not a weakening of worst-wins — that fold
+  ///   governs a pass and this display's sibling controllers, and neither
+  ///   survives the cable.
+  ///
+  /// This is not hypothetical. `AppModel.performRefresh` REUSES a controller
+  /// for any display whose `CGDirectDisplayID` reappears, and macOS reassigns
+  /// display IDs across a replug — so a different physical monitor swapped
+  /// onto the same port inherits this object, and would otherwise inherit the
+  /// previous panel's verdict about itself.
+  ///
+  /// `maxDDCValue` itself is deliberately NOT reset, and the asymmetry is the
+  /// point: the number feeds the DDC write path, so resetting it would change
+  /// what lands on the wire — out of bounds for a change that is meant to
+  /// record what already happens, and a gratuitous risk to the one-writer
+  /// discipline. The honest reading of the pair after a replug is "the value
+  /// we are still using, which we can no longer vouch for", which is exactly
+  /// what an assumed maximum is. (`DDCValueController.readMax` is reset,
+  /// because there `nil` IS the "assumed" state and there is no other way to
+  /// say it; that one does move written values, and is noted there.)
   public func rebind(writer: any DDCWriting) {
     self.writer = writer
+    didReadMaxDDC = false
+    readEvidence = .notAttempted
     coalescer.resetDuplicateState()
   }
 
@@ -984,6 +1037,29 @@ public final class BrightnessController {
   nonisolated func _duplicateResetCount() -> UInt64 {
     coalescer.duplicateResetCount()
   }
+
+  /// The last brightness target that actually reached this display's hardware
+  /// (B4), or nil if nothing has — nothing submitted, everything failed, or a
+  /// reset invalidated what had landed.
+  ///
+  /// `nonisolated` over the coalescer's existing lock, exactly like
+  /// `_duplicateResetCount()`: no executor hop for what a settings row reads
+  /// during a refresh. Public rather than a test seam because the diagnostics
+  /// section is a real (later-task) consumer.
+  public nonisolated func lastAppliedTarget() -> HardwareTarget? {
+    coalescer.lastAppliedTarget()
+  }
+
+  /// Whether the most recent apply ATTEMPT on this display failed (B4).
+  ///
+  /// The fact this exposes was previously computed and discarded on every
+  /// single write: `DDCCommandApplier` returns a `Bool`, the coalescer used it
+  /// to decide whether to advance its duplicate memo, and then it was gone.
+  /// "This monitor is ignoring us" was observable to the code and unsayable to
+  /// the user.
+  public nonisolated func lastApplyFailed() -> Bool {
+    coalescer.lastApplyFailed()
+  }
 }
 
 /// Drains hardware brightness targets off the main actor, coalescing
@@ -1053,9 +1129,23 @@ actor BrightnessWriteCoalescer {
   /// over that apply's success — on a rebind the in-flight value reached the
   /// OLD hardware, so recording it would duplicate-skip the next same-value
   /// write to the new panel forever. The drain captures `resets` before
-  /// applying and only records the target if no reset intervened.
+  /// applying and only records the outcome if no reset intervened.
+  ///
+  /// `lastFailed` rides in the same slot (B4). Until now the `Bool` an applier
+  /// returned advanced this memo and was then dropped on the floor, so nothing
+  /// anywhere could say "the last write to this display failed" — the
+  /// diagnostics section could not distinguish a panel that is accepting
+  /// commands from one that has been refusing every one of them since the
+  /// cable was plugged in. It is the LATEST attempt's outcome, not the worst
+  /// one: a display that failed once and has worked ever since is working, and
+  /// a latched flag would send someone hunting a cable that is fine. It is not
+  /// a second piece of state needing a second lock — it is a second field of
+  /// the fact this lock already guards, written in the same critical section
+  /// under the same `resets` guard.
   private nonisolated let lastApplied =
-    OSAllocatedUnfairLock<(target: HardwareTarget?, resets: UInt64)>(initialState: (nil, 0))
+    OSAllocatedUnfairLock<(target: HardwareTarget?, resets: UInt64, lastFailed: Bool)>(
+      initialState: (nil, 0, false)
+    )
 
   private var completedGeneration: UInt64 = 0
   private var waiters: [(generation: UInt64, continuation: CheckedContinuation<Void, Never>)] = []
@@ -1081,14 +1171,36 @@ actor BrightnessWriteCoalescer {
   /// would be skipped forever (review I10).
   nonisolated func resetDuplicateState() {
     // Bumping `resets` invalidates any apply currently in flight — see the
-    // `lastApplied` comment.
-    lastApplied.withLock { $0 = (nil, $0.resets + 1) }
+    // `lastApplied` comment. `lastFailed` clears with it: a reset means the
+    // hardware is in a state we did not write, so a failure recorded against
+    // the OLD wire is not a fact about the new one, and reporting it would
+    // accuse a freshly plugged panel of a fault the previous one had.
+    lastApplied.withLock { $0 = (nil, $0.resets + 1, false) }
   }
 
   /// Test seam: the `resets` version counter (bumps once per
   /// `resetDuplicateState`).
   nonisolated func duplicateResetCount() -> UInt64 {
     lastApplied.withLock { $0.resets }
+  }
+
+  /// The last target that actually reached hardware (B4). `nonisolated` over
+  /// the lock this memo already lives in — `duplicateResetCount()` is the
+  /// precedent, not new machinery, and reading it must not require an
+  /// executor hop into the drain's actor for what is a settings-pane refresh.
+  ///
+  /// `nil` means nothing has landed: either nothing was ever submitted, or
+  /// every attempt failed, or a reset invalidated what had landed. All three
+  /// are honestly "we cannot name a value that is on this panel".
+  nonisolated func lastAppliedTarget() -> HardwareTarget? {
+    lastApplied.withLock { $0.target }
+  }
+
+  /// Whether the most recent apply ATTEMPT failed (B4) — see `lastApplied`.
+  /// Distinct from `lastAppliedTarget() == nil`, which cannot separate "the
+  /// write failed" from "we never wrote".
+  nonisolated func lastApplyFailed() -> Bool {
+    lastApplied.withLock { $0.lastFailed }
   }
 
   /// Synchronous and nonisolated on purpose — see the type comment.
@@ -1148,11 +1260,19 @@ actor BrightnessWriteCoalescer {
           // record its target: a reset that raced this apply means the value
           // landed on hardware we no longer trust (review I1) — the `resets`
           // captured in `memo` above detects that.
-          if await write.applier.apply(write.target) {
-            lastApplied.withLock { state in
-              if state.resets == memo.resets {
-                state.target = write.target
-              }
+          //
+          // The outcome `Bool` is now KEPT rather than dropped (B4). Review
+          // I1's guard covers the failure flag too, not just the target: a
+          // reset that raced this apply means the failure was against the old
+          // wire, and recording it afterwards would make a freshly rebound
+          // panel report a fault it never had. Both fields therefore move
+          // together, inside one critical section, or neither does.
+          let didApply = await write.applier.apply(write.target)
+          lastApplied.withLock { state in
+            guard state.resets == memo.resets else { return }
+            state.lastFailed = !didApply
+            if didApply {
+              state.target = write.target
             }
           }
         }

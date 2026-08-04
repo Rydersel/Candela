@@ -53,9 +53,22 @@ public final class DDCValueController {
   /// Published per COMMAND, not per display, because `AppModel.DisplayState`
   /// holds brightness, volume and contrast as siblings with no owner among
   /// them: the display-level verdict is `DDCReadEvidence.worst` of the three,
-  /// folded at whatever reads them. Moved only through `worse`, so the
-  /// retry loop below cannot let a late `continue` erase an earlier zeros
-  /// observation.
+  /// folded at whatever reads them.
+  ///
+  /// Scope: the verdict of the most recent pass that actually asked the panel
+  /// something, folded worst-wins over the FAILED attempts within that pass —
+  /// so a late `continue` still cannot erase an earlier zeros observation from
+  /// the same pass, and a pass that returns early (`startupAction != .read`,
+  /// `!isAvailable`, `tries == 0`) leaves the previous verdict standing.
+  ///
+  /// What it is deliberately NOT is a fold across passes and across retries.
+  /// The retry loop exists because DDC reads are flaky, so the common healthy
+  /// case is attempt 1 returning nil and attempt 2 answering; folding those
+  /// monotonically published "this display does not reply" about a panel that
+  /// had just replied, then adopted its value in the same breath. A read that
+  /// eventually succeeded is a read that succeeded, so a successful attempt
+  /// supersedes the failures that preceded it in its pass. The ordering in
+  /// `DDCReadEvidence` is untouched; only the scope of the fold changed.
   public private(set) var readEvidence: DDCReadEvidence = .notAttempted
   /// Test seam, mirroring `BrightnessController._onSubmit`.
   @ObservationIgnored var _onSubmit: ((HardwareTarget) -> Void)?
@@ -228,6 +241,12 @@ public final class DDCValueController {
     // would blind the 0x8D-readback guard to it — the readback could then
     // setMuted(false)+persist over the user's fresh mute.
     let muteIssuedAtStart = issuedMuteGeneration
+    // This pass's own evidence, folded from `.notAttempted` rather than from
+    // whatever the last pass concluded — see `readEvidence`. Only the FAILED
+    // attempts fold together (worst-wins, so a silent retry after a zeros
+    // answer still reports the more specific write-only finding); a success
+    // supersedes them outright, which is also why it needs no fold.
+    var passEvidence = DDCReadEvidence.notAttempted
     for _ in 0 ..< tries {
       // The old single `guard … , result.max > 0 else { continue }` treated a
       // silent bus and a panel that answers zeros as the same non-event (B3).
@@ -236,18 +255,20 @@ public final class DDCValueController {
       // attempts. Same number of reads, same `continue`, same values — the
       // loop's DDC behaviour is untouched; it just stops forgetting.
       guard let result = await writer.read(command: readCode) else {
-        readEvidence = DDCReadEvidence.worse(readEvidence, .noReply)
+        passEvidence = DDCReadEvidence.worse(passEvidence, .noReply)
+        readEvidence = passEvidence
         continue
       }
       guard result.max > 0 else {
-        readEvidence = DDCReadEvidence.worse(readEvidence, .allZeros)
+        passEvidence = DDCReadEvidence.worse(passEvidence, .allZeros)
+        readEvidence = passEvidence
         continue
       }
       // Recorded BEFORE the staleness fence: the panel answered, and that is
       // true whether or not user input superseded the value we were about to
       // adopt. Returning here without recording would hide a good panel behind
       // a race.
-      readEvidence = DDCReadEvidence.worse(readEvidence, .answered)
+      readEvidence = .answered
       guard issuedGeneration == issuedAtStart else { return }
       // The max is real information on every validated read (the loop guard
       // proved `max > 0`); learn it BEFORE the artifact skip below, which
@@ -288,8 +309,27 @@ public final class DDCValueController {
     await muteCoalescer.waitUntilCompleted(through: issuedMuteGeneration)
   }
 
+  /// Every read-derived fact resets with the writer, for one reason: a read is
+  /// evidence about a WIRE, and this is a new wire. `AppModel.performRefresh`
+  /// reuses these controllers for any display whose `CGDirectDisplayID`
+  /// reappears, and macOS reassigns display IDs across a replug — so a
+  /// different physical monitor on the same port inherits this object and
+  /// would otherwise inherit the previous panel's readback and verdict about
+  /// itself. (`BrightnessController.rebind` carries the same reset.)
+  ///
+  /// `readMax` back to `nil` is the load-bearing one, and it is the only part
+  /// of this change that moves bytes on the wire: `nil` means "assume 100",
+  /// so a panel that had reported a max BELOW 100 will, after a rebind and
+  /// until the next successful read, be written against 100 instead. That is
+  /// the same state a freshly discovered display starts in, and scaling
+  /// writes against a maximum the panel on the other end never reported is
+  /// the worse of the two — but it IS a behaviour change on the write path,
+  /// stated here rather than buried, and pinned by
+  /// `arebindReturnsTheReadbackMaxToAssumed`.
   public func rebind(writer: any DDCWriting) {
     self.writer = writer
+    readMax = nil
+    readEvidence = .notAttempted
     coalescer.resetDuplicateState()
     muteCoalescer.resetDuplicateState()
   }

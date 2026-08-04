@@ -583,4 +583,92 @@ struct DDCValueControllerTests {
     await harness.controller.waitForPendingWrites()
     #expect(await scripted.recordedWrites().count == 2)
   }
+
+  // MARK: - Read evidence at the call site (B3)
+
+  /// The enum's own tests cannot catch a call site that stops folding, and no
+  /// test asserted this controller ever publishes anything at all — replacing
+  /// the fold with a plain assignment left the whole suite green. These pin
+  /// the published verdict, and with it the SCOPE of the fold: worst-wins
+  /// among a pass's failed attempts, superseded by a success, superseded again
+  /// by the next pass that asks.
+
+  @Test func azerosAnsweringPanelPublishesAllZeros() async {
+    let harness = Harness(command: .contrast, savedValue: 0.6) { $0.startupAction = .read }
+    await harness.fake.setReadResult((current: 0, max: 0)) // the MAG answer
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.readEvidence == .allZeros)
+    #expect(harness.controller.readMax == nil) // nothing was learned; 100 is assumed
+  }
+
+  @Test func asilentBusPublishesNoReply() async {
+    let harness = Harness(command: .contrast, savedValue: 0.6) { $0.startupAction = .read }
+    await harness.controller.refreshFromHardware() // FakeDDC(readResult: nil) by default
+    #expect(harness.controller.readEvidence == .noReply)
+  }
+
+  /// The defect this whole scope change exists to remove. The retry loop is
+  /// there BECAUSE DDC reads are flaky, so "attempt 1 silent, attempt 2
+  /// answers" is the ordinary healthy case — and folding those monotonically
+  /// published "this display does not reply" about a panel whose value the
+  /// very same pass then adopted. A read that eventually succeeded is a read
+  /// that succeeded.
+  @Test func asuccessfulRetryAfterAFailedAttemptReportsAnswered() async {
+    let scripted = ScriptedDDC(reads: [nil, (current: 0, max: 0), (current: 30, max: 100)])
+    let harness = Harness(command: .contrast, savedValue: 0.6, writer: scripted) {
+      $0.startupAction = .read
+    }
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.value == 0.3) // the pass adopted the panel's value…
+    #expect(harness.controller.readEvidence == .answered) // …and says so
+  }
+
+  /// The half that must NOT be weakened: within one pass, a later silent
+  /// attempt cannot erase an earlier zeros answer. `allZeros` outranks
+  /// `noReply` because it is the more specific finding, and it is the one that
+  /// names the fault.
+  @Test func withinOnePassASilentRetryDoesNotEraseAZerosAnswer() async {
+    let scripted = ScriptedDDC(reads: [(current: 0, max: 0), nil, nil])
+    let harness = Harness(command: .contrast, savedValue: 0.6, writer: scripted) {
+      $0.startupAction = .read
+    }
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.readEvidence == .allZeros)
+  }
+
+  /// A pass that returns before touching the wire (`startupAction != .read`
+  /// here) proves nothing and must leave the previous verdict standing.
+  @Test func apassThatAsksNothingLeavesTheVerdictStanding() async {
+    let harness = Harness(command: .contrast, savedValue: 0.6) { $0.startupAction = .read }
+    await harness.fake.setReadResult((current: 0, max: 0))
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.readEvidence == .allZeros)
+
+    harness.prefs.startupAction = .doNothing
+    await harness.fake.setReadResult((current: 30, max: 100))
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.readEvidence == .allZeros)
+  }
+
+  /// A rebind is a new wire, so both read-derived facts go back to their
+  /// "nothing learned" state. Not academic: `AppModel.performRefresh` REUSES
+  /// these controllers for any display whose `CGDirectDisplayID` reappears,
+  /// and macOS reassigns those IDs across a replug — a different physical
+  /// monitor on the same port inherits this object.
+  ///
+  /// `readMax` is the one that moves bytes: `nil` means "assume 100", so a
+  /// panel that had reported a max below 100 is written against 100 again
+  /// until the new wire answers. Deliberate, and asserted rather than left to
+  /// be discovered — see `rebind(writer:)`.
+  @Test func arebindReturnsTheReadbackMaxToAssumed() async {
+    let harness = Harness(command: .contrast, savedValue: 0.6) { $0.startupAction = .read }
+    await harness.fake.setReadResult((current: 30, max: 80))
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.readMax == 80)
+    #expect(harness.controller.readEvidence == .answered)
+
+    harness.controller.rebind(writer: FakeDDC(readResult: nil))
+    #expect(harness.controller.readMax == nil)
+    #expect(harness.controller.readEvidence == .notAttempted)
+  }
 }
