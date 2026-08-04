@@ -37,7 +37,10 @@ public enum CapabilityString {
   /// not fully understood.
   ///
   /// Same D24 rule as `support(forVCP:in:)`, and the same three gates in the
-  /// same order: balance check FIRST, whole-tag match, top-level codes only. A
+  /// same order: balance check FIRST, whole-tag match at depth 1 (so a `vcp(`
+  /// buried inside another tag's body is not mistaken for the list), and
+  /// top-level codes only — each of the two "top-level" claims in that sentence
+  /// is a separate depth counter, one over tags and one over codes. A
   /// partially-parsed string never produces a partial answer — a pane listing
   /// "the codes we could make out" would read as the display's advertised list
   /// and be wrong in the one direction that matters.
@@ -55,8 +58,12 @@ public enum CapabilityString {
 
   /// The body of a top-level tag — `tag("mccs_ver", in:)` → "2.1".
   ///
-  /// nil when the tag is absent, the string is unbalanced, or the group never
-  /// closes. An empty STRING is a different answer from nil: the tag was
+  /// "Top-level" is literal: only a tag immediately inside the outer group
+  /// answers. `tag("type", in: "(prot(type(LCD))vcp(10))")` is nil, not "LCD",
+  /// because that `type` belongs to `prot` — see `body(ofTag:in:)`.
+  ///
+  /// nil when the tag is absent, nested, the string is unbalanced, or the group
+  /// never closes. An empty STRING is a different answer from nil: the tag was
   /// declared and its body is blank (DT30 rule e). A caller that flattened the
   /// two would report "the display did not say" and "the display said nothing"
   /// as the same fact, which is exactly the conflation D24 and DT30 exist to
@@ -80,54 +87,114 @@ public enum CapabilityString {
     return depth == 0
   }
 
-  /// The characters between `<name>(` and its matching `)`, nested groups
-  /// included. `nil` when there is no such tag or the group never closes (the
-  /// truncation case).
+  /// The characters between a **top-level** `<name>(` and its matching `)`,
+  /// nested groups included. `nil` when there is no such tag or the group never
+  /// closes (the truncation case).
   ///
-  /// GENERALISED from `vcpBody` so `tag(_:in:)` inherits the whole-tag
-  /// boundary check already pinned by tests: "vcpname(" and "mccs_vcp(" are
-  /// different keys from "vcp(", and matching them would invent a list out of
-  /// unrelated data. The same check is what stops `tag("type", …)` from
-  /// answering with `prot_type(`'s body — one field's value reported as
-  /// another's is a fact invented out of unrelated data, the same defect in a
-  /// different costume.
+  /// "Top-level" means immediately inside the outer group — depth 1 — and is
+  /// enforced two ways, because a tag name can be wrong about its identity in
+  /// two independent directions:
   ///
-  /// The scan is deliberately hand-rolled rather than a regex: capability
-  /// strings nest, and only a depth counter can tell `60(0F 11 12)`'s closing
-  /// paren from the vcp list's own.
+  /// 1. **Horizontally, by the boundary check.** "vcpname(" and "mccs_vcp(" are
+  ///    different keys from "vcp(", and matching them would invent a list out
+  ///    of unrelated data. The same check stops `tag("type", …)` from answering
+  ///    with `prot_type(`'s body.
+  /// 2. **Vertically, by the depth counter.** A textual scan finds the first
+  ///    `<name>(` at *any* nesting depth, so `tag("type", in: "(prot(type(LCD))…")`
+  ///    answered "LCD" — a nested field's body reported as a top-level field's.
+  ///    `prot(type(...))` is a shape real monitors emit, and generalising this
+  ///    function from `vcp` to arbitrary tags turned an unlikely collision into
+  ///    a plausible one. Reporting one field's value as another's is the same
+  ///    invented fact as (1), arriving by the other door.
+  ///
+  /// "Depth 1" is measured against a real wrapper, not against whatever group
+  /// happens to come first (see `outerGroupInterior`). Without that, the
+  /// unwrapped `"vcp(vcp(60(01 03)))"` would treat its own leading `vcp(` as
+  /// the outer group, read the INNER list as top-level, and answer
+  /// `.unsupported` — a denial manufactured out of a string that is not a
+  /// capability string at all. Measured: that shape, and only that shape, was
+  /// the entire `unknown → .unsupported` class in the differential fuzz.
+  ///
+  /// The consequence, taken deliberately: a capability string with no outer
+  /// group — `vcp(10)` rather than `(vcp(10))` — is not well-formed MCCS and
+  /// returns `nil`. D24 makes that free, because `nil` reaches the UI as
+  /// `.unknown`, which `VolumeSliderPolicy` resolves to *enabled*.
+  ///
+  /// The scan is hand-rolled rather than a regex because capability strings
+  /// nest: only a depth counter can tell `60(0F 11 12)`'s closing paren from
+  /// the vcp list's own, and only a depth counter can tell the two `vcp(` in
+  /// `(vcpname(vcp(10))vcp(20))` apart.
   static func body(ofTag name: String, in capabilities: String) -> [Character]? {
     let tag = Array(name.lowercased())
     guard !tag.isEmpty else { return nil }
     let chars = Array(capabilities)
-    var index = 0
-    // `index + tag.count` must be a valid subscript for the '(' check, so the
-    // scan stops one character before the end — a name longer than the string
-    // simply never enters the loop.
-    while index + tag.count + 1 <= chars.count {
-      let isTag = chars[index + tag.count] == "("
-        && (0 ..< tag.count).allSatisfy { chars[index + $0].lowercased() == String(tag[$0]) }
-      let boundaryBefore = index == 0
-        || (!chars[index - 1].isLetter && !chars[index - 1].isNumber && chars[index - 1] != "_")
-      if isTag, boundaryBefore {
-        var depth = 1
-        var body: [Character] = []
-        var cursor = index + tag.count + 1
-        while cursor < chars.count {
-          let character = chars[cursor]
-          if character == "(" { depth += 1 }
-          if character == ")" {
-            depth -= 1
-            if depth == 0 { return body }
+    guard let interior = outerGroupInterior(chars) else { return nil }
+    // Depth is relative to the interior, so a top-level tag sits at depth 0.
+    var depth = 0
+    var index = interior.lowerBound
+    while index < interior.upperBound {
+      if depth == 0, index + tag.count < interior.upperBound {
+        let isTag = chars[index + tag.count] == "("
+          && (0 ..< tag.count).allSatisfy { chars[index + $0].lowercased() == String(tag[$0]) }
+        // `interior.lowerBound` is always >= 1 — it sits just after the outer
+        // '(' — so the look-behind needs no index == 0 special case, and at the
+        // first position it reads that '(', which is a boundary.
+        let boundaryBefore = !chars[index - 1].isLetter
+          && !chars[index - 1].isNumber && chars[index - 1] != "_"
+        if isTag, boundaryBefore {
+          var groupDepth = 1
+          var body: [Character] = []
+          var cursor = index + tag.count + 1
+          while cursor < interior.upperBound {
+            let character = chars[cursor]
+            if character == "(" { groupDepth += 1 }
+            if character == ")" {
+              groupDepth -= 1
+              if groupDepth == 0 { return body }
+            }
+            body.append(character)
+            cursor += 1
           }
-          body.append(character)
-          cursor += 1
+          // The tag opened and never closed: truncation. Return nil rather than
+          // resuming the scan — a second `vcp(` later in a truncated string is
+          // not evidence we can trust either.
+          return nil
         }
-        // The tag opened and never closed: truncation. Return nil rather than
-        // resuming the scan — a second `vcp(` later in a truncated string is
-        // not evidence we can trust either.
-        return nil
       }
+      if chars[index] == "(" { depth += 1 }
+      if chars[index] == ")" { depth -= 1 }
       index += 1
+    }
+    return nil
+  }
+
+  /// The interior of the one outer group, when the string is exactly `(…)`.
+  ///
+  /// A well-formed MCCS capability string is a single parenthesised group
+  /// wrapping every tag. Requiring that — rather than inferring the wrapper
+  /// from the first `(` we happen to meet — is what keeps `body(ofTag:in:)`'s
+  /// notion of "top-level" anchored to something real. `"(a)(b)"`, `"vcp(10)"`
+  /// and `"junk(vcp(10))"` are all rejected: each would otherwise donate an
+  /// arbitrary group to stand in for the wrapper, and every tag read out of it
+  /// would be a claim about a string we do not actually understand.
+  ///
+  /// Surrounding whitespace is tolerated because it changes no meaning. Nothing
+  /// else is — D24 would rather say nothing than guess at a wrapper.
+  private static func outerGroupInterior(_ chars: [Character]) -> Range<Int>? {
+    var start = 0
+    var end = chars.count
+    while start < end, chars[start].isWhitespace { start += 1 }
+    while end > start, chars[end - 1].isWhitespace { end -= 1 }
+    guard end - start >= 2, chars[start] == "(", chars[end - 1] == ")" else { return nil }
+    // The opening paren must close on the LAST character, not merely somewhere.
+    var depth = 0
+    for index in start ..< end {
+      if chars[index] == "(" { depth += 1 }
+      if chars[index] == ")" {
+        depth -= 1
+        guard depth >= 0 else { return nil }
+        if depth == 0 { return index == end - 1 ? (start + 1) ..< index : nil }
+      }
     }
     return nil
   }
@@ -142,7 +209,19 @@ public enum CapabilityString {
     func flush() -> Bool {
       defer { token = "" }
       guard !token.isEmpty else { return true }
-      guard token.count == 2, let code = UInt8(token, radix: 16) else { return false }
+      // Both characters must be ASCII hex digits, checked explicitly rather
+      // than left to `UInt8(_:radix:)`. That initialiser accepts a leading sign
+      // — `UInt8("+1", radix: 16)` is 1, and "+1" is two Characters, so a
+      // count-only guard passed a token that is not a hex pair. The cost was
+      // not merely a wrong entry in a diagnostics list: `support(forVCP:in:)`
+      // would then answer .unsupported for "(vcp(+1))" and grey a working
+      // control on the word of a provably malformed string, inverting D24's
+      // doctrine that an unclear answer resolves to *enabled*.
+      //
+      // `isASCII` is load-bearing alongside `isHexDigit`: the latter is true
+      // for fullwidth forms like "１", which `UInt8(_:radix:)` then rejects.
+      guard token.count == 2, token.allSatisfy({ $0.isASCII && $0.isHexDigit }),
+            let code = UInt8(token, radix: 16) else { return false }
       codes.insert(code)
       return true
     }

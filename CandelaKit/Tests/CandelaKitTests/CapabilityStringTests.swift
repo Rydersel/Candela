@@ -237,4 +237,87 @@ struct CapabilityStringDetailTests {
     // running the balance check first.
     #expect(CapabilityString.tag("vcp", in: "(vcp(10)") == nil)
   }
+
+  /// A feature code is exactly two ASCII hex digits — no sign, ever.
+  ///
+  /// `UInt8("+1", radix: 16)` is `1` and `"+1"` is two Characters, so a
+  /// `token.count == 2` check that leans on `UInt8(_:radix:)` to reject
+  /// non-digits lets a signed token through. Two consequences, the second one
+  /// shipping: the pane would report "this display advertises VCP 0x01" from a
+  /// token that is not a hex pair, and `support(forVCP:in:)` would answer
+  /// `.unsupported` for a string that is provably malformed — greying a working
+  /// control, which is the exact inversion of D24's doctrine that an unclear
+  /// answer resolves to *enabled*.
+  @Test func aSignedTokenIsNotAHexPairAndPoisonsTheWholeString() {
+    #expect(CapabilityString.codes(in: "(vcp(+1))") == nil)
+    #expect(CapabilityString.codes(in: "(vcp(-0))") == nil)
+    #expect(CapabilityString.codes(in: "(vcp(+A))") == nil)
+    #expect(CapabilityString.codes(in: "(vcp(+f))") == nil)
+    // The shipping consequence, stated as a verdict: never a denial.
+    #expect(CapabilityString.support(forVCP: 0x62, in: "(vcp(+1))") == .unknown)
+    #expect(CapabilityString.support(forVCP: 0x01, in: "(vcp(+1))") == .unknown)
+    // A signed token anywhere poisons the list, not just the token.
+    #expect(CapabilityString.codes(in: "(vcp(10 +1 62))") == nil)
+  }
+
+  /// ...and rejecting signs must not have cost us any real hex pair. Both
+  /// letter cases, the boundary values, and a nested value list.
+  @Test func everyGenuineHexPairStillParsesInEitherCase() {
+    #expect(CapabilityString.codes(in: "(vcp(0a Ff))") == [0x0A, 0xFF])
+    #expect(CapabilityString.codes(in: "(vcp(00 ff FF aA Bb cC dD eE))")
+      == [0x00, 0xFF, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE])
+    #expect(CapabilityString.codes(in: "(vcp(10 60(0f 1A) e3))") == [0x10, 0x60, 0xE3])
+  }
+
+  /// The tag scan is depth-aware: a tag nested inside another tag's body is
+  /// that tag's content, not a top-level field.
+  ///
+  /// `prot(type(LCD))` is a shape real monitors emit, and a textual scan would
+  /// answer `tag("type", …)` with a body that belongs to `prot`. That is one
+  /// field's value reported as another's — the same "fact invented out of
+  /// unrelated data" the whole-tag boundary check exists to prevent, arriving
+  /// by the other door. Only a match immediately inside the outer group counts.
+  @Test func aNestedTagIsNotATopLevelTag() {
+    #expect(CapabilityString.tag("type", in: "(prot(type(LCD))vcp(10))") == nil)
+    #expect(CapabilityString.tag("prot", in: "(prot(type(LCD))vcp(10))") == "type(LCD)")
+    // The real top-level list wins over one buried inside another tag's body.
+    #expect(CapabilityString.codes(in: "(vcpname(vcp(10))vcp(20))") == [0x20])
+    // A tag that exists ONLY nested is absent, not present.
+    #expect(CapabilityString.codes(in: "(vcpname(vcp(10)))") == nil)
+    #expect(CapabilityString.tag("mccs_ver", in: "(model(mccs_ver(2.1)))") == nil)
+  }
+
+  /// "Top-level" is measured against a real wrapper: the whole string must be
+  /// one parenthesised group. Anything else earns silence.
+  ///
+  /// Inferring the wrapper from whichever `(` came first is not merely untidy,
+  /// it manufactures denials. `"vcp(vcp(60(01 03)))"` has no outer group, so a
+  /// first-paren-wins reading treats the leading `vcp(` as the wrapper, reads
+  /// the INNER list as top-level, parses it cleanly, and answers `.unsupported`
+  /// for 0x10 — a grey slider derived from a string that is not a capability
+  /// string at all. A differential fuzz found this shape to be the *entire*
+  /// class of inputs where the depth fix could turn a non-denial into a denial,
+  /// which is the one direction D24 forbids.
+  ///
+  /// The rest is the safe direction and is free at the UI:
+  /// `VolumeSliderPolicy.isEnabled` greys on `.unsupported` alone, so a
+  /// `.supported → .unknown` move changes no control's state.
+  @Test func onlyASingleOuterGroupSpanningTheWholeStringIsACapabilityString() {
+    // The shape that would have manufactured a denial.
+    #expect(CapabilityString.codes(in: "vcp(vcp(60(01 03)))") == nil)
+    #expect(CapabilityString.support(forVCP: 0x10, in: "vcp(vcp(60(01 03)))") == .unknown)
+    // No wrapper at all.
+    #expect(CapabilityString.codes(in: "vcp(10)") == nil)
+    #expect(CapabilityString.support(forVCP: 0x10, in: "vcp(10)") == .unknown)
+    #expect(CapabilityString.support(forVCP: 0x62, in: "vcp(10)") == .unknown)
+    #expect(CapabilityString.tag("model", in: "model(MAG341CQR)") == nil)
+    // Two sibling groups: neither is "the" wrapper.
+    #expect(CapabilityString.codes(in: "(vcp(10))(vcp(20))") == nil)
+    // A wrapper with anything outside it is not a wrapper.
+    #expect(CapabilityString.codes(in: "junk(vcp(10))") == nil)
+    #expect(CapabilityString.codes(in: "(vcp(10))junk") == nil)
+    // Surrounding whitespace changes no meaning and is tolerated.
+    #expect(CapabilityString.codes(in: "  (vcp(10))\n") == [0x10])
+    #expect(CapabilityString.tag("model", in: " (model(MAG341CQR)vcp(10)) ") == "MAG341CQR")
+  }
 }
