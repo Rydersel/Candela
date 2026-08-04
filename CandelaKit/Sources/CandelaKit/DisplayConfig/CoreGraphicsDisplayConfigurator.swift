@@ -143,6 +143,47 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     }
   }
 
+  /// The same transaction discipline as `apply`, with the mirror call
+  /// substituted for the mode call. Every invariant below exists because the
+  /// transplanted `Mirroring.swift` violated it — that file stages its changes,
+  /// discards all four return values, and returns `true` regardless.
+  public func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws {
+    // An empty transaction commits `.success` having changed nothing, which is
+    // indistinguishable from having worked. Open nothing.
+    guard !changes.isEmpty else { return }
+
+    var config: CGDisplayConfigRef?
+    let begin = CGBeginDisplayConfiguration(&config)
+    guard begin == .success, let config else {
+      // A nil token after a `.success` begin would otherwise be reported as
+      // error code 0 — an error that reads as "no error".
+      throw DisplayConfigError(
+        cgErrorCode: begin == .success ? CGError.failure.rawValue : begin.rawValue
+      )
+    }
+    for change in changes {
+      // Staging is CHECKED, not discarded. If it fails,
+      // CGCompleteDisplayConfiguration happily commits the (empty)
+      // configuration and returns `.success`, so this function would return
+      // normally having changed nothing — and the caller's only other way to
+      // learn that is the user telling them. Every early exit cancels, so the
+      // config ref is never leaked (`Mirroring.swift:16,25` returns without
+      // cancelling).
+      let staged = CGConfigureDisplayMirrorOfDisplay(config, change.display, change.master)
+      guard staged == .success else {
+        CGCancelDisplayConfiguration(config)
+        throw DisplayConfigError(cgErrorCode: staged.rawValue)
+      }
+    }
+    let option: CGConfigureOption = scope == .preview ? .forAppOnly : .forSession
+    // The header notes a complete can fail for reasons that have nothing to do
+    // with mirroring — an unsupported mode, or another app running full-screen.
+    let result = CGCompleteDisplayConfiguration(config, option)
+    guard result == .success else {
+      throw DisplayConfigError(cgErrorCode: result.rawValue)
+    }
+  }
+
   // MARK: - Private
 
   /// The option is not optional in practice: without it CoreGraphics returns

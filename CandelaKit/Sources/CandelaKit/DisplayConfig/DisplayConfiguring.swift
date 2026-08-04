@@ -137,4 +137,17 @@ public protocol DisplayConfiguring: Sendable {
   /// scaled modes from native ones.
   func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)?
   func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope) throws
+
+  /// Stages one `CGConfigureDisplayMirrorOfDisplay` per change in a SINGLE
+  /// transaction and commits it.
+  ///
+  /// A BATCH because there is no dissolve-the-set call: breaking a set means
+  /// staging a null-master change for every slave and committing them together.
+  /// A per-display method would make a half-broken set expressible, and a
+  /// half-broken set is a state no policy wants to reason about.
+  ///
+  /// Throws `DisplayConfigError` if the transaction cannot be begun, if any
+  /// change fails to STAGE, or if the completion fails. An empty `changes`
+  /// array does nothing and opens no transaction.
+  func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws
 }
