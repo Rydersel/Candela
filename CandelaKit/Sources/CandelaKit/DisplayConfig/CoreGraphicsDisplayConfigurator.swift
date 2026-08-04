@@ -218,4 +218,58 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       isNative: (mode.ioFlags & nativeFlag) != 0
     )
   }
+
+  // MARK: - Rotation
+
+  public var canRotate: Bool { SkyLight.setDisplayRotation != nil }
+
+  public func rotation(of displayID: CGDirectDisplayID) -> DisplayRotation? {
+    DisplayRotation(degrees: CGDisplayRotation(displayID))
+  }
+
+  public func applyRotation(_ rotation: DisplayRotation, to displayID: CGDirectDisplayID) throws {
+    guard let setRotation = SkyLight.setDisplayRotation else {
+      throw DisplayConfigError(cgErrorCode: CGError.cannotComplete.rawValue)
+    }
+    let error = setRotation(displayID, rotation.degrees)
+    guard error == CGError.success.rawValue else {
+      throw DisplayConfigError(cgErrorCode: error)
+    }
+    // RT8. The call already blocks until the rotation has taken effect (RS10:
+    // 0.4–1.1s), but the readback was measured still trailing its return by
+    // ~26ms — so a single immediate check would report a false failure on the
+    // slow path. Bounded, not unbounded: if it has not landed half a second
+    // after a call that already waited a second, it is not landing.
+    let deadline = Date().addingTimeInterval(0.5)
+    while self.rotation(of: displayID) != rotation, Date() < deadline {
+      Thread.sleep(forTimeInterval: 0.01)
+    }
+    guard self.rotation(of: displayID) == rotation else {
+      // Deliberately not the platform's error code: the platform did not report
+      // one. That is the entire point of this check.
+      throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
+    }
+  }
+}
+
+/// The one private-API seam this feature has.
+///
+/// **RT4 — there is no fallback and none should be written.** The Intel-era
+/// `IOServiceRequestProbe` + `kIOFBSetTransform` route has **zero**
+/// `IOFramebuffer` services to attach to on Apple Silicon (RS2). Dead code here,
+/// not a second chance.
+private enum SkyLight {
+  /// Two arguments, the second a 32-bit integer of degrees. Read out of the
+  /// shipping binary's prologue rather than guessed (RS1): it saves `x0` and
+  /// `x1`, never touches `x2`, and stores argument 1 through `stp w22, w20`. A
+  /// guessed `float` signature would have passed the angle in `s0` and handed
+  /// the function garbage.
+  typealias SetDisplayRotation = @convention(c) (CGDirectDisplayID, Int32) -> Int32
+
+  static let setDisplayRotation: SetDisplayRotation? = {
+    guard let handle = dlopen(
+      "/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY
+    ), let symbol = dlsym(handle, "SLSSetDisplayRotation") else { return nil }
+    return unsafeBitCast(symbol, to: SetDisplayRotation.self)
+  }()
 }

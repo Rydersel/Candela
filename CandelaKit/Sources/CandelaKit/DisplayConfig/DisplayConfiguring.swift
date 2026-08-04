@@ -150,4 +150,33 @@ public protocol DisplayConfiguring: Sendable {
   /// change fails to STAGE, or if the completion fails. An empty `changes`
   /// array does nothing and opens no transaction.
   func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws
+
+  /// Whether this build can rotate displays at all.
+  ///
+  /// **RT5** — a missing private symbol is a capability answer, not a crash. When
+  /// this is false every rotation control is absent, the way
+  /// `BrightnessPathPolicy` reports an unavailable path rather than trapping.
+  var canRotate: Bool { get }
+
+  /// The display's current orientation, or nil if it reports something that is
+  /// not a right angle (RT7).
+  func rotation(of displayID: CGDirectDisplayID) -> DisplayRotation?
+
+  /// Rotates ONE display and proves it happened.
+  ///
+  /// **One display, never a batch (RT9).** There is no `SLSConfigureDisplay-
+  /// Rotation`, so rotation cannot be staged into a `CGBeginDisplayConfiguration`
+  /// transaction the way a mirror change can. N displays would be N independent
+  /// calls, each able to fail alone — so the half-applied state that
+  /// `MirrorRefusal.residualMembers` had to describe is kept unrepresentable by
+  /// never offering the batch.
+  ///
+  /// **Verifies the readback (RT8).** A `CGError` of 0 is not evidence: `-90`
+  /// and `360` both return success and change nothing (RS5). Throws
+  /// `DisplayConfigError` if the call fails OR if the achieved rotation is not
+  /// the requested one.
+  ///
+  /// **Blocks (RS10).** Measured at 0.4–1.1s, because the call does not return
+  /// until the rotation has taken effect. Never call it on the main actor.
+  func applyRotation(_ rotation: DisplayRotation, to displayID: CGDirectDisplayID) throws
 }

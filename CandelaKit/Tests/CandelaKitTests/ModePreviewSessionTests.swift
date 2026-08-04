@@ -33,6 +33,11 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
   private var _appliedMirroring: [AppliedMirroring] = []
   private var _configuredDisplays: [ConfiguredDisplay] = []
   private var _failMirroringWith: DisplayConfigError?
+  private var _canRotate = true
+  private var _rotations: [CGDirectDisplayID: DisplayRotation] = [:]
+  private var _appliedRotations: [(display: CGDirectDisplayID, rotation: DisplayRotation)] = []
+  private var _swallowRotations = false
+  private var _failRotationWith: DisplayConfigError?
 
   var applied: [Applied] { lock.withLock { _applied } }
   /// Kept alongside rather than inside `Applied` so the scope assertions stay
@@ -151,6 +156,53 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
         )
       }
     }
+  }
+
+  // MARK: - Rotation
+
+  var canRotate: Bool {
+    get { lock.withLock { _canRotate } }
+    set { lock.withLock { _canRotate = newValue } }
+  }
+
+  /// What each display currently reports. A display absent from this map reads
+  /// as `nil` — the RT7 "reports something that is not a right angle" case.
+  var rotations: [CGDirectDisplayID: DisplayRotation] {
+    get { lock.withLock { _rotations } }
+    set { lock.withLock { _rotations = newValue } }
+  }
+
+  /// Accept the call, return success, and change nothing.
+  ///
+  /// This is RS5 reproduced: `SLSSetDisplayRotation(display, -90)` and `(display,
+  /// 360)` both return `CGError` 0 and leave the display where it was. A fake
+  /// that could only fail loudly would let RT8's verification be deleted with
+  /// this suite still green.
+  var swallowRotations: Bool {
+    get { lock.withLock { _swallowRotations } }
+    set { lock.withLock { _swallowRotations = newValue } }
+  }
+
+  var appliedRotations: [(display: CGDirectDisplayID, rotation: DisplayRotation)] {
+    lock.withLock { _appliedRotations }
+  }
+
+  func rotation(of displayID: CGDirectDisplayID) -> DisplayRotation? {
+    lock.withLock { _rotations[displayID] }
+  }
+
+  func applyRotation(_ rotation: DisplayRotation, to displayID: CGDirectDisplayID) throws {
+    try lock.withLock {
+      if let _failRotationWith { throw _failRotationWith }
+      _appliedRotations.append((displayID, rotation))
+      guard !_swallowRotations else { return }
+      _rotations[displayID] = rotation
+    }
+  }
+
+  var failRotationWith: DisplayConfigError? {
+    get { lock.withLock { _failRotationWith } }
+    set { lock.withLock { _failRotationWith = newValue } }
   }
 }
 
