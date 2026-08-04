@@ -159,7 +159,7 @@ enum MirroringCopy {
 
   /// What Start does when nothing on the machine is locked into a set.
   static var startExplanation: LocalizedStringKey {
-    "The display you pick shows its picture on every other display. You get fifteen seconds to keep it."
+    "The display you pick shows its picture on every other display. You get thirty seconds to keep it."
   }
 
   /// What Start does when something IS locked. `MirrorTopologyPolicy.engage`
@@ -169,7 +169,7 @@ enum MirroringCopy {
   static var startExplanationSomeLocked: LocalizedStringKey {
     """
     The display you pick shows its picture on the other displays, apart from \
-    any that macOS keeps mirrored elsewhere. You get fifteen seconds to keep it.
+    any that macOS keeps mirrored elsewhere. You get thirty seconds to keep it.
     """
   }
 

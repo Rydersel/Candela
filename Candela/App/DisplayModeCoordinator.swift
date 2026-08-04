@@ -30,14 +30,13 @@ import os
 final class DisplayModeCoordinator {
   /// Which surface asked for the preview that is outstanding.
   ///
-  /// Not cosmetic, and not a preference: it decides where the answer can be
-  /// offered. The settings pane's banner lives in an ordinary window that is
-  /// still there fifteen seconds later. The panel is an `NSMenu` tracking
-  /// session — it ends on Escape, on a click in the menu bar, and plausibly as
-  /// a side effect of the very reconfiguration the preview performs. A
-  /// panel-started preview therefore gets a surface that does not depend on the
-  /// menu still being open, or the countdown would expire with the user having
-  /// been shown nothing at all.
+  /// It no longer decides where a PREVIEW is answered — the confirmation window
+  /// takes every preview now, whatever started it (`syncConfirmation`). What it
+  /// still decides is where a failed `begin()` is reported: the settings pane
+  /// has a row of its own for that and stays on screen, while the panel is an
+  /// `NSMenu` tracking session that ends on Escape, on a click in the menu bar,
+  /// and — the case that matters — on the selection itself, so a panel-origin
+  /// failure would otherwise be shown to nobody.
   enum PreviewOrigin: Sendable {
     case settings
     case panel
@@ -56,10 +55,22 @@ final class DisplayModeCoordinator {
     /// the curated list is one row per size, so counting modes would compare 11
     /// against 332 and read as though we were hiding 321 resolutions.
     let distinctLogicalSizes: Int
-    /// False when no mode carries the native flag. `isScaled` is then
-    /// undecidable and the badge is suppressed rather than guessed — comparing
-    /// against a zero-sized panel would mark every mode as scaled.
-    let nativeKnown: Bool
+    /// The panel's own framebuffer, from the mode carrying the native flag.
+    /// nil when no mode carries it: `isScaled` is then undecidable and the
+    /// badge is suppressed rather than guessed — comparing against a
+    /// zero-sized panel would mark every mode as scaled.
+    ///
+    /// Kept as the SIZE rather than as a bare "is it known" flag because the
+    /// full list has to answer `isScaled` per mode, and only the curated rows
+    /// carry a precomputed answer.
+    let nativePixels: PixelSize?
+
+    var nativeKnown: Bool { nativePixels != nil }
+  }
+
+  struct PixelSize: Equatable {
+    let width: Int
+    let height: Int
   }
 
   /// A preview that has been applied and not yet resolved. Every field is a
@@ -227,7 +238,7 @@ final class DisplayModeCoordinator {
       all: all,
       current: configurator.currentMode(for: displayID),
       distinctLogicalSizes: Set(all.map { LogicalSize(mode: $0) }).count,
-      nativeKnown: native != nil
+      nativePixels: native.map { PixelSize(width: $0.width, height: $0.height) }
     )
   }
 
@@ -293,7 +304,7 @@ final class DisplayModeCoordinator {
   /// turning the feature off. Candela's opinion applies when the display
   /// arrives; from then until it leaves, the display belongs to the user.
   ///
-  /// Deliberately NOT a preview. Nobody is watching, and a fifteen-second
+  /// Deliberately NOT a preview. Nobody is watching, and a thirty-second
   /// countdown that defaults to revert would undo every remembered mode a
   /// moment after every reconnect — the exact opposite of the feature. It
   /// commits at session scope directly, which is also why it never calls
@@ -303,7 +314,7 @@ final class DisplayModeCoordinator {
   ///
   /// Mirror SLAVES are excluded here and only here. The picker still offers them
   /// every mode, because the two paths differ in the one way that matters: a pick
-  /// is a person asking for this display by name and getting fifteen seconds and
+  /// is a person asking for this display by name and getting thirty seconds and
   /// an auto-revert, while this pass asks nobody. Hiding the control instead
   /// would make it vanish and reappear under the user's hands — mirroring is a
   /// hotkey in this very app (`MirroringCoordinator.toggleUnlessSingleDisplay`,
@@ -728,17 +739,22 @@ final class DisplayModeCoordinator {
     // (They can only coexist on DIFFERENT displays — `performSelect` clears the
     // failure before it begins.)
     //
-    // A FAILED preview gets this window whatever its origin, and that is the
-    // one place origin does not decide the surface. A settings-origin preview
-    // is normally answered by the banner in the settings window, but nothing
-    // keeps that window open: ⌘W or switching the sidebar to another display
-    // takes the banner away. While the countdown is armed that is survivable —
-    // expiry reverts on its own. A failed EXPIRY is not: the countdown is
-    // disarmed, nothing auto-retries, and the display is left on a mode the
-    // user never approved with no surface anywhere to revert it from, short of
-    // quitting the app. `DisplayModeSection` already documents two live
-    // surfaces for one preview as intended, so this is the existing design.
-    if let preview, origins[preview.displayID] == .panel || preview.failure != nil {
+    // **Origin does not decide this surface.** It used to: a settings-origin
+    // preview was answered by the banner in the settings pane and got no window
+    // at all. That made the safety question easy to miss — it was a few lines
+    // of text partway down a scrolling pane, on whichever display the settings
+    // window happened to be, while the display that actually changed showed
+    // nothing. macOS puts this question in a dialog on the display it is about,
+    // and so do we now, for every preview whatever started it.
+    //
+    // It also closes a hole the origin gate left open. Nothing keeps the
+    // settings window on screen: ⌘W, or switching the sidebar to another
+    // display, takes the banner away. While the countdown is armed that is
+    // survivable — expiry reverts on its own. A failed EXPIRY is not: the
+    // countdown is disarmed, nothing auto-retries, and the display is left on a
+    // mode the user never approved with no surface anywhere to revert it from,
+    // short of quitting the app.
+    if let preview {
       confirmation?.presentConfirmation(.preview(preview.displayID))
       return
     }
@@ -854,6 +870,41 @@ protocol ModeConfirmationPresenting: AnyObject {
 }
 
 extension DisplayModeCoordinator.Catalog {
+  /// Native / HiDPI / Scaled for one mode of THIS panel — the same logical
+  /// size is native on one display and an oversized render on another.
+  ///
+  /// **RM11 rests on this now.** The size label used to hedge ("Looks like
+  /// 2560 × 1440") because a bare size can be read as a claim that the panel
+  /// really is that many pixels. The hedge is gone; these words carry the
+  /// claim instead, so every surface that offers a size has to wear them, and
+  /// they have to be computed in ONE place — three private copies is how the
+  /// rule drifts.
+  ///
+  /// Words, not a formatted string: a popup item is a single label and
+  /// parenthesises them, a two-column row separates them with a dot. The words
+  /// are the statement; the punctuation is layout.
+  ///
+  /// "Scaled" is suppressed rather than guessed when the panel's native size is
+  /// unknown, and is never said about the native mode itself.
+  func badges(for mode: DisplayMode) -> [String] {
+    var badges: [String] = []
+    if mode.isNative { badges.append("Native") }
+    if mode.isHiDPI { badges.append("HiDPI") }
+    if let nativePixels, !mode.isNative,
+       mode.isScaled(nativePixelWidth: nativePixels.width, nativePixelHeight: nativePixels.height) {
+      badges.append("Scaled")
+    }
+    return badges
+  }
+
+  /// The size and its badges as one label, for surfaces that draw a single
+  /// string — a popup item, a panel row, a disclosure summary.
+  func badgedSize(_ mode: DisplayMode) -> String {
+    let badges = badges(for: mode)
+    guard !badges.isEmpty else { return DisplayModeCopy.size(mode) }
+    return "\(DisplayModeCopy.size(mode)) (\(badges.joined(separator: ", ")))"
+  }
+
   /// The mode to apply for a curated row: the chosen SIZE at the refresh rate
   /// the display is already running, when that size offers it.
   ///

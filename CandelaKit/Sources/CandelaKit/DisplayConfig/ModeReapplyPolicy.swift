@@ -63,7 +63,7 @@ public struct ModeReapplyDecision: Sendable, Equatable {
 ///
 /// Pure and separate from the CoreGraphics calls because this is the path with
 /// no user in front of it. A preview that goes wrong is answered by a person
-/// within fifteen seconds; a reapply that goes wrong is discovered days later,
+/// within thirty seconds; a reapply that goes wrong is discovered days later,
 /// so the rules it follows are stated once, here, and tested.
 public enum ModeReapplyPolicy {
   /// - Parameters:

@@ -5,22 +5,35 @@ import SwiftUI
 /// The words every surface uses to name a display mode: the settings section,
 /// the panel's resolution list, and the floating confirmation panel.
 ///
-/// Shared rather than repeated because RM11 is a copy *rule* — "looks like",
-/// never "true native HiDPI" — and a rule enforced in three private helpers is
-/// a rule that drifts the first time one of them is edited.
+/// Shared rather than repeated because RM11 is a copy *rule* — never imply true
+/// native HiDPI at an arbitrary size — and a rule enforced in three private
+/// helpers is a rule that drifts the first time one of them is edited.
 enum DisplayModeCopy {
-  /// RM11. On a fixed panel only one logical size is a true 2× of the native
-  /// framebuffer; everything else renders oversized and downsamples, so the
-  /// honest claim is about how big things look, not about what the panel is.
+  /// The plain size, with no hedge.
+  ///
+  /// It used to read "Looks like 2560 × 1440", Apple's own idiom for a scaled
+  /// mode. That was the whole of our RM11 answer and it cost more than it
+  /// bought: the hedge is the loudest thing in every row, it says nothing about
+  /// WHICH way a mode is inexact, and it reads as evasive next to a picker
+  /// labelled Size.
+  ///
+  /// RM11 is now carried by the Native / HiDPI / Scaled badges
+  /// (`DisplayModeCoordinator.Catalog.badges(for:)`), which state the same fact
+  /// precisely and per mode. **Every surface that offers a size to choose from
+  /// must show them**; a bare size on such a surface is the regression this
+  /// note exists to prevent. Surfaces that merely NAME the mode already in
+  /// force — the confirmation window's subtitle, the reapply reports, the
+  /// panel's collapsed Resolution summary — carry the size alone, because there
+  /// the claim is "this is the mode", not "this size is what the panel is".
   static func size(_ mode: DisplayMode) -> String {
     size(mode.descriptor)
   }
 
-  /// The same sentence for a STORED choice, which is a descriptor rather than a
+  /// The same label for a STORED choice, which is a descriptor rather than a
   /// live mode. Routed through one implementation so a remembered resolution is
   /// named the same way as the row the user picked it from.
   static func size(_ descriptor: DisplayModeDescriptor) -> String {
-    "Looks like \(descriptor.logicalWidth) × \(descriptor.logicalHeight)"
+    "\(descriptor.logicalWidth) × \(descriptor.logicalHeight)"
   }
 
   /// Rates are quantized to one decimal at the CoreGraphics boundary, so 59.9

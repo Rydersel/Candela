@@ -9,13 +9,26 @@ struct MirrorPreviewSessionTests {
     [MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2)]
   }
 
-  private func makeSession(_ fake: FakeConfigurator, seconds: Int = 15) -> MirrorPreviewSession {
+  private func makeSession(_ fake: FakeConfigurator, seconds: Int = 30) -> MirrorPreviewSession {
     fake.configuredDisplays = unmirroredPair()
     return MirrorPreviewSession(configurator: fake, countdownSeconds: seconds)
   }
 
   private func engageDecision(_ topology: MirrorTopology) -> MirrorToggleDecision {
     MirrorTopologyPolicy.engage(topology, master: 2)
+  }
+
+  /// The shipped countdown, pinned. Every test here passes an explicit
+  /// `countdownSeconds`, so the default the app actually gets was covered by
+  /// nothing — and it is a product decision (thirty seconds, deliberately the
+  /// same as `ModePreviewSession`), not an implementation detail.
+  @Test func theDefaultCountdownIsThirtySeconds() async {
+    let fake = FakeConfigurator()
+    fake.configuredDisplays = unmirroredPair()
+    let session = MirrorPreviewSession(configurator: fake)
+    let captured = MirrorTopology(fake.displays())
+    _ = await session.begin(engageDecision(captured), from: captured)
+    #expect(await session.secondsRemaining == 30)
   }
 
   @Test func beginningAPreviewAppliesTheChangesAtPreviewScope() async {
@@ -324,7 +337,7 @@ struct MirrorPreviewSessionTests {
     #expect(MirrorTopology(fake.displays()).master(of: 1) == nil)
   }
 
-  /// The harm as the user meets it: the countdown expires fifteen seconds after
+  /// The harm as the user meets it: the countdown expires half a minute after
   /// the set was stopped and brings it back, undoing an explicit action with no
   /// further interaction. A superseded preview has nothing left to expire.
   @Test func aSupersededPreviewsCountdownCanNeverBringTheOldSetBack() async {

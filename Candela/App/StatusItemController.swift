@@ -294,7 +294,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
     // Resolution previews started from the panel are answered in a window of
     // their own: the panel is a menu tracking session and cannot be relied on
-    // to still exist fifteen seconds later. See `ModeConfirmationWindow`.
+    // to still exist half a minute later. See `ModeConfirmationWindow`.
     let confirmation = ModeConfirmationWindow(coordinator: model.displayModes)
     confirmation.displayName = { [weak self] displayID in
       guard let state = self?.model.allControlledStates.first(where: { $0.id == displayID })

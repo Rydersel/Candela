@@ -3,24 +3,39 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// The "Keep this resolution?" surface for a preview started from the menu-bar
-/// panel.
+/// The "Keep this resolution?" surface. **The primary one, for every preview**,
+/// whichever surface started it.
 ///
-/// **Why a window and not a banner in the panel.** The panel is a SwiftUI view
-/// inside a real `NSMenu` tracking session. That session ends on Escape, on a
-/// click in the menu bar, and — the case that matters — possibly as a side
-/// effect of the display reconfiguration the preview itself performs. If the
-/// confirm UI lived in the panel, the plausible outcome is: pick a resolution,
-/// the panel vanishes, fifteen seconds later the screen snaps back with no
-/// explanation. That reads as the feature being broken, and it is a *safety*
-/// surface — the countdown exists because a bad mode can leave a screen
-/// unreadable, so it must never be answered blind or, worse, silently.
+/// **Why a window rather than a banner.** For a panel-started preview it is
+/// forced: the panel is a SwiftUI view inside a real `NSMenu` tracking session,
+/// and that session ends on Escape, on a click in the menu bar, and — the case
+/// that matters — possibly as a side effect of the display reconfiguration the
+/// preview itself performs. Pick a resolution, the panel vanishes, half a minute
+/// later the screen snaps back with no explanation.
 ///
-/// A floating panel on the affected display is also the platform's own answer:
-/// macOS confirms display changes with a dialog on the display that changed.
+/// For a settings-started preview it is a judgement, and it was made the other
+/// way once. The pane's banner is a few lines of text partway down a scrolling
+/// page, in a window that is very often on a DIFFERENT display from the one that
+/// just changed. It was missable, and this is a *safety* question — the
+/// countdown exists because a bad mode can leave a screen unreadable, so it must
+/// never be answered blind or, worse, silently. So the window takes that preview
+/// too, and the banner stays only as the recovery surface for when this window
+/// is on screen but unusable (see `DisplayModeSection.previewBanner`).
+///
+/// A dialog on the affected display is also the platform's own answer: macOS
+/// confirms display changes exactly this way.
 ///
 /// The commit is still explicit — nothing is committed at session scope without
 /// someone pressing Keep, and doing nothing still reverts.
+///
+/// **Its buttons take the FIRST click.** That was an open question until
+/// 2026-08-04 and it is the reason this window could be promoted at all: a
+/// never-activated window can swallow the click that would otherwise focus it,
+/// and there is no `acceptsFirstMouse` override anywhere in this repo. Measured
+/// on real hardware with a synthesised `kCGEventLeftMouseDown`/`Up` pair while
+/// another app was frontmost — one click on Keep committed, one click on Revert
+/// Now reverted. No override is needed. The result depends on the style mask and
+/// on `becomesKeyOnlyIfNeeded`; re-measure if either changes.
 @MainActor
 final class ModeConfirmationWindow: ModeConfirmationPresenting {
   private let coordinator: DisplayModeCoordinator
@@ -221,10 +236,12 @@ struct ModeConfirmationView: View {
     if let preview = coordinator.preview {
       card {
         Text("Keep this resolution?")
-          .font(.headline)
+          .font(.title3.weight(.semibold))
+          .multilineTextAlignment(.center)
         Text(verbatim: subtitle(preview))
           .font(.callout)
           .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
           .fixedSize(horizontal: false, vertical: true)
 
         if let failure = preview.failure {
@@ -238,20 +255,32 @@ struct ModeConfirmationView: View {
           Text(verbatim: DisplayModeCopy.countdown(preview.secondsRemaining))
             .font(.callout)
             .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            // A number that changes every second must not be able to change the
+            // WIDTH of what it sits in — the buttons below would shuffle under
+            // the pointer once a second.
+            .monospacedDigit()
         } else if preview.failure != nil {
           caption(DisplayModeCopy.expiryAlreadyRan)
         }
 
-        HStack(spacing: 8) {
-          Spacer(minLength: 0)
+        // Side by side and equally wide, the way an alert asks a question it
+        // expects an answer to. Not trailing-aligned any more: at 320pt with a
+        // headline the old row read as a form's footer, which is exactly the
+        // "easy to miss" this window was promoted to fix.
+        HStack(spacing: 10) {
           // Both answers carry the preview THIS window is rendering, so a
           // selection landing between the click and the queued operation is
           // refused as stale rather than resolved by an answer given about
           // something else.
           Button("Revert Now") { Task { await coordinator.revert(preview) } }
+            .buttonStyle(AnswerButtonStyle(isPrimary: false))
+            .keyboardShortcut(.cancelAction)
           Button("Keep") { Task { await coordinator.confirm(preview) } }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(AnswerButtonStyle(isPrimary: true))
+            .keyboardShortcut(.defaultAction)
         }
+        .padding(.top, 6)
         // Belt to the intent check's braces: while a selection is still landing
         // the window is about to change, so offering an answer to the old one
         // is pointless even though it is now harmless.
@@ -273,33 +302,46 @@ struct ModeConfirmationView: View {
     if let failure = coordinator.startFailure {
       card {
         Text("Resolution not changed")
-          .font(.headline)
+          .font(.title3.weight(.semibold))
+          .multilineTextAlignment(.center)
         if !displayName.isEmpty {
           Text(verbatim: displayName)
             .font(.callout)
             .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
         }
         caption(DisplayModeCopy.startFailure)
           .help("CoreGraphics error \(failure.error.cgErrorCode)")
 
-        HStack(spacing: 8) {
-          Spacer(minLength: 0)
-          Button("OK") { coordinator.dismissStartFailure() }
-            .buttonStyle(.borderedProminent)
-        }
+        Button("OK") { coordinator.dismissStartFailure() }
+          .buttonStyle(AnswerButtonStyle(isPrimary: true))
+          .keyboardShortcut(.defaultAction)
+          .padding(.top, 6)
       }
     }
   }
 
   /// One shape for both states, so the window does not change size or alignment
   /// language depending on what it has to say.
+  ///
+  /// Centred, icon-first and 340pt wide: the shape of a macOS alert, because
+  /// that is what this now is. The old 320pt leading-aligned card read as a
+  /// tooltip, and a safety question that reads as a tooltip gets treated like
+  /// one. The icon is the app's own — nothing else on screen says WHO is asking,
+  /// and a resolution that changed by itself is otherwise indistinguishable from
+  /// the display or macOS doing it.
   private func card(@ViewBuilder _ content: () -> some View) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
+    VStack(spacing: 10) {
+      Image(nsImage: NSApp.applicationIconImage)
+        .resizable()
+        .frame(width: 56, height: 56)
+        .accessibilityHidden(true)
       content()
     }
-    .padding(16)
-    .frame(width: 320, alignment: .leading)
+    .multilineTextAlignment(.center)
+    .padding(24)
+    .frame(width: 340)
   }
 
   private func subtitle(_ preview: DisplayModeCoordinator.Preview) -> String {
@@ -311,6 +353,53 @@ struct ModeConfirmationView: View {
     Text(text)
       .font(.callout)
       .foregroundStyle(.secondary)
+      .multilineTextAlignment(.center)
       .fixedSize(horizontal: false, vertical: true)
+  }
+}
+
+/// The two answers, drawn by us rather than by `.bordered` / `.borderedProminent`.
+///
+/// **`.borderedProminent` renders GREY in this window and always will.** Candela
+/// is an `.accessory` app that is essentially never the active application, and
+/// AppKit draws controls in an inactive app in their inactive appearance —
+/// measured 2026-08-04, the two answers came out visually identical. On an alert
+/// whose whole job is to be impossible to miss, "which one is the primary
+/// action?" being unanswerable is the defect this window was promoted to fix.
+/// `controlAccentColor` is a system colour that does not dim with activation, so
+/// asking for it directly is the only thing that survives.
+///
+/// Both answers share one style so the two capsules cannot end up different
+/// heights, which is what happened when only the primary was custom. Hover and
+/// pressed states are required of any custom button (`buttons.md`) — and this is
+/// a control that reconfigures a screen, so a click that feels unregistered
+/// invites a second one.
+private struct AnswerButtonStyle: ButtonStyle {
+  let isPrimary: Bool
+  @State private var isHovering = false
+  @Environment(\.isEnabled) private var isEnabled
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .font(.body.weight(isPrimary ? .semibold : .regular))
+      .foregroundStyle(isPrimary ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+      .padding(.vertical, 8)
+      .frame(maxWidth: .infinity)
+      .background(
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+          .fill(fill(pressed: configuration.isPressed))
+      )
+      .opacity(isEnabled ? 1 : 0.4)
+      .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+      .onHover { isHovering = $0 }
+  }
+
+  private func fill(pressed: Bool) -> AnyShapeStyle {
+    if isPrimary {
+      let accent = Color(nsColor: .controlAccentColor)
+      return AnyShapeStyle(accent.opacity(pressed ? 0.7 : (isHovering ? 0.88 : 1)))
+    }
+    if pressed { return AnyShapeStyle(.tertiary) }
+    return AnyShapeStyle(isHovering ? AnyShapeStyle(.secondary.opacity(0.35)) : AnyShapeStyle(.quaternary))
   }
 }

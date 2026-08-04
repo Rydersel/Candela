@@ -75,7 +75,12 @@ public actor ModePreviewSession {
   private var countdownArmed = false
   private var lastOutcome: ModePreviewOutcome?
 
-  public init(configurator: any DisplayConfiguring, countdownSeconds: Int = 15) {
+  /// Thirty seconds, the same as `MirrorPreviewSession`. The two are the same
+  /// kind of decision — a reconfiguration that may itself have made the answer
+  /// hard to read — so a different timer on each would be arbitrary. It was
+  /// fifteen, which is not long enough to find and read a confirmation window
+  /// on a display whose text has just halved in size.
+  public init(configurator: any DisplayConfiguring, countdownSeconds: Int = 30) {
     self.configurator = configurator
     self.countdownSeconds = countdownSeconds
   }

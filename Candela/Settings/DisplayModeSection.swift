@@ -43,7 +43,7 @@ struct DisplayModeSection: View {
           // curated list is empty, the full one is not — so the escape hatch
           // below is the whole feature here, and saying "no resolutions" while
           // holding dozens would be false.
-          SettingsCaption("Every size this display reports is too small to use as a desktop. All modes lists them.")
+          SettingsCaption("Every size this display reports is too small to use as a desktop. All sizes and refresh rates lists them anyway.")
         } else {
           SettingsCaption("\(AppInfo.productName) found no resolutions it can switch between on this display.")
         }
@@ -70,20 +70,31 @@ struct DisplayModeSection: View {
   /// everything has nothing to explain.
   private func curationCaption(_ catalog: DisplayModeCoordinator.Catalog) -> SettingsCaption? {
     guard catalog.rows.count < catalog.distinctLogicalSizes else { return nil }
-    return SettingsCaption(verbatim: "Showing \(catalog.rows.count) of the \(catalog.distinctLogicalSizes) sizes this display reports — the rest are too small to use as a desktop. All modes lists every size at every refresh rate.")
+    return SettingsCaption(verbatim: "Showing \(catalog.rows.count) of the \(catalog.distinctLogicalSizes) sizes this display reports — the rest are too small to use as a desktop. All sizes and refresh rates, below, holds every one of them.")
   }
 
   // MARK: - Preview
 
-  /// Gated on the DISPLAY, never on which surface started the preview.
+  /// The SECOND surface, kept deliberately.
   ///
-  /// That is load-bearing, not an oversight: it is the recovery path for a
-  /// panel-started preview whose confirmation window cannot be used — a failed
-  /// revert on a mode that left the screen barely readable, a window that ended
-  /// up on a display the user cannot see, a first click that did not take. This
-  /// pane answers the same session with the same intent-carrying values, so
-  /// whichever surface is reachable can end it. Two live surfaces for one
-  /// preview is the point.
+  /// `ModeConfirmationWindow` is the primary one now — it takes every preview
+  /// whatever started it, and it goes on the display that changed, which is what
+  /// the owner asked for and what macOS itself does. This banner is no longer
+  /// where a settings-started change is normally answered.
+  ///
+  /// It stays because the window is a *floating panel on one specific display*
+  /// and the answers it offers are safety answers. It is the recovery path for
+  /// every case where that window is on screen but not usable: a failed revert
+  /// on a mode that left the display barely readable, a window that landed on a
+  /// display the user cannot see (a mirror sample lagging a break puts it on the
+  /// ex-master), a preview whose display departed. Gated on the DISPLAY and
+  /// never on origin, and answering with the same intent-carrying values, so
+  /// whichever surface is reachable can end the same session. Two live surfaces
+  /// for one preview is the point.
+  ///
+  /// (A first click that does not take is NOT one of those cases: measured
+  /// 2026-08-04 on real hardware, Keep and Revert both fire on the first click
+  /// of a genuine mouse-down in the never-activated panel.)
   @ViewBuilder private var previewBanner: some View {
     if let preview = coordinator.preview, preview.displayID == displayID {
       VStack(alignment: .leading, spacing: 6) {
@@ -176,28 +187,18 @@ struct DisplayModeSection: View {
     DisplayModeCopy.refresh(hz)
   }
 
-  private func badges(
-    for row: DisplayModeRow, in catalog: DisplayModeCoordinator.Catalog
-  ) -> [String] {
-    var badges: [String] = []
-    if row.mode.isNative { badges.append("Native") }
-    if row.mode.isHiDPI { badges.append("HiDPI") }
-    if catalog.nativeKnown, row.isScaled, !row.mode.isNative { badges.append("Scaled") }
-    return badges
-  }
-
-  /// The badges, folded into one menu item's label.
+  /// Refresh rate, then the Native / HiDPI / Scaled words, for the full list's
+  /// second column.
   ///
-  /// A popup item is drawn by AppKit from the label it is given, so the capsules
-  /// the full-list rows wear cannot come along — but the words must, and
-  /// "Scaled" especially: it is the only thing standing between a user and the
-  /// belief that an oversized-render mode is what the panel actually is. Folding
-  /// them in also means the CLOSED popup states them about the mode currently on
-  /// screen, which the old list only did next to a checkmark.
-  private func menuLabel(for row: DisplayModeRow, in catalog: DisplayModeCoordinator.Catalog) -> String {
-    let badges = badges(for: row, in: catalog)
-    guard !badges.isEmpty else { return sizeLabel(row.mode) }
-    return "\(sizeLabel(row.mode)) (\(badges.joined(separator: ", ")))"
+  /// Same words as the popup's `badgedSize`, different punctuation: a popup item
+  /// is one label and parenthesises them, a two-column row already has a
+  /// separator. The words are what RM11 rests on now that the size label is a
+  /// bare "2560 × 1440", and this list is the surface where dropping them would
+  /// leave hundreds of unexplained sizes.
+  private func detailLabel(
+    for mode: DisplayMode, in catalog: DisplayModeCoordinator.Catalog
+  ) -> String {
+    ([refreshLabel(mode.refreshHz)] + catalog.badges(for: mode)).joined(separator: " · ")
   }
 
   // MARK: - Size
@@ -217,7 +218,10 @@ struct DisplayModeSection: View {
   /// The popup therefore snaps back to the running mode until the change lands,
   /// which is the truth: nothing is applied until the preview is kept.
   @ViewBuilder private func sizePicker(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
-    Picker("Resolution:", selection: Binding(
+    // "Size:", not "Resolution:" — the section is already called Resolution, and
+    // this row now pairs with "Refresh rate:" directly below it. The two
+    // together are what "resolution" means.
+    Picker("Size:", selection: Binding(
       get: { curatedSelection(in: catalog) },
       set: { id in
         guard let id, let row = catalog.rows.first(where: { $0.id == id }) else { return }
@@ -230,11 +234,11 @@ struct DisplayModeSection: View {
       // the closed control tells the truth; choosing it is the no-op that
       // choosing the current size has always been.
       if curatedSelection(in: catalog) == nil {
-        Text(verbatim: catalog.current.map(sizeLabel) ?? "Unknown")
+        Text(verbatim: catalog.current.map(catalog.badgedSize) ?? "Unknown")
           .tag(DisplayModeRow.ID?.none)
       }
       ForEach(catalog.rows) { row in
-        Text(verbatim: menuLabel(for: row, in: catalog))
+        Text(verbatim: catalog.badgedSize(row.mode))
           .tag(DisplayModeRow.ID?.some(row.id))
       }
     }
@@ -300,11 +304,12 @@ struct DisplayModeSection: View {
         LazyVStack(alignment: .leading, spacing: 0) {
           ForEach(catalog.all) { mode in
             ModeChoice(
-              // The same label as the curated rows a few pixels above. A bare
-              // "1440 × 2560" here would put two names for one mode in one
-              // window, and would be the single site where RM11 does not hold.
+              // The same label as the curated rows a few pixels above, and — the
+              // part that matters — wearing the same badges. This list is where
+              // RM11 is easiest to lose: hundreds of sizes, most of them scaled,
+              // and the size alone says nothing about which.
               title: sizeLabel(mode),
-              detail: "\(refreshLabel(mode.refreshHz))\(mode.isHiDPI ? " · HiDPI" : "")",
+              detail: detailLabel(for: mode, in: catalog),
               isCurrent: mode.ioModeID == catalog.current?.ioModeID
             ) {
               apply(mode, in: catalog)
@@ -314,7 +319,10 @@ struct DisplayModeSection: View {
       }
       .frame(maxHeight: 240)
     } label: {
-      Text("All modes (\(catalog.all.count))")
+      // Not "All sizes": it holds every size at EVERY refresh rate, which on the
+      // development Dell is 41 sizes and 332 modes. "Modes" was jargon, and it
+      // clashed with the Size and Refresh rate rows above.
+      Text("All sizes and refresh rates (\(catalog.all.count))")
     }
   }
 
@@ -342,8 +350,7 @@ struct DisplayModeSection: View {
 
   private func apply(_ mode: DisplayMode, in catalog: DisplayModeCoordinator.Catalog) {
     // Clicking the mode already on screen used to apply a no-op and then demand
-    // "Keep this resolution?" with a 15-second countdown for a change nobody
-    // made.
+    // "Keep this resolution?" with a full countdown for a change nobody made.
     guard mode.ioModeID != catalog.current?.ioModeID else { return }
     // Never speculative: this runs only from an explicit click naming this
     // display's mode. No `Task` here — `select` is fire-and-forget into the
@@ -351,8 +358,9 @@ struct DisplayModeSection: View {
     // one per click is precisely how the banner ends up naming a different mode
     // than the one "Keep" would commit.
     //
-    // `.settings`: the answer is the banner at the top of this section, in a
-    // window that is still on screen when the countdown expires.
+    // `.settings` no longer picks the answering surface — the confirmation
+    // window takes every preview now — but it still routes a failed `begin()`,
+    // which this pane reports in `startFailureBanner` and the panel cannot.
     coordinator.select(mode, on: displayID, from: .settings)
   }
 }

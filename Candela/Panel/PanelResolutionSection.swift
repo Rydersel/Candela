@@ -10,7 +10,7 @@ import SwiftUI
 /// tracking, so the inner one is dead on arrival. That was measured once already
 /// for the HDR control in `PanelView`, which is a cycling button for exactly this
 /// reason. A resolution list cannot be a cycling button — each press would start
-/// a fifteen-second countdown on a mode nobody asked for — so it is an inline
+/// a thirty-second countdown on a mode nobody asked for — so it is an inline
 /// disclosure instead: one row while collapsed, the top few sizes while open.
 ///
 /// The full list, the refresh-rate picker, the badges and the remember toggle
@@ -63,7 +63,12 @@ struct PanelResolutionSection: View {
         if isExpanded {
           ForEach(catalog.rows.prefix(Self.maximumRows)) { row in
             PanelModeRow(
-              title: DisplayModeCopy.size(row.mode),
+              // Badged, like every other surface that OFFERS a size to choose
+              // from: the size label is bare now, so these words are the whole
+              // of RM11 here. Measured at 280pt: the longest real label,
+              // "1440 × 2560 (HiDPI, Scaled)" on the Dell, fits with room to
+              // spare. (The disclosure summary above does not — see there.)
+              title: catalog.badgedSize(row.mode),
               accessibilityName: displayName,
               isCurrent: catalog.isCurrentSize(row.mode)
             ) {
@@ -97,6 +102,14 @@ struct PanelResolutionSection: View {
       // The size the display is actually running, not the row that happens to
       // be checked: they differ when the current size fell below the curation
       // floor, and the summary must describe the display, not our list.
+      //
+      // The only place in the app that offers a size WITHOUT its badges, and
+      // deliberately: this shares a 280pt row with the word "Resolution" and a
+      // chevron, and "1296 × 2304 (HiDPI, Scaled)" truncates to
+      // "1296 × 2304 (HiDPI, Sc…" — measured on the Dell. It is also not an
+      // offer. It reports what the display is running, which is the same kind
+      // of statement the confirmation window and the reapply reports make with
+      // a bare size; the badges are one click away on the rows this expands to.
       detail: catalog.current.map(DisplayModeCopy.size),
       accessibilityName: displayName,
       accessibilityRole: "resolution",
@@ -210,7 +223,7 @@ struct PanelResolutionSection: View {
 /// second one.
 private struct PanelModeRow: View {
   let title: String
-  /// Same rule as `PanelDisclosureRow`: a bare "Looks like 2560 × 1440" told
+  /// Same rule as `PanelDisclosureRow`: a bare "2560 × 1440 (Scaled)" told
   /// nobody which display it would change.
   let accessibilityName: String
   let isCurrent: Bool

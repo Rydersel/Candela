@@ -101,7 +101,9 @@ public actor MirrorPreviewSession {
   private var countdownArmed = false
   private var lastOutcome: ModePreviewOutcome?
 
-  public init(configurator: any DisplayConfiguring, countdownSeconds: Int = 15) {
+  /// Thirty seconds, the same as `ModePreviewSession` — see the note there.
+  /// Both are one kind of decision and differing timers would be arbitrary.
+  public init(configurator: any DisplayConfiguring, countdownSeconds: Int = 30) {
     self.configurator = configurator
     self.countdownSeconds = countdownSeconds
   }
@@ -141,7 +143,7 @@ public actor MirrorPreviewSession {
   /// renegotiated when it returns. A mirror preview is a SET, and dropping it
   /// strands the members that did NOT depart —
   ///
-  /// preview `{1→2, 3→2}`, and display 3 is unplugged inside the 15 s window.
+  /// preview `{1→2, 3→2}`, and display 3 is unplugged inside the countdown window.
   /// Dropping leaves display 1 still mirroring 2 at `.preview` scope, with the
   /// countdown cancelled and the confirmation window dismissed: a topology the
   /// user never approved, with no UI and no timer, recoverable only by quitting
@@ -231,7 +233,7 @@ public actor MirrorPreviewSession {
   /// preview's fallback is the topology captured BEFORE it applied, and that
   /// capture can perfectly well contain the very set the user has just asked to
   /// break — start a preview while a set exists, then stop that set. Reverting
-  /// would re-apply the capture and bring the set back: fifteen seconds later
+  /// would re-apply the capture and bring the set back: half a minute later
   /// if the expiry does it, immediately if this method did. An explicit choice
   /// supersedes a pending question rather than losing to it.
   ///

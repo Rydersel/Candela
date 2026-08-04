@@ -10,7 +10,7 @@ import SwiftUI
 /// tracking, so the inner one is dead on arrival. Measured twice already: once
 /// for the HDR control in `PanelView`, which is a cycling button for exactly this
 /// reason, and again for `PanelResolutionSection`. Mirroring cannot be a cycling
-/// button either — each press would reconfigure the rig and start a fifteen-second
+/// button either — each press would reconfigure the rig and start a thirty-second
 /// countdown nobody asked for — so it is an inline disclosure, the same shape:
 /// one row while collapsed, the action beneath while open.
 ///

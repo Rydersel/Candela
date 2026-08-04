@@ -368,7 +368,7 @@ final class MirroringCoordinator {
         case .success:
           // Cancelled BEFORE the await, not after `startCountdown()` gets to it:
           // the previous preview's driver is still looping, and a tick that
-          // lands during `adopt` would knock the fresh preview from 15 seconds
+          // lands during `adopt` would knock the fresh preview from 30 seconds
           // to 14. It narrows the window rather than closing it — a tick already
           // past its sleep and inside `session.tick()` still counts against the
           // new preview, and closing that needs the session to know WHICH
@@ -410,7 +410,7 @@ final class MirroringCoordinator {
         // reason is not tidiness. An outstanding mirror preview's fallback is
         // the topology captured BEFORE it applied, which can contain the very
         // set being broken here: leaving it outstanding lets the expiry re-apply
-        // that capture and bring the set back fifteen seconds after an explicit
+        // that capture and bring the set back half a minute after an explicit
         // stop, with no further interaction and no explanation. Reverting it
         // instead would do the same thing immediately. `applyDisengage`
         // supersedes it — resolves it without reverting — inside the actor that

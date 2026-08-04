@@ -428,6 +428,18 @@ struct ModePreviewSessionTests {
     #expect(await session.confirm(answer(3)) == .committed)
   }
 
+  /// The shipped countdown, pinned. Every other test here passes an explicit
+  /// `countdownSeconds`, so the default the app actually gets was covered by
+  /// nothing — and it is a product decision (thirty seconds, matching
+  /// `MirrorPreviewSession`), not an implementation detail.
+  @Test func theDefaultCountdownIsThirtySeconds() async {
+    let fake = FakeConfigurator()
+    fake.current = mode(1)
+    let session = ModePreviewSession(configurator: fake)
+    _ = await session.begin(mode: mode(2), on: 7)
+    #expect(await session.secondsRemaining == 30)
+  }
+
   @Test func theCountdownStopsBeingReportedOnceResolved() async {
     let fake = FakeConfigurator()
     fake.current = mode(1)
