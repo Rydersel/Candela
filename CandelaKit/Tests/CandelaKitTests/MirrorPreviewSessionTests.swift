@@ -267,6 +267,159 @@ struct MirrorPreviewSessionTests {
     #expect(await session.isCountingDown)
   }
 
+  // MARK: - Breaking a set while a preview is outstanding
+
+  /// The rig the supersede rule exists for: a set ALREADY EXISTS (1 mirroring
+  /// 3), so the topology a preview captures contains it. Reverting that capture
+  /// re-mirrors 1 onto 3 — which is exactly what must not happen when the user
+  /// has just asked for the mirroring to stop.
+  private func preexistingSetTrio() -> [ConfiguredDisplay] {
+    [
+      MirrorFixtures.display(1, mirrors: 3, builtIn: true),
+      MirrorFixtures.display(2),
+      MirrorFixtures.display(3, inSet: true),
+    ]
+  }
+
+  /// Drives the real sequence: a set exists, a preview builds a different one
+  /// around display 2, and the user then stops the set they can see. The break's
+  /// change list is DECIDED from the live topology exactly as the app decides
+  /// it, so the test pins the list that actually ships.
+  private func breakChanges(_ fake: FakeConfigurator, containing member: CGDirectDisplayID)
+    -> [MirrorChange]
+  {
+    guard case let .disengage(changes, _) = MirrorTopologyPolicy.disengage(
+      MirrorTopology(fake.displays()), containing: member
+    ) else {
+      Issue.record("expected a disengage decision")
+      return []
+    }
+    return changes
+  }
+
+  /// THE defect. A break resolves the outstanding preview WITHOUT reverting it:
+  /// the capture describes a topology the user has just contradicted, and
+  /// re-applying it would fight an explicit choice. Nothing is applied by the
+  /// supersede itself — the only two batches are the preview and the break.
+  @Test func breakingASetSupersedesTheOutstandingPreviewRatherThanRevertingIt() async {
+    let fake = FakeConfigurator()
+    fake.configuredDisplays = preexistingSetTrio()
+    let session = MirrorPreviewSession(configurator: fake)
+    let captured = MirrorTopology(fake.displays())
+    _ = await session.begin(engageDecision(captured), from: captured)
+    #expect(await session.hasOutstandingPreview)
+
+    let changes = breakChanges(fake, containing: 1)
+    #expect(await session.applyDisengage(changes).failureError == nil)
+
+    #expect(await session.hasOutstandingPreview == false)
+    #expect(await session.isCountingDown == false)
+    // Two batches and no third: the preview, then the break. A revert would sit
+    // between them and would name `MirrorChange(display: 1, master: 3)`.
+    #expect(fake.appliedMirroring.count == 2)
+    #expect(fake.appliedMirroring.last?.scope == .session)
+    #expect(fake.appliedMirroring.last?.changes == changes)
+    // The pre-existing set is GONE, not restored.
+    #expect(MirrorTopology(fake.displays()).masters.isEmpty)
+    #expect(MirrorTopology(fake.displays()).master(of: 1) == nil)
+  }
+
+  /// The harm as the user meets it: the countdown expires fifteen seconds after
+  /// the set was stopped and brings it back, undoing an explicit action with no
+  /// further interaction. A superseded preview has nothing left to expire.
+  @Test func aSupersededPreviewsCountdownCanNeverBringTheOldSetBack() async {
+    let fake = FakeConfigurator()
+    fake.configuredDisplays = preexistingSetTrio()
+    let session = MirrorPreviewSession(configurator: fake, countdownSeconds: 2)
+    let captured = MirrorTopology(fake.displays())
+    _ = await session.begin(engageDecision(captured), from: captured)
+    _ = await session.applyDisengage(breakChanges(fake, containing: 1))
+
+    for _ in 0 ..< 5 { #expect(await session.tick() == nil) }
+    #expect(fake.appliedMirroring.count == 2)
+    #expect(MirrorTopology(fake.displays()).masters.isEmpty)
+  }
+
+  /// The second, more reachable path to the same harm: the confirmation card is
+  /// still on screen when the break lands, and Keep is the obvious answer to a
+  /// window that still appears to be asking. It must commit NOTHING — committing
+  /// re-mirrors the rig at session scope with no countdown left to undo it.
+  ///
+  /// The app also dismisses the card, and its queue orders a click behind the
+  /// break; this is the backstop under both, and the only one a test can reach.
+  @Test func answeringASupersededPreviewCommitsNothing() async {
+    let fake = FakeConfigurator()
+    fake.configuredDisplays = preexistingSetTrio()
+    let session = MirrorPreviewSession(configurator: fake)
+    let captured = MirrorTopology(fake.displays())
+    _ = await session.begin(engageDecision(captured), from: captured)
+    guard let answered = await session.previewedTopology else {
+      Issue.record("no outstanding preview")
+      return
+    }
+    _ = await session.applyDisengage(breakChanges(fake, containing: 1))
+
+    #expect(await session.confirm(answered) == .stale)
+    #expect(await session.revert(answered) == .stale)
+    #expect(fake.appliedMirroring.count == 2)
+    #expect(MirrorTopology(fake.displays()).masters.isEmpty)
+  }
+
+  /// The mirror image of `begin` refusing a `.disengage`. Every change a break
+  /// stages names `kCGNullDirectDisplay`; an ENGAGE arriving here would apply at
+  /// session scope with no preview, no countdown and no fallback — and would
+  /// supersede the outstanding preview on its way past.
+  @Test func onlyABreakCanBeAppliedThroughTheDisengagePath() async {
+    let fake = FakeConfigurator()
+    let session = makeSession(fake)
+    let captured = MirrorTopology(fake.displays())
+    _ = await session.begin(engageDecision(captured), from: captured)
+
+    let engage = [MirrorChange(display: 1, master: 2)]
+    #expect(await session.applyDisengage(engage).failureError != nil)
+    #expect(fake.appliedMirroring.count == 1)
+    #expect(await session.hasOutstandingPreview)
+    #expect(await session.isCountingDown)
+  }
+
+  /// The ordinary case — no preview outstanding — still applies at session
+  /// scope, unchanged from applying straight through the configurator.
+  @Test func breakingASetWithNoPreviewOutstandingAppliesAtSessionScope() async {
+    let fake = FakeConfigurator()
+    fake.configuredDisplays = preexistingSetTrio()
+    let session = MirrorPreviewSession(configurator: fake)
+    let changes = breakChanges(fake, containing: 1)
+
+    #expect(await session.applyDisengage(changes).failureError == nil)
+    #expect(fake.appliedMirroring == [.init(changes: changes, scope: .session)])
+    #expect(MirrorTopology(fake.displays()).masters.isEmpty)
+  }
+
+  /// The DELIBERATE cost of superseding before applying, pinned so it is a
+  /// decision rather than a surprise: a break that throws has already resolved
+  /// the preview, so the previewed topology stands with no countdown left to
+  /// take it back. It is still at `.preview` scope, the caller surfaces the
+  /// error, and pressing the button again is the retry. The alternative ordering
+  /// buys this back at the price of a window in which the expiry re-mirrors the
+  /// set the break just dissolved.
+  @Test func aBreakThatThrowsHasStillSupersededThePreview() async {
+    let fake = FakeConfigurator()
+    fake.configuredDisplays = preexistingSetTrio()
+    let session = MirrorPreviewSession(configurator: fake)
+    let captured = MirrorTopology(fake.displays())
+    _ = await session.begin(engageDecision(captured), from: captured)
+    let changes = breakChanges(fake, containing: 1)
+    fake.failMirroringWith = DisplayConfigError(cgErrorCode: 1004)
+
+    #expect(
+      await session.applyDisengage(changes).failureError == DisplayConfigError(cgErrorCode: 1004)
+    )
+    #expect(await session.hasOutstandingPreview == false)
+    #expect(await session.isCountingDown == false)
+    // Nothing was applied by the failed break, and nothing by the supersede.
+    #expect(fake.appliedMirroring.count == 1)
+  }
+
   /// A display that was never in the previewed set leaves the preview — and its
   /// countdown — exactly where they were. Otherwise any unrelated unplug would
   /// silently strand a rig in an unapproved topology with nothing left to take

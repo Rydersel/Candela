@@ -61,11 +61,14 @@ public struct PreviewedMirrorTopology: Sendable, Equatable {
 ///   that throws changed nothing, so the fallback is still valid and still
 ///   needed, and retrying is the whole recovery path.
 ///
-/// Only an `.engage` is previewed. Disengage commits directly, through the
-/// caller: breaking a set returns every display to its own desktop and cannot
+/// Only an `.engage` is previewed. A break is never previewed and never gains a
+/// countdown: breaking a set returns every display to its own desktop and cannot
 /// leave a screen unreadable, while a countdown there would *re-mirror* a rig
 /// the user just un-mirrored, while they were still looking for the
-/// confirmation window on a screen that had only just come back.
+/// confirmation window on a screen that had only just come back. It commits
+/// through `applyDisengage(_:)` all the same — not because it needs previewing,
+/// but because it has to SUPERSEDE any preview that is outstanding, and the
+/// preview and its countdown live in here.
 ///
 /// `.preview` scope is a second backstop and nothing more.
 /// `kCGConfigureForAppOnly` does self-revert a mirror when the process exits
@@ -171,8 +174,9 @@ public actor MirrorPreviewSession {
     _ decision: MirrorToggleDecision, from captured: MirrorTopology
   ) -> Result<Void, DisplayConfigError> {
     guard case let .engage(master, changes) = decision, !changes.isEmpty else {
-      // Disengage commits directly (see the type's doc comment) and a refusal
-      // is not a change at all. Neither is partially handled here on purpose:
+      // A break commits through `applyDisengage(_:)` (see the type's doc
+      // comment) and a refusal is not a change at all. Neither is partially
+      // handled here on purpose:
       // `.disengage` carries `residualMembers`, and a break that leaves a
       // locked slave mirroring is a PARTIAL break its caller has to report. A
       // path through here that bound the changes and dropped the residue would
@@ -210,6 +214,57 @@ public actor MirrorPreviewSession {
     lastOutcome = nil
     remaining = countdownSeconds
     countdownArmed = true
+    return .success(())
+  }
+
+  /// Commits a mirror BREAK at session scope, **superseding** any outstanding
+  /// preview — resolving it without reverting.
+  ///
+  /// The break is still not previewed and still never gains a countdown; see
+  /// the type's doc comment for why. What it gains by coming through here is
+  /// ORDER, and a place the rule can be tested: the outstanding preview and its
+  /// countdown live in this actor, so this is the only point at which "resolve
+  /// the preview, then apply" cannot be interleaved by an expiry landing
+  /// between the two.
+  ///
+  /// **Superseded, not reverted, and that difference is the whole method.** A
+  /// preview's fallback is the topology captured BEFORE it applied, and that
+  /// capture can perfectly well contain the very set the user has just asked to
+  /// break — start a preview while a set exists, then stop that set. Reverting
+  /// would re-apply the capture and bring the set back: fifteen seconds later
+  /// if the expiry does it, immediately if this method did. An explicit choice
+  /// supersedes a pending question rather than losing to it.
+  ///
+  /// **Superseding FIRST, before the apply, is deliberate.** Afterwards the
+  /// countdown is disarmed and `tick()` cannot re-apply the capture, so no
+  /// expiry can land in the middle. The cost is real and is the smaller one: an
+  /// apply that THROWS leaves the previewed topology standing with nothing left
+  /// to take it back automatically. It is still at `.preview` scope, the caller
+  /// reports the failure, and pressing the same button again is the retry — the
+  /// other ordering buys that back at the price of a window in which the expiry
+  /// re-mirrors the set this call has just dissolved.
+  ///
+  /// Refuses anything that is not a break, as the mirror image of `begin`
+  /// refusing a `.disengage`: every change a break stages names
+  /// `kCGNullDirectDisplay`, and an engage arriving here would apply at session
+  /// scope with no preview, no countdown and no fallback at all.
+  ///
+  /// The RESIDUE of a partial break is deliberately not returned. It is decided
+  /// before anything is staged, carried by `MirrorToggleDecision.disengage`, and
+  /// stated by the caller — the same division of labour that makes `begin`
+  /// refuse a disengage rather than swallow its residue.
+  public func applyDisengage(_ changes: [MirrorChange]) -> Result<Void, DisplayConfigError> {
+    guard changes.allSatisfy({ $0.master == kCGNullDirectDisplay }) else {
+      return .failure(DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue))
+    }
+    supersede()
+    do {
+      try configurator.applyMirroring(changes, scope: .session)
+    } catch let error as DisplayConfigError {
+      return .failure(error)
+    } catch {
+      return .failure(DisplayConfigError(cgErrorCode: -1))
+    }
     return .success(())
   }
 
@@ -266,6 +321,26 @@ public actor MirrorPreviewSession {
     let live = MirrorTopology(configurator.displays())
     let changes = MirrorTopologyPolicy.changes(from: live, to: outstanding.captured)
     return resolve(applying: changes, success: .reverted)
+  }
+
+  /// Resolves the outstanding preview by DROPPING it — nothing is applied, and
+  /// the countdown is disarmed with it. The one caller is `applyDisengage`,
+  /// whose doc comment carries the argument for why this is not a revert.
+  ///
+  /// `lastOutcome` becomes `.stale` rather than `.reverted`. A window that was
+  /// still on screen when this ran can still deliver an answer, and `.stale` is
+  /// the truthful reply to it: that answer resolved nothing. `.reverted` would
+  /// claim a restoration that never happened — the same class of false report
+  /// this whole path exists to close — and `.committed` would claim the preview
+  /// was kept.
+  @discardableResult
+  private func supersede() -> PreviewedMirrorTopology? {
+    guard let superseded = previewedTopology else { return nil }
+    outstanding = nil
+    remaining = 0
+    countdownArmed = false
+    lastOutcome = .stale
+    return superseded
   }
 
   private func matches(

@@ -501,23 +501,26 @@ final class DisplayModeCoordinator {
   /// Ends any outstanding MODE preview and reports whether the display is back
   /// where it started.
   ///
-  /// Called by `MirroringCoordinator` before a mirror ENGAGE preview begins, and
-  /// it runs inside THIS coordinator's queue, so that one path cannot open a
-  /// `CGBeginDisplayConfiguration` transaction while a mode transaction is still
-  /// open. The two preview sessions cannot literally share one task chain — two
-  /// `@MainActor @Observable` coordinators cannot without being merged into one
-  /// object — so the ordering is enforced by the mirror chain AWAITING this.
+  /// Called by `MirroringCoordinator` before a mirror ENGAGE preview begins and
+  /// before a mirror BREAK applies, and it runs inside THIS coordinator's queue,
+  /// so that neither path can open a `CGBeginDisplayConfiguration` transaction
+  /// while a mode transaction is still open. The two preview sessions cannot
+  /// literally share one task chain — two `@MainActor @Observable` coordinators
+  /// cannot without being merged into one object — so the ordering is enforced
+  /// by the mirror chain AWAITING this.
   ///
-  /// **That orders the engage path and nothing else.** `select` does not call
-  /// the mirror side's equivalent, a mirror `.disengage` applies without coming
-  /// through here, and the mirror countdown's expiry runs detached on the
-  /// session's executor — so concurrent transactions remain possible in those
-  /// three directions. Stated rather than implied, because the narrow guarantee
-  /// is the one the code delivers.
+  /// **That orders the mirror side and nothing else.** `select` does not call
+  /// the mirror side's equivalent, and the mirror countdown's expiry runs
+  /// detached on the session's executor — so concurrent transactions remain
+  /// possible in those two directions. Stated rather than implied, because the
+  /// narrow guarantee is the one the code delivers.
   ///
   /// A mirror engage would otherwise move a display out from under a preview
   /// whose fallback mode was captured before it — and the mode preview's own
-  /// recovery surface would then be on a display that has no `NSScreen`.
+  /// recovery surface would then be on a display that has no `NSScreen`. A break
+  /// has no such asymmetry to fix; it comes through for the transaction ordering
+  /// alone, and refuses on the same terms rather than inventing a second policy
+  /// for the same failure.
   ///
   /// Returns false when the revert FAILED, which is the mirror side's cue to
   /// refuse: the same refusal `ModePreviewSession.begin` already makes across

@@ -345,19 +345,18 @@ final class MirroringCoordinator {
         // from inside THIS chain, so the mode revert has completed before this
         // path opens a `CGBeginDisplayConfiguration` transaction.
         //
-        // THAT IS THE ENGAGE PATH ONLY, and the guarantee is not general. Three
-        // ways the two coordinators still reach CoreGraphics concurrently:
-        // `DisplayModeCoordinator.select` never asks the mirror side to stand
-        // down (only this direction is ordered); the `.disengage` arm below
-        // applies straight through the configurator without calling
-        // `endOutstandingPreview()` at all; and `startCountdown`'s expiry runs
-        // `tick()` → `applyMirroring` on a DETACHED task, deliberately ungated
-        // on the main actor, so it can overlap a mode apply by construction.
-        // Making it general needs one serialisation point that owns every
-        // `CGBeginDisplayConfiguration` in the app — two `@MainActor
-        // @Observable` coordinators cannot share a task chain without being
-        // merged — and that is a change neither this task nor DT19 makes. What
-        // is claimed here is what is enforced here.
+        // BOTH MIRROR DIRECTIONS ARE ORDERED THIS WAY — the `.disengage` arm
+        // below makes the same call on the same terms — but the guarantee is
+        // still not general. Two ways the two coordinators reach CoreGraphics
+        // concurrently: `DisplayModeCoordinator.select` never asks the mirror
+        // side to stand down, so the ordering holds in this direction only; and
+        // `startCountdown`'s expiry runs `tick()` → `applyMirroring` on a
+        // DETACHED task, deliberately ungated on the main actor, so it can
+        // overlap a mode apply by construction. Making it general needs one
+        // serialisation point that owns every `CGBeginDisplayConfiguration` in
+        // the app — two `@MainActor @Observable` coordinators cannot share a
+        // task chain without being merged — and that is a change neither this
+        // task nor DT19 makes. What is claimed here is what is enforced here.
         guard await self.modes.endOutstandingPreview() else {
           self.lastFailure = DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
           self.log.error("Refused a mirror engage: an outstanding mode preview could not be reverted")
@@ -367,6 +366,14 @@ final class MirroringCoordinator {
         self.log.info("Engaging mirror on \(master, privacy: .public), \(changes.count, privacy: .public) change(s)")
         switch await self.session.begin(.engage(master: master, changes: changes), from: captured) {
         case .success:
+          // Cancelled BEFORE the await, not after `startCountdown()` gets to it:
+          // the previous preview's driver is still looping, and a tick that
+          // lands during `adopt` would knock the fresh preview from 15 seconds
+          // to 14. It narrows the window rather than closing it — a tick already
+          // past its sleep and inside `session.tick()` still counts against the
+          // new preview, and closing that needs the session to know WHICH
+          // preview a tick is for.
+          self.stopCountdown()
           await self.adopt(.clear)
           self.startCountdown()
         case let .failure(error):
@@ -378,8 +385,42 @@ final class MirroringCoordinator {
         // its own desktop and cannot leave a screen unreadable, and a countdown
         // here would re-mirror a rig the user just un-mirrored while they were
         // still looking for the window on a screen that had only just come back.
-        do {
-          try self.configurator.applyMirroring(changes, scope: .session)
+        //
+        // ORDERED against the mode side on exactly the engage arm's terms, and
+        // REFUSING on exactly its terms: this is about to open a
+        // `CGBeginDisplayConfiguration` transaction too, and an interleave that
+        // loses the break would have this arm report a success it did not
+        // achieve — the one defect class this whole path exists to close. The
+        // refusal is visible (`lastFailure`, hence the report card) and the mode
+        // preview keeps its own window and its own retry, so refusing parks
+        // nobody: pressing the button again is the recovery.
+        guard await self.modes.endOutstandingPreview() else {
+          self.lastFailure = DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
+          self.log.error("Refused a mirror break: an outstanding mode preview could not be reverted")
+          self.syncConfirmation()
+          return
+        }
+        if await self.session.hasOutstandingPreview {
+          // Read for the LOG only. `applyDisengage` supersedes whatever is
+          // outstanding at the instant IT runs; this answer is one actor hop
+          // old, and nothing below depends on it.
+          self.log.info("Stopping mirroring supersedes an outstanding mirror preview")
+        }
+        // Through the SESSION rather than straight at the configurator, and the
+        // reason is not tidiness. An outstanding mirror preview's fallback is
+        // the topology captured BEFORE it applied, which can contain the very
+        // set being broken here: leaving it outstanding lets the expiry re-apply
+        // that capture and bring the set back fifteen seconds after an explicit
+        // stop, with no further interaction and no explanation. Reverting it
+        // instead would do the same thing immediately. `applyDisengage`
+        // supersedes it — resolves it without reverting — inside the actor that
+        // owns the countdown, so no expiry can land between the two steps.
+        //
+        // The change list is still the one decided from the entry sample, and
+        // that stays correct precisely BECAUSE superseding applies nothing: the
+        // topology the decision described is the topology this stages against.
+        switch await self.session.applyDisengage(changes) {
+        case .success:
           // Reported, never inferred from the change list — which does not
           // mention the survivors at all. A locked slave keeps mirroring and
           // keeps its master a master, so "mirroring off" over a partly-broken
@@ -390,11 +431,17 @@ final class MirroringCoordinator {
           if !residualMembers.isEmpty {
             self.log.info("Mirror break was partial; still mirrored: \(residualMembers, privacy: .public)")
           }
-        } catch let error as DisplayConfigError {
+        case let .failure(error):
           self.lastFailure = error
-        } catch {
-          self.lastFailure = DisplayConfigError(cgErrorCode: -1)
         }
+        // The card must not outlive the topology it is asking about. Rebuilt
+        // FROM the session like every other write to `preview`, so this also
+        // cancels the countdown DRIVER — a task still ticking against a resolved
+        // preview keeps a live "Keep mirroring?" card on screen over a machine
+        // that is not mirroring, and one click on Keep re-mirrors the rig the
+        // user just un-mirrored. Ordered after the writes above so the report it
+        // syncs is the one this apply just produced.
+        await self.adopt(.clear)
       case let .refused(reason):
         // Never a silent false. `engageMirror` returned a bare Bool whose two
         // falses meant different things, and the enum it was replaced by has
