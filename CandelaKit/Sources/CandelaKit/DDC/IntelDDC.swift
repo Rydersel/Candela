@@ -146,7 +146,9 @@ public class IntelDDC {
       if bytes.count > 4096 { return nil }
     }
     guard !bytes.isEmpty else { return nil }
-    return String(decoding: bytes, as: UTF8.self)
+    // Same gap, same fix as the arm64 path: a NUL-terminated payload would
+    // otherwise fail the parser's whole-string-wrap rule. See `CapabilityPayload`.
+    return CapabilityPayload.string(from: bytes)
   }
 
   private func readCapabilityFragment(

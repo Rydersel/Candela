@@ -49,8 +49,10 @@ public actor Arm64DDCService: DDCWriting {
       if bytes.count > 4096 { return nil }
     }
     guard !bytes.isEmpty else { return nil }
-    // Capability strings are ASCII; anything else decodes to replacement
-    // characters and fails the parser's two-hex-digit rule → .unknown.
-    return String(decoding: bytes, as: UTF8.self)
+    // Trailing NULs and surrounding whitespace are the wire's, not the
+    // display's — see `CapabilityPayload`. Trimming them HERE is what lets
+    // `CapabilityString.outerGroupInterior` keep refusing to guess at a
+    // wrapper. [MEASURED] the DELL U2725QE terminates with one NUL.
+    return CapabilityPayload.string(from: bytes)
   }
 }

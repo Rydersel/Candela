@@ -146,16 +146,21 @@ public enum CapabilityString {
   ///   showing the raw string — so the pane displays a legible vcp list while
   ///   telling the reader it could not read one.
   ///
-  /// It is reachable without malformed firmware, because
-  /// `Arm64DDCService.readCapabilityString` concatenates fragments with no
-  /// trimming: one trailing NUL byte turns `"(vcp(10))"` into `"(vcp(10))\0"`,
-  /// whose last character is not `)` and is not whitespace, so
-  /// `outerGroupInterior` rejects the whole string. A parseable list plus
-  /// trailing junk is exactly the shape a display sends and the pane then
-  /// disclaims. Fixing that belongs in the reassembly (trim trailing NULs and
-  /// control bytes there, where the wire's own noise is), not by loosening the
-  /// wrapper rule here — D24 would still rather say nothing than guess at a
-  /// wrapper.
+  /// It was reachable without malformed firmware, and a real panel reached it:
+  /// the reassembly concatenated fragments with no trimming, so the DELL
+  /// U2725QE's one trailing NUL turned `"(…mswhql(1))"` into
+  /// `"(…mswhql(1))\0"`, whose last character is not `)` and is not whitespace
+  /// — `outerGroupInterior` rejected all 606 bytes of a complete answer, and
+  /// the pane disclaimed a vcp list it was displaying verbatim. [MEASURED
+  /// 2026-08-04: 44 codes and `mccs_ver` "2.1" trimmed, nil with the NUL.]
+  ///
+  /// Fixed in the reassembly, where the wire's own noise is —
+  /// `CapabilityPayload.string(from:)`, called by both
+  /// `Arm64DDCService.readCapabilityString` and `IntelDDC.readCapabilityString`
+  /// — and deliberately NOT by loosening the wrapper rule here. D24 would still
+  /// rather say nothing than guess at a wrapper, and the nine measured
+  /// `unknown → .unsupported` moves that rule prevents cost more than the bug
+  /// it caused.
   ///
   /// The scan is hand-rolled rather than a regex because capability strings
   /// nest: only a depth counter can tell `60(0F 11 12)`'s closing paren from
