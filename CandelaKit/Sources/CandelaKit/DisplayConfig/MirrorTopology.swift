@@ -23,12 +23,16 @@ import Foundation
 /// with N slaves, no nesting. A slave names its master with a single ID, so
 /// chains collapse and one hop is always the whole answer.
 ///
-/// Every list it hands out is `id`-ascending, never in enumeration order.
+/// Every list it hands out is `id`-ascending, never in enumeration order —
+/// `displays` INCLUDED, which is why the initialiser sorts rather than the
+/// accessors. A promise the stored property quietly broke would be worse than
+/// no promise: `CGGetOnlineDisplayList` order is also what `Equatable` would
+/// otherwise compare on, so two samples of one unchanged machine could differ.
 public struct MirrorTopology: Sendable, Equatable {
   public let displays: [ConfiguredDisplay]
 
   public init(_ displays: [ConfiguredDisplay]) {
-    self.displays = displays
+    self.displays = displays.sorted { $0.id < $1.id }
   }
 
   /// Every display that owns a framebuffer some other display is showing.
@@ -55,11 +59,21 @@ public struct MirrorTopology: Sendable, Equatable {
   /// Every display in the set `displayID` belongs to, itself included. Empty
   /// when it belongs to none. Nesting is not expressible — a slave's master is
   /// a single ID and chains collapse — so one hop is the whole answer.
+  ///
+  /// INTERSECTED WITH THE SAMPLE, always. A slave names its master by ID, and
+  /// that ID need not be in `displays`: the sample can be stale, and a consumer
+  /// is free to build a topology from a filtered list (externals only, say,
+  /// dropping the built-in master). Naming the absent master here would hand
+  /// `disengage` a member it stages a change for, and Task 3's transaction is
+  /// all-or-nothing — so one phantom would stop a perfectly breakable set from
+  /// breaking at all. This is the same doctrine `drawableDisplayID` follows
+  /// when it returns its input unchanged: a topology never invents a target.
   public func setMembers(containing displayID: CGDirectDisplayID) -> [CGDirectDisplayID] {
     guard let entry = displays.first(where: { $0.id == displayID }), entry.isInMirrorSet
     else { return [] }
     let master = entry.isMirrorSlave ? entry.mirrorsDisplay : entry.id
-    return ([master] + slaves(of: master)).sorted()
+    let sampled = Set(displays.map(\.id))
+    return ([master] + slaves(of: master)).filter { sampled.contains($0) }.sorted()
   }
 
   /// `displayID` plus, when it is a master, every display mirroring it.
@@ -107,9 +121,21 @@ public struct MirrorTopology: Sendable, Equatable {
 public enum MirrorToggleDecision: Sendable, Equatable {
   /// Stage these changes to build a set around `master`.
   case engage(master: CGDirectDisplayID, changes: [MirrorChange])
-  /// Stage these changes to dissolve the set. One null-master change per
+  /// Stage these changes to break mirroring: one null-master change per
   /// breakable member.
-  case disengage(changes: [MirrorChange])
+  ///
+  /// `residualMembers` is what will STILL be in a mirror set once they commit,
+  /// and it is the reason this case is not just a change list. A locked member
+  /// is never staged (the change cannot succeed and would cancel the whole
+  /// transaction), so a set containing one is only PARTLY broken — the locked
+  /// slave keeps mirroring, and its master keeps being a master. Empty means
+  /// the break is total.
+  ///
+  /// Without this field the outcome is indistinguishable from a total break,
+  /// and a caller reports "mirroring off" over a set the user is still looking
+  /// at. That is the T3 defect — success reported while nothing changed —
+  /// re-created one layer up, so the type refuses to express it.
+  case disengage(changes: [MirrorChange], residualMembers: [CGDirectDisplayID])
   /// Nothing to do, and a REASON.
   case refused(MirrorRefusal)
 }
@@ -117,14 +143,46 @@ public enum MirrorToggleDecision: Sendable, Equatable {
 /// Why a mirror request produced no changes. Every case is something the UI can
 /// state out loud; none of them is "it did not work".
 public enum MirrorRefusal: Sendable, Equatable {
-  /// Fewer than two online displays. The key executor falls through to a plain
-  /// brightness-down step on this refusal and on NO OTHER (fork parity).
+  /// Fewer than two displays in the sample. The key executor falls through to a
+  /// plain brightness-down step on this refusal and on NO OTHER (fork parity).
+  ///
+  /// An EMPTY sample lands here too. The name is the user-facing truth on the
+  /// rig this actually happens on — a laptop with nothing plugged in — and an
+  /// empty online list is not a machine state, it is a topology read between a
+  /// teardown and its callback. Nothing useful can be said about it that is not
+  /// also true of "you only have one display".
   case onlyOneDisplay
-  /// Nothing eligible to be the master: no candidate that is not already locked
-  /// into a set it cannot leave.
+  /// `toggle`'s automatic scan found nothing that could own a set: every
+  /// display is either the built-in (which the hotkey never promotes, fork
+  /// parity) or locked into a set it cannot leave.
+  ///
+  /// Reachable from `toggle` ONLY. The named-master path has its own three
+  /// answers below, because "nothing can be the master" is a false statement
+  /// when the caller has just named a display that can.
   case noEligibleMaster
-  /// The set cannot be broken by anyone, because every member reports
-  /// `isAlwaysInMirrorSet`. Carries the members so the UI can name them.
+  /// The display named is not in this sample — unplugged, or filtered out of
+  /// the list the topology was built from. Never guessed at: see
+  /// `MirrorTopology.setMembers(containing:)`.
+  case noSuchDisplay
+  /// The display named as master is locked into a mirror set it cannot leave
+  /// (`isAlwaysInMirrorSet`), so it cannot own a different one.
+  ///
+  /// Distinct from `noEligibleMaster` because it is a fact about the ONE
+  /// display the caller pointed at, and the sentence the UI needs is about that
+  /// display rather than about the machine.
+  case masterIsAlwaysMirrored
+  /// The named master is perfectly eligible and there is nothing to mirror onto
+  /// it: every other display in the sample is locked into a set it cannot
+  /// leave, and a locked display is never staged.
+  ///
+  /// Split out of `noEligibleMaster` for the same reason `notInASet` was split
+  /// out of `setCannotBeBroken`. Saying "no display can be the mirror master"
+  /// to someone who has just picked one that can is simply untrue.
+  case nothingToMirror
+  /// Mirroring here cannot be broken: no member of the set can be REMOVED from
+  /// it. Every slave reports `isAlwaysInMirrorSet`, and unmirroring the master
+  /// alone changes nothing — it is not mirroring anyone. Carries the members so
+  /// the UI can name them.
   case setCannotBeBroken([CGDirectDisplayID])
   /// The display named for `disengage(_:containing:)` is in no mirror set — or
   /// is not in this sample at all. Defensive in practice, since the UI offers
@@ -160,18 +218,10 @@ public enum MirrorTopologyPolicy {
   public static func toggle(_ topology: MirrorTopology) -> MirrorToggleDecision {
     guard topology.displays.count >= 2 else { return .refused(.onlyOneDisplay) }
 
-    let members = topology.displays.filter(\.isInMirrorSet)
-    if !members.isEmpty {
-      // Every set on the machine is dissolved, which is what the fork did: it
-      // iterated the whole online list rather than one set.
-      let breakable = members.filter { !$0.isAlwaysInMirrorSet }.map(\.id).sorted()
-      guard !breakable.isEmpty else {
-        return .refused(.setCannotBeBroken(members.map(\.id).sorted()))
-      }
-      return .disengage(changes: breakable.map {
-        MirrorChange(display: $0, master: kCGNullDirectDisplay)
-      })
-    }
+    // Every set on the machine is dissolved, which is what the fork did: it
+    // iterated the whole online list rather than one set.
+    let members = topology.displays.filter(\.isInMirrorSet).map(\.id)
+    if !members.isEmpty { return dissolve(topology, members: members) }
 
     // Fork parity: the master is a NON-built-in display and the built-in
     // becomes a slave, deliberately. Lowest id rather than list order is ours.
@@ -186,13 +236,18 @@ public enum MirrorTopologyPolicy {
   /// The UI's decision: build a set around a NAMED master. Unlike `toggle`, the
   /// built-in is an acceptable master here — that is a person asking for it by
   /// name, not a heuristic choosing for them.
+  ///
+  /// Its three refusals are three different sentences, never `noEligibleMaster`:
+  /// the display is not here (`noSuchDisplay`), the display cannot own a set
+  /// (`masterIsAlwaysMirrored`), or nothing else can join the one it would own
+  /// (`nothingToMirror`). Only the last of those is about the machine.
   public static func engage(
     _ topology: MirrorTopology, master: CGDirectDisplayID
   ) -> MirrorToggleDecision {
     guard topology.displays.count >= 2 else { return .refused(.onlyOneDisplay) }
-    guard let chosen = topology.displays.first(where: { $0.id == master }),
-          !chosen.isAlwaysInMirrorSet
-    else { return .refused(.noEligibleMaster) }
+    guard let chosen = topology.displays.first(where: { $0.id == master })
+    else { return .refused(.noSuchDisplay) }
+    guard !chosen.isAlwaysInMirrorSet else { return .refused(.masterIsAlwaysMirrored) }
 
     // A locked display is never STAGED either: the change cannot succeed, and
     // one failed stage cancels the whole transaction (Task 3), so including it
@@ -202,7 +257,7 @@ public enum MirrorTopologyPolicy {
       .map(\.id)
       .sorted()
       .map { MirrorChange(display: $0, master: chosen.id) }
-    guard !changes.isEmpty else { return .refused(.noEligibleMaster) }
+    guard !changes.isEmpty else { return .refused(.nothingToMirror) }
     return .engage(master: chosen.id, changes: changes)
   }
 
@@ -218,11 +273,53 @@ public enum MirrorTopologyPolicy {
   ) -> MirrorToggleDecision {
     let members = topology.setMembers(containing: member)
     guard !members.isEmpty else { return .refused(.notInASet) }
-    let breakable = members.filter { !topology.cannotBeUnmirrored($0) }
-    guard !breakable.isEmpty else { return .refused(.setCannotBeBroken(members)) }
-    return .disengage(changes: breakable.map {
-      MirrorChange(display: $0, master: kCGNullDirectDisplay)
-    })
+    return dissolve(topology, members: members)
+  }
+
+  /// The single break rule, shared by both paths so they cannot drift: the ONLY
+  /// difference between the hotkey's break and the UI's is which members are
+  /// handed in.
+  ///
+  /// Two things it gets right that a bare "one change per breakable member"
+  /// does not.
+  ///
+  /// **A set is broken by removing its SLAVES.** The master is not mirroring
+  /// anyone, so a null-master change on it is idempotent — real, staged for
+  /// parity with the shipped path and because it makes the intent explicit, but
+  /// it changes nothing on its own. So eligibility is decided on the slaves: if
+  /// every slave is locked, the set survives untouched no matter what is
+  /// staged, and that is a REFUSAL, not a disengage. Without this rule, the
+  /// second press on a partly-locked rig stages a lone master change, commits
+  /// `.success`, reports mirroring off, and leaves the set exactly as it was —
+  /// forever, since every later press takes the same branch. That is the T3
+  /// defect wearing a new coat.
+  ///
+  /// **What survives is reported.** A locked slave keeps mirroring, which keeps
+  /// its master a master, so both are named in `residualMembers` rather than
+  /// left for the caller to infer from a change list that does not mention
+  /// them.
+  private static func dissolve(
+    _ topology: MirrorTopology, members: [CGDirectDisplayID]
+  ) -> MirrorToggleDecision {
+    let sampled = Set(members)
+    let entries = topology.displays.filter { sampled.contains($0.id) }
+
+    guard entries.contains(where: { $0.isMirrorSlave && !$0.isAlwaysInMirrorSet }) else {
+      return .refused(.setCannotBeBroken(entries.map(\.id).sorted()))
+    }
+
+    let breakable = entries.filter { !$0.isAlwaysInMirrorSet }.map(\.id).sorted()
+    let staged = Set(breakable)
+    let surviving = entries.filter { $0.isMirrorSlave && !staged.contains($0.id) }
+    let present = Set(topology.displays.map(\.id))
+    let residual = Set(surviving.map(\.id) + surviving.map(\.mirrorsDisplay))
+      .filter { present.contains($0) }
+      .sorted()
+
+    return .disengage(
+      changes: breakable.map { MirrorChange(display: $0, master: kCGNullDirectDisplay) },
+      residualMembers: residual
+    )
   }
 
   /// The changes needed to get from `current` back to `captured` — the
@@ -233,6 +330,17 @@ public enum MirrorTopologyPolicy {
   /// A display absent from `captured` is restored to unmirrored: the capture
   /// never described it, and leaving it in a set the user is undoing is the
   /// worse of the two readings.
+  ///
+  /// **BEST EFFORT, not total: a locked display is skipped.** A display
+  /// reporting `isAlwaysInMirrorSet` cannot be moved, so no change is emitted
+  /// for it even when `captured` says it was somewhere else — the same staging
+  /// rule the rest of this type follows, since one impossible change cancels
+  /// the whole transaction and would revert nothing at all. The consequence is
+  /// real and belongs at the call site rather than in a report nobody reads: a
+  /// revert can complete with a locked display still mirroring, so a caller
+  /// that says "restored" says slightly more than it knows. Compare
+  /// `MirrorToggleDecision.disengage`, which names its residue for exactly this
+  /// reason.
   public static func changes(
     from current: MirrorTopology, to captured: MirrorTopology
   ) -> [MirrorChange] {

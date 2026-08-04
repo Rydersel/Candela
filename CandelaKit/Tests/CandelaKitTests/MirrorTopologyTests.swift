@@ -125,4 +125,27 @@ struct MirrorTopologyTests {
     #expect(MirrorFixtures.unmirroredPair.slaves(of: kCGNullDirectDisplay).isEmpty)
     #expect(MirrorFixtures.mirroredTrio.slaves(of: kCGNullDirectDisplay).isEmpty)
   }
+
+  /// A slave can name a master this sample does not contain — a stale read, or
+  /// any consumer building a topology from a filtered list (externals only,
+  /// dropping the built-in master). Membership is intersected with the sample,
+  /// so it never names a display nobody can act on and `disengage` cannot stage
+  /// a change for a phantom. `master(of:)` still reports what the slave names,
+  /// because that is a fact about the slave rather than a target.
+  @Test func aSetNeverNamesAMasterThisSampleDoesNotContain() {
+    let topology = MirrorTopology([display(1, builtIn: true), display(2, mirrors: 9)])
+    #expect(topology.setMembers(containing: 2) == [2])
+    #expect(topology.master(of: 2) == 9)
+    #expect(topology.masters.isEmpty)
+  }
+
+  /// The type promises `id`-ascending everywhere, and `displays` is part of
+  /// "everywhere". Two samples of one unchanged machine that differ only in
+  /// `CGGetOnlineDisplayList` order are the same topology, and `Equatable` —
+  /// which compares the stored array — has to agree.
+  @Test func theSampleItselfIsSortedSoEnumerationOrderCannotLeakIntoEquality() {
+    let scrambled = MirrorTopology([display(7), display(2), display(4)])
+    #expect(scrambled.displays.map(\.id) == [2, 4, 7])
+    #expect(scrambled == MirrorTopology([display(2), display(4), display(7)]))
+  }
 }
