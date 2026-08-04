@@ -306,7 +306,8 @@ final class DisplayModeCoordinator {
   /// is a person asking for this display by name and getting fifteen seconds and
   /// an auto-revert, while this pass asks nobody. Hiding the control instead
   /// would make it vanish and reappear under the user's hands — mirroring is a
-  /// hotkey in this very app (`Mirroring.engageMirror`) — to protect them from a
+  /// hotkey in this very app (`MirroringCoordinator.toggleUnlessSingleDisplay`,
+  /// bound to Cmd+BrightnessDown) — to protect them from a
   /// mode change they explicitly requested and can undo by waiting.
   ///
   /// It writes NO preferences — in particular a substitute is never stored over
@@ -495,6 +496,42 @@ final class DisplayModeCoordinator {
   @discardableResult
   func revert(_ answered: Preview) async -> ModePreviewOutcome {
     await enqueueReturning { await self.performResolve(answered, keeping: false) }
+  }
+
+  /// Ends any outstanding MODE preview and reports whether the display is back
+  /// where it started.
+  ///
+  /// Called by `MirroringCoordinator` before a mirror preview begins, and it
+  /// runs inside THIS coordinator's queue so the two never interleave two
+  /// `CGBeginDisplayConfiguration` transactions on the same displays. The two
+  /// preview sessions cannot literally share one task chain — two `@MainActor
+  /// @Observable` coordinators cannot without being merged into one object — so
+  /// the ordering is enforced by the mirror chain AWAITING this, which is the
+  /// same guarantee reached from the other side.
+  ///
+  /// A mirror engage would otherwise move a display out from under a preview
+  /// whose fallback mode was captured before it — and the mode preview's own
+  /// recovery surface would then be on a display that has no `NSScreen`.
+  ///
+  /// Returns false when the revert FAILED, which is the mirror side's cue to
+  /// refuse: the same refusal `ModePreviewSession.begin` already makes across
+  /// displays, for the same reason.
+  func endOutstandingPreview() async -> Bool {
+    await enqueueReturning {
+      guard let outstanding = await self.session.previewedMode else { return true }
+      // Built FROM the session, so the intent check inside `performResolve`
+      // cannot see it as stale: it is by construction the preview that is
+      // outstanding. `secondsRemaining: 0` and `isCountingDown: false` are the
+      // honest description of an answer nobody waited for.
+      let answered = Preview(
+        displayID: outstanding.displayID,
+        mode: outstanding.mode,
+        secondsRemaining: 0,
+        failure: nil,
+        isCountingDown: false
+      )
+      return await self.performResolve(answered, keeping: false) == .reverted
+    }
   }
 
   /// THE only place `startFailure` is cleared, for the same reason `store` is

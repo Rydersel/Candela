@@ -145,8 +145,13 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
 
   /// The same transaction discipline as `apply`, with the mirror call
   /// substituted for the mode call. Every invariant below exists because the
-  /// transplanted `Mirroring.swift` violated it — that file stages its changes,
-  /// discards all four return values, and returns `true` regardless.
+  /// transplanted `Mirroring.swift` violated it — that file staged its changes,
+  /// discarded all four return values, and returned `true` regardless.
+  ///
+  /// It has since been DELETED and its one live caller (Cmd+BrightnessDown)
+  /// routed through `MirroringCoordinator`, so the citations here and below are
+  /// historical: there is no second mirror implementation left to drift from
+  /// this one.
   public func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws {
     // An empty transaction commits `.success` having changed nothing, which is
     // indistinguishable from having worked. Open nothing.

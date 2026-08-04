@@ -82,10 +82,18 @@ final class KeyActionExecutor {
         }
       }
     case let .toggleMirroringOrStepDown(isFine):
-      // Fork fall-through: when mirroring is not applicable (single display),
-      // Cmd+BrightnessDown acts as a normal brightness-down step — and a plain
-      // step is `.affected`, same as rule 6.
-      if !Mirroring.engageMirror() {
+      // Fork fall-through, PRESERVED: when mirroring is not applicable (a
+      // single display), Cmd+BrightnessDown acts as a normal brightness-down
+      // step — and a plain step is `.affected`, same as rule 6.
+      //
+      // `.onlyOneDisplay` is the ONE refusal that falls through. The other six
+      // become a report on screen rather than a silent `false`, which is what
+      // the bare `Bool` this replaced could not express.
+      //
+      // The coordinator answers SYNCHRONOUSLY for exactly this question and
+      // queues everything else: a keypress cannot wait for a task chain to
+      // learn whether it was a keypress about brightness.
+      if !model.mirroring.toggleUnlessSingleDisplay() {
         execute(.stepBrightness(isUp: false, isFine: isFine, scope: .affected), isFresh: isFresh)
       }
     case let .stepVolume(isUp, isFine):
