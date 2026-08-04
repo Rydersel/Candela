@@ -66,6 +66,13 @@ final class MirrorTopologySampler {
   /// store would otherwise report every slave as its own drawable display.
   func start() {
     refresh()
+    // Insurance, one line: a second `start()` would otherwise overwrite
+    // `observer` and leak the first registration, leaving two blocks writing the
+    // store on every notification. Harmless today — the blocks capture only
+    // `Sendable` values and write the same whole sample — and called exactly
+    // once, which is precisely why the second caller would be the one nobody
+    // reasons about.
+    guard observer == nil else { return }
     observer = NotificationCenter.default.addObserver(
       forName: NSApplication.didChangeScreenParametersNotification,
       object: nil,

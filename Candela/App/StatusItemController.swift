@@ -93,6 +93,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// coordinator references it weakly — the countdown must outlive the menu
   /// tracking session that started it, so the window cannot be owned by a view.
   private var modeConfirmation: ModeConfirmationWindow?
+  /// Answers a mirror preview, and reports a mirror change that was refused,
+  /// failed, or only partly happened. Held for the same reason as the mode
+  /// window above — and additionally because the hotkey has no other surface at
+  /// all, so this is the only thing that can say anything about it.
+  private var mirrorConfirmation: MirrorConfirmationWindow?
   /// Stored (review M23) so the topology loop can `cleanupDisplay` departed
   /// displays' HUD panels; the executor shares this same instance.
   private let hud = BrightnessHUD()
@@ -319,6 +324,37 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       self.settingsActions.prefDidChange(.storedDisplayMode, persistenceKey: key)
     }
 
+    // Mirroring's own surface. Same argument as the resolution window, plus one
+    // this one has on its own: a mirror change can be started from a HOTKEY,
+    // with no panel and no settings window anywhere, so without this a refusal
+    // or a failed apply would be completely silent.
+    let mirrorConfirmation = MirrorConfirmationWindow(coordinator: model.mirroring)
+    mirrorConfirmation.drawableDisplayID = { [weak self] displayID in
+      self?.model.mirrorTopology.drawableDisplayID(for: displayID) ?? displayID
+    }
+    self.mirrorConfirmation = mirrorConfirmation
+    model.mirroring.confirmation = mirrorConfirmation
+    model.mirroring.displayName = { [weak self] displayID in
+      guard let state = self?.model.allControlledStates.first(where: { $0.id == displayID })
+      else { return "" }
+      // The panel's own naming rule, so a renamed display is named the same way
+      // wherever it is named.
+      return PanelView.title(for: state.display)
+    }
+    // The orphaned-shade fix (see `MirroringCoordinator.rebuildSoftwareDimming`).
+    // Wired here because it needs an AppKit island and the display list; D28
+    // decides WHICH door — `reapplyAfterPrefChange()`, never
+    // `handleReconfigure(recapture:)` and never `setBrightness(sameValue)`,
+    // because the first re-runs only the software leg and no-ops in pure-DDC
+    // mode and the second is memo-suppressed.
+    model.mirroring.rebuildSoftwareDimming = { [weak self] in
+      guard let self else { return }
+      self.shadeOverlay.removeAllShades()
+      for state in self.model.displays {
+        state.controller.reapplyAfterPrefChange()
+      }
+    }
+
     // Topology consumption loop — the stream's single consumer: after each
     // debounced reconfiguration (or post-wake sober), re-discover displays,
     // re-arm the media-key tap, and drop departed displays' HUD panels.
@@ -330,6 +366,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // trigger, but everything below this line may resolve a drawable ID and
         // none of it should read a topology older than this event.
         self.mirrorSampler.refresh()
+        // Cheap (one `displays()` call), and it is what every drawable-ID
+        // resolution in the app reads. The coordinator observes the raw
+        // screen-parameters notification itself, so this is the same kind of
+        // backstop the line above is — not the primary trigger.
+        self.model.mirroring.refreshTopology()
         let departed = await self.model.refresh()
         self.refreshTapConfig()
         self.updateStatusItemVisibility()
@@ -356,15 +397,32 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // reset cannot wipe an earlier display's just-reapplied dim.
         self.gammaController.resetAllGamma()
         // Shades reset the same way, in the same place, and for a reason the
-        // gamma line does not have: a shade is created, keyed, alpha'd and
-        // removed under the DRAWABLE id, so a topology change MOVES ITS KEY.
-        // A mirror breaking leaves the ex-master's shade holding its last dim
-        // alpha at `CGShieldingWindowLevel()` under a key nothing will ever
-        // name again — a black film over a display, above everything, with no
-        // route out of it inside the app short of quitting. Nothing else in
-        // this path removes shades (`removeAllShades` otherwise runs only at
-        // terminate and at wipe-all-settings), and this loop is where the
-        // topology change becomes visible.
+        // gamma line does not have: a shade is created, keyed, framed, alpha'd
+        // and removed under the DRAWABLE id, so a topology change MOVES ITS KEY.
+        //
+        // The direction that STRANDS one is a mirror ENGAGING. Display S is
+        // software-dimming under key S; S becomes a slave; S's controller
+        // resolves to the master from that instant on, so key S is never named
+        // again; `repinFrames()` explicitly skips it (S has no `NSScreen`, and
+        // the deliberate choice there is to leave the window alone rather than
+        // guess a frame); and what is left is a full-screen black window at
+        // `CGShieldingWindowLevel()` holding its last dim alpha over a display
+        // with no desktop, with no route out of it inside the app short of
+        // quitting.
+        //
+        // A mirror BREAKING does not strand anything, and the distinction is
+        // worth stating so nobody narrows this call to that path: the ex-master
+        // resolves to itself (it was never a slave) and re-names its own key on
+        // the next re-apply, and the ex-slave gets a fresh shade under its own
+        // id. Removing wholesale covers both, so the call is unconditional.
+        //
+        // Nothing else in this path removes shades (`removeAllShades` otherwise
+        // runs only at terminate and at wipe-all-settings), and this loop is
+        // where the topology change becomes visible. `MirroringCoordinator`
+        // performs the same teardown from the RAW screen-parameters
+        // notification, which is earlier than this debounced stream — see
+        // `rebuildSoftwareDimming`; this remains the backstop for a change that
+        // somehow posts no notification.
         //
         // Safe to do wholesale because the loop below re-establishes it:
         // `handleReconfigure` nils the software dedupe memo and re-runs the

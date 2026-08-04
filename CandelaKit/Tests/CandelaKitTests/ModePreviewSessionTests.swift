@@ -154,14 +154,11 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
   }
 }
 
-/// `Result<Void, _>` is not `Equatable` — `Void` isn't — so the failures are
-/// compared through their error rather than as whole results.
-private extension Result where Success == Void, Failure == DisplayConfigError {
-  var failureError: DisplayConfigError? {
-    if case let .failure(error) = self { return error }
-    return nil
-  }
-}
+// `Result<Void, _>` is not `Equatable`, so `begin`'s failures are compared
+// through their error. The extension that does it lives beside `MirrorFixtures`
+// in `MirrorTopologyTests.swift`: `MirrorPreviewSessionTests` needs the same
+// helper, and `private` at file scope would have forced a second copy — a
+// second thing to get wrong.
 
 @Suite("Mode preview session")
 struct ModePreviewSessionTests {

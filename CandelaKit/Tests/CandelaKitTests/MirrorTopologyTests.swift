@@ -42,6 +42,21 @@ enum MirrorFixtures {
   }
 }
 
+/// `Result<Void, _>` is not `Equatable` — `Void` isn't — so the failures of the
+/// preview sessions' `begin` are compared through their error rather than as
+/// whole results.
+///
+/// File-internal rather than `private`, and living here rather than in either
+/// session's own suite, because BOTH `ModePreviewSessionTests` and
+/// `MirrorPreviewSessionTests` need it. `private` at file scope is invisible to
+/// the other file, and a second copy is a second thing to get wrong.
+extension Result where Success == Void, Failure == DisplayConfigError {
+  var failureError: DisplayConfigError? {
+    if case let .failure(error) = self { return error }
+    return nil
+  }
+}
+
 @Suite("Mirror topology reconstruction (DT13)")
 struct MirrorTopologyTests {
   private func display(

@@ -60,12 +60,22 @@ public protocol MirrorTopologyProviding: Sendable {
 /// behaviour. An unwired engine therefore degrades to the status quo (a lookup
 /// that fails and is REPORTED, DT17) rather than to a crash or a guess.
 ///
-/// It has exactly one writer: `MirrorTopologySampler` in the app target, which
-/// samples at launch and on every `didChangeScreenParameters`. The staleness it
-/// leaves is ONE-DIRECTIONAL and the sampler's doc comment states both halves;
-/// the half worth remembering here is that a sample lagging a mirror BREAKING
-/// resolves to a real but WRONG display, which is the only case in this design
-/// where a caller can succeed at the wrong thing.
+/// It has TWO writers in the app target, and they write the same kind of value
+/// from the same source, so this is last-write-wins over two whole samples and
+/// never a field at a time:
+///
+/// - `MirrorTopologySampler`, which samples at launch and on every
+///   `didChangeScreenParameters`;
+/// - `MirroringCoordinator`, whose `adoptTopology` republishes whatever it just
+///   sampled. It cannot simply read this store instead: its hotkey entry point
+///   samples LIVE, because a keypress must not depend on a notification having
+///   already landed, and the sample it decided from is the one every drawable-ID
+///   resolution should then be reading.
+///
+/// The staleness this leaves is ONE-DIRECTIONAL and the sampler's doc comment
+/// states both halves; the half worth remembering here is that a sample lagging
+/// a mirror BREAKING resolves to a real but WRONG display, which is the only
+/// case in this design where a caller can succeed at the wrong thing.
 public final class MirrorTopologyStore: MirrorTopologyProviding, Sendable {
   private let stored: OSAllocatedUnfairLock<MirrorTopology>
 

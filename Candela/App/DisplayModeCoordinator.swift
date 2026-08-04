@@ -306,7 +306,8 @@ final class DisplayModeCoordinator {
   /// is a person asking for this display by name and getting fifteen seconds and
   /// an auto-revert, while this pass asks nobody. Hiding the control instead
   /// would make it vanish and reappear under the user's hands — mirroring is a
-  /// hotkey in this very app (`Mirroring.engageMirror`) — to protect them from a
+  /// hotkey in this very app (`MirroringCoordinator.toggleUnlessSingleDisplay`,
+  /// bound to Cmd+BrightnessDown) — to protect them from a
   /// mode change they explicitly requested and can undo by waiting.
   ///
   /// It writes NO preferences — in particular a substitute is never stored over
@@ -495,6 +496,51 @@ final class DisplayModeCoordinator {
   @discardableResult
   func revert(_ answered: Preview) async -> ModePreviewOutcome {
     await enqueueReturning { await self.performResolve(answered, keeping: false) }
+  }
+
+  /// Ends any outstanding MODE preview and reports whether the display is back
+  /// where it started.
+  ///
+  /// Called by `MirroringCoordinator` before a mirror ENGAGE preview begins and
+  /// before a mirror BREAK applies, and it runs inside THIS coordinator's queue,
+  /// so that neither path can open a `CGBeginDisplayConfiguration` transaction
+  /// while a mode transaction is still open. The two preview sessions cannot
+  /// literally share one task chain — two `@MainActor @Observable` coordinators
+  /// cannot without being merged into one object — so the ordering is enforced
+  /// by the mirror chain AWAITING this.
+  ///
+  /// **That orders the mirror side and nothing else.** `select` does not call
+  /// the mirror side's equivalent, and the mirror countdown's expiry runs
+  /// detached on the session's executor — so concurrent transactions remain
+  /// possible in those two directions. Stated rather than implied, because the
+  /// narrow guarantee is the one the code delivers.
+  ///
+  /// A mirror engage would otherwise move a display out from under a preview
+  /// whose fallback mode was captured before it — and the mode preview's own
+  /// recovery surface would then be on a display that has no `NSScreen`. A break
+  /// has no such asymmetry to fix; it comes through for the transaction ordering
+  /// alone, and refuses on the same terms rather than inventing a second policy
+  /// for the same failure.
+  ///
+  /// Returns false when the revert FAILED, which is the mirror side's cue to
+  /// refuse: the same refusal `ModePreviewSession.begin` already makes across
+  /// displays, for the same reason.
+  func endOutstandingPreview() async -> Bool {
+    await enqueueReturning {
+      guard let outstanding = await self.session.previewedMode else { return true }
+      // Built FROM the session, so the intent check inside `performResolve`
+      // cannot see it as stale: it is by construction the preview that is
+      // outstanding. `secondsRemaining: 0` and `isCountingDown: false` are the
+      // honest description of an answer nobody waited for.
+      let answered = Preview(
+        displayID: outstanding.displayID,
+        mode: outstanding.mode,
+        secondsRemaining: 0,
+        failure: nil,
+        isCountingDown: false
+      )
+      return await self.performResolve(answered, keeping: false) == .reverted
+    }
   }
 
   /// THE only place `startFailure` is cleared, for the same reason `store` is

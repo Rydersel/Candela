@@ -65,6 +65,18 @@ final class AppModel {
   /// to a guess.
   let mirrorTopology = MirrorTopologyStore()
 
+  /// The mirror toggle, the mirror preview countdown and the published
+  /// topology. Replaces the transplanted `Mirroring.engageMirror`, which the
+  /// Cmd+BrightnessDown hotkey used to call directly.
+  ///
+  /// Lazily constructed because it names two stored properties declared above
+  /// it. `@ObservationIgnored` because the Observation macro cannot wrap a
+  /// `lazy var` — views observe the coordinator's own properties, not this
+  /// reference.
+  @ObservationIgnored private(set) lazy var mirroring = MirroringCoordinator(
+    store: mirrorTopology, modes: displayModes
+  )
+
   /// App-level M4 prefs (startupAction, multiKeyboardVolume, showContrast)
   /// read through one DisplayPrefs like the engine does; the persistence key
   /// is irrelevant for unsuffixed accessors. Assigned in `init` rather than
