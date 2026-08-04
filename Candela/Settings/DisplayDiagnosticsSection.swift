@@ -375,10 +375,16 @@ struct DisplayDiagnosticsSection: View {
 
   private var capabilityAnswerCaption: LocalizedStringKey {
     if capabilities != nil {
-      return "\(AppInfo.productName) asks each display to describe itself once per session."
+      return "\(AppInfo.productName) asks each display to describe itself once after it is plugged in."
     }
     if model.volumeSupport[persistenceKey] != nil {
-      return "\(AppInfo.productName) asked once this session. Either the display sent nothing or it sent something that could not be put back together — from here the two look the same."
+      // "Once this session" would be wider than the cache's real window:
+      // `AppModel.performRefresh` evicts both `volumeSupport` and
+      // `capabilityString` for any display that is no longer live, because a
+      // replug hands out a fresh `IOAVService` and an old answer is not
+      // evidence about the new wire. So the window is the plug, not the
+      // session, and unplugging re-asks.
+      return "\(AppInfo.productName) asked once since this display was plugged in. Either the display sent nothing or it sent something that could not be put back together — from here the two look the same."
     }
     // The one skip that is not "hasn't got round to it yet": DDC is dead under
     // HDR, so `CapabilityProbePolicy` refuses to probe and refuses to cache a
@@ -386,7 +392,7 @@ struct DisplayDiagnosticsSection: View {
     if state.controller.isHDREngaged {
       return "\(AppInfo.productName) does not ask a display that is in HDR mode — hardware commands do not reach it — and will ask once HDR turns off."
     }
-    return "\(AppInfo.productName) asks each display to describe itself once per session. It has not asked this one yet."
+    return "\(AppInfo.productName) asks each display to describe itself once after it is plugged in. It has not asked this one yet."
   }
 
   /// nil means the description did not parse end to end (D24), which is a
@@ -445,11 +451,30 @@ struct DisplayDiagnosticsSection: View {
     }
 
     LabeledContent("Brightness scale") {
-      Text(verbatim: state.controller.didReadMaxDDC
-        ? "This display reported a maximum of \(state.controller.maxDDCValue)"
-        : "Assumed 100 — the display did not report one")
-        .foregroundStyle(.secondary)
+      Text(verbatim: brightnessScaleText).foregroundStyle(.secondary)
     }
+  }
+
+  /// Three answers, because `didReadMaxDDC` being false is not one fact.
+  /// `BrightnessController.refreshFromHardware` returns before it reads for a
+  /// display on the native path or with the brightness command turned off, and
+  /// the pass may simply not have run yet — in all of those it leaves the flag
+  /// false without ever having asked. "The display did not report one" there is
+  /// an absence claim about a probe that never ran, and it rendered directly
+  /// above this same group's "\(AppInfo.productName) has not read from this
+  /// display".
+  ///
+  /// The brightness controller's OWN evidence, not the folded `readEvidence`:
+  /// the maximum comes from the brightness read alone, so a volume read that
+  /// answered must not be allowed to speak for it.
+  private var brightnessScaleText: String {
+    if state.controller.didReadMaxDDC {
+      return "This display reported a maximum of \(state.controller.maxDDCValue)"
+    }
+    if state.controller.readEvidence == .notAttempted {
+      return "Assumed 100 — \(AppInfo.productName) has not asked this display for its scale"
+    }
+    return "Assumed 100 — the display did not report one"
   }
 
   /// The four commands this app speaks, and which of them this display
@@ -501,12 +526,35 @@ struct DisplayDiagnosticsSection: View {
   private var readEvidenceCaption: LocalizedStringKey {
     switch readEvidence {
     case .notAttempted:
-      "Startup behaviour for this display is not set to read values back."
+      notAttemptedCaption
     case .answered:
       "The values shown elsewhere in this window come from the display itself."
     case .allZeros, .noReply:
       "The values shown elsewhere in this window are what \(AppInfo.productName) last wrote, not what the display reports."
     }
+  }
+
+  /// The old sentence — "startup behaviour for THIS DISPLAY is not set to read
+  /// values back" — asserted a cause it could not know, at a scope that does
+  /// not exist. `startupAction` is app-level (`DisplayPrefs` reads it straight
+  /// off the `startupAction` default, unkeyed), and `.notAttempted` also
+  /// arises from Safe Mode, from all three commands being turned off for this
+  /// display, and simply from the first read not having happened yet.
+  ///
+  /// So the two causes that ARE knowable from here are named, in the order
+  /// that matches how they mask each other — under Safe Mode the
+  /// `startupAction` getter reports `.doNothing` regardless of what is stored
+  /// (D11), so reading it first would report the pref rather than the session.
+  /// Everything else falls through to a sentence that states the consequence
+  /// and claims no cause.
+  private var notAttemptedCaption: LocalizedStringKey {
+    if model.isSafeMode {
+      return "Safe Mode is on for this session, so nothing is read back from any display. The values shown elsewhere in this window come from your saved settings, not from the display."
+    }
+    if prefs.startupAction != .read {
+      return "\(AppInfo.productName) is not set to read values back from displays at startup. The values shown elsewhere in this window come from your saved settings, not from the display."
+    }
+    return "Nothing has been read from this display yet. The values shown elsewhere in this window come from your saved settings, not from the display."
   }
 
   // MARK: - 4. What is unavailable, and why
@@ -597,7 +645,23 @@ struct DisplayDiagnosticsSection: View {
     case .unsupported:
       return "Unavailable — this display's description parsed cleanly and does not list the volume command"
     case .unknown:
-      return "Available — this display did not answer, so \(AppInfo.productName) leaves the control on"
+      // A stored `.unknown` has TWO producers
+      // (`AppModel.probeVolumeCapabilities`): `readCapabilityString()` came
+      // back nil, OR a string arrived and `CapabilityString.support(forVCP:in:)`
+      // fell through to `.unknown` because it was unbalanced, carried no
+      // top-level `vcp(` tag, or listed no codes. Only the first is silence.
+      //
+      // In the second, `capabilityString` IS populated — and saying "this
+      // display did not answer" there contradicts, three rows apart, this same
+      // group's "The display answered", its verbatim copy of what the display
+      // sent, and "The description did not parse, so \(AppInfo.productName)
+      // makes no claim about it" (`codes(in:)` fails on exactly the same three
+      // gates, in the same order). The capability row above already draws this
+      // distinction; the row that decides whether a control stays on has more
+      // reason to draw it, not less.
+      return capabilities == nil
+        ? "Available — this display sent no answer \(AppInfo.productName) could read, so the control stays on"
+        : "Available — \(AppInfo.productName) could not read a command list out of this display's description, so the control stays on"
     }
   }
 
@@ -624,12 +688,28 @@ struct DisplayDiagnosticsSection: View {
     return "Unavailable — the \(command) command is turned off for this display"
   }
 
+  /// `supportsHDR` is `cachedSupportsHDR`, and it is false in three different
+  /// situations: the display really lists no HDR modes, the async
+  /// `refreshHDRCaches()` has not landed yet, and `MonitorPanelService`'s
+  /// manager is nil because MonitorPanel.framework did not load ("nil when the
+  /// framework failed to load; every entry point then degrades"). Blaming the
+  /// panel for the last two is the same defect as reporting an unasked display
+  /// as unsupported, so the sentence names both possibilities and says they
+  /// are indistinguishable from here — the shape the capability row above
+  /// already uses.
+  ///
+  /// The DisplayServices check runs FIRST. It is a different framework — the
+  /// one that carries native brightness, which is the only path that reaches a
+  /// display in HDR mode — and it is knowable regardless of what MonitorPanel
+  /// answered. Behind the `supportsHDR` guard it could never fire for the case
+  /// it describes, because a machine with no private frameworks at all fails
+  /// the guard first.
   private var hdrAvailabilityText: String {
-    guard state.controller.supportsHDR else {
-      return "Unavailable — this display reports no HDR modes"
-    }
     guard DisplayServices.isAvailable else {
       return "Unavailable — macOS did not load the framework \(AppInfo.productName) needs for HDR brightness"
+    }
+    guard state.controller.supportsHDR else {
+      return "Unavailable — \(AppInfo.productName) has no HDR answer for this display: either it lists no HDR modes, or macOS did not load the framework \(AppInfo.productName) asks. From here the two look the same."
     }
     return "Available"
   }
@@ -649,7 +729,7 @@ struct DisplayDiagnosticsSection: View {
 
     if !isBuiltIn {
       LabeledContent("HDR") {
-        Text(state.controller.isHDREngaged ? "Engaged" : "Off").foregroundStyle(.secondary)
+        Text(verbatim: state.controller.isHDREngaged ? "Engaged" : "Off").foregroundStyle(.secondary)
       }
 
       // `hdrMode` is the POLICY and `isHDREngaged` the STATE, so the two
@@ -661,7 +741,7 @@ struct DisplayDiagnosticsSection: View {
     }
 
     LabeledContent(writeGateLabel) {
-      Text(model.displayManager.isEpochCurrent(model.displayManager.currentEpoch())
+      Text(verbatim: model.displayManager.isEpochCurrent(model.displayManager.currentEpoch())
         ? "Being sent"
         : "Paused while displays are changing or asleep")
         .foregroundStyle(.secondary)
@@ -670,13 +750,26 @@ struct DisplayDiagnosticsSection: View {
     if model.isSafeMode {
       SettingRow("Shift was held at launch. Saved values are not restored, nothing is read back, and nothing is written at quit. Sliders and keys still work.") {
         LabeledContent("Safe Mode") {
-          Text("On for this session").foregroundStyle(.secondary)
+          Text(verbatim: "On for this session").foregroundStyle(.secondary)
         }
       }
     }
 
-    LabeledContent("Keys being watched") {
-      Text(verbatim: watchedKeysText).foregroundStyle(.secondary)
+    // The caption is attached only to the empty case, which is the state a
+    // single-display rig is actually in: the not-running sibling gives its
+    // reason in the value, and a bare "None" gave none at all. It states the
+    // gates rather than picking one — which of them is holding is not visible
+    // from here, and all of them are necessary conditions.
+    if watchedKeyFamilies.isEmpty, model.lastArmedTapConfig != nil {
+      SettingRow("\(AppInfo.productName) watches a family of keys only while something can act on it: brightness while an external display is connected, volume while the sound output matches a display it controls — and either one only while that family is set to use the media keys. Keys it does not watch go straight to macOS.") {
+        LabeledContent("Keys being watched") {
+          Text(verbatim: watchedKeysText).foregroundStyle(.secondary)
+        }
+      }
+    } else {
+      LabeledContent("Keys being watched") {
+        Text(verbatim: watchedKeysText).foregroundStyle(.secondary)
+      }
     }
 
     if model.accessibility.isWarningWarranted {
@@ -715,9 +808,19 @@ struct DisplayDiagnosticsSection: View {
   /// Reads the LAST ARMED config, not a freshly computed one. The two differ
   /// exactly when a rearm failed — which is the case this row is for (B9).
   private var watchedKeysText: String {
-    guard let config = model.lastArmedTapConfig else {
+    guard model.lastArmedTapConfig != nil else {
       return "None — the media-key tap is not running"
     }
+    let families = watchedKeyFamilies
+    return families.isEmpty
+      ? "None — every media key is going straight to macOS"
+      : families.joined(separator: ", ")
+  }
+
+  /// Split out so the row can tell "watching nothing" from "not running" and
+  /// caption the first without recomputing the words.
+  private var watchedKeyFamilies: [String] {
+    guard let config = model.lastArmedTapConfig else { return [] }
     var families: [String] = []
     if config.watchedKeys.contains(.brightnessUp) || config.watchedKeys.contains(.brightnessDown) {
       families.append("brightness")
@@ -726,7 +829,7 @@ struct DisplayDiagnosticsSection: View {
       || config.watchedKeys.contains(.mute) {
       families.append("volume and mute")
     }
-    return families.isEmpty ? "None" : families.joined(separator: ", ")
+    return families
   }
 
   private var audioMatchText: String {
