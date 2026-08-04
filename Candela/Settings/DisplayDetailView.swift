@@ -46,6 +46,7 @@ struct DisplayDetailView: View {
       identitySection
       panelSection
       displayModeSection
+      mirroringSection
       controlMethodSection
       volumeSection
       tuningSection
@@ -138,6 +139,24 @@ struct DisplayDetailView: View {
 
   private var displayModeSection: some View {
     DisplayModeSection(state: state, coordinator: model.displayModes, actions: actions)
+  }
+
+  // MARK: - Mirroring
+
+  /// One line and one property, like the diagnostics section below. No
+  /// `PaneID` case and no `SettingsRegistry` row — per-display destinations are
+  /// not registry panes (R2, R3). No pref either: mirroring is deliberately not
+  /// persisted and not reapplied (DT20).
+  ///
+  /// Placed after the resolution section and before control method: identity,
+  /// then what the display shows, then how the display is arranged, then how
+  /// Candela drives it. It does NOT belong to R16 — a control that governs
+  /// whether a display *appears* must not live in that display's own
+  /// destination, and mirroring does not remove a display from the sidebar. A
+  /// mirror slave stays online, stays discovered, and keeps its
+  /// `BrightnessController` across a toggle.
+  private var mirroringSection: some View {
+    MirroringSection(state: state, coordinator: model.mirroring)
   }
 
   /// Candela's equivalent of the fork's `controlMethod` subtitle. The BRANCH
