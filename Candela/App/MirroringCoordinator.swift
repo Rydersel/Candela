@@ -210,20 +210,38 @@ final class MirroringCoordinator {
     // The rebuild resolves drawable ids through the store, so a rebuild ahead of
     // the write would re-create the shade under the key it is trying to retire.
     if changed { rebuildSoftwareDimming() }
-    // A member of the previewed set has departed: there is nothing left to apply
-    // the fallback to, and leaving the preview outstanding would wedge every
-    // later begin(). Asked of the SESSION rather than of `preview`, for
+    // A member of the previewed set has departed, so the preview is REVERTED —
+    // never dropped. Dropping is what `DisplayModeCoordinator` does for a mode,
+    // and it is wrong for a set: with two slaves, losing one would leave the
+    // OTHER still mirroring at `.preview` scope with the countdown cancelled and
+    // the window dismissed, i.e. an unapproved topology with no UI and no timer,
+    // recoverable only by quitting. See
+    // `MirrorPreviewSession.revertOnDeparture(displayID:)`.
+    //
+    // Asked of the SESSION rather than of `preview`, for
     // `DisplayModeCoordinator.dropPreviewOnDepartedDisplay`'s reason: the
     // derived copy is nil for several awaits after `begin()` succeeds.
+    //
+    // ONE call, not one per departed id: the whole preview resolves at once, and
+    // `min()` only makes which id gets named deterministic. And no
+    // `refreshTopology()` afterwards, deliberately — this block runs INSIDE
+    // `adoptTopology`, so re-entering it here would spin whenever the revert
+    // keeps failing. A successful revert reconfigures displays and the
+    // screen-parameters notification brings the next sample in on its own.
     enqueue {
       guard let outstanding = await self.session.previewedTopology else { return }
       let live = Set(sample.displays.map(\.id))
       let members = Set([outstanding.confirmationDisplayID] + outstanding.applied.map(\.display))
-      guard !members.isSubset(of: live) else { return }
-      for id in members.subtracting(live) {
-        await self.session.discard(displayID: id)
+      guard let departed = members.subtracting(live).min() else { return }
+      switch await self.session.revertOnDeparture(displayID: departed) {
+      case let .failed(error):
+        // The preview is still outstanding and its countdown still armed, so the
+        // expiry retries. Silence here would leave the failure invisible.
+        self.log.error("Reverting after display \(departed, privacy: .public) departed failed")
+        await self.adopt(.set(error))
+      case .reverted, .committed, .stale, nil:
+        await self.adopt(.clear)
       }
-      await self.adopt(.clear)
     }
   }
 
@@ -324,8 +342,22 @@ final class MirroringCoordinator {
         // The ordering rule: a mirror engage first ends any outstanding MODE
         // preview, and REFUSES if that revert failed — reporting success would
         // leave a display nobody named stranded on an unapproved mode. Awaited
-        // from inside THIS chain, which is what keeps the two coordinators from
-        // interleaving two `CGBeginDisplayConfiguration` transactions.
+        // from inside THIS chain, so the mode revert has completed before this
+        // path opens a `CGBeginDisplayConfiguration` transaction.
+        //
+        // THAT IS THE ENGAGE PATH ONLY, and the guarantee is not general. Three
+        // ways the two coordinators still reach CoreGraphics concurrently:
+        // `DisplayModeCoordinator.select` never asks the mirror side to stand
+        // down (only this direction is ordered); the `.disengage` arm below
+        // applies straight through the configurator without calling
+        // `endOutstandingPreview()` at all; and `startCountdown`'s expiry runs
+        // `tick()` → `applyMirroring` on a DETACHED task, deliberately ungated
+        // on the main actor, so it can overlap a mode apply by construction.
+        // Making it general needs one serialisation point that owns every
+        // `CGBeginDisplayConfiguration` in the app — two `@MainActor
+        // @Observable` coordinators cannot share a task chain without being
+        // merged — and that is a change neither this task nor DT19 makes. What
+        // is claimed here is what is enforced here.
         guard await self.modes.endOutstandingPreview() else {
           self.lastFailure = DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
           self.log.error("Refused a mirror engage: an outstanding mode preview could not be reverted")

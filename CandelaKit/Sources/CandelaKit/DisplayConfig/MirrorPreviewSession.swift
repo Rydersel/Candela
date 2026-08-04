@@ -127,23 +127,38 @@ public actor MirrorPreviewSession {
     }
   }
 
-  /// The display is gone. Drops the outstanding preview WITHOUT applying
-  /// anything — there is nothing left to apply it to.
+  /// A member of the previewed set has departed. **REVERTS the preview**, and
+  /// returns nil when `displayID` is not a member of it (or nothing is
+  /// outstanding at all).
   ///
-  /// Matches on any member of the previewed set, not just the master: any of
-  /// them departing invalidates the set, and leaving the preview outstanding
-  /// would wedge every later `begin()` (which ends a live preview first, and
-  /// REFUSES when that revert fails) until the app restarts.
+  /// **Deliberately NOT `ModePreviewSession.discard`, which drops without
+  /// applying, and deliberately not named the same.** Dropping is right for one
+  /// display and one mode: the departed display is the only thing that preview
+  /// touched, and it keeps nothing, because its mode was app-scoped and is
+  /// renegotiated when it returns. A mirror preview is a SET, and dropping it
+  /// strands the members that did NOT depart —
+  ///
+  /// preview `{1→2, 3→2}`, and display 3 is unplugged inside the 15 s window.
+  /// Dropping leaves display 1 still mirroring 2 at `.preview` scope, with the
+  /// countdown cancelled and the confirmation window dismissed: a topology the
+  /// user never approved, with no UI and no timer, recoverable only by quitting
+  /// the app. That defeats the entire point of previewing, which is that an
+  /// unapproved topology self-heals.
+  ///
+  /// Uniform across master and slave, and neither needs a special case.
+  /// `MirrorTopologyPolicy.changes(from:to:)` iterates the LIVE list, so a
+  /// departed display is never staged; and a departure that emptied the set
+  /// yields an empty change list, which is already a no-op success.
+  ///
+  /// A revert that FAILS leaves the preview outstanding and the countdown where
+  /// it was, exactly as every other resolution here does: nothing moved, so the
+  /// fallback is still the truth, and a still-armed expiry is a free retry.
   @discardableResult
-  public func discard(displayID: CGDirectDisplayID) -> Bool {
-    guard let outstanding else { return false }
+  public func revertOnDeparture(displayID: CGDirectDisplayID) -> ModePreviewOutcome? {
+    guard let outstanding else { return nil }
     let members = Set([outstanding.confirmationDisplayID] + outstanding.applied.map(\.display))
-    guard members.contains(displayID) else { return false }
-    self.outstanding = nil
-    remaining = 0
-    countdownArmed = false
-    lastOutcome = .reverted
-    return true
+    guard members.contains(displayID) else { return nil }
+    return revertOutstanding()
   }
 
   /// Applies `decision` at `.preview` scope and arms the countdown, falling

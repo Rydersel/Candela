@@ -180,31 +180,91 @@ struct MirrorPreviewSessionTests {
     #expect(await session.hasOutstandingPreview)
   }
 
-  /// The master went away. There is nothing left to apply the fallback to, and
-  /// leaving the preview outstanding would wedge every later `begin()`.
-  @Test func discardingTheMastersPreviewAppliesNothing() async {
+  /// The MASTER went away. The preview is REVERTED, not dropped — and the
+  /// departed master needs no special case: `changes(from:to:)` iterates the
+  /// LIVE list, so the surviving slave is staged back to unmirrored and the
+  /// master that is gone is never staged at all.
+  @Test func theMastersDepartureRevertsTheMembersThatRemain() async {
     let fake = FakeConfigurator()
     let session = makeSession(fake)
     let captured = MirrorTopology(fake.displays())
     _ = await session.begin(engageDecision(captured), from: captured)
-    let before = fake.appliedMirroring.count
-    #expect(await session.discard(displayID: 2))
+    fake.configuredDisplays = fake.displays().filter { $0.id != 2 }
+
+    #expect(await session.revertOnDeparture(displayID: 2) == .reverted)
     #expect(await session.hasOutstandingPreview == false)
-    #expect(fake.appliedMirroring.count == before)
+    #expect(fake.appliedMirroring.last == .init(
+      changes: [MirrorChange(display: 1, master: kCGNullDirectDisplay)], scope: .session
+    ))
   }
 
-  /// A SLAVE departing invalidates the set just as surely as the master does —
-  /// the previewed change list names a display that is no longer there, so
-  /// there is nothing left to apply the fallback to either.
-  @Test func discardingASlaveOfThePreviewedSetAlsoDropsIt() async {
+  /// A SLAVE departing resolves the preview rather than abandoning it. With a
+  /// single slave the distinction is invisible — losing it un-mirrors the set
+  /// anyway, so the revert stages nothing and succeeds as a no-op. The two-slave
+  /// case below is the one that makes the difference visible.
+  @Test func aSlavesDepartureResolvesThePreviewRatherThanAbandoningIt() async {
     let fake = FakeConfigurator()
     let session = makeSession(fake)
     let captured = MirrorTopology(fake.displays())
     _ = await session.begin(engageDecision(captured), from: captured)
-    let before = fake.appliedMirroring.count
-    #expect(await session.discard(displayID: 1))
+    fake.configuredDisplays = fake.displays().filter { $0.id != 1 }
+
+    #expect(await session.revertOnDeparture(displayID: 1) == .reverted)
     #expect(await session.hasOutstandingPreview == false)
-    #expect(fake.appliedMirroring.count == before)
+    #expect(await session.isCountingDown == false)
+  }
+
+  /// THE case this behaviour exists for. Preview `{1→2, 3→2}`, and display 3 is
+  /// unplugged inside the countdown window.
+  ///
+  /// Dropping the preview here would leave display 1 STILL mirroring 2 at
+  /// `.preview` scope, with the countdown cancelled and the confirmation window
+  /// dismissed — a topology the user never approved, with no UI and no timer,
+  /// recoverable only by quitting the app. Reverting puts display 1 back and
+  /// stages nothing for the display that left.
+  @Test func aDepartureFromATwoSlaveSetRevertsTheSlaveThatRemains() async {
+    let fake = FakeConfigurator()
+    fake.configuredDisplays = [
+      MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2),
+      MirrorFixtures.display(3),
+    ]
+    let session = MirrorPreviewSession(configurator: fake)
+    let captured = MirrorTopology(fake.displays())
+    _ = await session.begin(engageDecision(captured), from: captured)
+    #expect(fake.appliedMirroring.last?.changes == [
+      MirrorChange(display: 1, master: 2), MirrorChange(display: 3, master: 2),
+    ])
+    fake.configuredDisplays = fake.displays().filter { $0.id != 3 }
+
+    #expect(await session.revertOnDeparture(displayID: 3) == .reverted)
+    #expect(await session.hasOutstandingPreview == false)
+    #expect(fake.appliedMirroring.last == .init(
+      changes: [MirrorChange(display: 1, master: kCGNullDirectDisplay)], scope: .session
+    ))
+    #expect(MirrorTopology(fake.displays()).masters.isEmpty)
+  }
+
+  /// A departure whose revert throws keeps the preview outstanding AND the
+  /// countdown armed, so the expiry is a free retry. Dropping on a failed apply
+  /// would abandon a topology that demonstrably did not move.
+  @Test func aDepartureWhoseRevertFailsKeepsThePreviewOutstanding() async {
+    let fake = FakeConfigurator()
+    fake.configuredDisplays = [
+      MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2),
+      MirrorFixtures.display(3),
+    ]
+    let session = MirrorPreviewSession(configurator: fake)
+    let captured = MirrorTopology(fake.displays())
+    _ = await session.begin(engageDecision(captured), from: captured)
+    fake.configuredDisplays = fake.displays().filter { $0.id != 3 }
+    fake.failMirroringWith = DisplayConfigError(cgErrorCode: 1003)
+
+    #expect(
+      await session.revertOnDeparture(displayID: 3)
+        == .failed(DisplayConfigError(cgErrorCode: 1003))
+    )
+    #expect(await session.hasOutstandingPreview)
+    #expect(await session.isCountingDown)
   }
 
   /// A display that was never in the previewed set leaves the preview — and its
@@ -216,7 +276,7 @@ struct MirrorPreviewSessionTests {
     let session = makeSession(fake)
     let captured = MirrorTopology(fake.displays())
     _ = await session.begin(engageDecision(captured), from: captured)
-    #expect(await session.discard(displayID: 77) == false)
+    #expect(await session.revertOnDeparture(displayID: 77) == nil)
     #expect(await session.hasOutstandingPreview)
     #expect(await session.isCountingDown)
   }

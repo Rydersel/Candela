@@ -501,13 +501,19 @@ final class DisplayModeCoordinator {
   /// Ends any outstanding MODE preview and reports whether the display is back
   /// where it started.
   ///
-  /// Called by `MirroringCoordinator` before a mirror preview begins, and it
-  /// runs inside THIS coordinator's queue so the two never interleave two
-  /// `CGBeginDisplayConfiguration` transactions on the same displays. The two
-  /// preview sessions cannot literally share one task chain — two `@MainActor
-  /// @Observable` coordinators cannot without being merged into one object — so
-  /// the ordering is enforced by the mirror chain AWAITING this, which is the
-  /// same guarantee reached from the other side.
+  /// Called by `MirroringCoordinator` before a mirror ENGAGE preview begins, and
+  /// it runs inside THIS coordinator's queue, so that one path cannot open a
+  /// `CGBeginDisplayConfiguration` transaction while a mode transaction is still
+  /// open. The two preview sessions cannot literally share one task chain — two
+  /// `@MainActor @Observable` coordinators cannot without being merged into one
+  /// object — so the ordering is enforced by the mirror chain AWAITING this.
+  ///
+  /// **That orders the engage path and nothing else.** `select` does not call
+  /// the mirror side's equivalent, a mirror `.disengage` applies without coming
+  /// through here, and the mirror countdown's expiry runs detached on the
+  /// session's executor — so concurrent transactions remain possible in those
+  /// three directions. Stated rather than implied, because the narrow guarantee
+  /// is the one the code delivers.
   ///
   /// A mirror engage would otherwise move a display out from under a preview
   /// whose fallback mode was captured before it — and the mode preview's own
