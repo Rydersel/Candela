@@ -105,6 +105,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// (D11), which is what disables both restores for the session. Assigned in
   /// `init` rather than inline because it needs that flag.
   private let restoreCoordinator: RestoreCoordinator
+  /// The only writer to `model.mirrorTopology`. Held for the app's lifetime —
+  /// it owns a block-based notification registration, and dropping it would
+  /// freeze the store at the launch sample without anything saying so.
+  private lazy var mirrorSampler = MirrorTopologySampler(store: model.mirrorTopology)
   private let log = Logger(subsystem: "com.rydersel.Candela", category: "keys")
 
   func applicationDidFinishLaunching(_: Notification) {
@@ -218,6 +222,14 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // acceptable, and the correct trade: `.hide` must take effect at once.
     updateStatusItemVisibility()
 
+    // The mirror topology's only writer, started BEFORE the first discovery
+    // pass: `model.mirrorTopology` is what every drawable-ID resolution reads,
+    // and an unstarted sampler leaves it holding the empty topology — i.e. the
+    // identity function, which is the pre-DT15 behaviour wearing the new seam's
+    // clothes. Launching into an already-engaged mirror set is an ordinary way
+    // to start, so the launch sample is not a formality.
+    mirrorSampler.start()
+
     // Reconfiguration intake: synchronous registration on the main thread is
     // load-bearing — CG delivers the callback on the registering thread's
     // run loop, and only the main thread has one that lives forever.
@@ -286,6 +298,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // in the row that started the change and in the window that confirms it.
       return PanelView.title(for: state.display)
     }
+    // Resolved through the store on each use rather than captured as a value:
+    // the window outlives any single topology, and a mirror can engage while it
+    // is up — which for a MIRROR preview is not a hypothetical, it is the thing
+    // being previewed.
+    confirmation.drawableDisplayID = { [weak self] displayID in
+      self?.model.mirrorTopology.drawableDisplayID(for: displayID) ?? displayID
+    }
     modeConfirmation = confirmation
     model.displayModes.confirmation = confirmation
     // D27: the coordinator writes `storedDisplayMode` on a commit, and the seam
@@ -307,6 +326,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       guard let stream = self?.model.displayManager.topologyChanges else { return }
       for await _ in stream {
         guard let self else { return }
+        // Backstop, and first: the screen-parameters observer is the primary
+        // trigger, but everything below this line may resolve a drawable ID and
+        // none of it should read a topology older than this event.
+        self.mirrorSampler.refresh()
         let departed = await self.model.refresh()
         self.refreshTapConfig()
         self.updateStatusItemVisibility()
@@ -332,6 +355,24 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // table). Done here rather than per display so a later display's
         // reset cannot wipe an earlier display's just-reapplied dim.
         self.gammaController.resetAllGamma()
+        // Shades reset the same way, in the same place, and for a reason the
+        // gamma line does not have: a shade is created, keyed, alpha'd and
+        // removed under the DRAWABLE id, so a topology change MOVES ITS KEY.
+        // A mirror breaking leaves the ex-master's shade holding its last dim
+        // alpha at `CGShieldingWindowLevel()` under a key nothing will ever
+        // name again — a black film over a display, above everything, with no
+        // route out of it inside the app short of quitting. Nothing else in
+        // this path removes shades (`removeAllShades` otherwise runs only at
+        // terminate and at wipe-all-settings), and this loop is where the
+        // topology change becomes visible.
+        //
+        // Safe to do wholesale because the loop below re-establishes it:
+        // `handleReconfigure` nils the software dedupe memo and re-runs the
+        // software leg, which recreates the shade under the NEW drawable id.
+        // Displays with no shade to recreate — native path, pure DDC, and the
+        // built-in slot (`shade: nil`, so it is never in this dictionary at
+        // all) — are unaffected.
+        self.shadeOverlay.removeAllShades()
         for state in self.model.displays {
           await state.controller.noteHDRStateMayHaveChanged()
           await state.controller.handleReconfigure()

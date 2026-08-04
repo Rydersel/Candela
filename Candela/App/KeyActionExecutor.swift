@@ -53,7 +53,7 @@ final class KeyActionExecutor {
         let anchor: CGDirectDisplayID? = (mode == .focusInsteadOfMouse
           ? FocusedDisplay.frontmostWindowDisplayID()
           : nil) ?? Self.pointerDisplayID()
-        let affected = anchor.map(Self.expandToMirrorSet) ?? []
+        let affected = anchor.map(expandToMirrorSet) ?? []
         let stepped = model.stepBrightness(
           displayIDs: affected, isUp: isUp, isFine: isFine, isFresh: isFresh
         )
@@ -121,13 +121,14 @@ final class KeyActionExecutor {
       // follows the brightness mouse policy), with the same fall-back-to-all
       // — fallback BEFORE the isDisabled filter, so a resolved-but-disabled
       // display swallows the press instead of triggering the fallback (R1).
-      let affected = Self.pointerDisplayID().map(Self.expandToMirrorSet) ?? []
+      let affected = Self.pointerDisplayID().map(expandToMirrorSet) ?? []
       var targets = affected.compactMap { id in model.displays.first { $0.id == id } }
       if targets.isEmpty { targets = model.displays }
       for state in model.keyEnabledStates(targets) {
         guard let newValue = state.contrast.step(isUp: isUp, isFine: isFine) else { continue }
         hud?.showHUD(
-          displayID: state.id, type: .contrast, name: hudName(for: state), value: Float(newValue)
+          displayID: hudDisplayID(state.id), type: .contrast,
+          name: hudName(for: state), value: Float(newValue)
         )
       }
     case .openSoundSettings:
@@ -165,7 +166,7 @@ final class KeyActionExecutor {
       // empty match set swallows the press.
       return model.keyEnabledStates(model.audioMatchingDisplays())
     case .mouse:
-      let ids = Self.pointerDisplayID().map(Self.expandToMirrorSet) ?? []
+      let ids = Self.pointerDisplayID().map(expandToMirrorSet) ?? []
       let resolved = ids.compactMap { id in model.displays.first { $0.id == id } }
       // DIVERGENCE from the fork (planner flag 6, endorsed): the fork
       // SWALLOWS the press when the pointer resolves no external (its tap
@@ -183,7 +184,7 @@ final class KeyActionExecutor {
     // consults it solely on the volume paths). The write itself still lands.
     guard !DisplayPrefs(persistenceKey: state.display.persistenceKey).hideOsd else { return }
     hud?.showHUD(
-      displayID: state.id,
+      displayID: hudDisplayID(state.id),
       type: state.volume.isMuted ? .volumeMuted : .volume,
       name: hudName(for: state),
       value: Float(value)
@@ -194,8 +195,12 @@ final class KeyActionExecutor {
     // Backlog #11 (D6): the HUD mirrors the badge's LIVENESS predicate
     // (isHDREngaged — HDR live however it got there), not the policy
     // (hdrMode). One predicate for both surfaces, decided deliberately.
+    //
+    // The NAME and the HDR suffix stay keyed on the display that was STEPPED;
+    // only the placement resolves. A pill on the master naming the panel whose
+    // brightness moved is the honest reading of a mirror set.
     hud?.showBrightness(
-      displayID: id,
+      displayID: hudDisplayID(id),
       name: hudName(id: id, hardwareName: name),
       value: value,
       nameSuffix: hdrSuffix(for: id)
@@ -241,24 +246,48 @@ final class KeyActionExecutor {
     return screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
   }
 
-  /// `displayID` plus, when it is the master of a mirror set, every online
-  /// display mirroring it (fork: the mirror-set expansion inside
-  /// `getAffectedDisplays`). A mirrored member is never the pointer's display
-  /// in practice, but the master's ID is what the pointer resolves to, and the
-  /// members need the same step. Non-mirrored displays expand to themselves.
-  private static func expandToMirrorSet(_ displayID: CGDirectDisplayID) -> [CGDirectDisplayID] {
-    guard CGDisplayIsInHWMirrorSet(displayID) != 0 || CGDisplayIsInMirrorSet(displayID) != 0,
-          CGDisplayMirrorsDisplay(displayID) == kCGNullDirectDisplay
-    else {
-      return [displayID]
-    }
-    var onlineDisplayIDs = [CGDirectDisplayID](repeating: 0, count: 16)
-    var displayCount: UInt32 = 0
-    guard CGGetOnlineDisplayList(16, &onlineDisplayIDs, &displayCount) == .success else {
-      return [displayID]
-    }
-    let members = onlineDisplayIDs.prefix(Int(displayCount))
-      .filter { CGDisplayMirrorsDisplay($0) == displayID }
-    return [displayID] + members
+  /// `displayID` plus, when it is the master of a mirror set, every display
+  /// mirroring it (fork: the mirror-set expansion inside `getAffectedDisplays`).
+  /// A mirrored member is never the pointer's display in practice, but the
+  /// master's ID is what the pointer resolves to, and the members need the same
+  /// step — the set shows one picture, so stepping only the master would leave
+  /// it visibly mismatched. Non-mirrored displays expand to themselves.
+  ///
+  /// Reads ONE sample from the topology store rather than re-querying
+  /// CoreGraphics per call site (DT13). The three call sites here each used to
+  /// take a fresh `CGGetOnlineDisplayList` plus N `CGDisplayMirrorsDisplay`
+  /// calls, so two presses a frame apart could disagree about the topology —
+  /// and the predicate they used was one of the three disagreeing definitions
+  /// of "mirrored" this app used to carry.
+  ///
+  /// These are STEP targets, so they stay RAW: what comes back is fed to
+  /// `model.stepBrightness(displayIDs:)` and to the volume/contrast
+  /// controllers, which write DDC to the panel the user asked for. Nothing on
+  /// this path resolves to a master — D29 leaves it UNVERIFIED whether a
+  /// slave's DDC is suppressed, and treating it as unavailable would put VCP
+  /// 0x8D out of reach and strand a hardware-muted panel with no way back.
+  private func expandToMirrorSet(_ displayID: CGDirectDisplayID) -> [CGDirectDisplayID] {
+    model.mirrorTopology.topology().expand(displayID)
+  }
+
+  /// Where this display's HUD belongs: its own screen, or its mirror MASTER's.
+  ///
+  /// A mirrored panel is absent from `NSScreen.screens`, so `BrightnessHUD`'s
+  /// lookup returns nil and it shows nothing at all — silently, while the DDC
+  /// write lands and the panel visibly changes. Resolving here rather than
+  /// inside the island keeps the island free of judgement (DT16).
+  ///
+  /// A stepped set therefore shows ONE pill, on the master: every member
+  /// resolves to the same ID, and `BrightnessHUD` keys its windows by ID. Only
+  /// the PLACEMENT resolves — the name and the HDR suffix stay keyed on the
+  /// display that was stepped.
+  ///
+  /// A sample that lags a mirror BREAKING resolves an ex-slave to its
+  /// ex-master, which is a real screen: the pill lands on the wrong display for
+  /// the moment before the next screen-parameters notification. That is the
+  /// one-directional half of the store's guarantee, and a misplaced pill is the
+  /// cheapest place in the app to pay it.
+  private func hudDisplayID(_ displayID: CGDirectDisplayID) -> CGDirectDisplayID {
+    model.mirrorTopology.drawableDisplayID(for: displayID)
   }
 }

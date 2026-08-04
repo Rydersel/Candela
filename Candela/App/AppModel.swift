@@ -57,10 +57,12 @@ final class AppModel {
   /// enforcer get an ID that is already guaranteed drawable; every reader gets
   /// a value, never a query.
   ///
-  /// NOTHING UPDATES IT YET — a later task wires the sampler that calls
-  /// `update(_:)` at launch and on every screen-parameters change. Until then
-  /// it holds the empty topology, whose resolution is the identity function, so
-  /// the engine behaves exactly as it did before this seam existed.
+  /// Its ONE writer is `MirrorTopologySampler`, which `StatusItemController`
+  /// starts at launch and which then follows every screen-parameters change.
+  /// Before it starts — and if `CGGetOnlineDisplayList` ever fails — this holds
+  /// the empty topology, whose resolution is the identity function, i.e. exactly
+  /// the behaviour that predates this seam. It degrades to the status quo, never
+  /// to a guess.
   let mirrorTopology = MirrorTopologyStore()
 
   /// App-level M4 prefs (startupAction, multiKeyboardVolume, showContrast)

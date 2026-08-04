@@ -566,6 +566,16 @@ public final class BrightnessController {
   /// Where this display's pixels actually are: itself, or its mirror master.
   /// Read fresh on every use — the topology is a sample of one instant and a
   /// cached copy would be a promise about a machine that has moved on.
+  ///
+  /// **In a mirror set, every member's controller resolves to the SAME id**, so
+  /// they all drive one shade window and one gamma enforcer position, each
+  /// memoising its own `lastAppliedSw` as applied. Two controllers therefore
+  /// believe they own a surface only the last writer actually set. This is not a
+  /// defect to fix: a mirror set is ONE framebuffer, so one dimming surface is
+  /// the only physically meaningful answer — dimming a slave separately from its
+  /// master is not a thing the hardware can do. Recorded because the memo makes
+  /// it look like two independent applies succeeded, and someone reading
+  /// `lastAppliedSw` for a slave will otherwise expect a surface of its own.
   private var drawableDisplayID: CGDirectDisplayID {
     mirrorTopology.drawableDisplayID(for: displayID)
   }

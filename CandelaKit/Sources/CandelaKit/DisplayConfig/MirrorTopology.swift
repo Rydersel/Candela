@@ -115,8 +115,27 @@ public struct MirrorTopology: Sendable, Equatable {
   /// topology must never invent a target: that fallback is exactly today's
   /// behaviour, which then fails its `NSScreen` lookup and is REPORTED (DT17)
   /// rather than guessed at.
+  ///
+  /// INTERSECTED WITH THE SAMPLE, for the same reason `setMembers(containing:)`
+  /// is and `master(of:)` deliberately is not. A slave names its master by ID
+  /// and that ID need not be in `displays` — a stale sample, or a topology built
+  /// from a filtered list. `master(of:)` reports it anyway because it is a fact
+  /// ABOUT THE SLAVE; this is a TARGET, and its whole contract is that the
+  /// caller may act on it without looking it up first. Every consumer here does
+  /// exactly that: `GammaController` parks its activity enforcer on the result,
+  /// `ShadeOverlay` frames a window on it, `BrightnessHUD` and
+  /// `ModeConfirmationWindow` place themselves on it.
+  ///
+  /// Handing back a phantom master would be strictly worse than handing back the
+  /// raw ID, and not merely equivalent. Both fail the `NSScreen` lookup, but the
+  /// phantom can NEVER succeed, while the raw ID succeeds the moment the sample
+  /// was merely stale about mirroring and the display has a screen of its own.
+  /// Since Task 5 the gamma leg clears its dedupe memo on failure, so a target
+  /// that can never resolve is re-attempted and re-logged on every drag event —
+  /// a live-lock on the hottest path in the app rather than a one-off refusal.
   public func drawableDisplayID(for displayID: CGDirectDisplayID) -> CGDirectDisplayID {
-    guard let entry = displays.first(where: { $0.id == displayID }), entry.isMirrorSlave
+    guard let entry = displays.first(where: { $0.id == displayID }), entry.isMirrorSlave,
+          displays.contains(where: { $0.id == entry.mirrorsDisplay })
     else { return displayID }
     return entry.mirrorsDisplay
   }

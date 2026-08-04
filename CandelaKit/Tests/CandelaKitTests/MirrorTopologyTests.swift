@@ -139,6 +139,21 @@ struct MirrorTopologyTests {
     #expect(topology.masters.isEmpty)
   }
 
+  /// The same intersection, on the one accessor whose result is ACTED ON. A
+  /// phantom master can never have an `NSScreen`, so returning it would refuse
+  /// gamma dimming for that panel forever — and since the software leg clears
+  /// its dedupe memo on failure (DT17), forever means once per drag event, with
+  /// a log line each. The raw ID at least resolves whenever the sample was
+  /// merely stale about mirroring. `master(of:)` above still reports the
+  /// phantom, because that is a fact about the slave rather than a target.
+  @Test func aDrawableTargetIsNeverADisplayThisSampleDoesNotContain() {
+    let topology = MirrorTopology([display(1, builtIn: true), display(2, mirrors: 9)])
+    #expect(topology.drawableDisplayID(for: 2) == 2)
+    #expect(topology.master(of: 2) == 9)
+    // The present-master case is untouched: intersection narrows nothing real.
+    #expect(MirrorFixtures.mirroredTrio.drawableDisplayID(for: 1) == 2)
+  }
+
   /// The type promises `id`-ascending everywhere, and `displays` is part of
   /// "everywhere". Two samples of one unchanged machine that differ only in
   /// `CGGetOnlineDisplayList` order are the same topology, and `Equatable` —
@@ -147,5 +162,20 @@ struct MirrorTopologyTests {
     let scrambled = MirrorTopology([display(7), display(2), display(4)])
     #expect(scrambled.displays.map(\.id) == [2, 4, 7])
     #expect(scrambled == MirrorTopology([display(2), display(4), display(7)]))
+  }
+
+  /// The "one HUD per set" property, stated purely. A stepped mirror set has to
+  /// show ONE pill on the master: without this, every member resolves to the
+  /// same screen origin and a four-panel set stacks four HUD windows at one
+  /// point with the last write winning.
+  ///
+  /// It is a property of `expand` and `drawableDisplayID` together, not of new
+  /// code — which is exactly why it is worth pinning. It fails the moment
+  /// someone "simplifies" `expand` to return raw members, or teaches
+  /// `drawableDisplayID` to hand a slave back unresolved.
+  @Test func everyMemberOfASetResolvesToTheSameDrawableDisplay() {
+    let topology = MirrorFixtures.mirroredTrio
+    let targets = Set(topology.expand(2).map(topology.drawableDisplayID(for:)))
+    #expect(targets == [2])
   }
 }

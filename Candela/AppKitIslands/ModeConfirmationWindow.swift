@@ -29,6 +29,15 @@ final class ModeConfirmationWindow: ModeConfirmationPresenting {
   /// deliberately empty rather than a hardware name: an unwired presenter
   /// should look unfinished in testing, not plausibly right.
   var displayName: (CGDirectDisplayID) -> String = { _ in "" }
+  /// Resolves a display to one that has an `NSScreen` — itself, or its mirror
+  /// master (DT15). Injected for the same reason `displayName` is: the island
+  /// holds no topology of its own and exercises no judgement about mirroring
+  /// (DT16).
+  ///
+  /// The default is the IDENTITY function and not something obviously broken,
+  /// because identity is exactly the old behaviour and is right for every
+  /// unmirrored display. Wired at launch in `StatusItemController`.
+  var drawableDisplayID: (CGDirectDisplayID) -> CGDirectDisplayID = { $0 }
 
   private var panel: NSPanel?
   /// What the window is currently showing, or nil while hidden.
@@ -48,13 +57,30 @@ final class ModeConfirmationWindow: ModeConfirmationPresenting {
   func presentConfirmation(_ content: ModeConfirmationContent) {
     guard shown != content else { return }
     let displayID = content.displayID
-    // No screen for the display this is about: either it has departed (the
+    // The window goes where there are PIXELS. For a mode preview on a display
+    // that has since become a mirror slave this is a rescue; for a MIRROR
+    // preview it is the mechanism — the display named in the request loses its
+    // screen the instant the preview applies, so an unresolved lookup would
+    // dismiss the one surface offering the revert.
+    //
+    // Resolution is one-directional in its safety, and the unsafe direction
+    // reaches here. A sample lagging a mirror ENGAGING self-heals: the lookup
+    // fails, the guard below dismisses, `shown` goes back to nil, and the next
+    // countdown tick — which is otherwise a no-op, `shown != content` being
+    // false — re-runs this against a caught-up sample and puts the window up.
+    // A sample lagging a mirror BREAKING does NOT: the ex-master is a real
+    // screen, so the window appears on the WRONG display, `shown` records it,
+    // and no later tick re-positions it. The window is answerable where it
+    // lands and the countdown still reverts, so the cost is a confirmation on
+    // the wrong panel for the life of one preview, not an unanswerable one.
+    let placement = drawableDisplayID(displayID)
+    // No screen even after resolving: either the display has departed (the
     // coordinator discards the preview on the next screen-parameters
     // notification) or the list has not caught up with the reconfiguration yet.
     // Hide rather than leave a window naming the previous display up — a preview
     // retries this on every countdown tick, so a momentarily stale screen list
     // self-heals a second later.
-    guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
+    guard let screen = NSScreen.screens.first(where: { $0.displayID == placement }) else {
       dismissConfirmation()
       return
     }

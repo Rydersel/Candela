@@ -110,6 +110,19 @@ final class BrightnessHUD: BrightnessHUDPresenting {
 
   // MARK: - Presentation
 
+  /// `displayID` must ALREADY be a drawable display — resolved through the
+  /// mirror topology by the caller (DT15/DT16). A mirror slave is absent from
+  /// `NSScreen.screens`, so an unresolved ID lands in the guard below and shows
+  /// nothing at all, silently, while the write still reaches the panel.
+  ///
+  /// The island keeps its one-line lookup and no judgement; the mirror
+  /// awareness lives in the engine. `menuBarAllowance(for:)` therefore measures
+  /// the MASTER's menu bar for a mirror set, which is correct — the set's menu
+  /// bar is the master's — and is not a thing to "fix" back.
+  ///
+  /// The name is a separate question from the placement and is deliberately NOT
+  /// resolved: a pill on the master naming the panel whose brightness moved is
+  /// the honest reading of a mirror set.
   func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String, value: Float, maxValue: Float = 1, nameSuffix: String? = nil) {
     guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
       return
