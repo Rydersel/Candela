@@ -216,6 +216,36 @@ public class Arm64DDC: NSObject {
     return matchScore
   }
 
+  /// Physical panel size in CENTIMETRES, from
+  /// `CoreDisplay_DisplayCreateInfoDictionary`'s image-size fields (which are
+  /// in millimetres).
+  ///
+  /// `ioregMatchScore` already reads exactly these two fields on every
+  /// discovery pass and uses them only to score an EDID-UUID substring match,
+  /// then drops them. Read separately here rather than threaded out of the
+  /// scorer: the scorer's job is scoring — it runs once per (displayID ×
+  /// ioreg service) candidate pair and returns a single Int, so widening its
+  /// return to carry a by-product would change a hot inner loop's shape for
+  /// the benefit of a read-only pane. One extra
+  /// `CoreDisplay_DisplayCreateInfoDictionary` per MATCHED display per
+  /// discovery pass (strictly fewer calls than the scorer already makes, since
+  /// matches are a subset of candidate pairs) is cheaper than entangling the
+  /// two, and it is a CoreDisplay dictionary read — no I2C, so no DDC
+  /// transaction, timing, retry or written value is touched.
+  ///
+  /// Guards `> 0` deliberately: a panel that declares 0 mm has declared
+  /// nothing, and reporting "0 × 0 cm" would be a row stating a fabricated
+  /// number rather than admitting it has none.
+  static func physicalSizeCm(displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
+    guard let dictionary = CoreDisplay_DisplayCreateInfoDictionary(displayID)?
+      .takeRetainedValue() as NSDictionary?,
+      let horizontal = dictionary[kDisplayHorizontalImageSize] as? Int64,
+      let vertical = dictionary[kDisplayVerticalImageSize] as? Int64,
+      horizontal > 0, vertical > 0
+    else { return nil }
+    return (Int(horizontal / 10), Int(vertical / 10))
+  }
+
   static func ioregIterateToNextObjectOfInterest(interests: [String], iterator: inout io_iterator_t) -> (name: String, entry: io_service_t, preceedingEntry: io_service_t)? {
     var entry: io_service_t = IO_OBJECT_NULL
     var preceedingEntry: io_service_t = IO_OBJECT_NULL
