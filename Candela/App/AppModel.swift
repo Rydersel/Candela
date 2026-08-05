@@ -159,6 +159,13 @@ final class AppModel {
     lastArmedTapConfig = config
   }
 
+  /// The tap was torn down (#59: revocation). Diagnostics must report "the
+  /// media-key tap is not running", not the config of a tap that no longer
+  /// exists.
+  func noteTapDisarmed() {
+    lastArmedTapConfig = nil
+  }
+
   /// The gamma-interference monitor, injected by `StatusItemController` after
   /// construction (it owns the AppKit alert island the monitor needs). Read
   /// ONLY for reporting — nothing here drives it.

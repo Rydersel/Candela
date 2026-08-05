@@ -548,10 +548,16 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // down any existing tap before creating the new one, so no explicit
         // stop is needed here.
         self.startMediaKeyTap()
+      } else {
+        // Revocation MUST tear the tap down (#59). [MEASURED 2026-08-05]
+        // Revoking the grant under a live active head-insert tap wedges
+        // WindowServer — the entire input system freezes until the tap's mach
+        // port dies. stop() invalidates the port, the same kernel-level
+        // release as the process death that recovered the machine both times.
+        // The banner still re-appears on its own via `isGranted` observation.
+        self.mediaKeyTap?.stop()
+        self.model.noteTapDisarmed()
       }
-      // Revocation needs no action: `isGranted` is observable, so the panel
-      // banner re-appears on its own now that the source no longer latches,
-      // and the dead tap is rebuilt on the next grant.
     }
 
     // Warm the display list before the first open. Menu tracking can hold the
