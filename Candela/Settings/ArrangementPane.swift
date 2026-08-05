@@ -20,6 +20,7 @@ import SwiftUI
 @MainActor
 struct ArrangementPane: View {
   @Environment(AppModel.self) private var model
+  @Environment(SettingsActions.self) private var actions
 
   /// Reconciled against the live layout on every read rather than seeded once —
   /// displays come and go while this pane is open, and a selection naming a
@@ -46,6 +47,7 @@ struct ArrangementPane: View {
     let _ = model.prefsRevision
     Form {
       arrangementSection
+      savedLayoutSection
     }
     .formStyle(.grouped)
     .task(id: refusalToken) {
@@ -154,6 +156,86 @@ struct ArrangementPane: View {
     return SettingsCaption(
       "Moves the menu bar and the Dock to this display. You will be asked to keep or undo the change."
     )
+  }
+
+  // MARK: - Saved layouts
+
+  /// The unattended half of the feature: what happens to this layout when the
+  /// displays come back.
+  ///
+  /// Its OWN section rather than another row under the map, because it is a
+  /// different concern — the map is what the user is doing now, this is what the
+  /// app does when nobody is watching — and grouping is what tells two concerns
+  /// apart (layout.md, "group related items"). The header carries information
+  /// the pane's toolbar title does not, which is why this section has one and
+  /// the map's section does not.
+  ///
+  /// It is present with one display attached, for the reason the whole pane is:
+  /// a control that appears and disappears as hardware comes and goes is the
+  /// failure R16 ruled against. What changes is the caption, not the control.
+  private var savedLayoutSection: some View {
+    Section("Saved Arrangements") {
+      SettingRow(caption: rememberCaption) {
+        Toggle("Remember how these displays are arranged", isOn: Binding(
+          get: { coordinator.isRestoringLayout },
+          set: { restoring in
+            // Only the FLAG is announced here. Turning it on ALSO saves the
+            // layout on screen, and that write announces itself from inside the
+            // coordinator (`didSaveArrangement`) — naming `.savedArrangements`
+            // here as well would put the rule in two places, which is exactly
+            // how the stored-mode announcement was lost the first time.
+            coordinator.setRestoringLayout(restoring)
+            actions.prefDidChange(.restoreArrangement)
+          }
+        ))
+      }
+
+      // The restore pass is one of the things Safe Mode suppresses, so in a
+      // safe-mode session this control describes behavior that is not happening.
+      // D11: say so where it changes what the control means, rather than leaving
+      // the pane quietly claiming otherwise. Symbol AND text — never state by
+      // colour alone (color.md).
+      if model.isSafeMode {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+          Image(systemName: "exclamationmark.triangle")
+            .foregroundStyle(.secondary)
+          Text("Safe Mode is on for this session, so no arrangement will be restored.")
+        }
+        SettingsCaption("Shift was held at launch. Relaunch without holding Shift to restore normal startup behavior. Your setting above is unchanged and will be used then.")
+      }
+
+      // The only account an unattended restore ever gives, and it waits here
+      // until the user dismisses it or the display set changes — rendered in the
+      // section whose control made the promise, exactly as the stored-mode
+      // reapply banner sits under "Remember this resolution".
+      if let notice = coordinator.restoreNotice {
+        VStack(alignment: .leading, spacing: 6) {
+          ArrangementCopy.restoreNotice(notice, name: coordinator.displayName)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+          Button("OK") { coordinator.dismissReport() }
+        }
+      }
+    }
+  }
+
+  /// What the toggle will do — and, with one display attached, what there is to
+  /// do it to. Never a control whose effect the user has to guess.
+  private var rememberCaption: SettingsCaption {
+    // Built rather than written as one literal: the sentences are long enough
+    // that a single line is unreadable in source, and `SettingsCaption` has the
+    // `verbatim` initialiser precisely so a composed sentence still gets the
+    // pane's caption styling by construction.
+    let restores = coordinator.arrangement.tiles.count > 1
+      ? "Puts these displays back this way when they reconnect or \(AppInfo.productName) launches."
+      : "Puts a set of displays back the way you left them when that set reconnects or \(AppInfo.productName) launches."
+    guard coordinator.arrangement.tiles.count > 1 else {
+      return SettingsCaption(verbatim: "\(restores) With one display connected there is no arrangement to save yet.")
+    }
+    let updates = "Turning it on saves the arrangement on screen now, and keeping a change you make here updates it."
+    let elsewhere = "Changes you make in System Settings are left alone until the displays reconnect."
+    return SettingsCaption(verbatim: "\(restores) \(updates) \(elsewhere)")
   }
 
   // MARK: - Selection

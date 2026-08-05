@@ -537,6 +537,46 @@ final class ArrangementCoordinator {
     for id in claimed { arrivals.release(id) }
   }
 
+  // MARK: - The saved-layout opt-in
+
+  /// Read live from prefs rather than mirrored into a stored bool, for the
+  /// reason `SMAppService.mainApp.status` is (D10): the settings reset wipes the
+  /// whole domain, and a mirror would survive it.
+  var isRestoringLayout: Bool { persistence.isRestoreEnabled }
+
+  /// Turning it ON also saves the layout on screen now.
+  ///
+  /// `DisplayModeCoordinator.setRemembering`'s reason exactly: without that, the
+  /// toggle does nothing until the next arrangement change, so it reads as
+  /// broken on the very reconnect it was turned on for — and the restore engine
+  /// would ship with nothing to restore. Turning it OFF leaves the saved layout
+  /// alone, matching `ArrangementPersistence.clear`'s ruling that "forget this
+  /// layout" and "stop restoring layouts" are separate answers.
+  ///
+  /// The `savedArrangements` fan-out is NOT the caller's job: it is announced
+  /// from inside `saveIfRestoring` (D27). A view trusted to fan out by hand is
+  /// the arrangement that lost the announcement the first time.
+  func setRestoringLayout(_ restoring: Bool) {
+    persistence.setRestoreEnabled(restoring)
+    guard restoring else { return }
+    enqueue {
+      // NOT while a preview stands. The layout on screen during a countdown is
+      // one nobody has approved, and saving it would file the very arrangement
+      // the user is about to revert — the settings window and the confirmation
+      // panel are on screen together for thirty seconds, so this is reachable.
+      // Asked of the SESSION rather than of `preview`, which is nil for several
+      // awaits after a `begin()` succeeds and so cannot answer it. Nothing is
+      // lost by waiting: keeping the change saves it through `resolve`.
+      guard await self.session.previewedArrangement == nil else { return }
+      // A fresh sample rather than the last one this coordinator happens to
+      // hold: the pane can sit open across a reconfiguration, and saving a stale
+      // layout would file an arrangement the machine is not in under the set it
+      // is in.
+      self.refreshArrangement()
+      self.saveIfRestoring()
+    }
+  }
+
   /// Records the layout the user just approved, so the next time this display
   /// set shows up it comes back.
   ///
