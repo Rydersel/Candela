@@ -64,6 +64,25 @@ enum DisplayModeCopy {
     "\(AppInfo.productName) could not switch this display. Nothing changed."
   }
 
+  /// The sentence for either reason a selection took no effect, in ONE place:
+  /// three surfaces render `StartFailure`, and a reason added without a row here
+  /// is a compile error rather than three surfaces disagreeing.
+  static func startFailure(_ reason: DisplayModeCoordinator.StartFailure.Reason) -> LocalizedStringKey {
+    switch reason {
+    case .failed: startFailure
+    case let .blocked(claimant): ReconfigurationCopy.blocked(by: claimant)
+    }
+  }
+
+  /// The tooltip beside it. Diagnostic rather than part of the statement — the
+  /// same split the CoreGraphics error code already had.
+  static func startFailureDiagnostic(_ reason: DisplayModeCoordinator.StartFailure.Reason) -> String {
+    switch reason {
+    case let .failed(error): "CoreGraphics error \(error.cgErrorCode)"
+    case let .blocked(claimant): "Held by \(claimant.rawValue)"
+    }
+  }
+
   /// A `confirm()`/`revert()`/expiry that threw. The preview is still on the
   /// display and nothing auto-retries, so this must invite another attempt.
   static var resolveFailure: LocalizedStringKey {

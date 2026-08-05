@@ -46,11 +46,24 @@ final class AppModel {
   /// test target can fake it; production uses CoreAudio.
   let audioDevices: any AudioDeviceProviding
 
+  /// ONE gate for every display-reconfiguring feature (AR12): display modes,
+  /// mirroring, rotation and arrangement. Declared before all four because each
+  /// of them takes it as a required init parameter — a defaulted gate would give
+  /// each coordinator a private one, which compiles, runs, and excludes nobody.
+  let reconfigurationGate = DisplayReconfigurationGate()
+
   /// Display-mode enumeration, the preview countdown and stored-mode writes.
   /// Owned here rather than by a view because the countdown must outlive
   /// whatever window started it, and because the settings pane and the panel
   /// have to drive the same session.
-  let displayModes = DisplayModeCoordinator()
+  ///
+  /// `@ObservationIgnored lazy` for the reason `mirroring` below is: it names a
+  /// stored property declared above it, and the Observation macro cannot wrap a
+  /// `lazy var`. Views observe the coordinator's own properties, not this
+  /// reference.
+  @ObservationIgnored private(set) lazy var displayModes = DisplayModeCoordinator(
+    gate: reconfigurationGate
+  )
 
   /// THE topology sample every part of the app resolves through (DT15). Handed
   /// to every `BrightnessController` so the shade and the gamma activity
@@ -74,14 +87,16 @@ final class AppModel {
   /// `lazy var` — views observe the coordinator's own properties, not this
   /// reference.
   @ObservationIgnored private(set) lazy var mirroring = MirroringCoordinator(
-    store: mirrorTopology, modes: displayModes
+    store: mirrorTopology, modes: displayModes, gate: reconfigurationGate
   )
 
   /// Rotation requests and the rotation countdown. Owned here for
   /// `displayModes`' reason — the countdown must outlive whatever window started
   /// it. Unlike the other two it persists nothing: a rotation is already system
   /// state the instant it applies (RT2).
-  let rotation = RotationCoordinator()
+  @ObservationIgnored private(set) lazy var rotation = RotationCoordinator(
+    gate: reconfigurationGate
+  )
 
   /// App-level M4 prefs (startupAction, multiKeyboardVolume, showContrast)
   /// read through one DisplayPrefs like the engine does; the persistence key

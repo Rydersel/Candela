@@ -138,8 +138,8 @@ struct DisplayModeSection: View {
   @ViewBuilder private var startFailureBanner: some View {
     if let failure = coordinator.startFailure, failure.displayID == displayID {
       VStack(alignment: .leading, spacing: 6) {
-        SettingsCaption(DisplayModeCopy.startFailure)
-          .help("CoreGraphics error \(failure.error.cgErrorCode)")
+        SettingsCaption(DisplayModeCopy.startFailure(failure.reason))
+          .help(DisplayModeCopy.startFailureDiagnostic(failure.reason))
         Button("OK") { coordinator.dismissStartFailure() }
       }
     }

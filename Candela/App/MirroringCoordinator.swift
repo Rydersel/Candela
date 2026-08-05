@@ -60,6 +60,11 @@ final class MirroringCoordinator {
   /// reporting it as a success — the honest statement is "some of it, and here
   /// is what is left".
   private(set) var lastPartialBreak: [CGDirectDisplayID] = []
+  /// The four-way gate refused this request, and names who is holding it
+  /// (AR12). Its own property rather than an eighth `MirrorRefusal`: that enum
+  /// is `MirrorTopologyPolicy`'s answer about the TOPOLOGY, and this is not a
+  /// fact about the topology at all.
+  private(set) var blockedBy: ReconfigurationClaimant?
   private(set) var isApplying = false
 
   @ObservationIgnored weak var confirmation: (any MirrorConfirmationPresenting)?
@@ -100,6 +105,16 @@ final class MirroringCoordinator {
   @ObservationIgnored private let configurator: any DisplayConfiguring
   @ObservationIgnored private let store: MirrorTopologyStore
   @ObservationIgnored private let modes: DisplayModeCoordinator
+  /// AR12. Held from just before a mirror apply until nothing is outstanding.
+  ///
+  /// It does NOT replace the `modes.endOutstandingPreview()` await below, and the
+  /// two are not the same guarantee: the gate refuses an OVERLAPPING preview,
+  /// while that await is what orders this chain's `CGBeginDisplayConfiguration`
+  /// after any mode transaction the queue is still finishing. With the gate in
+  /// front of it the await is now reached only when the mode side holds nothing,
+  /// so it is a backstop rather than the mechanism — stated here because the
+  /// narrow guarantee is the one the code delivers.
+  @ObservationIgnored private let gate: DisplayReconfigurationGate
   @ObservationIgnored private let session: MirrorPreviewSession
   @ObservationIgnored private var pending: Task<Void, Never>?
   @ObservationIgnored private var countdown: Task<Void, Never>?
@@ -120,10 +135,12 @@ final class MirroringCoordinator {
   init(
     store: MirrorTopologyStore,
     modes: DisplayModeCoordinator,
+    gate: DisplayReconfigurationGate,
     configurator: any DisplayConfiguring = CoreGraphicsDisplayConfigurator()
   ) {
     self.store = store
     self.modes = modes
+    self.gate = gate
     self.configurator = configurator
     session = MirrorPreviewSession(configurator: configurator)
     refreshTopology()
@@ -315,6 +332,7 @@ final class MirroringCoordinator {
     lastRefusal = nil
     lastFailure = nil
     lastPartialBreak = []
+    blockedBy = nil
     syncConfirmation()
   }
 
@@ -355,6 +373,23 @@ final class MirroringCoordinator {
         if self.inFlight == 0 { self.isApplying = false }
       }
       self.dismissReport()
+      // AR12, asked before either apply arm and not for a refusal, which
+      // reconfigures nothing and so has nothing to exclude. Granted when we are
+      // already the holder: a break that supersedes an outstanding engage is a
+      // supported operation, and `applyDisengage` is built for it.
+      switch decision {
+      case .engage, .disengage:
+        if let holder = await self.gate.claim(.mirroring).refusedBy {
+          self.blockedBy = holder
+          self.log.info("Refused a mirror change: \(holder.rawValue, privacy: .public) is reconfiguring displays")
+          // The hotkey has no other surface at all, so silence here reads as the
+          // key being dead.
+          self.syncConfirmation()
+          return
+        }
+      case .refused:
+        break
+      }
       switch decision {
       case let .engage(master, changes):
         // The ordering rule: a mirror engage first ends any outstanding MODE
@@ -503,6 +538,12 @@ final class MirroringCoordinator {
     guard let outstanding = await session.previewedTopology else {
       preview = nil
       stopCountdown()
+      // THE release (AR12). Here rather than at each call site because this
+      // funnel already runs after every path that can end a preview — a failed
+      // begin, a break that superseded one, an expiry, and a member of the set
+      // departing with nobody watching. Unconditional: the gate refuses a
+      // release from a claimant that is not holding it.
+      await gate.release(.mirroring)
       syncConfirmation()
       return
     }
@@ -526,8 +567,8 @@ final class MirroringCoordinator {
   /// every countdown tick, so the presenter must treat a repeat present of
   /// unchanged content as a no-op.
   ///
-  /// Every write to `preview`, `lastRefusal`, `lastFailure` or
-  /// `lastPartialBreak` has to be followed by this call. An un-synced write does
+  /// Every write to `preview`, `lastRefusal`, `lastFailure`, `lastPartialBreak`
+  /// or `blockedBy` has to be followed by this call. An un-synced write does
   /// not merely leave the window stale — it leaves it rendering a state that no
   /// longer exists, i.e. an empty floating panel.
   private func syncConfirmation() {
@@ -538,7 +579,7 @@ final class MirroringCoordinator {
     // A refusal, a failed apply or a partial break changed nothing (or not
     // everything) on screen, so silence here is indistinguishable from the
     // feature not working — and the hotkey has no other surface at all.
-    if lastFailure != nil || lastRefusal != nil || !lastPartialBreak.isEmpty {
+    if lastFailure != nil || lastRefusal != nil || !lastPartialBreak.isEmpty || blockedBy != nil {
       confirmation?.presentMirrorConfirmation(.report)
       return
     }

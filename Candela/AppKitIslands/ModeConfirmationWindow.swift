@@ -160,8 +160,8 @@ struct ModeConfirmationView: View {
         if !displayName.isEmpty {
           ConfirmationSubtitle(verbatim: displayName)
         }
-        ConfirmationCaption(DisplayModeCopy.startFailure)
-          .help("CoreGraphics error \(failure.error.cgErrorCode)")
+        ConfirmationCaption(DisplayModeCopy.startFailure(failure.reason))
+          .help(DisplayModeCopy.startFailureDiagnostic(failure.reason))
 
         ConfirmationAnswers {
           Button("OK") { coordinator.dismissStartFailure() }

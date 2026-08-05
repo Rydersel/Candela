@@ -142,7 +142,7 @@ struct PanelResolutionSection: View {
   @ViewBuilder private var startFailure: some View {
     if let failure = coordinator.startFailure, failure.displayID == displayID {
       HStack(alignment: .firstTextBaseline, spacing: 6) {
-        Text(DisplayModeCopy.startFailure)
+        Text(DisplayModeCopy.startFailure(failure.reason))
           .font(.system(size: 11))
           .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
@@ -151,7 +151,7 @@ struct PanelResolutionSection: View {
           .font(.system(size: 11))
           .fixedSize()
       }
-      .help("CoreGraphics error \(failure.error.cgErrorCode)")
+      .help(DisplayModeCopy.startFailureDiagnostic(failure.reason))
     }
   }
 
