@@ -32,25 +32,40 @@ enum ArrangementCopy {
 
   /// AR7. Says what has to move rather than "invalid", which tells the user
   /// nothing they can act on.
-  static func invalidLayout(_ problems: [ArrangementProblem], name: (CGDirectDisplayID) -> String) -> LocalizedStringKey {
-    let overlaps = problems.compactMap { problem -> (CGDirectDisplayID, CGDirectDisplayID)? in
+  ///
+  /// `Text`, not `LocalizedStringKey`, for `MirroringCopy.refusal`'s reason: the
+  /// named variants are built from a display's own name, and routing a runtime
+  /// value through a lookup key would translate the user's hardware. `Text` is
+  /// the type both spellings have in common.
+  ///
+  /// Takes the naming closure because friendly-name resolution belongs to the
+  /// surface, not here — and falls back to an unnamed sentence when the surface
+  /// cannot name a display, rather than emitting a gap where a name should be.
+  static func invalidLayout(
+    _ problems: [ArrangementProblem], name: (CGDirectDisplayID) -> String
+  ) -> Text {
+    // `ArrangementRules.problems` never mixes the two kinds — an overlap makes
+    // every reachability answer meaningless, so it reports overlaps alone — and
+    // one sentence is enough to act on either way.
+    let overlap = problems.lazy.compactMap { problem -> (CGDirectDisplayID, CGDirectDisplayID)? in
       if case let .overlap(first, second) = problem { return (first, second) }
       return nil
-    }
-    if let first = overlaps.first {
-      let names = [name(first.0), name(first.1)].filter { !$0.isEmpty }
+    }.first
+    if let overlap {
+      let names = [name(overlap.0), name(overlap.1)].filter { !$0.isEmpty }
       return names.count == 2
-        ? "\(names[0]) and \(names[1]) overlap. Displays can touch, but they cannot cover each other."
-        : "Two displays overlap. Displays can touch, but they cannot cover each other."
+        ? Text(verbatim: "\(names[0]) and \(names[1]) overlap. Displays can touch, but they cannot cover each other.")
+        : Text("Two displays overlap. Displays can touch, but they cannot cover each other.")
     }
+
     let stranded = problems.compactMap { problem -> CGDirectDisplayID? in
       if case let .disconnected(display) = problem { return display }
       return nil
     }
     if stranded.count == 1, !name(stranded[0]).isEmpty {
-      return "\(name(stranded[0])) is not touching any other display. Every display has to share an edge with the rest."
+      return Text(verbatim: "\(name(stranded[0])) is not touching any other display. Every display has to share an edge with the rest.")
     }
-    return "One or more displays are not touching the rest. Every display has to share an edge with the others."
+    return Text("One or more displays are not touching the rest. Every display has to share an edge with the others.")
   }
 
   /// A `begin()` that failed. Nothing is outstanding, so there is nothing to
@@ -83,14 +98,14 @@ enum ArrangementCopy {
   /// §6.3. macOS adjusts a requested layout silently, so the only trustworthy
   /// account of a change is the one read back — and a notice about it is only
   /// worth showing because a pure translation is deliberately NOT reported.
-  static func notice(_ notice: ArrangementApplyNotice, name: (CGDirectDisplayID) -> String) -> LocalizedStringKey {
+  static func notice(_ notice: ArrangementApplyNotice, name: (CGDirectDisplayID) -> String) -> Text {
     switch notice {
     case .adjusted:
-      "macOS moved some of the displays to a layout of its own — this is what is on screen now."
+      Text("macOS moved some of the displays to a layout of its own — this is what is on screen now.")
     case let .mainDisplayUnchanged(display):
       name(display).isEmpty
-        ? "The menu bar did not move to the display that was asked for."
-        : "The menu bar did not move to \(name(display))."
+        ? Text("The menu bar did not move to the display that was asked for.")
+        : Text(verbatim: "The menu bar did not move to \(name(display)).")
     }
   }
 }
