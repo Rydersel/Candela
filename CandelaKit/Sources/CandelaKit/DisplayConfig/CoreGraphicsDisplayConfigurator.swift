@@ -145,8 +145,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       CGCancelDisplayConfiguration(config)
       throw DisplayConfigError(cgErrorCode: staged.rawValue)
     }
-    let option: CGConfigureOption = scope == .preview ? .forAppOnly : .forSession
-    let result = CGCompleteDisplayConfiguration(config, option)
+    let result = CGCompleteDisplayConfiguration(config, scope.configureOption)
     guard result == .success else {
       throw DisplayConfigError(cgErrorCode: result.rawValue)
     }
@@ -189,10 +188,9 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
         throw DisplayConfigError(cgErrorCode: staged.rawValue)
       }
     }
-    let option: CGConfigureOption = scope == .preview ? .forAppOnly : .forSession
     // The header notes a complete can fail for reasons that have nothing to do
     // with mirroring — an unsupported mode, or another app running full-screen.
-    let result = CGCompleteDisplayConfiguration(config, option)
+    let result = CGCompleteDisplayConfiguration(config, scope.configureOption)
     guard result == .success else {
       throw DisplayConfigError(cgErrorCode: result.rawValue)
     }

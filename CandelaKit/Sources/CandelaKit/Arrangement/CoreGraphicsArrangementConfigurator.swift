@@ -60,11 +60,10 @@ public struct CoreGraphicsArrangementConfigurator: DisplayArrangementConfiguring
         throw DisplayConfigError(cgErrorCode: staged.rawValue)
       }
     }
-    let option: CGConfigureOption = scope == .preview ? .forAppOnly : .forSession
     // The header notes a complete can fail for reasons that have nothing to do
     // with the layout — an unsupported mode, or another app running full-screen
     // (§4.5). That is a user-explicable failure to surface, not to retry.
-    let result = CGCompleteDisplayConfiguration(config, option)
+    let result = CGCompleteDisplayConfiguration(config, scope.configureOption)
     guard result == .success else {
       throw DisplayConfigError(cgErrorCode: result.rawValue)
     }
