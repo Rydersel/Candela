@@ -99,6 +99,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// all, so this is the only thing that can say anything about it.
   private var mirrorConfirmation: MirrorConfirmationWindow?
   private var rotationConfirmation: RotationConfirmationWindow?
+  /// Answers an arrangement preview. Held for the same reason as the three
+  /// above: the coordinator references it weakly and the countdown outlives
+  /// whatever started the change.
+  private var arrangementConfirmation: ArrangementConfirmationWindow?
   /// Stored (review M23) so the topology loop can `cleanupDisplay` departed
   /// displays' HUD panels; the executor shares this same instance.
   private let hud = BrightnessHUD()
@@ -358,6 +362,24 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
     self.rotationConfirmation = rotationConfirmation
     model.rotation.confirmation = rotationConfirmation
+
+    // Arrangement's own surface, the fourth CALLER of `ConfirmationPanel` — not
+    // a fourth window type, which is how one of the first three shipped with an
+    // invisible primary button (#54). It has the strongest case of the four for
+    // being a window: an arrangement change is the one that can move the menu
+    // bar onto a different display, so the surface asking about it must go where
+    // the menu bar ended up rather than where the request was made.
+    let arrangementConfirmation = ArrangementConfirmationWindow(coordinator: model.arrangement)
+    arrangementConfirmation.drawableDisplayID = { [weak self] displayID in
+      self?.model.mirrorTopology.drawableDisplayID(for: displayID) ?? displayID
+    }
+    arrangementConfirmation.displayName = { [weak self] displayID in
+      guard let state = self?.model.allControlledStates.first(where: { $0.id == displayID })
+      else { return "" }
+      return PanelView.title(for: state.display)
+    }
+    self.arrangementConfirmation = arrangementConfirmation
+    model.arrangement.confirmation = arrangementConfirmation
 
     // The orphaned-shade fix (see `MirroringCoordinator.rebuildSoftwareDimming`).
     // Wired here because it needs an AppKit island and the display list; D28

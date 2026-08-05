@@ -209,16 +209,24 @@ public enum ArrangementOutcomePolicy {
   /// noise the first time it means something. The two facts are separated
   /// exactly as §2.3 prescribes: compare the relative layout, and compare the
   /// main display's identity on its own.
+  ///
+  /// `requestedMain` is optional because `ArrangementPlan.requestedMain` is: a
+  /// layout need not put any tile at the origin (drag the origin display away
+  /// and none does), and `.mainDisplayUnchanged` has to NAME the display that
+  /// was asked for. With nothing asked for there is nothing to report, so the
+  /// main-display comparison is skipped rather than answered against a guess —
+  /// the layout comparison below still runs, and it is the one that carries the
+  /// bigger fact.
   public static func notices(
     requested: DisplayArrangement,
     resulting: DisplayArrangement,
-    requestedMain: CGDirectDisplayID
+    requestedMain: CGDirectDisplayID?
   ) -> [ArrangementApplyNotice] {
     var notices: [ArrangementApplyNotice] = []
     if requested.relativeLayout != resulting.relativeLayout {
       notices.append(.adjusted(resulting))
     }
-    if resulting.mainDisplayID != requestedMain {
+    if let requestedMain, resulting.mainDisplayID != requestedMain {
       notices.append(.mainDisplayUnchanged(requestedMain))
     }
     return notices

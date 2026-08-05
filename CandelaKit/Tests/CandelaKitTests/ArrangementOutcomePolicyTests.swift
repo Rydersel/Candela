@@ -87,6 +87,27 @@ struct ArrangementOutcomePolicyTests {
     ) == [.adjusted(resulting), .mainDisplayUnchanged(1)])
   }
 
+  /// A layout that puts no tile at the origin asked for no main display, so
+  /// there is nothing for `.mainDisplayUnchanged` to name — `ArrangementPlan`'s
+  /// `requestedMain` is optional for exactly that reason. Skipped rather than
+  /// answered against a guess, and the LAYOUT comparison still runs: that is the
+  /// half that would be lost if "no main requested" short-circuited both.
+  @Test func noRequestedMainSkipsTheMainNoticeAndStillReportsAnAdjustment() {
+    let offOrigin = requested.translated(dx: 100, dy: 100)
+    #expect(offOrigin.mainDisplayID == nil)
+    #expect(ArrangementOutcomePolicy.notices(
+      requested: offOrigin, resulting: offOrigin, requestedMain: nil
+    ).isEmpty)
+
+    let elsewhere = DisplayArrangement(tiles: [
+      tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
+      tile(2, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
+    ])
+    #expect(ArrangementOutcomePolicy.notices(
+      requested: offOrigin, resulting: elsewhere, requestedMain: nil
+    ) == [.adjusted(elsewhere)])
+  }
+
   /// A display that vanished between the apply and the read-back is a different
   /// layout, not a translation of one — the caller must not be told its request
   /// stands.
