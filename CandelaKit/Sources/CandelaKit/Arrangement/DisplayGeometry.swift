@@ -18,11 +18,19 @@ public struct DisplayPoint: Sendable, Equatable, Hashable {
 
 /// A display's rect in display space. Integers make equality exact, kill float
 /// drift in snapping, and match `CGConfigureDisplayOrigin`'s `int32_t` (AR1).
+///
+/// **`let`, so `init`'s clamp cannot be undone.** These were `var` — copied
+/// verbatim from the drag-canvas research §2.1, since corrected there — which
+/// left `max(0, …)` bypassable after construction. A negative width silently
+/// breaks `overlaps`, `touches` and `union`, and every validity and snapping
+/// decision in the feature rests on those three. Nothing needs in-place
+/// mutation: callers already use `moved(to:)` and `offset(dx:dy:)`, and both go
+/// back through `init`.
 public struct DisplayRect: Sendable, Equatable, Hashable {
-  public var x: Int
-  public var y: Int
-  public var width: Int
-  public var height: Int
+  public let x: Int
+  public let y: Int
+  public let width: Int
+  public let height: Int
 
   public init(x: Int, y: Int, width: Int, height: Int) {
     self.x = x
