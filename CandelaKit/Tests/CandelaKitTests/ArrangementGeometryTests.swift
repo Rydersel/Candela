@@ -29,6 +29,21 @@ struct ArrangementGeometryTests {
     #expect(a.touches(b))
   }
 
+  @Test func rectsSharingInteriorOverlap() {
+    // Every other overlap expectation in the suite is `false`, so `overlaps`
+    // returning a constant `false` used to pass the whole suite — and
+    // `ArrangementRules` is built entirely on it.
+    let a = DisplayRect(x: 0, y: 0, width: 100, height: 100)
+    let b = DisplayRect(x: 99, y: -50, width: 100, height: 100) // one point of interior
+    #expect(a.overlaps(b))
+    #expect(b.overlaps(a)) // symmetric
+    #expect(!a.touches(b)) // an overlap is not adjacency
+
+    let contained = DisplayRect(x: 10, y: 10, width: 10, height: 10)
+    #expect(a.overlaps(contained))
+    #expect(contained.overlaps(a))
+  }
+
   @Test func cornerOnlyContactIsNotAdjacency() {
     let a = DisplayRect(x: 0, y: 0, width: 100, height: 100)
     let b = DisplayRect(x: 100, y: 100, width: 100, height: 100)
@@ -94,9 +109,11 @@ struct CanvasTransformTests {
     CanvasTransform.fitting(arrangement.bounds, in: Self.canvas, margin: Self.margin, headroom: Self.headroom)
   }
 
-  /// A spread of fits, so R1/R2 are not pinned to one lucky scale: a tiny
-  /// virtual panel (scale > 1), the three-display L, and a bounds far larger
-  /// than any real desktop (scale ≈ 0.004, where float error is worst).
+  /// A spread of fits, so R1/R2 are not pinned to one lucky scale: the
+  /// three-display L (s ≈ 0.064), a small virtual panel (s ≈ 0.45), a bounds far
+  /// larger than any real desktop (s ≈ 0.004, where float error is worst), a
+  /// 3×3 rect with no margin or headroom (s ≈ 106.7, the only entry above 1),
+  /// and an off-origin oddly-sized one.
   private var transforms: [CanvasTransform] {
     [
       transform,
@@ -175,8 +192,16 @@ struct CanvasTransformTests {
   }
 
   @Test func t_translationInvariance() {
-    // Catches an offset computed from bounds.origin instead of bounds centre:
-    // that error scales with the translation, so 1e-9 is nowhere near it.
+    // What T constrains is that the offset TRACKS THE BOUNDS — an offset that
+    // ignores them entirely moves the picture when the arrangement is translated
+    // (positive control: `offsetX = canvas.width / 2`, measured 9 failures here).
+    //
+    // It does NOT distinguish origin from centre: any offset of the form
+    // `k − s·(a point that translates with the bounds)` is translation-invariant,
+    // so substituting `cx = bounds.x` leaves T green. `c_theArrangementIsCentred`
+    // is the only test that constrains WHICH point lands at the canvas centre —
+    // that substitution also fails F and aSingleDisplayCentres, but only
+    // incidentally, because at this scale it pushes tiles off the canvas.
     let base = arrangement
     let baseTransform = CanvasTransform.fitting(base.bounds, in: Self.canvas, margin: Self.margin, headroom: Self.headroom)
 
@@ -206,6 +231,40 @@ struct CanvasTransformTests {
     #expect(abs(r.midY - Self.canvas.height / 2) < 1e-9)
     #expect(r.x >= Self.margin - 1e-9)
     #expect(r.maxX <= Self.canvas.width - Self.margin + 1e-9)
+  }
+
+  /// The "no upper clamp" rule in `fitting`. F and C only ever exercise scales
+  /// far below 1, and a `min(fit, 1.0)` clamp only ever shrinks — a shrunken
+  /// arrangement still fits inside the canvas and is still centred, so the clamp
+  /// used to leave the entire suite green. What it actually breaks is filling
+  /// the canvas, which is what this asserts.
+  @Test func f_aSmallArrangementIsScaledUpToFillTheCanvas() {
+    let small = DisplayArrangement(tiles: [tile(1, DisplayRect(x: -40, y: 12, width: 100, height: 100))])
+    let t = CanvasTransform.fitting(small.bounds, in: Self.canvas, margin: Self.margin, headroom: Self.headroom)
+    #expect(t.scale > 1)
+
+    // Height is the constraining axis for a square in a 560×320 canvas, so the
+    // rendered bounds must span exactly what margin and headroom leave there.
+    let usable = (Self.canvas.height - 2 * Self.margin) / (1 + 2 * Self.headroom)
+    let r = t.canvasRect(small.bounds)
+    #expect(abs(r.height - usable) < 1e-9)
+
+    // C and F, on a small-bounds transform.
+    #expect(abs(r.midX - Self.canvas.width / 2) < 1e-9)
+    #expect(abs(r.midY - Self.canvas.height / 2) < 1e-9)
+    #expect(r.x >= Self.margin - 1e-9)
+    #expect(r.maxY <= Self.canvas.height - Self.margin + 1e-9)
+  }
+
+  /// `scale` is documented finite and > 0 and the memberwise init enforces it.
+  /// Exit tests, because a precondition failure kills the process: the paired
+  /// `.success` case is the control proving the mechanism can tell them apart.
+  @Test func aNonPositiveOrNonFiniteScaleTrapsAtConstruction() async {
+    await #expect(processExitsWith: .failure) { _ = CanvasTransform(scale: 0, offsetX: 0, offsetY: 0) }
+    await #expect(processExitsWith: .failure) { _ = CanvasTransform(scale: -1, offsetX: 0, offsetY: 0) }
+    await #expect(processExitsWith: .failure) { _ = CanvasTransform(scale: .nan, offsetX: 0, offsetY: 0) }
+    await #expect(processExitsWith: .failure) { _ = CanvasTransform(scale: .infinity, offsetX: 0, offsetY: 0) }
+    await #expect(processExitsWith: .success) { _ = CanvasTransform(scale: 1, offsetX: 0, offsetY: 0) }
   }
 
   @Test func aZeroSizeArrangementDoesNotCrash() {

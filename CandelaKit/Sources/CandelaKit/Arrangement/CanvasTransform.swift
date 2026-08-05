@@ -49,12 +49,20 @@ public struct CanvasRect: Sendable, Equatable {
 /// The one mapping between display space and canvas space. The app target never
 /// reimplements any part of it.
 public struct CanvasTransform: Sendable, Equatable {
-  /// Canvas points per display point. Always > 0.
+  /// Canvas points per display point. Finite and > 0 — enforced by `init`, not
+  /// merely asserted here.
   public let scale: Double
   public let offsetX: Double
   public let offsetY: Double
 
+  /// `scale == 0` makes `displayPoint` evaluate `Int(±infinity)`, which traps
+  /// somewhere far from the mistake; a NaN or infinite scale poisons every
+  /// coordinate it touches. `fitting` already guarantees the invariant, so this
+  /// precondition costs nothing there and closes the hole for every other
+  /// caller — including in-module ones, which is why this is a precondition
+  /// rather than an `internal` access level.
   public init(scale: Double, offsetX: Double, offsetY: Double) {
+    precondition(scale > 0 && scale.isFinite, "CanvasTransform.scale must be finite and > 0")
     self.scale = scale
     self.offsetX = offsetX
     self.offsetY = offsetY
@@ -73,9 +81,12 @@ public struct CanvasTransform: Sendable, Equatable {
     let innerH = max(1, canvas.height - 2 * margin)
     let padded = 1 + 2 * headroom
 
-    // No upper clamp. A `min(fit, 1.0)` would break the fit for a small virtual
-    // panel — 640×480 at s = 1 overflows a 560 pt canvas. Extra terms may go
-    // inside this `min` (they can only shrink); nothing may be applied after it.
+    // No upper clamp. A `min(fit, 1.0)` cannot overflow the canvas — it only
+    // ever shrinks — but it would render a small arrangement postage-stamp-sized
+    // in the middle of it instead of filling the space the margin and headroom
+    // leave. Pinned by `f_aSmallArrangementIsScaledUpToFillTheCanvas`, which is
+    // the only test the clamp breaks. Extra terms may go inside this `min`;
+    // nothing may be applied after it.
     let fitted = min(innerW / (Double(bounds.width) * padded),
                      innerH / (Double(bounds.height) * padded))
 
