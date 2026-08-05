@@ -48,6 +48,7 @@ final class FakeArrangementConfigurator: DisplayArrangementConfiguring, @uncheck
   private var _applied: [Applied] = []
   private var _failWith: DisplayConfigError?
   private var _divergeNextApplyTo: [CGDirectDisplayID: DisplayPoint]?
+  private var _onlineDisplays: [ConfiguredDisplay]?
 
   /// What `currentArrangement()` reports. Settable because a preview captures
   /// the live layout before every apply.
@@ -77,7 +78,25 @@ final class FakeArrangementConfigurator: DisplayArrangementConfiguring, @uncheck
     set { lock.withLock { _divergeNextApplyTo = newValue } }
   }
 
+  /// Online displays this fake reports INSTEAD of the ones its tiles imply.
+  /// Settable so a test can express the case the paired read exists for: a
+  /// display that is attached and has no tile, which is what an unreadable
+  /// `CGDisplayBounds` produces. `nil` derives them from the tiles, which is the
+  /// ordinary state and keeps every existing test's fake complete.
+  var onlineDisplays: [ConfiguredDisplay]? {
+    get { lock.withLock { _onlineDisplays } }
+    set { lock.withLock { _onlineDisplays = newValue } }
+  }
+
   func currentArrangement() -> DisplayArrangement { arrangement }
+
+  func currentTopology() -> (displays: [ConfiguredDisplay], arrangement: DisplayArrangement) {
+    let live = arrangement
+    let derived = live.tiles.map {
+      ConfiguredDisplay(id: $0.id, identity: $0.identity, name: $0.name, isBuiltIn: false)
+    }
+    return (onlineDisplays ?? derived, live)
+  }
 
   func apply(_ plan: ArrangementPlan, scope: DisplayConfigScope) throws -> DisplayArrangement {
     try lock.withLock {

@@ -95,6 +95,37 @@ enum ArrangementCopy {
 
   static var restore: LocalizedStringKey { "Put Them Back" }
 
+  /// Why a saved layout did not come back.
+  ///
+  /// Restore runs with nobody watching, so this is the only account the user
+  /// ever gets — and every sentence names something they can act on, because
+  /// "could not restore your arrangement" on its own is a statement nobody can
+  /// do anything with.
+  ///
+  /// `Text` rather than `LocalizedStringKey` for `invalidLayout`'s reason: the
+  /// named variants are built from the user's own hardware, and routing a
+  /// runtime value through a lookup key would translate it.
+  static func restoreNotice(
+    _ notice: ArrangementReapplyNotice, name: (CGDirectDisplayID) -> String
+  ) -> Text {
+    switch notice {
+    case .ambiguousIdentity:
+      // AR11. Deliberately does NOT name the displays: the whole reason for the
+      // refusal is that two of them are indistinguishable, so naming one would
+      // be the guess this refuses to make.
+      Text("Two of your displays report the same identity, so \(AppInfo.productName) cannot tell which saved position belongs to which. The arrangement was left as it is.")
+    case .setDiffers:
+      Text("The saved arrangement is for a different set of displays, so it was not restored.")
+    case let .layoutNoLongerFits(problems):
+      // The same sentence the interactive refusal uses, because it is the same
+      // fact about the same layout — usually a display that has changed
+      // resolution since the arrangement was saved.
+      invalidLayout(problems, name: name)
+    case .failed:
+      Text("\(AppInfo.productName) could not restore the saved arrangement.")
+    }
+  }
+
   /// §6.3. macOS adjusts a requested layout silently, so the only trustworthy
   /// account of a change is the one read back — and a notice about it is only
   /// worth showing because a pure translation is deliberately NOT reported.

@@ -59,8 +59,23 @@ final class ArrangementCoordinator {
   /// be offered back. See `noteRecoverableLayout`.
   private(set) var recoverableLayout: DisplayArrangement?
   private(set) var isApplying = false
+  /// A saved layout that could not be restored exactly.
+  ///
+  /// Restore is unattended, so this is the ONLY way the user finds out. It
+  /// survives until they dismiss it or the display set changes — the point is
+  /// that it is still there the next time they look, not that it was true at the
+  /// moment nobody was watching. `DisplayModeCoordinator.ReapplyReport`'s job,
+  /// with one value rather than a per-display map: a layout is a fact about the
+  /// whole set, so there is one of these at a time.
+  private(set) var restoreNotice: ArrangementReapplyNotice?
 
   @ObservationIgnored weak var confirmation: (any ArrangementConfirmationPresenting)?
+  /// Called after a commit actually wrote `savedArrangements`, so the
+  /// propagation seam hears about it (D27) whichever surface answered. Owned
+  /// here for `DisplayModeCoordinator.didStoreMode`'s reason: the answering view
+  /// used to be trusted to fan out by hand, and the moment a second surface
+  /// offers the same answer, one of them forgets.
+  @ObservationIgnored var didSaveArrangement: () -> Void = {}
   /// Friendly-name resolution belongs to the surfaces. Empty by default so an
   /// unwired coordinator looks unfinished in testing rather than plausibly right.
   @ObservationIgnored var displayName: (CGDirectDisplayID) -> String = { _ in "" }
@@ -71,6 +86,13 @@ final class ArrangementCoordinator {
   /// and exclude nobody.
   @ObservationIgnored private let gate: DisplayReconfigurationGate
   @ObservationIgnored private let session: ArrangementPreviewSession
+  @ObservationIgnored private let persistence: ArrangementPersistence
+  /// Which reconfigurations count as an arrival for a LAYOUT. It lives in
+  /// `CandelaKit` under test because its two failure directions are both timing
+  /// and both are invisible from here: too eager fights the user forever, too
+  /// shy silently fails to restore anything on the reconnect the feature is
+  /// named for.
+  @ObservationIgnored private var arrivals = TopologyArrivalTracker()
   @ObservationIgnored private var pending: Task<Void, Never>?
   @ObservationIgnored private var countdown: Task<Void, Never>?
   @ObservationIgnored private var inFlight = 0
@@ -82,10 +104,12 @@ final class ArrangementCoordinator {
   init(
     gate: DisplayReconfigurationGate,
     configurator: any DisplayArrangementConfiguring = CoreGraphicsArrangementConfigurator(),
+    persistence: ArrangementPersistence = ArrangementPersistence(),
     countdownSeconds: Int = 30
   ) {
     self.gate = gate
     self.configurator = configurator
+    self.persistence = persistence
     session = ArrangementPreviewSession(
       configurator: configurator, countdownSeconds: countdownSeconds
     )
@@ -129,7 +153,22 @@ final class ArrangementCoordinator {
   /// this proactive call and a countdown expiring a moment later cannot disagree
   /// about it.
   func displaysChanged() {
-    refreshArrangement()
+    let topology = configurator.currentTopology()
+    arrangement = topology.arrangement
+    // A departure is what makes the next appearance an arrival, so it is
+    // recorded HERE — synchronously inside the screen-parameters handler, from
+    // the ONLINE list — rather than only where the restore pass runs. That pass
+    // hangs off the app's debounced topology stream, whose one-second quiet
+    // window would coalesce an unplug and a replug into a single event with the
+    // display present at both ends, and the layout saved for the set that came
+    // back would never be restored.
+    arrivals.noteObserved(live: Set(topology.displays.map(\.id)))
+    // `restoreNotice` is deliberately NOT cleared here. It is written by the
+    // restore pass and only there, and every set change produces an arrival that
+    // runs that pass — which writes the new outcome, including "nothing to say".
+    // Clearing it on any reconfiguration would take the report away on the next
+    // resolution change, which is not a set change and says nothing about it.
+    //
     // A layout for a display set that has changed cannot be restored as a whole
     // (AR4), so offering it back would offer a button that can only fail.
     if let recoverableLayout,
@@ -179,6 +218,34 @@ final class ArrangementCoordinator {
     apply(recoverableLayout)
   }
 
+  /// Restores the saved layout for the display set that has just ARRIVED.
+  ///
+  /// Called from launch and from the app's debounced
+  /// `CGDisplayReconfigurationCallBack` intake, and from nowhere else — never on
+  /// a pref write, never on a timer.
+  ///
+  /// The arrival gate is the substance of this, not bookkeeping. A
+  /// reconfiguration event is ALSO what the user dragging displays in System
+  /// Settings produces, so a pass that restored on every event would undo that
+  /// change within a second, permanently, and make the arrangement pane of
+  /// System Settings unusable. Candela's opinion applies when the display set
+  /// changes; from then until it changes again, the layout belongs to the user.
+  ///
+  /// Deliberately NOT a preview. Nobody is watching, and a thirty-second
+  /// countdown that defaults to revert would undo every remembered layout a
+  /// moment after every reconnect — the exact opposite of the feature. It
+  /// commits at `ArrangementReapplyPolicy.scope` directly, which is also why it
+  /// never calls `ArrangementPreviewSession.begin`: `begin` would arm a
+  /// countdown against nobody, and its capture would become the fallback for the
+  /// next preview a person actually asks for.
+  ///
+  /// It writes NO preferences. A layout that could not be restored is not
+  /// rewritten to whatever the machine settled on — what the user saved is what
+  /// gets tried again the next time that display set shows up.
+  func restoreSavedArrangement() {
+    enqueue { await self.performRestore() }
+  }
+
   /// `answered` is the preview the caller was LOOKING AT. It is carried into the
   /// session, which refuses an answer that no longer names the outstanding
   /// preview — so an answer can only ever resolve what the user was reading, and
@@ -196,7 +263,7 @@ final class ArrangementCoordinator {
   /// Clears everything the report card renders, and syncs the window in the same
   /// operation rather than leaving a caller to pair the two.
   ///
-  /// It is deliberately NOT claimed to be the only writer of these four:
+  /// It is deliberately NOT claimed to be the only writer of these five:
   /// `recoverableLayout` is also dropped in `displaysChanged`, because a layout
   /// naming a display set that no longer exists cannot be restored as a whole
   /// (AR4) and offering it would offer a button that can only fail. The rule that
@@ -207,6 +274,7 @@ final class ArrangementCoordinator {
     lastFailure = nil
     blockedBy = nil
     recoverableLayout = nil
+    restoreNotice = nil
     syncConfirmation()
   }
 
@@ -296,6 +364,114 @@ final class ArrangementCoordinator {
     refreshArrangement()
   }
 
+  private func performRestore() async {
+    // ONE enumeration for both halves: the completeness check below is only
+    // meaningful if the display list and the layout describe the same instant.
+    let topology = configurator.currentTopology()
+    arrangement = topology.arrangement
+
+    let claimed = arrivals.claimArrivals(online: topology.displays)
+    guard !claimed.isEmpty else { return }
+
+    // An outstanding preview outranks a saved layout: a person is looking at a
+    // change right now, and restoring under them would move the displays out
+    // from beneath a fallback that was captured before it. Every claim goes
+    // back — this is "not now", not "never" — and resolving the preview is
+    // itself a reconfiguration, so the event it produces calls this again.
+    guard await session.previewedArrangement == nil else {
+      release(claimed)
+      return
+    }
+    // AR12, asked BEFORE anything is staged, so a refusal costs nothing. Note
+    // the guard above is what makes the release at the end ours to make: with no
+    // preview outstanding, a claim taken here is protecting this pass alone.
+    if let holder = await gate.claim(.arrangement).refusedBy {
+      log.info("Deferred a layout restore: \(holder.rawValue, privacy: .public) is reconfiguring displays")
+      release(claimed)
+      return
+    }
+
+    let decision = ArrangementReapplyPolicy.decide(
+      isEnabled: persistence.isRestoreEnabled,
+      arrivals: claimed,
+      stored: persistence.savedArrangement(for: TopologySignature(topology.arrangement)),
+      attached: topology.displays,
+      current: topology.arrangement
+    )
+
+    if decision.isDeferred {
+      // The layout read could not describe every attached display, so it cannot
+      // be acted on as a whole (AR4). The claims go back and the next topology
+      // event tries again with a machine that can answer.
+      release(claimed)
+    } else {
+      // The two are handled independently rather than as an either/or, because
+      // the decision type does not promise they are exclusive — a policy that
+      // one day both applies something and has something to say about it must
+      // not have the apply silently skipped by a `??`.
+      var notice = decision.notice
+      if let layout = decision.arrangementToApply {
+        notice = apply(restored: layout, over: topology.arrangement) ?? notice
+      }
+      restoreNotice = notice
+      if let restoreNotice {
+        log.error("Could not restore the saved layout: \(String(describing: restoreNotice), privacy: .public)")
+      }
+      syncConfirmation()
+      refreshArrangement()
+    }
+
+    // Nothing here opens a preview, so the claim this pass took is spent — but
+    // the release is still guarded, because between the check above and here the
+    // session is the only authority on whether anything is outstanding, and
+    // freeing a claim that is protecting a preview is the interleave the gate
+    // exists to prevent.
+    if await session.previewedArrangement == nil { await gate.release(.arrangement) }
+  }
+
+  /// Commits a restored layout. Returns `nil` on success, or what to report.
+  private func apply(
+    restored layout: DisplayArrangement, over live: DisplayArrangement
+  ) -> ArrangementReapplyNotice? {
+    guard let plan = ArrangementPlan(applying: layout, to: live) else {
+      // A structural refusal of the layout as a whole — an origin outside
+      // `Int32`, or a display that has become a mirror slave since the read.
+      // Reported rather than swallowed: unattended, silence is indistinguishable
+      // from a restore that worked.
+      return .failed(DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue))
+    }
+    do {
+      _ = try configurator.apply(plan, scope: ArrangementReapplyPolicy.scope)
+      log.log("Restored the saved layout for \(plan.changes.count, privacy: .public) displays")
+      return nil
+    } catch let error as DisplayConfigError {
+      // `apply` throws when a stage or the completion fails AND when the
+      // achieved layout is not the requested one (#53). On the unattended path
+      // that second case is precisely what must not be swallowed: the machine is
+      // in a layout CoreGraphics chose, and `try?` here would leave the app
+      // reporting a successful restore.
+      return .failed(error)
+    } catch {
+      return .failed(DisplayConfigError(cgErrorCode: -1))
+    }
+  }
+
+  private func release(_ claimed: Set<CGDirectDisplayID>) {
+    for id in claimed { arrivals.release(id) }
+  }
+
+  /// Records the layout the user just approved, so the next time this display
+  /// set shows up it comes back.
+  ///
+  /// From the ACHIEVED layout, never from what was requested — macOS adjusts a
+  /// requested layout silently, and saving the request would store an
+  /// arrangement the machine was never in.
+  private func saveIfRestoring() {
+    guard persistence.isRestoreEnabled else { return }
+    persistence.save(arrangement)
+    didSaveArrangement()
+  }
+
   /// Remembers the layout to offer back after an apply that DIVERGED.
   ///
   /// Task 10's accepted cost, carried forward: a `begin` whose apply diverged
@@ -332,6 +508,11 @@ final class ArrangementCoordinator {
       await adopt(.keep)
     }
     refreshArrangement()
+    // AFTER the re-read, and only for a layout the user kept: this is the one
+    // moment a layout is known to be both on screen and approved. Saving the
+    // requested layout instead would store an arrangement the machine was never
+    // in, since macOS adjusts a request silently.
+    if case .committed = outcome { saveIfRestoring() }
     return outcome
   }
 
@@ -384,8 +565,9 @@ final class ArrangementCoordinator {
   /// every countdown tick, so the presenter must treat a repeat present of
   /// unchanged content as a no-op.
   ///
-  /// Every write to `preview`, `lastInvalidLayout`, `lastFailure`, `blockedBy`
-  /// or `recoverableLayout` has to be followed by this call. An un-synced write
+  /// Every write to `preview`, `lastInvalidLayout`, `lastFailure`, `blockedBy`,
+  /// `recoverableLayout` or `restoreNotice` has to be followed by this call. An
+  /// un-synced write
   /// does not merely leave the window stale — it leaves it rendering a state
   /// that no longer exists, i.e. an empty floating panel.
   private func syncConfirmation() {
@@ -403,7 +585,7 @@ final class ArrangementCoordinator {
       return
     }
     if !lastInvalidLayout.isEmpty || lastFailure != nil || blockedBy != nil
-      || recoverableLayout != nil {
+      || recoverableLayout != nil || restoreNotice != nil {
       confirmation?.presentArrangementConfirmation(.report)
       return
     }

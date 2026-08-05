@@ -22,7 +22,15 @@ public struct CoreGraphicsArrangementConfigurator: DisplayArrangementConfiguring
   }
 
   public func currentArrangement() -> DisplayArrangement {
-    ArrangementSnapshot.arrangement(of: displays.displays(), bounds: CGDisplayBounds)
+    currentTopology().arrangement
+  }
+
+  /// Expressed in terms of ONE `displays()` call, which is what makes the pair
+  /// describe the same instant — the property the restore path's completeness
+  /// check depends on.
+  public func currentTopology() -> (displays: [ConfiguredDisplay], arrangement: DisplayArrangement) {
+    let online = displays.displays()
+    return (online, ArrangementSnapshot.arrangement(of: online, bounds: CGDisplayBounds))
   }
 
   public func apply(_ plan: ArrangementPlan, scope: DisplayConfigScope) throws -> DisplayArrangement {

@@ -136,6 +136,13 @@ struct ArrangementConfirmationView: View {
       if let blockedBy = coordinator.blockedBy {
         ConfirmationCaption(ReconfigurationCopy.blocked(by: blockedBy))
       }
+      // A saved layout that did not come back. It shares this card rather than
+      // getting a window of its own for the reason there is only one
+      // confirmation surface at all (#54): a second window asking the same class
+      // of question is how one of them shipped with an invisible primary button.
+      if let restoreNotice = coordinator.restoreNotice {
+        ConfirmationCaption(ArrangementCopy.restoreNotice(restoreNotice, name: displayName))
+      }
 
       // The #53 case: the layout the machine was in before an apply that
       // diverged, offered back. Only this branch has a second button, because

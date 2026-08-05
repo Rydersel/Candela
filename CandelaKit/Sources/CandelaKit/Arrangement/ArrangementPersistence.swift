@@ -31,6 +31,24 @@ public struct TopologySignature: Sendable, Hashable {
     key = arrangement.tiles.map(\.identity.key).sorted().joined(separator: "+")
   }
 
+  /// The same set, read one step earlier: straight off the ONLINE display list,
+  /// before `ArrangementSnapshot` turns it into tiles. The two spellings agree
+  /// whenever the snapshot placed every display it should have — pinned by a
+  /// test, because that agreement is what lets the arrival gate and the storage
+  /// key be talking about the same topology.
+  ///
+  /// It exists because the arrival gate must NOT see an unreadable display as a
+  /// topology change: that drops it from the layout while it is still attached,
+  /// and a signature that moved with it would make the whole set read as newly
+  /// arrived once it came back.
+  public init(online displays: [ConfiguredDisplay]) {
+    key = displays
+      .filter { !$0.isMirrorSlave } // AR6: no tile, no position, not part of the set
+      .map(\.identity.key)
+      .sorted()
+      .joined(separator: "+")
+  }
+
   /// No display can hold a position, so there is no set for a layout to be
   /// about. Persisting under it would file every empty read under one key.
   public var isEmpty: Bool { key.isEmpty }
@@ -251,10 +269,14 @@ public final class ArrangementPersistence: @unchecked Sendable {
         )
       }
     }
-    // AR4 on the read side, ENFORCED rather than asserted in a comment: a plan
-    // built from fewer tiles than the layout names would leave the remainder's
-    // origins unset, and CoreGraphics repositions any display a reconfiguration
-    // does not mention.
+    // AR4 on the read side. UNREACHABLE as the checks above stand — no identity
+    // names two tiles and the two multisets are equal, so every entry has
+    // exactly one tile — and kept anyway, because what it guards is a partial
+    // layout: a plan built from fewer tiles than the layout names leaves the
+    // remainder's origins unset, and CoreGraphics repositions any display a
+    // reconfiguration does not mention. Stated as unreachable rather than
+    // pinned by a test, because no input reaches it; a mutation pass finds it
+    // exactly this way, and that is the honest description.
     guard tiles.count == saved.entries.count else { return .none }
     return .exact(DisplayArrangement(tiles: tiles))
   }

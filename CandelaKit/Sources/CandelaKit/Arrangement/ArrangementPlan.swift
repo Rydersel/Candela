@@ -127,6 +127,17 @@ public protocol DisplayArrangementConfiguring: Sendable {
   /// `mirroredIDs` and get no tile of their own (AR6).
   func currentArrangement() -> DisplayArrangement
 
+  /// The layout AND the online display list it was derived from, from ONE
+  /// enumeration.
+  ///
+  /// One call rather than two, because the restore path has to compare them:
+  /// `ArrangementSnapshot` skips a display whose bounds are unreadable, so an
+  /// online display with no tile is the AR4-on-the-read-side case the reapply
+  /// policy defers on. Asking two questions a moment apart would let a display
+  /// arrive between them and look exactly like that — and, worse, let one leave
+  /// between them and look like nothing at all.
+  func currentTopology() -> (displays: [ConfiguredDisplay], arrangement: DisplayArrangement)
+
   /// Stages every change in the plan in ONE transaction, commits it, re-reads
   /// the result, and returns **what is on screen now** — never what was asked
   /// for. The return value is not discardable for that reason: macOS adjusts a

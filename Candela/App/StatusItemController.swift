@@ -380,6 +380,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
     self.arrangementConfirmation = arrangementConfirmation
     model.arrangement.confirmation = arrangementConfirmation
+    // D27, the same wiring `didStoreMode` gets and for the same reason: the
+    // coordinator writes `savedArrangements` when a layout is kept, and the seam
+    // has to hear about it whichever surface answered. App-level, so no
+    // persistence key — the layout is a fact about the display SET.
+    model.arrangement.didSaveArrangement = { [weak self] in
+      self?.settingsActions.prefDidChange(.savedArrangements)
+    }
 
     // The orphaned-shade fix (see `MirroringCoordinator.rebuildSoftwareDimming`).
     // Wired here because it needs an AppKit island and the display list; D28
@@ -420,6 +427,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         self.wireInterferenceHooks()
         self.warmModeCatalogs()
         self.reapplyStoredModes()
+        self.restoreSavedArrangement()
         // Fork parity: the counter zeroes on every configure so unrelated
         // events across a long session never add up to an offer.
         // `suspendedForSession` survives.
@@ -550,6 +558,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // is tracking.
       warmModeCatalogs()
       reapplyStoredModes()
+      restoreSavedArrangement()
       #if DEBUG
         // Screenshot hook (DT6). After `model.refresh()`, so `display:first`
         // has a display list to resolve against.
@@ -684,6 +693,26 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   private func reapplyStoredModes() {
     guard !isSafeMode else { return }
     model.displayModes.reapplyStoredModes()
+  }
+
+  /// Restores the saved layout for a display set that has just arrived.
+  ///
+  /// Driven from the same two places as `reapplyStoredModes()` and gated the
+  /// same way, and **called after it, which is load-bearing** (§7.4): a mode
+  /// change resizes the display, so a layout applied first would be tiled
+  /// against footprints that are about to change. The two run on separate
+  /// queues, so this is a sequencing INTENT rather than a guarantee — survivable
+  /// in exactly one direction, because a layout that no longer tiles is refused
+  /// and reported rather than sent (AR7), and a mode change is itself a
+  /// reconfiguration whose event runs this again.
+  ///
+  /// Safe mode gates it here, where the flag lives, for the reason it gates
+  /// stored modes: this is an unattended reconfiguration with no countdown
+  /// behind it, and it is the one that can move the menu bar onto a display the
+  /// user is not looking at.
+  private func restoreSavedArrangement() {
+    guard !isSafeMode else { return }
+    model.arrangement.restoreSavedArrangement()
   }
 
   /// D12: full-domain wipe, explicitly confirmed by the caller (the General
