@@ -413,7 +413,13 @@ final class MirroringCoordinator {
         guard await self.modes.endOutstandingPreview() else {
           self.lastFailure = DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
           self.log.error("Refused a mirror engage: an outstanding mode preview could not be reverted")
-          self.syncConfirmation()
+          // Through `adopt`, not a bare `syncConfirmation()`: this arm claimed
+          // the gate a few lines up and applies nothing, so a plain return here
+          // would strand the claim and wedge every display feature in the app
+          // for the rest of the session. `adopt` is the releaser, and `.keep`
+          // rather than `.clear` because any mirror preview already standing
+          // keeps its own failure — this refusal is not about it.
+          await self.adopt(.keep)
           return
         }
         self.log.info("Engaging mirror on \(master, privacy: .public), \(changes.count, privacy: .public) change(s)")
@@ -450,7 +456,13 @@ final class MirroringCoordinator {
         guard await self.modes.endOutstandingPreview() else {
           self.lastFailure = DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
           self.log.error("Refused a mirror break: an outstanding mode preview could not be reverted")
-          self.syncConfirmation()
+          // Through `adopt`, not a bare `syncConfirmation()`: this arm claimed
+          // the gate a few lines up and applies nothing, so a plain return here
+          // would strand the claim and wedge every display feature in the app
+          // for the rest of the session. `adopt` is the releaser, and `.keep`
+          // rather than `.clear` because any mirror preview already standing
+          // keeps its own failure — this refusal is not about it.
+          await self.adopt(.keep)
           return
         }
         if await self.session.hasOutstandingPreview {
