@@ -44,13 +44,15 @@ enum MirrorFixtures {
 
 /// `Result<Void, _>` is not `Equatable` — `Void` isn't — so the failures of the
 /// preview sessions' `begin` are compared through their error rather than as
-/// whole results.
+/// whole results. Unconstrained in its success type because
+/// `ArrangementPreviewSession.begin` returns the value it staged, and a failure
+/// is read the same way whatever the success would have carried.
 ///
-/// File-internal rather than `private`, and living here rather than in either
-/// session's own suite, because BOTH `ModePreviewSessionTests` and
-/// `MirrorPreviewSessionTests` need it. `private` at file scope is invisible to
-/// the other file, and a second copy is a second thing to get wrong.
-extension Result where Success == Void, Failure == DisplayConfigError {
+/// File-internal rather than `private`, and living here rather than in any one
+/// session's suite, because all THREE preview-session suites need it. `private`
+/// at file scope is invisible to the other files, and a second copy is a second
+/// thing to get wrong.
+extension Result where Failure == DisplayConfigError {
   var failureError: DisplayConfigError? {
     if case let .failure(error) = self { return error }
     return nil
