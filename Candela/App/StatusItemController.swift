@@ -380,6 +380,17 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
     self.arrangementConfirmation = arrangementConfirmation
     model.arrangement.confirmation = arrangementConfirmation
+    // The canvas names its tiles through the coordinator, so the map and the
+    // confirmation window call a display by the same name. Same resolution as
+    // the window's closure above, and both fall back to "" for a display
+    // `DisplayDiscovery` never saw — it filters on a non-nil `IOAVService`, so
+    // virtual, AirPlay and Sidecar displays have no settings state to be renamed
+    // in, and each surface substitutes the topology's own name for them.
+    model.arrangement.displayName = { [weak self] displayID in
+      guard let state = self?.model.allControlledStates.first(where: { $0.id == displayID })
+      else { return "" }
+      return PanelView.title(for: state.display)
+    }
     // D27, the same wiring `didStoreMode` gets and for the same reason: the
     // coordinator writes `savedArrangements` when a layout is kept, and the seam
     // has to hear about it whichever surface answered. App-level, so no

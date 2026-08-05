@@ -22,16 +22,17 @@
   /// residue — a plain `open` of the app never sets it. Usage:
   ///
   ///   CANDELA_DEBUG_SETTINGS=pane:general    Candela.app/Contents/MacOS/Candela
-  ///   CANDELA_DEBUG_SETTINGS=pane:menuBar    (also: pane:keyboard, pane:about)
+  ///   CANDELA_DEBUG_SETTINGS=pane:menuBar    (also: pane:arrangement,
+  ///                                           pane:keyboard, pane:about)
   ///   CANDELA_DEBUG_SETTINGS=display:builtIn
   ///   CANDELA_DEBUG_SETTINGS=display:first
   ///   CANDELA_DEBUG_SETTINGS=display:<persistenceKey>
   ///
   /// Both id spaces are CASE-SENSITIVE and camelCase: `pane:menuBar`, not
   /// `pane:menubar`; `display:builtIn`, not `display:builtin`. The valid pane
-  /// ids are exactly `PaneID.allCases` — general, menuBar, keyboard, about —
-  /// and a rejection message lists them, so the spelling never has to be
-  /// guessed twice.
+  /// ids are exactly `PaneID.allCases`, and a rejection message lists them from
+  /// that enum rather than from this comment, so the spelling never has to be
+  /// guessed twice and this list cannot go stale into a lie.
   ///
   /// `display:first` resolves the first connected EXTERNAL display's
   /// persistence key, which is the one a capture script cannot know in advance.

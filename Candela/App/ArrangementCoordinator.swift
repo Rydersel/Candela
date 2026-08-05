@@ -101,6 +101,11 @@ final class ArrangementCoordinator {
     subsystem: "com.rydersel.Candela", category: "arrangement"
   )
 
+  #if DEBUG
+    @ObservationIgnored private var debugReportObserver: (any NSObjectProtocol)?
+    @ObservationIgnored private var debugPreviewObserver: (any NSObjectProtocol)?
+  #endif
+
   init(
     gate: DisplayReconfigurationGate,
     configurator: any DisplayArrangementConfiguring = CoreGraphicsArrangementConfigurator(),
@@ -125,6 +130,65 @@ final class ArrangementCoordinator {
     ) { [weak self] _ in
       MainActor.assumeIsolated { self?.displaysChanged() }
     }
+
+    #if DEBUG
+      // Screenshot validation only, and permanent for the reason its three
+      // siblings in `MirroringCoordinator` and `RotationCoordinator` are:
+      // `ArrangementConfirmationWindow` cannot be reached from a script.
+      // Clicking the pane's canvas needs an Accessibility grant this machine
+      // does not have, and there is no arrangement hotkey. Until this existed,
+      // that window was the ONE confirmation surface in the app whose layout,
+      // contrast and truncation had never been looked at.
+      //
+      // Compiled out of Release BY CONSTRUCTION, not by remembering to delete
+      // it; the standing review step (grep every Mach-O in the Release bundle,
+      // with a Debug positive control) still applies.
+      debugReportObserver = DistributedNotificationCenter.default().addObserver(
+        forName: Notification.Name("com.rydersel.Candela.debug.showArrangementReport"),
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          // Real display ids where there are two, so the NAMED sentence renders
+          // rather than the unnamed fallback — the named one is the longer of
+          // the two and the one that can truncate.
+          let ids = self.arrangement.tiles.map(\.id)
+          self.lastInvalidLayout = [.overlap(ids.first ?? 1, ids.dropFirst().first ?? 2)]
+          self.syncConfirmation()
+        }
+      }
+
+      // The other half: the PREVIEW card is the one with two answers, so it is
+      // the one where "which is the primary?" can go wrong. It posts the genuine
+      // request through the genuine path, with the real countdown behind it —
+      // and it asks `ArrangementDockPolicy` for the destination, so what it
+      // applies is a layout that is legal by construction. **Never the
+      // built-in**: it is the owner's working screen, and moving it is how the
+      // menu bar ends up somewhere nobody asked for.
+      debugPreviewObserver = DistributedNotificationCenter.default().addObserver(
+        forName: Notification.Name("com.rydersel.Candela.debug.showArrangementPreview"),
+        object: nil,
+        queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          let topology = self.configurator.currentTopology()
+          let movable = topology.displays.filter { !$0.isBuiltIn && !$0.isMirrorSlave }
+          for display in movable {
+            for direction in ArrangementDirection.allCases {
+              if let moved = ArrangementDockPolicy.move(
+                display.id, direction, in: topology.arrangement
+              ) {
+                self.apply(moved)
+                return
+              }
+            }
+          }
+          self.log.info("debug preview: no external display has a legal move")
+        }
+      }
+    #endif
   }
 
   /// The notification token is deliberately not unregistered here: it is not
