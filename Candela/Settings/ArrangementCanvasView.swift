@@ -85,6 +85,24 @@ struct ArrangementCanvasView: View {
     CanvasTransform.fitting(arrangement.bounds, in: Self.canvasSize, margin: Self.margin)
   }
 
+  /// How much EVERY tile says, decided once from the tiles as they are about to
+  /// be drawn. See `TileLabelStyle`: the alternative — each tile deciding from
+  /// its own height — is what let one short tile drop its resolution beside
+  /// three that kept theirs, which reads as a rendering bug rather than as a
+  /// decision. Tile *sizes* do not change during a drag (only origins do), so
+  /// this cannot flicker under the pointer.
+  private var labelStyle: TileLabelStyle {
+    TileLabelStyle.fitting(displayed.tiles.map { tile in
+      let rect = transform.canvasRect(tile.rect)
+      return TileLabelStyle.Metrics(
+        size: CGSize(width: rect.width, height: rect.height),
+        name: label(for: tile),
+        pointSize: pointSize(tile),
+        isMirrored: !tile.mirroredIDs.isEmpty
+      )
+    })
+  }
+
   /// Every display NAMED in a problem, not just the dragged one (§3.5): moving
   /// the middle display of a row strands the far one, and the user has to see
   /// which displays they broke rather than only which one they are holding.
@@ -135,13 +153,14 @@ struct ArrangementCanvasView: View {
 
     DisplayTile(
       name: label(for: tile),
-      pointSize: "\(tile.rect.width) × \(tile.rect.height)",
+      pointSize: pointSize(tile),
       mirroredCount: tile.mirroredIDs.count,
       isMain: displayed.mainDisplayID == tile.id,
       isSelected: selection == tile.id,
       isFocused: focused == tile.id,
       isInvalid: invalidIDs.contains(tile.id),
-      isDragging: isDragging
+      isDragging: isDragging,
+      labels: labelStyle
     )
     // ORDER IS LOAD-BEARING, and this is the top-ranked risk in the feature.
     // `.position` returns a view that fills the WHOLE parent and places its
@@ -179,7 +198,10 @@ struct ArrangementCanvasView: View {
         .disabled(displayed.mainDisplayID == tile.id)
     }
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel(Text(verbatim: label(for: tile)))
+    // Name AND resolution, unconditionally — the label never follows what the
+    // tile had room to draw. `TileLabelStyle` can drop a line from the picture;
+    // it can take nothing away from here.
+    .accessibilityLabel(Text(verbatim: accessibilityLabel(tile)))
     .accessibilityValue(Text(verbatim: accessibilityValue(tile)))
     .accessibilityHint("Use the arrow keys to move this display next to another one.")
     .accessibilityAddTraits(selection == tile.id ? [.isButton, .isSelected] : [.isButton])
@@ -211,9 +233,17 @@ struct ArrangementCanvasView: View {
     return friendly.isEmpty ? tile.name : friendly
   }
 
+  /// The tile's resolution, in the ONE spelling the map and the tooltip share.
+  private func pointSize(_ tile: ArrangementTile) -> String {
+    "\(tile.rect.width) × \(tile.rect.height)"
+  }
+
+  private func accessibilityLabel(_ tile: ArrangementTile) -> String {
+    "\(label(for: tile)), \(tile.rect.width) by \(tile.rect.height) points"
+  }
+
   private func accessibilityValue(_ tile: ArrangementTile) -> String {
-    var parts = ["\(tile.rect.width) by \(tile.rect.height) points"]
-    parts.append("positioned at x \(tile.rect.x), y \(tile.rect.y)")
+    var parts = ["positioned at x \(tile.rect.x), y \(tile.rect.y)"]
     if displayed.mainDisplayID == tile.id { parts.append("main display") }
     if !tile.mirroredIDs.isEmpty { parts.append("mirrored to \(tile.mirroredIDs.count) more") }
     return parts.joined(separator: ", ")

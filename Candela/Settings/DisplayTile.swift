@@ -1,8 +1,141 @@
+import AppKit
 import SwiftUI
+
+/// What every tile on the map says — decided ONCE for the whole canvas, never
+/// per tile.
+///
+/// **The defect this type exists to prevent.** Disclosure used to be a per-tile
+/// question ("is *this* tile 52 pt tall?"), which produced a map where three
+/// tiles read `Display 76 / 1680 × 1050` and the fourth, 12 pt shorter, read
+/// only `Display 77`. Two adjacent tiles disagreeing about what a tile carries
+/// reads as a rendering bug, not as a decision. So the level is chosen for the
+/// **map**: the richest level *every* tile can carry, in the fonts the tile will
+/// actually draw with. Uniformity is then structural — one value reaches every
+/// tile — rather than a threshold every caller has to get right.
+///
+/// The level is honest about running out of room in this order: full size →
+/// one type size down → name only → nothing. The name outranks the resolution
+/// when only one line fits, because the name is what every sentence in the pane
+/// refers to and the tile's *shape* already carries the resolution to scale.
+/// Nothing is ever truncated to fit: a width that cannot hold `1680 × 1050`
+/// drops the line rather than drawing `16…50`.
+///
+/// **VoiceOver is untouched by any of this.** The canvas states the name and the
+/// resolution in the tile's accessibility label unconditionally, and the tooltip
+/// carries both as well, so a dropped line is a visual decision only.
+struct TileLabelStyle: Equatable, Sendable {
+  enum Detail: Sendable { case none, name, nameAndSize }
+
+  let detail: Detail
+  /// Point size of the name line. The resolution line is always
+  /// `Self.secondarySize` — it is secondary at every level.
+  let nameSize: Double
+  /// Whether tiles that mirror others say so. Decided over the mirrored tiles
+  /// **only**: a tile with no slaves has no third line to omit, so including it
+  /// in the vote would let a display that says nothing about mirroring silence
+  /// one that has something to say.
+  let showsMirrored: Bool
+
+  static let secondarySize: Double = 10
+  static let horizontalPadding: Double = 3
+  static let bottomPadding: Double = 2
+
+  /// The one place a tile's label geometry is described. `fitting` and the view
+  /// both read it, so the size a level is *tested* at is the size it is *drawn*
+  /// at — there is no second opinion to drift.
+  static func labelHeight(detail: Detail, nameSize: Double, mirrored: Bool) -> Double {
+    switch detail {
+    case .none: 0
+    case .name: lineHeight(nameSize)
+    case .nameAndSize:
+      lineHeight(nameSize) + lineHeight(secondarySize)
+        + (mirrored ? lineHeight(secondarySize) : 0)
+    }
+  }
+
+  /// The band at the top of a tile that the menu-bar strip occupies, reserved on
+  /// **every** tile rather than only on the main one. Which display is main
+  /// changes without the map resizing, so a band reserved only when `isMain`
+  /// would let one button press push a name into the strip it was clearing.
+  static func stripBand(forHeight height: Double) -> Double {
+    stripInset + stripHeight(forHeight: height)
+  }
+
+  static func stripHeight(forHeight height: Double) -> Double {
+    max(2, min(5, height * 0.06))
+  }
+
+  static let stripInset: Double = 3
+
+  private static func lineHeight(_ size: Double) -> Double {
+    let font = NSFont.systemFont(ofSize: size)
+    return (font.ascender - font.descender + font.leading).rounded(.up)
+  }
+
+  private static func nameWidth(_ name: String, size: Double) -> Double {
+    let font = NSFont.systemFont(ofSize: size)
+    return (name as NSString).size(withAttributes: [.font: font]).width
+  }
+
+  private static func secondaryWidth(_ text: String) -> Double {
+    let font = NSFont.systemFont(ofSize: secondarySize)
+    return (text as NSString).size(withAttributes: [.font: font]).width
+  }
+
+  /// Everything the decision needs from one tile.
+  struct Metrics {
+    let size: CGSize
+    let name: String
+    let pointSize: String
+    let isMirrored: Bool
+  }
+
+  /// Richest first. A step DOWN in type size is tried before a line is dropped —
+  /// it buys little height (10 pt and 11 pt lines differ by one point) but ~8 %
+  /// of width, and width is what a tall, narrow display runs out of first.
+  private static let ladder: [(detail: Detail, nameSize: Double)] = [
+    (.nameAndSize, 11), (.nameAndSize, secondarySize), (.name, 11), (.name, secondarySize),
+  ]
+
+  static func fitting(_ tiles: [Metrics]) -> TileLabelStyle {
+    guard !tiles.isEmpty else {
+      return TileLabelStyle(detail: .none, nameSize: 11, showsMirrored: false)
+    }
+    for step in ladder {
+      let everyTileFits = tiles.allSatisfy {
+        fits(step.detail, step.nameSize, $0, mirrored: false)
+      }
+      guard everyTileFits else { continue }
+      let mirrored = tiles.filter(\.isMirrored)
+      let showsMirrored = step.detail == .nameAndSize && !mirrored.isEmpty
+        && mirrored.allSatisfy { fits(step.detail, step.nameSize, $0, mirrored: true) }
+      return TileLabelStyle(
+        detail: step.detail, nameSize: step.nameSize, showsMirrored: showsMirrored
+      )
+    }
+    return TileLabelStyle(detail: .none, nameSize: 11, showsMirrored: false)
+  }
+
+  private static func fits(
+    _ detail: Detail, _ nameSize: Double, _ tile: Metrics, mirrored: Bool
+  ) -> Bool {
+    let needed = stripBand(forHeight: tile.size.height)
+      + labelHeight(detail: detail, nameSize: nameSize, mirrored: mirrored) + bottomPadding
+    guard tile.size.height >= needed else { return false }
+
+    var width = nameWidth(tile.name, size: nameSize)
+    if detail == .nameAndSize { width = max(width, secondaryWidth(tile.pointSize)) }
+    if mirrored { width = max(width, secondaryWidth(mirroredLabel)) }
+    return tile.size.width >= width + 2 * horizontalPadding
+  }
+
+  static let mirroredLabel = "Mirrored"
+}
 
 /// One display on the arrangement map, drawn to scale.
 ///
-/// It carries **no geometry of its own** — the canvas sizes and positions it —
+/// It carries **no geometry of its own** — the canvas sizes and positions it,
+/// and the canvas also hands it the `TileLabelStyle` every other tile is using —
 /// so it is a pure function of its appearance inputs and there is nothing to
 /// keep in sync across a SwiftUI diff.
 ///
@@ -24,17 +157,19 @@ struct DisplayTile: View {
   let isSelected: Bool
   /// Keyboard focus, drawn HERE rather than by AppKit's focus effect.
   ///
-  /// **Measured 2026-08-05.** The system ring keeps the geometry it was drawn
-  /// with: after an arrangement change rescales the map, the ring stayed at the
-  /// tile's *previous* size — pinned in the pixels of `05-canvas-pending.png`,
-  /// where the ring ended 58 px short of the tile it was supposed to be
-  /// hugging. A ring pointing at a region that is not the tile is worse than no
-  /// ring at all, and it fails for exactly the users the keyboard route exists
-  /// for. Drawn as part of the tile it cannot go stale, because it has no
-  /// geometry of its own to remember.
+  /// **Measured 2026-08-05.**
+  /// The system ring keeps the geometry it was drawn with: after an arrangement
+  /// change rescaled the map, the ring stayed at the tile's *previous* size —
+  /// pinned in the pixels of `05-canvas-pending.png`, where the ring ended 58 px
+  /// short of the tile it was supposed to be hugging. A ring pointing at a
+  /// region that is not the tile is worse than no ring at all, and it fails for
+  /// exactly the users the keyboard route exists for. Drawn as part of the tile
+  /// it cannot go stale, because it has no geometry of its own to remember.
   let isFocused: Bool
   let isInvalid: Bool
   let isDragging: Bool
+  /// The map's decision, not this tile's. See `TileLabelStyle`.
+  let labels: TileLabelStyle
 
   var body: some View {
     GeometryReader { proxy in
@@ -62,37 +197,61 @@ struct DisplayTile: View {
           VStack(spacing: 0) {
             RoundedRectangle(cornerRadius: 1)
               .fill(.primary.opacity(0.45))
-              .frame(height: max(2, min(5, proxy.size.height * 0.06)))
+              .frame(height: TileLabelStyle.stripHeight(forHeight: proxy.size.height))
               .padding(.horizontal, 3)
-              .padding(.top, 3)
+              .padding(.top, TileLabelStyle.stripInset)
             Spacer(minLength: 0)
           }
         }
 
-        // Progressive disclosure by tile HEIGHT (layout.md). A 1470×956 built-in
-        // beside a 3440×1440 ultrawide can come out 40 pt tall, and three
-        // stacked labels in 40 pt is a smudge rather than information.
-        if proxy.size.height >= 34 {
-          VStack(spacing: 1) {
-            Text(verbatim: name).font(.caption).lineLimit(1).truncationMode(.middle)
-            if proxy.size.height >= 52 {
-              Text(verbatim: pointSize).font(.caption2).foregroundStyle(.secondary)
-            }
-            if mirroredCount > 0, proxy.size.height >= 68 {
-              Text("Mirrored").font(.caption2).foregroundStyle(.secondary)
-            }
-          }
-          .padding(.horizontal, 4)
-        }
+        labelStack(in: proxy.size)
       }
     }
     .opacity(isDragging ? 0.9 : 1)
     // The only elevation cue in the view, and it is on the one thing that is
     // genuinely lifted.
     .shadow(color: .black.opacity(isDragging ? 0.25 : 0), radius: 6, y: 2)
-    // The tooltip is the escape hatch for a tile too short to show its own
-    // labels — the name and size are then reachable without resizing anything.
+    // The escape hatch for a map whose tiles are too small to say everything —
+    // the name and the size are then reachable without resizing anything.
     .help(Text(verbatim: "\(name) — \(pointSize)"))
+  }
+
+  /// Centred in the space BELOW the menu-bar strip's band, never in the tile:
+  /// the band is reserved on every tile (`TileLabelStyle.stripBand`), so the
+  /// name clears the strip whichever display is main, and the height
+  /// `TileLabelStyle.fitting` tested is the height this stack occupies.
+  @ViewBuilder private func labelStack(in size: CGSize) -> some View {
+    if labels.detail != .none {
+      VStack(spacing: 0) {
+        Color.clear.frame(height: TileLabelStyle.stripBand(forHeight: size.height))
+        Spacer(minLength: 0)
+        VStack(spacing: 0) {
+          Text(verbatim: name)
+            .font(.system(size: labels.nameSize))
+            .lineLimit(1)
+            .truncationMode(.middle)
+          if labels.detail == .nameAndSize {
+            Text(verbatim: pointSize)
+              .font(.system(size: TileLabelStyle.secondarySize))
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+            if labels.showsMirrored, mirroredCount > 0 {
+              Text(verbatim: TileLabelStyle.mirroredLabel)
+                .font(.system(size: TileLabelStyle.secondarySize))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+          }
+        }
+        Spacer(minLength: 0)
+        Color.clear.frame(height: TileLabelStyle.bottomPadding)
+      }
+      // Fills the tile so the two `Spacer`s can centre the text between the
+      // reserved band and the bottom padding. Without it the stack sizes to its
+      // content and the ZStack centres it over the strip instead.
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .padding(.horizontal, TileLabelStyle.horizontalPadding)
+    }
   }
 
   private var fill: AnyShapeStyle {
