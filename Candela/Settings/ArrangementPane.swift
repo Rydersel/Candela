@@ -135,8 +135,12 @@ struct ArrangementPane: View {
   /// the structural reasons are stated first.
   private var mainDisplayCaption: SettingsCaption {
     guard let id = reconciledSelection.wrappedValue else {
+      // It said "click one to make it the main display", which is not what a
+      // click does — a click selects, and the button is the thing that moves the
+      // menu bar. Copy that promises the button's effect to a click is half of
+      // why a selected-looking tile beside a dead button reads as broken.
       return SettingsCaption(
-        "Drag a display to move it, or click one to make it the main display. Tab to a display and press Space to choose it, then use the arrow keys to move it. Displays have to touch along an edge and cannot overlap."
+        "Drag a display to move it, or click one to select it. Tab to a display and press Space to select it, then use the arrow keys to move it. Displays have to touch along an edge and cannot overlap."
       )
     }
     if id == coordinator.arrangement.mainDisplayID {

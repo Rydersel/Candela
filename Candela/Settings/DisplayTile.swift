@@ -72,8 +72,11 @@ struct TileLabelStyle: Equatable, Sendable {
     return (font.ascender - font.descender + font.leading).rounded(.up)
   }
 
+  /// Measured **semibold**, which is the weight a SELECTED tile draws its name
+  /// in. Measuring the regular weight would let clicking a tile truncate a name
+  /// that fitted a moment earlier.
   private static func nameWidth(_ name: String, size: Double) -> Double {
-    let font = NSFont.systemFont(ofSize: size)
+    let font = NSFont.systemFont(ofSize: size, weight: .semibold)
     return (name as NSString).size(withAttributes: [.font: font]).width
   }
 
@@ -145,19 +148,33 @@ struct TileLabelStyle: Equatable, Sendable {
 /// second, disagreeing opinion about a shape that is already correct.
 ///
 /// Every colour is semantic (drag-canvas §7.2): `.fill.tertiary`, `.separator`,
-/// `.tint`, and the one literal — red — that has a meaning no hierarchical grey
-/// carries. Light and dark then both work without a second code path, which is
-/// what `dark-mode.md` asks for. Red is never the *only* signal: an invalid drop
-/// also draws a 2 pt border and puts a sentence under the canvas.
+/// `.tint`, the system's own `keyboardFocusIndicatorColor`, and the one literal
+/// — red — that has a meaning no hierarchical grey carries. Light and dark then
+/// both work without a second code path, which is what `dark-mode.md` asks for.
+/// Red is never the *only* signal: an invalid drop also draws a 2 pt border and
+/// puts a sentence under the canvas.
 struct DisplayTile: View {
   let name: String
   let pointSize: String
   let mirroredCount: Int
   let isMain: Bool
+  /// **Selection is a choice**, and the one "Use as Main Display" acts on. Drawn
+  /// as a *state of the tile* — tinted fill, tinted edge, semibold name — so it
+  /// cannot be read as the ring the keyboard leaves behind it.
   let isSelected: Bool
-  /// Keyboard focus, drawn HERE rather than by AppKit's focus effect.
+  /// **Focus is where the keyboard is**, not a choice: Space promotes a focused
+  /// tile to the selection. Drawn as the system's own keyboard ring
+  /// (`keyboardFocusIndicatorColor`, the accent at 50 %) and changing nothing
+  /// else about the tile, because that is what the platform's focus indicator
+  /// means. The two states used to share one 2 pt tint ring, which put a tile
+  /// that read as "selected" beside a greyed-out "Use as Main Display" — the
+  /// pane looked broken at rest, and the honest reading was that focus had been
+  /// drawn as selection.
   ///
-  /// **Measured 2026-08-05.**
+  /// Both are drawn when both are true. Suppressing the ring on a selected tile
+  /// made Tab appear to lose the keyboard as soon as it reached the selection.
+  ///
+  /// Drawn HERE rather than by AppKit's focus effect. **Measured 2026-08-05.**
   /// The system ring keeps the geometry it was drawn with: after an arrangement
   /// change rescaled the map, the ring stayed at the tile's *previous* size —
   /// pinned in the pixels of `05-canvas-pending.png`, where the ring ended 58 px
@@ -180,13 +197,11 @@ struct DisplayTile: View {
 
         // INSET, so it reads as a ring inside the tile rather than as a second
         // opinion about the tile's edge — adjacent displays share an edge, and
-        // a ring drawn on it would sit half over the neighbour. Suppressed when
-        // the tile is already selected: the selection border marks the same
-        // tile, and two tint rings on one tile is noise, not information.
-        if isFocused, !isSelected {
+        // a ring drawn on it would sit half over the neighbour.
+        if isFocused {
           RoundedRectangle(cornerRadius: 3)
-            .strokeBorder(.tint, lineWidth: 2)
-            .padding(2)
+            .strokeBorder(Color(nsColor: .keyboardFocusIndicatorColor), lineWidth: 3)
+            .padding(1.5)
         }
 
         // The menu-bar strip: the platform's own signifier for "this is the main
@@ -227,7 +242,7 @@ struct DisplayTile: View {
         Spacer(minLength: 0)
         VStack(spacing: 0) {
           Text(verbatim: name)
-            .font(.system(size: labels.nameSize))
+            .font(.system(size: labels.nameSize, weight: isSelected ? .semibold : .regular))
             .lineLimit(1)
             .truncationMode(.middle)
           if labels.detail == .nameAndSize {
@@ -256,7 +271,7 @@ struct DisplayTile: View {
 
   private var fill: AnyShapeStyle {
     if isInvalid { return AnyShapeStyle(Color.red.opacity(0.16)) }
-    if isSelected { return AnyShapeStyle(.tint.opacity(0.18)) }
+    if isSelected { return AnyShapeStyle(.tint.opacity(0.30)) }
     return AnyShapeStyle(.fill.tertiary)
   }
 
