@@ -119,9 +119,20 @@ struct ArrangementConfirmationView: View {
     }
   }
 
+  /// What this card is reporting, which is what titles it. Decided in
+  /// `CandelaKit` — the precedence between a known divergence, an uncertain one
+  /// and "nothing changed" is the whole substance of the fix, and a view has
+  /// nowhere to test it (D21).
+  private var reportSubject: ArrangementReportSubject {
+    .of(
+      hasRecoverableLayout: coordinator.recoverableLayout != nil,
+      restoreNotice: coordinator.restoreNotice
+    )
+  }
+
   @ViewBuilder private var reportBody: some View {
     ConfirmationCard {
-      ConfirmationTitle(ArrangementCopy.reportTitle)
+      ConfirmationTitle(ArrangementCopy.reportTitle(reportSubject))
       if !coordinator.lastInvalidLayout.isEmpty {
         ConfirmationCaption(ArrangementCopy.invalidLayout(
           coordinator.lastInvalidLayout, name: displayName

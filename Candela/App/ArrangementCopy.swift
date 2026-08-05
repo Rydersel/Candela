@@ -8,7 +8,25 @@ enum ArrangementCopy {
   static var question: LocalizedStringKey { "Keep this arrangement?" }
   static var keep: LocalizedStringKey { "Keep" }
   static var revert: LocalizedStringKey { "Revert Now" }
-  static var reportTitle: LocalizedStringKey { "Arrangement not changed" }
+  /// The report card's title, from what the card is actually reporting.
+  ///
+  /// It used to be the fixed string "Arrangement not changed", which two of the
+  /// card's branches contradict outright — it sat directly above "The displays
+  /// did not end up where they were asked to go". A surface built to report a
+  /// success that was not achieved must not itself report a state the machine is
+  /// not in.
+  static func reportTitle(_ subject: ArrangementReportSubject) -> LocalizedStringKey {
+    switch subject {
+    case .nothingChanged:
+      "Arrangement not changed"
+    case .restoreFailed:
+      // Says only what is known. Whether the displays moved is precisely what
+      // this case cannot tell — see `ArrangementReportSubject.restoreFailed`.
+      "Saved arrangement not restored"
+    case .diverged:
+      "Arrangement changed unexpectedly"
+    }
+  }
 
   static func countdown(_ seconds: Int) -> String {
     seconds == 1 ? "Reverting in 1 second" : "Reverting in \(seconds) seconds"
