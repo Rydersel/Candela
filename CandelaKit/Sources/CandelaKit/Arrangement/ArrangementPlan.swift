@@ -234,7 +234,30 @@ public enum ArrangementOutcomePolicy {
     requestedMain: CGDirectDisplayID?
   ) -> [ArrangementApplyNotice] {
     var notices: [ArrangementApplyNotice] = []
-    if requested.relativeLayout != resulting.relativeLayout {
+    // Restricted to the REQUESTED displays before normalising, exactly as
+    // `ArrangementVerification.unhonoured` does and for the same reason. A
+    // display that arrived between the commit and the read-back — or one whose
+    // `CGDisplayBounds` was momentarily unreadable at `begin` and is readable
+    // now — moves the achieved bounding box, so every requested tile normalises
+    // to a different point and a layout nothing touched compares unequal.
+    //
+    // The two comparisons disagreeing is the defect worth naming: verification
+    // filtered and passed, this one did not and reported `.adjusted`, so the
+    // confirmation card said "macOS moved some of the displays to a layout of
+    // its own" at the exact moment the user is deciding whether to keep the
+    // change — about a change macOS had honoured.
+    //
+    // The MAIN-display comparison below is deliberately NOT filtered: if a
+    // newcomer took the origin, the menu bar genuinely is not on the display
+    // that was asked for, and that is a fact about the machine rather than about
+    // the planned displays' relative positions.
+    let requestedIDs = Set(requested.tiles.map(\.id))
+    let compared = DisplayArrangement(
+      tiles: resulting.tiles.filter { requestedIDs.contains($0.id) }
+    )
+    if requested.relativeLayout != compared.relativeLayout {
+      // Carries the FULL layout on screen, not the restriction: the caller has
+      // to reconcile against the machine, not against the part of it we planned.
       notices.append(.adjusted(resulting))
     }
     if let requestedMain, resulting.mainDisplayID != requestedMain {

@@ -117,4 +117,56 @@ struct ArrangementOutcomePolicyTests {
       requested: requested, resulting: resulting, requestedMain: 1
     ) == [.adjusted(resulting)])
   }
+
+  /// The reciprocal of the test above, and the one this suite was missing: a
+  /// result carrying an EXTRA display.
+  ///
+  /// A display can arrive between the commit and the read-back — or one whose
+  /// `CGDisplayBounds` was unreadable at `begin` can become readable — and the
+  /// newcomer moves the achieved bounding box, so an unfiltered normalisation
+  /// shifts every requested tile and reports a layout nothing touched as
+  /// adjusted. `ArrangementVerification.unhonoured` already restricts to the
+  /// planned displays for this reason; this comparison did not, so the two
+  /// disagreed and the confirmation card told the user macOS had rearranged
+  /// their displays while they were deciding whether to keep the change.
+  @Test func aResultCarryingAnExtraDisplayIsNotReportedAsAdjusted() {
+    // Placed left of and above everything requested, so it is the newcomer that
+    // owns the achieved bounding box's minimum corner — the case an unfiltered
+    // normalisation gets wrong.
+    let arrived = tile(3, DisplayRect(x: -3440, y: -2520, width: 3440, height: 1440))
+    let resulting = DisplayArrangement(tiles: requested.tiles + [arrived])
+
+    #expect(ArrangementOutcomePolicy.notices(
+      requested: requested, resulting: resulting, requestedMain: 1
+    ).isEmpty)
+  }
+
+  /// The filter must not become a blindfold: with the newcomer present, a
+  /// requested display that genuinely moved is still reported.
+  @Test func anExtraDisplayDoesNotHideAGenuineAdjustmentOfThePlannedOnes() {
+    let arrived = tile(3, DisplayRect(x: -3440, y: -2520, width: 3440, height: 1440))
+    let resulting = DisplayArrangement(tiles: [
+      tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
+      tile(2, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
+      arrived,
+    ])
+    #expect(ArrangementOutcomePolicy.notices(
+      requested: requested, resulting: resulting, requestedMain: 1
+    ) == [.adjusted(resulting)])
+  }
+
+  /// …and the main-display half stays UNfiltered on purpose. A newcomer that
+  /// landed at the origin means the menu bar really is not on the display that
+  /// was asked for, which is a fact about the machine rather than about the
+  /// planned displays' relative positions.
+  @Test func anExtraDisplayAtTheOriginStillReportsTheMainDisplayUnchanged() {
+    let arrived = tile(3, DisplayRect(x: 0, y: 0, width: 3440, height: 1440))
+    // The requested pair, translated so 3 owns the origin and the pair's own
+    // relative geometry is untouched.
+    let resulting = DisplayArrangement(tiles: requested.translated(dx: 3440, dy: 0).tiles + [arrived])
+
+    #expect(ArrangementOutcomePolicy.notices(
+      requested: requested, resulting: resulting, requestedMain: 1
+    ) == [.mainDisplayUnchanged(1)])
+  }
 }
