@@ -197,7 +197,11 @@ public enum ArrangementSnapper {
   /// on which of two displays the user happened to grab, and dragging A onto B
   /// would not undo dragging B onto A. Flooring makes the one-point offset a
   /// single stated rule in both directions.
-  private static func halved(_ value: Int) -> Int {
+  ///
+  /// Internal rather than private so `ArrangementDockPolicy` can centre a
+  /// keyboard dock the same way. Two copies of this rule would let an arrow
+  /// press and a drag land one point apart on every odd difference.
+  static func halved(_ value: Int) -> Int {
     value >= 0 ? value / 2 : (value - 1) / 2
   }
 
