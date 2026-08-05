@@ -470,6 +470,47 @@ struct ArrangementPreviewSessionTests {
     #expect(await session.previewedArrangement == next)
   }
 
+  /// The proactive call has to make the same distinction the revert paths do: an
+  /// empty sweep is every display unreadable at once (§4.4), not every display
+  /// departing. A coordinator that calls this on every reconfiguration
+  /// notification would otherwise throw away a good fallback the first time a
+  /// sweep landed mid-reconfiguration.
+  @Test func discardDoesNotReadAnUnreadableSweepAsADeparture() async throws {
+    let fake = loaded(pair)
+    let session = ArrangementPreviewSession(configurator: fake, countdownSeconds: 15)
+    let previewed = try await session.begin(stacked).get()
+
+    fake.arrangement = DisplayArrangement(tiles: [])
+    #expect(await session.discardIfTopologyChanged() == false)
+    #expect(await session.previewedArrangement == previewed)
+    #expect(await session.isCountingDown)
+
+    fake.arrangement = previewed.achieved
+    #expect(await session.revert(previewed) == .reverted)
+    #expect(fake.currentArrangement() == pair)
+  }
+
+  /// Dragging a display back to where it started while a preview is outstanding.
+  /// The plan is computed against LIVE — which is the unconfirmed preview — so
+  /// this is a real change and is allowed; computed against the captured
+  /// fallback it would read as "nothing to change" and be refused, leaving the
+  /// user told there is nothing to do while the screens show otherwise.
+  ///
+  /// Keeping it also keeps the fallback honest: the capture is still `pair`, so
+  /// nothing about the original layout was lost by passing through it.
+  @Test func aSecondBeginBackToTheStartingLayoutIsAChangeBecauseLiveIsThePreview() async throws {
+    let fake = loaded(pair)
+    let session = ArrangementPreviewSession(configurator: fake, countdownSeconds: 15)
+    _ = try await session.begin(stacked).get()
+
+    let back = try await session.begin(pair).get()
+    #expect(back.requested == pair)
+    #expect(back.achieved == pair)
+    #expect(await session.confirm(back) == .committed)
+    #expect(fake.applied.map(\.scope) == [.preview, .preview, .permanent])
+    #expect(fake.currentArrangement() == pair)
+  }
+
   /// The same rule reached through the COUNTDOWN rather than through a caller
   /// noticing the departure. The two share one predicate, so an expiry that
   /// lands before the reconfiguration notification does cannot wedge the session

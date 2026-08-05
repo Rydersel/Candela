@@ -258,9 +258,15 @@ public actor ArrangementPreviewSession {
   }
 
   /// Safe to call repeatedly while `hasOutstandingPreview` names the same
-  /// preview. A revert that threw left the layout where it was, so trying again
-  /// once CoreGraphics recovers is the whole recovery path — the error UI hangs
-  /// off this, and it passes back the same value it is showing.
+  /// preview: the fallback is untouched by a failed resolution and every attempt
+  /// recomputes its plan from a live sample, so trying again once CoreGraphics
+  /// recovers is the whole recovery path — the error UI hangs off this, and it
+  /// passes back the same value it is showing.
+  ///
+  /// Deliberately NOT "a revert that threw left the layout where it was". The
+  /// seam's post-commit check can throw over a layout that DID move (see the
+  /// type's doc comment), which is exactly why the retry re-samples instead of
+  /// replaying.
   public func revert(_ answered: PreviewedArrangement) -> ModePreviewOutcome {
     guard let outstanding else { return lastOutcome ?? .reverted }
     guard answered == outstanding.previewed else { return .stale }
