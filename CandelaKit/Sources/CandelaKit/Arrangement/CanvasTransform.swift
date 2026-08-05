@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 
 /// Canvas space: the view's local coordinate space — origin top-left, y-**down**,
