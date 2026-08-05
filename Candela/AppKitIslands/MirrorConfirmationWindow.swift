@@ -124,6 +124,12 @@ struct MirrorConfirmationView: View {
         ConfirmationCaption(MirroringCopy.applyFailure)
           .help("CoreGraphics error \(failure.cgErrorCode)")
       }
+      // The four-way gate said no (AR12). Neither a refusal about the topology
+      // nor a failed apply — nothing was staged. Said out loud because a hotkey
+      // press has no other surface at all, and silence on it reads as a dead key.
+      if let blockedBy = coordinator.blockedBy {
+        ConfirmationCaption(ReconfigurationCopy.blocked(by: blockedBy))
+      }
       // A break that committed exactly what it staged and still left a set
       // standing. Said out loud, because "mirroring off" over a set the user is
       // still looking at is the defect this whole feature exists to close.

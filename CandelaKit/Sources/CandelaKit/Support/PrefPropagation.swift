@@ -30,6 +30,11 @@ public enum PrefName: String, Sendable, CaseIterable {
   case enableMuteUnmute, audioSinkOverride, audioDeviceNameOverride
   // Per-display — display configuration (W2 SP1)
   case rememberDisplayMode, storedDisplayMode
+  // App-level — display arrangement (#13). `savedArrangements` names a FAMILY
+  // of keys, one per topology signature, the way `storedDisplayMode` names one
+  // per display identity — a layout is a statement about a display SET, not
+  // about a display.
+  case restoreArrangement, savedArrangements
   // Per-command (base names; `DisplayPrefs.setTuning` adds the `.<cmd>` part)
   case unavailableDDC, minDDCOverride, maxDDCOverride, curveDDC, invertDDC, remapDDC
 }
@@ -74,6 +79,15 @@ public enum PrefPropagation {
     case .rememberDisplayMode, .storedDisplayMode:
       // Reapply happens at launch and reconnect only, never on the pref write
       // itself (DM7) — writing the pref must not yank the user's screen.
+      // `.refreshUI` is unioned in below and is the whole row.
+      []
+
+    case .restoreArrangement, .savedArrangements:
+      // The same answer as the mode rows above, for the same reason: a layout is
+      // restored when displays ARRIVE, never on the pref write itself, so
+      // turning the switch on must not rearrange anyone's screens under them.
+      // The failure that would cause is worse than the mode one — the menu bar
+      // and the Dock follow whichever display ends up at the origin.
       // `.refreshUI` is unioned in below and is the whole row.
       []
 

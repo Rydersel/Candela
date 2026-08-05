@@ -99,6 +99,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// all, so this is the only thing that can say anything about it.
   private var mirrorConfirmation: MirrorConfirmationWindow?
   private var rotationConfirmation: RotationConfirmationWindow?
+  /// Answers an arrangement preview. Held for the same reason as the three
+  /// above: the coordinator references it weakly and the countdown outlives
+  /// whatever started the change.
+  private var arrangementConfirmation: ArrangementConfirmationWindow?
   /// Stored (review M23) so the topology loop can `cleanupDisplay` departed
   /// displays' HUD panels; the executor shares this same instance.
   private let hud = BrightnessHUD()
@@ -111,6 +115,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// (D11), which is what disables both restores for the session. Assigned in
   /// `init` rather than inline because it needs that flag.
   private let restoreCoordinator: RestoreCoordinator
+  /// The two unattended restore passes, chained (see `restoreUnattended()`).
+  /// A property rather than a local so two topology events cannot interleave
+  /// their halves — the second call's passes wait on the first call's.
+  private let unattendedRestores = UnattendedRestoreSequence()
   /// The only writer to `model.mirrorTopology`. Held for the app's lifetime —
   /// it owns a block-based notification registration, and dropping it would
   /// freeze the store at the launch sample without anything saying so.
@@ -359,6 +367,42 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     self.rotationConfirmation = rotationConfirmation
     model.rotation.confirmation = rotationConfirmation
 
+    // Arrangement's own surface, the fourth CALLER of `ConfirmationPanel` — not
+    // a fourth window type, which is how one of the first three shipped with an
+    // invisible primary button (#54). It has the strongest case of the four for
+    // being a window: an arrangement change is the one that can move the menu
+    // bar onto a different display, so the surface asking about it must go where
+    // the menu bar ended up rather than where the request was made.
+    let arrangementConfirmation = ArrangementConfirmationWindow(coordinator: model.arrangement)
+    arrangementConfirmation.drawableDisplayID = { [weak self] displayID in
+      self?.model.mirrorTopology.drawableDisplayID(for: displayID) ?? displayID
+    }
+    arrangementConfirmation.displayName = { [weak self] displayID in
+      guard let state = self?.model.allControlledStates.first(where: { $0.id == displayID })
+      else { return "" }
+      return PanelView.title(for: state.display)
+    }
+    self.arrangementConfirmation = arrangementConfirmation
+    model.arrangement.confirmation = arrangementConfirmation
+    // The canvas names its tiles through the coordinator, so the map and the
+    // confirmation window call a display by the same name. Same resolution as
+    // the window's closure above, and both fall back to "" for a display
+    // `DisplayDiscovery` never saw — it filters on a non-nil `IOAVService`, so
+    // virtual, AirPlay and Sidecar displays have no settings state to be renamed
+    // in, and each surface substitutes the topology's own name for them.
+    model.arrangement.displayName = { [weak self] displayID in
+      guard let state = self?.model.allControlledStates.first(where: { $0.id == displayID })
+      else { return "" }
+      return PanelView.title(for: state.display)
+    }
+    // D27, the same wiring `didStoreMode` gets and for the same reason: the
+    // coordinator writes `savedArrangements` when a layout is kept, and the seam
+    // has to hear about it whichever surface answered. App-level, so no
+    // persistence key — the layout is a fact about the display SET.
+    model.arrangement.didSaveArrangement = { [weak self] in
+      self?.settingsActions.prefDidChange(.savedArrangements)
+    }
+
     // The orphaned-shade fix (see `MirroringCoordinator.rebuildSoftwareDimming`).
     // Wired here because it needs an AppKit island and the display list; D28
     // decides WHICH door — `reapplyAfterPrefChange()`, never
@@ -397,7 +441,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         self.restoreCoordinator.noteLaunchOrReconfigure()
         self.wireInterferenceHooks()
         self.warmModeCatalogs()
-        self.reapplyStoredModes()
+        self.restoreUnattended()
         // Fork parity: the counter zeroes on every configure so unrelated
         // events across a long session never add up to an offer.
         // `suspendedForSession` survives.
@@ -527,7 +571,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // here: nothing the panel starts can be relied on to run while the menu
       // is tracking.
       warmModeCatalogs()
-      reapplyStoredModes()
+      restoreUnattended()
       #if DEBUG
         // Screenshot hook (DT6). After `model.refresh()`, so `display:first`
         // has a display list to resolve against.
@@ -642,7 +686,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
   }
 
-  /// Reapplies remembered resolutions for displays that have just arrived.
+  /// The two unattended restores — remembered resolutions, then the saved
+  /// layout — as ONE operation.
   ///
   /// Driven from exactly two places — the launch warm task and the topology
   /// loop above — and from nowhere else (DM7). The topology loop is this app's
@@ -654,14 +699,30 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// displays count as arrivals, so calling this on every quiet window is not
   /// the same as reapplying continuously.
   ///
-  /// Safe mode gates it here, where the flag lives. Safe mode is the launch you
+  /// **The layout restore runs AFTER the mode reapply, and that is now a
+  /// guarantee rather than an intent** (§7.4): a resolution change resizes the
+  /// display, so a layout applied first would be tiled against footprints that
+  /// are about to change. The two used to be fired back-to-back onto separate
+  /// queues, which made the ordering luck — and, worse, made the two starve each
+  /// other, because they claim the same AR12 gate and a refused pass gives its
+  /// arrival claims back on the premise that the holder's reconfiguration event
+  /// will call it again. Neither pass produces one when it decides to apply
+  /// nothing, which is the dominant case for both. `UnattendedRestoreSequence`
+  /// documents the whole of it.
+  ///
+  /// Safe mode gates BOTH here, where the flag lives. Safe mode is the launch you
   /// perform when the app's unattended restores are suspected of making things
-  /// worse, and a stored resolution is the one restored value that can leave a
-  /// screen unreadable — with no countdown behind it, because nobody is
-  /// watching. The alert's copy names resolution for the same reason.
-  private func reapplyStoredModes() {
+  /// worse: a stored resolution is the one restored value that can leave a
+  /// screen unreadable, and a restored layout is the one that can move the menu
+  /// bar onto a display the user is not looking at — both with no countdown
+  /// behind them, because nobody is watching. The alert's copy names resolution
+  /// for the same reason.
+  private func restoreUnattended() {
     guard !isSafeMode else { return }
-    model.displayModes.reapplyStoredModes()
+    unattendedRestores.run([
+      { [model] in await model.displayModes.reapplyStoredModes() },
+      { [model] in await model.arrangement.restoreSavedArrangement() },
+    ])
   }
 
   /// D12: full-domain wipe, explicitly confirmed by the caller (the General

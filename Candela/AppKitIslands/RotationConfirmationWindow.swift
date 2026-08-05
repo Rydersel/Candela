@@ -113,6 +113,11 @@ struct RotationConfirmationView: View {
         ConfirmationCaption(RotationCopy.applyFailure)
           .help("CoreGraphics error \(failure.cgErrorCode)")
       }
+      // The four-way gate said no (AR12). Nothing was applied, so this is
+      // neither a refusal about the display nor a failed apply.
+      if let blockedBy = coordinator.blockedBy {
+        ConfirmationCaption(ReconfigurationCopy.blocked(by: blockedBy))
+      }
 
       ConfirmationAnswers {
         Button("OK") { coordinator.dismissReport() }

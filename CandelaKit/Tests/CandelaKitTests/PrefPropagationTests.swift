@@ -44,7 +44,10 @@ struct PrefPropagationTests {
     // W2 SP1 added `rememberDisplayMode`/`storedDisplayMode`: 33 -> 35.
     #expect(PrefName.rememberDisplayMode.rawValue == "rememberDisplayMode")
     #expect(PrefName.storedDisplayMode.rawValue == "storedDisplayMode")
-    #expect(PrefName.allCases.count == 35)
+    // #13 added the two arrangement keys: 35 -> 37.
+    #expect(PrefName.restoreArrangement.rawValue == "restoreArrangement")
+    #expect(PrefName.savedArrangements.rawValue == "savedArrangements")
+    #expect(PrefName.allCases.count == 37)
   }
 
   // MARK: - Rows

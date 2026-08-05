@@ -34,6 +34,11 @@ final class RotationCoordinator {
   /// A rotation or a revert that the hardware refused, or that reported success
   /// and did not happen (RT8).
   private(set) var lastFailure: DisplayConfigError?
+  /// The four-way gate refused this request, and names who is holding it
+  /// (AR12). Its own property rather than a fifth `RotationRefusal`: that enum
+  /// is `RotationPolicy`'s answer about the DISPLAY, and this is not a fact
+  /// about the display at all.
+  private(set) var blockedBy: ReconfigurationClaimant?
   private(set) var isApplying = false
 
   @ObservationIgnored weak var confirmation: (any RotationConfirmationPresenting)?
@@ -42,6 +47,13 @@ final class RotationCoordinator {
   @ObservationIgnored var displayName: (CGDirectDisplayID) -> String = { _ in "" }
 
   @ObservationIgnored private let configurator: any DisplayConfiguring
+  /// AR12. Held from just before the rotation applies until nothing is
+  /// outstanding. Rotation had no exclusion of any kind before this: it shipped
+  /// after AR10 was written, which is exactly why the ruling was amended.
+  ///
+  /// Not defaulted — a per-coordinator default would compile, run, and exclude
+  /// nobody.
+  @ObservationIgnored private let gate: DisplayReconfigurationGate
   @ObservationIgnored private let session: RotationPreviewSession
   @ObservationIgnored private var pending: Task<Void, Never>?
   @ObservationIgnored private var countdown: Task<Void, Never>?
@@ -56,9 +68,11 @@ final class RotationCoordinator {
   #endif
 
   init(
+    gate: DisplayReconfigurationGate,
     configurator: any DisplayConfiguring = CoreGraphicsDisplayConfigurator(),
     timeoutSeconds: Int = 30
   ) {
+    self.gate = gate
     self.configurator = configurator
     session = RotationPreviewSession(configurator: configurator, timeoutSeconds: timeoutSeconds)
     // A rotation fires this notification itself, so this is not only about
@@ -145,6 +159,16 @@ final class RotationCoordinator {
   private func begin(_ request: RotationRequest) async {
     lastRefusal = nil
     lastFailure = nil
+    blockedBy = nil
+    // AR12, asked BEFORE the apply: `SLSSetDisplayRotation` blocks for 0.4–1.1
+    // seconds and does not come back until the panel has moved, so a refusal
+    // after it would be a refusal of something that already happened.
+    if let holder = await gate.claim(.rotation).refusedBy {
+      blockedBy = holder
+      log.info("Refused a rotation: \(holder.rawValue, privacy: .public) is reconfiguring displays")
+      syncConfirmation()
+      return
+    }
     let result = await session.begin(request)
     switch result {
     case .success:
@@ -171,6 +195,7 @@ final class RotationCoordinator {
   func dismissReport() {
     lastRefusal = nil
     lastFailure = nil
+    blockedBy = nil
     syncConfirmation()
   }
 
@@ -241,6 +266,12 @@ final class RotationCoordinator {
     guard let outstanding = await session.previewed else {
       preview = nil
       stopCountdown()
+      // THE release (AR12). Here rather than at each call site because this
+      // funnel already runs after every path that can end a rotation preview — a
+      // failed begin, an answer, an expiry, and the display departing with
+      // nobody watching. Unconditional: the gate refuses a release from a
+      // claimant that is not holding it.
+      await gate.release(.rotation)
       syncConfirmation()
       return
     }
@@ -260,15 +291,15 @@ final class RotationCoordinator {
     syncConfirmation()
   }
 
-  /// Every write to `preview`, `lastRefusal` or `lastFailure` must be followed
-  /// by this. An un-synced write leaves the window rendering a state that no
-  /// longer exists — an empty floating panel.
+  /// Every write to `preview`, `lastRefusal`, `lastFailure` or `blockedBy` must
+  /// be followed by this. An un-synced write leaves the window rendering a state
+  /// that no longer exists — an empty floating panel.
   private func syncConfirmation() {
     if let preview {
       confirmation?.presentRotationConfirmation(.preview(preview.request.display))
       return
     }
-    if lastFailure != nil || lastRefusal != nil {
+    if lastFailure != nil || lastRefusal != nil || blockedBy != nil {
       confirmation?.presentRotationConfirmation(.report)
       return
     }

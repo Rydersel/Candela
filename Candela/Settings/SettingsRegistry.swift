@@ -37,6 +37,11 @@ enum SettingsRegistry {
         id: id, title: "Menu Bar", symbol: "menubar.rectangle", tint: .blue,
         content: { AnyView(AppMenuPane()) }
       )
+    case .arrangement:
+      SettingsPaneDescriptor(
+        id: id, title: "Arrangement", symbol: "rectangle.3.group", tint: .teal,
+        content: { AnyView(ArrangementPane()) }
+      )
     case .keyboard:
       SettingsPaneDescriptor(
         id: id, title: "Keyboard", symbol: "keyboard", tint: .indigo,

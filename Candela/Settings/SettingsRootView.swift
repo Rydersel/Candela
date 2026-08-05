@@ -127,10 +127,11 @@ struct SettingsRootView: View {
     switch selection {
     case let .pane(id):
       // The registry holds a LocalizedStringKey for the sidebar row; the
-      // window needs a plain String, and these four are the same words.
+      // window needs a plain String, and these are the same words.
       switch id {
       case .general: "General"
       case .menuBar: "Menu Bar"
+      case .arrangement: "Arrangement"
       case .keyboard: "Keyboard"
       case .about: "About"
       }

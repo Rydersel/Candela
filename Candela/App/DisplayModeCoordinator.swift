@@ -111,7 +111,17 @@ final class DisplayModeCoordinator {
   /// reported on another display's page.
   struct StartFailure: Equatable {
     let displayID: CGDirectDisplayID
-    let error: DisplayConfigError
+    let reason: Reason
+
+    /// Two ways a selection can take no effect, and they are different
+    /// statements: one is the hardware or CoreGraphics saying no, the other is
+    /// this app refusing to reconfigure a display while it is already
+    /// reconfiguring displays (AR12). One state with two reasons rather than two
+    /// states, so `dismissStartFailure` stays THE only place either is cleared.
+    enum Reason: Equatable {
+      case failed(DisplayConfigError)
+      case blocked(by: ReconfigurationClaimant)
+    }
   }
 
   private(set) var catalogs: [CGDirectDisplayID: Catalog] = [:]
@@ -130,6 +140,15 @@ final class DisplayModeCoordinator {
 
   let configurator: any DisplayConfiguring
   let persistence: ModePersistence
+
+  /// AR12. Held from just before `begin()` until nothing is outstanding, so no
+  /// other display-reconfiguring feature can move a display out from under a
+  /// preview whose fallback was captured before it.
+  ///
+  /// Not defaulted, and deliberately so: a per-coordinator default would compile,
+  /// run, and exclude nobody — four private gates are four features that all
+  /// think they are alone.
+  @ObservationIgnored private let gate: DisplayReconfigurationGate
 
   /// Where a `.panel`-origin preview is answered. Wired at launch; nil means
   /// the app never installed one, which degrades to "no confirmation surface
@@ -174,9 +193,11 @@ final class DisplayModeCoordinator {
   )
 
   init(
+    gate: DisplayReconfigurationGate,
     configurator: any DisplayConfiguring = CoreGraphicsDisplayConfigurator(),
     persistence: ModePersistence = ModePersistence()
   ) {
+    self.gate = gate
     self.configurator = configurator
     self.persistence = persistence
     session = ModePreviewSession(configurator: configurator)
@@ -326,7 +347,13 @@ final class DisplayModeCoordinator {
   /// the display shows up, and a monitor that came back on a reduced link once
   /// does not permanently rewrite their resolution. (Which is also why there is
   /// no `prefDidChange` here: nothing changed.)
-  func reapplyStoredModes() {
+  ///
+  /// **Awaitable, and its one caller awaits it.** `UnattendedRestoreSequence`
+  /// runs this and the arrangement restore as one operation, in this order,
+  /// because the two claim the same gate and a refused pass cannot rely on the
+  /// winner producing a reconfiguration event — see the comment in
+  /// `performReapply` on the refusal, and the type's own documentation.
+  func reapplyStoredModes() async {
     let live = configurator.displays()
     // Claiming marks, in one step: the work below is queued and asynchronous,
     // so a second call landing before it finishes must not act on the same
@@ -339,7 +366,7 @@ final class DisplayModeCoordinator {
     // the session, but it does apply modes at SESSION scope — landing that in
     // the middle of a `begin()`/`confirm()` would move a display out from under
     // a preview whose fallback was captured before it.
-    enqueue { await self.performReapply(displays) }
+    await enqueueReturning { await self.performReapply(displays) }
   }
 
   func dismissReapplyReport(for displayID: CGDirectDisplayID) {
@@ -347,6 +374,24 @@ final class DisplayModeCoordinator {
   }
 
   private func performReapply(_ displays: [ConfiguredDisplay]) async {
+    // Unattended, and still a reconfiguration, so AR12 applies to it exactly as
+    // it applies to a pick — a stored mode re-asserted in the middle of an
+    // arrangement preview changes the very tile sizes that layout was computed
+    // from. Refused, every arrival claim goes back: the arrival has not been
+    // dealt with, and keeping it would mean "never".
+    //
+    // Whether anything calls this again is NOT a property of the gate, and this
+    // used to claim it was. It holds only for a claimant that holds the gate
+    // around an outstanding reconfiguration or preview, because resolving one of
+    // those is itself a reconfiguration and produces the event. It does NOT hold
+    // for a claimant that decides to apply nothing — which is the arrangement
+    // restore's dominant case, and was this pass's too, so the two starved each
+    // other. `UnattendedRestoreSequence` is why they no longer race: the layout
+    // restore does not run until this pass has finished and released.
+    if await gate.claim(.displayModes).refusedBy != nil {
+      for display in displays { arrivals.release(display.id) }
+      return
+    }
     // Asked of the session rather than of `preview`, for the same reason
     // `dropPreviewOnDepartedDisplay` does: the derived copy is nil for several
     // awaits after `begin()` succeeds, and reapplying over a live preview would
@@ -432,6 +477,12 @@ final class DisplayModeCoordinator {
         reapplyReports[display.id] = nil
       }
     }
+    // Reapply opens no preview, so the claim it took is spent the moment the
+    // loop ends — but it can run while a preview stands on ANOTHER display, and
+    // releasing then would free the claim protecting that preview. The session
+    // is the authority on whether anything is outstanding; `preview` is not (it
+    // is nil for several awaits after a `begin()` succeeds).
+    if await session.previewedMode == nil { await gate.release(.displayModes) }
   }
 
   func isRemembering(_ displayID: CGDirectDisplayID) -> Bool {
@@ -607,15 +658,28 @@ final class DisplayModeCoordinator {
     // do for this display, they are now doing by hand. Leaving the notice up
     // would have it contradict the choice they just made.
     reapplyReports[displayID] = nil
+    // AR12, asked BEFORE `begin()` because that is what makes a refusal cost
+    // nothing: no transaction has been opened and no display has moved, so there
+    // is a sentence to say and nothing to undo. Granted when WE are already the
+    // holder — a select on a second display while one is previewing is a
+    // supported operation, and `ModePreviewSession.begin` handles it.
+    if let holder = await gate.claim(.displayModes).refusedBy {
+      startFailure = StartFailure(displayID: displayID, reason: .blocked(by: holder))
+      // Synced by this `adopt`, which must stay immediately after the write —
+      // same adjacency rule as the failure branch below.
+      await adopt(.clear)
+      return
+    }
     switch await session.begin(mode: mode, on: displayID) {
     case .success:
       await adopt(.clear)
       startCountdown()
     case let .failure(error):
-      // The one write to `startFailure` that is not a clear. It is synced by the
-      // `adopt` below — which must therefore stay immediately after it, since
-      // this is what puts the failure on screen.
-      startFailure = StartFailure(displayID: displayID, error: error)
+      // One of the two writes to `startFailure` that are not a clear (the other
+      // is the gate refusal above). It is synced by the `adopt` below — which
+      // must therefore stay immediately after it, since this is what puts the
+      // failure on screen.
+      startFailure = StartFailure(displayID: displayID, reason: .failed(error))
       // A begin() that fails may or may not have left something outstanding: it
       // refuses when the previous mode is unreadable (nothing applied), and it
       // also refuses when ending a preview on ANOTHER display failed — in which
@@ -694,6 +758,13 @@ final class DisplayModeCoordinator {
     guard let outstanding = await session.previewedMode else {
       preview = nil
       stopCountdown()
+      // THE release (AR12), and it is here rather than at each call site on
+      // purpose: this funnel already runs after every path that can end a
+      // preview — a failed `begin`, a commit, a revert, an expiry, and a display
+      // departing with nobody watching — so a claim cannot outlive the thing it
+      // was protecting. Unconditional, because the gate refuses a release from a
+      // claimant that is not holding it.
+      await gate.release(.displayModes)
       syncConfirmation()
       return
     }

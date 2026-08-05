@@ -5,7 +5,10 @@ import Foundation
 /// rather than a sidebar row that navigates nowhere. Same guarantee `PrefName`
 /// gives the propagation seam.
 enum PaneID: String, CaseIterable, Hashable {
-  case general, menuBar, keyboard, about
+  // Order is the sidebar's order. `arrangement` sits after `menuBar` because it
+  // is about the desktop rather than about the app, and before the input and
+  // informational panes.
+  case general, menuBar, arrangement, keyboard, about
 }
 
 /// The split view's selection type.

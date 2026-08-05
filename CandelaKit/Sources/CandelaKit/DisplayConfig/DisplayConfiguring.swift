@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// How long an applied mode should last.
+/// How long an applied configuration should last.
 ///
 /// `Equatable` is declared here rather than added by a test-side extension:
 /// it is our own type in our own module, so a `@retroactive` conformance
@@ -10,8 +10,36 @@ public enum DisplayConfigScope: Sendable, Equatable {
   /// `kCGConfigureForAppOnly` — reverts when this process exits, including on
   /// a crash. The safe way to show someone a mode before committing to it.
   case preview
-  /// `kCGConfigureForSession` — outlives the process.
+  /// `kCGConfigureForSession` — outlives the process, and is dropped at logout.
   case session
+  /// `kCGConfigurePermanently` — written to the user's stored configuration, so
+  /// it survives logout.
+  ///
+  /// Arrangement commits with this (drag-canvas §6.1): the layout is what macOS
+  /// itself persists per display-set, and a session-scoped commit would be lost
+  /// at logout and read as the feature not working.
+  ///
+  /// **A permanent change the macOS UI cannot represent silently degrades to
+  /// session scope** (`CGDisplayConfiguration.h`), with no error — one more
+  /// reason every apply re-reads what it achieved instead of trusting its own
+  /// return code.
+  case permanent
+}
+
+extension DisplayConfigScope {
+  /// An exhaustive switch, and deliberately the ONLY place this mapping is
+  /// written. It replaced a `scope == .preview ? .forAppOnly : .forSession`
+  /// ternary at each of the three `CGCompleteDisplayConfiguration` call sites —
+  /// which would have silently mapped `.permanent` to `.forSession`, losing the
+  /// layout at logout while reporting success. A switch here makes the compiler
+  /// demand a row for every future case at every call site at once.
+  var configureOption: CGConfigureOption {
+    switch self {
+    case .preview: .forAppOnly
+    case .session: .forSession
+    case .permanent: .permanently
+    }
+  }
 }
 
 /// A display that can be reconfigured. Unlike `ExternalDisplay` this includes
