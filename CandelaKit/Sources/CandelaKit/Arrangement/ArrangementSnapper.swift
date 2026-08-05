@@ -70,19 +70,20 @@ public struct SnapResult: Sendable, Equatable {
 /// not change which Y candidates exist, or the answer would depend on which axis
 /// was evaluated first.
 ///
-/// The result is a function of the candidate set alone, never of the order the
-/// tiles arrive in: every candidate carries a total-order key
-/// `(distance, kind, other display id, target)` and the winner is its minimum.
-/// A snap decided by array order is not reproducible in a bug report.
+/// Candidates are ranked by `(distance, kind, other display id, target, guide
+/// position)`, which is a strict total order whenever the tiles have distinct
+/// ids — as a `DisplayArrangement`'s do. Nothing here reads the order `tiles`
+/// arrives in; a snap decided by array order is not reproducible in a bug
+/// report.
 ///
-/// A snap that *produces* an overlap is not undone here. `ArrangementRules`
-/// reports it, the tile renders red, and the drop is refused (AR7) — undoing it
-/// silently would be the auto-correction AR7 exists to avoid.
+/// A snap that *produces* an overlap is not undone here — undoing it silently
+/// would be the auto-correction AR7 exists to avoid. `ArrangementDragPolicy`
+/// reports it through the proposal's `problems` instead.
 public enum ArrangementSnapper {
   /// - Parameter threshold: in **display** points. The authored threshold is in
   ///   canvas points and is converted through the drag's frozen transform
-  ///   (§3.3) — `ArrangementDragPolicy` owns that conversion. A threshold below
-  ///   1 admits only an exact hit.
+  ///   (§3.3) — `ArrangementDragPolicy` owns that conversion. A threshold of 0
+  ///   admits only an exact hit; a negative one admits nothing at all.
   public static func snap(
     _ moving: DisplayRect,
     id: CGDirectDisplayID,
@@ -129,9 +130,6 @@ public enum ArrangementSnapper {
     return others
       .flatMap { candidates(on: axis, moving: moving, other: $0) }
       .filter { abs($0.target - origin) <= threshold }
-      // `min(by:)` keeps the FIRST minimal element, and the key below ties only
-      // between candidates of one tile — `otherID` separates every other pair —
-      // so the winner does not depend on the order `others` arrives in.
       .min { key($0, from: origin) < key($1, from: origin) }
   }
 
@@ -152,7 +150,25 @@ public enum ArrangementSnapper {
       )
     }
 
-    var result: [Candidate] = []
+    // Generated align-first, which is the REVERSE of the preference. The
+    // ranking key is then the only thing that can make an abut win a tie; with
+    // the abuts appended first, dropping `kind` from the key would leave the
+    // behaviour unchanged and no test could see the difference.
+    var result: [Candidate] = [
+      candidate(sourceOrigin, .align, at: sourceOrigin),
+      candidate(sourceMax - movingExtent, .align, at: sourceMax),
+      candidate(
+        sourceOrigin + halved(extent(source, axis) - movingExtent),
+        .align,
+        // The guide is drawn through the OTHER display's centre. The moved
+        // tile's own centre can land one point off it, because both that centre
+        // and this target are halved integers; at canvas scale (≈12 display
+        // points to the canvas point) the difference is well under a pixel, and
+        // drawing through the rect that is not moving keeps the guide from
+        // jittering as the tile approaches.
+        at: sourceOrigin + halved(extent(source, axis))
+      ),
+    ]
 
     // The crossing precondition, read at the PRE-SNAP position. Without it a
     // tile dragged far above another still feels a magnet from it: the two
@@ -166,19 +182,6 @@ public enum ArrangementSnapper {
       result.append(candidate(sourceMax, .abut, at: sourceMax))
       result.append(candidate(sourceOrigin - movingExtent, .abut, at: sourceOrigin))
     }
-
-    result.append(candidate(sourceOrigin, .align, at: sourceOrigin))
-    result.append(candidate(sourceMax - movingExtent, .align, at: sourceMax))
-    result.append(candidate(
-      sourceOrigin + halved(extent(source, axis) - movingExtent),
-      .align,
-      // The guide is drawn through the OTHER display's centre. The moved tile's
-      // own centre can land one point off it, because both this target and a
-      // centre are halved integers; at canvas scale (≈12 display points to the
-      // canvas point) that is well under a pixel, and picking the stable rect to
-      // draw through keeps the guide from jittering as the tile approaches.
-      at: sourceOrigin + halved(extent(source, axis))
-    ))
 
     return result
   }
@@ -198,11 +201,25 @@ public enum ArrangementSnapper {
     value >= 0 ? value / 2 : (value - 1) / 2
   }
 
+  /// `position` is the last term so the ranking is a strict total order over the
+  /// candidates of a tile list with distinct ids, rather than one that leaves
+  /// `min(by:)`'s first-minimal-wins behaviour to decide. It is reachable: two
+  /// displays of the same width offer leading-edge and trailing-edge aligns with
+  /// the same target, and this makes the leading edge the one the guide names.
+  ///
+  /// `target` is §3.4's, and cannot currently decide anything: two candidates of
+  /// one display share a kind and a distance only when the moved display sits at
+  /// their midpoint, which is where the centre-align candidate sits at distance
+  /// zero and wins outright. It stays because the ordering has to remain total
+  /// for whatever candidates are added next.
   private static func key(
     _ candidate: Candidate,
     from origin: Int
-  ) -> (Int, SnapKind, CGDirectDisplayID, Int) {
-    (abs(candidate.target - origin), candidate.kind, candidate.otherID, candidate.target)
+  ) -> (Int, SnapKind, CGDirectDisplayID, Int, Int) {
+    (
+      abs(candidate.target - origin), candidate.kind, candidate.otherID,
+      candidate.target, candidate.position
+    )
   }
 
   // MARK: - Lines

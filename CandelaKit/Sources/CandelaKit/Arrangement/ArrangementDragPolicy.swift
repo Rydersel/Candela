@@ -3,10 +3,11 @@ import Foundation
 
 /// What a drag is asking for, at one instant.
 ///
-/// **AR3.** This is the value the canvas renders mid-drag AND the value it
-/// commits on release — the same instance, not a recomputation from the same
-/// inputs. "It snapped somewhere other than the preview showed" is then not a
-/// reachable state rather than merely an unlikely one.
+/// **AR3.** It carries everything both ends of a drag need — what to draw, what
+/// to apply, and whether applying it is legal — so a release has nothing left to
+/// compute and can commit the value that was on screen. "It snapped somewhere
+/// other than the preview showed" then needs a caller that recomputes on
+/// purpose, rather than being the default outcome of two code paths drifting.
 public struct ArrangementProposal: Sendable, Equatable {
   /// The dragged tile moved AND snapped, in the baseline's display space.
   public let arrangement: DisplayArrangement
@@ -95,9 +96,12 @@ public enum ArrangementDragPolicy {
       dy: transform.displayDistance(translation.y)
     )
 
-    // At least 1: on a map zoomed in far enough that 8 canvas points is under
-    // half a display point, a threshold of 0 would admit only an exact hit and
-    // snapping would appear to stop working.
+    // The floor is §3.3's, and it earns its keep twice. On a map zoomed in far
+    // enough that 8 canvas points is worth under half a display point the
+    // conversion rounds to 0, which admits an exact hit and nothing either side
+    // of it; 1 keeps a point of tolerance, which is all display space has to
+    // give. And it holds a negative `snapThreshold` — which admits nothing at
+    // all, not even an exact hit — to the same floor.
     let threshold = max(1, transform.displayDistance(snapThreshold))
     let snapped = ArrangementSnapper.snap(
       moved, id: id, against: baseline.tiles, threshold: threshold

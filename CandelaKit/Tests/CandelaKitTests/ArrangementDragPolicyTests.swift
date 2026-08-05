@@ -183,6 +183,29 @@ struct ArrangementDragPolicyTests {
     #expect(originOf(inn, 2) == DisplayPoint(x: 1_100, y: 0)) // left where it was dropped
   }
 
+  @Test func theConvertedThresholdNeverFallsBelowOnePoint() {
+    // Zoomed in past 16 canvas points per display point, 8 canvas points
+    // converts to 0 — a threshold that admits an exact hit and nothing either
+    // side of it. The floor keeps the single point of tolerance display space
+    // has to give.
+    let zoomed = CanvasTransform(scale: 20, offsetX: 0, offsetY: 0)
+    #expect(zoomed.displayDistance(ArrangementDragPolicy.snapThresholdCanvasPoints) == 0)
+
+    let oneOff = ArrangementDragPolicy.propose(
+      dragging: 2, by: CanvasPoint(x: 20, y: 0), from: pair, transform: zoomed
+    )
+    #expect(zoomed.displayDistance(20) == 1) // the drag moved exactly one point
+    #expect(originOf(oneOff, 2) == DisplayPoint(x: 1_000, y: 0))
+
+    // And a negative threshold, which would otherwise admit nothing at all, is
+    // held to the same floor rather than silently disabling snapping.
+    let negative = ArrangementDragPolicy.propose(
+      dragging: 2, by: CanvasPoint(x: 0.1, y: 0), from: pair,
+      transform: tenToOne, snapThreshold: -100
+    )
+    #expect(originOf(negative, 2) == DisplayPoint(x: 1_000, y: 0))
+  }
+
   @Test func theTransformIsUsedAsGivenAndNeverRefitted() {
     // AR2. Refitting to the arrangement's bounds mid-drag rescales the whole map
     // under the pointer every frame. The scale below is deliberately not the one

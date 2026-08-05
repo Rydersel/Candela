@@ -28,6 +28,10 @@ struct ArrangementSnapperTests {
     // exactly 50 from the abut target (0, landing it edge-to-edge against S's
     // left side) and exactly 50 from the align target (100, its left edge lined
     // up with S's).
+    // Stated directly as well as through the geometry: the ranking key carries
+    // `SnapKind`, whose order is its declaration order and nothing else.
+    #expect(SnapKind.abut < SnapKind.align)
+
     let source = tile(2, rect(100, 0, 100, 100))
 
     let result = ArrangementSnapper.snap(
@@ -39,6 +43,15 @@ struct ArrangementSnapperTests {
     // The shared edge, not the target: the tile lands at 0 and meets S at 100.
     #expect(line(result, .x)?.position == 100)
     #expect(line(result, .x)?.otherDisplayID == 2)
+
+    // The same tie from the other side, where the abut target (200) is the
+    // LARGER number. Without this the ranking's `target` term would decide the
+    // case above on its own and dropping `kind` from the key would go unnoticed.
+    let fromTheRight = ArrangementSnapper.snap(
+      rect(150, 0, 100, 100), id: 1, against: [source], threshold: 60
+    )
+    #expect(fromTheRight.rect == rect(200, 0, 100, 100))
+    #expect(line(fromTheRight, .x)?.kind == .abut)
 
     // Positive control — the tie is what abut wins. A strictly nearer align
     // still beats it, so the rule is a tie-break and not a blanket preference.
@@ -156,6 +169,22 @@ struct ArrangementSnapperTests {
 
     #expect(result.rect == rect(50, 105, 50, 100))
     #expect(result.lines.map(\.axis) == [.x])
+  }
+
+  @Test func equalWidthsCollapseThreeAlignmentsOntoOneTargetAndTheGuideNamesTheLeadingEdge() {
+    // Leading edge, trailing edge and centre all ask for the same x when the two
+    // displays are the same width, so only the guide can differ. Which one gets
+    // drawn is decided by the ranking key's last term, not by which candidate
+    // happened to be built first.
+    let source = tile(2, rect(0, 0, 100, 100))
+
+    let result = ArrangementSnapper.snap(
+      rect(5, 0, 100, 100), id: 1, against: [source], threshold: 8
+    )
+
+    #expect(result.rect.x == 0)
+    #expect(line(result, .x)?.kind == .align)
+    #expect(line(result, .x)?.position == 0)
   }
 
   @Test func theMovedDisplayIsNeverACandidateAgainstItself() {
