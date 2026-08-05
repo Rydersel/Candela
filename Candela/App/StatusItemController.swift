@@ -1,4 +1,6 @@
 import AppKit
+// @preconcurrency: same mutable-C-global import quirk as AccessibilityPermission.
+@preconcurrency import ApplicationServices
 import CandelaKit
 import os
 import ServiceManagement
@@ -521,6 +523,25 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       }
     }
     mediaKeyTap = tap
+
+    // #59: after an emergency teardown (revocation seen by the AX poll, or a
+    // WindowServer wedge broken by the deadman switch), wait out the settle
+    // window, then either rebuild the tap (false alarm — e.g. a slow display
+    // reconfigure tripped the probe) or record the disarm so diagnostics
+    // reads "not running". The delay matters: right after a wedge breaks, a
+    // pending TCC delete commits within moments, and rebuilding immediately
+    // could recreate the tap the revocation was trying to kill.
+    tap.onEmergencyTeardown = { [weak self] in
+      Task { @MainActor in
+        try? await Task.sleep(for: .seconds(3))
+        guard let self else { return }
+        if AXIsProcessTrustedWithOptions(nil) {
+          self.startMediaKeyTap()
+        } else {
+          self.model.noteTapDisarmed()
+        }
+      }
+    }
 
     let permission = model.accessibility
     // D14 + HIG: on a first run the Setup window owns the Accessibility ask so

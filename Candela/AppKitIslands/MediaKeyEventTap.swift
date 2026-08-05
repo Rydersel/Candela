@@ -2,6 +2,8 @@
 //  Based on MediaKeyTap by Nicholas Hurden (MIT)
 
 import AppKit
+// @preconcurrency: same mutable-C-global import quirk as AccessibilityPermission.
+@preconcurrency import ApplicationServices
 import CandelaKit
 import CoreGraphics
 import os
@@ -40,6 +42,22 @@ final class MediaKeyEventTap {
   }
 
   enum TapError: Error { case creationFailed }
+
+  /// #59 watchdog logging. `notice` persists to the unified log by default,
+  /// so a post-incident `log show` can reconstruct a wedge without a debug
+  /// build — the whole investigation depended on exactly that visibility.
+  nonisolated static let watchdogLog = Logger(
+    subsystem: "com.rydersel.Candela", category: "tap-watchdog"
+  )
+
+  /// Called (on an arbitrary thread) after the #59 monitor performs an
+  /// emergency teardown. The controller uses it to re-check the grant after a
+  /// settle delay and rebuild the tap when the teardown was a false alarm.
+  var onEmergencyTeardown: (@Sendable () -> Void)?
+
+  /// #59 self-ping marker carried in `.eventSourceUserData`. Arbitrary value,
+  /// distinctive enough not to collide with anything real.
+  nonisolated static let pingMagic: Int64 = 0x0059_CAD3_1A
 
   /// The Swift side of the C-callback trampoline. `@Sendable` both for the
   /// hop onto the tap thread and so the closure literal in `start()` is
@@ -101,7 +119,20 @@ final class MediaKeyEventTap {
     let configLock = self.configLock
     let runtime = self.runtime
     let onPress = self.onPress
+    /// #59 heartbeat, shared by the callback, the prober and the monitor:
+    /// (ping posted, ping seen by the callback, probe in flight, prober loop
+    /// completed). Created before the callback closure so the callback can
+    /// stamp `pingSeen`.
+    let heartbeat = OSAllocatedUnfairLock<
+      (pingPosted: Date?, pingSeen: Date, probing: Date?, alive: Date)
+    >(initialState: (nil, Date(), nil, Date()))
     let callback: EventTapCallback = { type, event in
+      // #59 self-ping marker: our own prober posted this event. Stamp its
+      // arrival and swallow it — it is not for the system.
+      if event.getIntegerValueField(.eventSourceUserData) == Self.pingMagic {
+        heartbeat.withLock { $0.pingSeen = Date(); $0.pingPosted = nil }
+        return nil
+      }
       if type == .tapDisabledByTimeout {
         // The system disabled us for being slow; re-enable and pass the
         // event through. Reads the port from the shared box — the callback
@@ -183,6 +214,139 @@ final class MediaKeyEventTap {
     }
     thread.name = "MediaKeyEventTap"
     thread.start()
+
+    // #59 deadman switch. Revoking Accessibility under a live active tap
+    // wedges WindowServer until the tap's mach port dies — and in the
+    // TCC-entry-DELETE case there is NO in-band signal to react to [MEASURED
+    // 2026-08-05]: no distributed notification is posted, and
+    // AXIsProcessTrustedWithOptions keeps returning a stale `true` because
+    // the delete cannot COMMIT while WindowServer is wedged on our port. A
+    // sampled freeze showed this process completely healthy while input was
+    // dead. The only reliable detection is the wedge itself:
+    //
+    // - A PROBER thread makes a cheap WindowServer round-trip every 2 s
+    //   (`CGWindowListCopyWindowInfo` — a real RPC, unlike display-bounds
+    //   reads, which are locally cached).
+    // - A MONITOR thread checks two conditions each second: a committed
+    //   revocation (AX poll — covers toggles the notification path misses),
+    //   and a probe stuck > 5 s (WindowServer wedged while we hold an active
+    //   tap). Either way it invalidates the port via the nonisolated
+    //   teardown — the same kernel-level release as process death — which
+    //   un-wedges WindowServer and lets a pending TCC delete commit.
+    // - 5 s tolerates WindowServer's legitimate stalls (mode changes and
+    //   rotation block up to ~1.1 s, measured on #11).
+    // - `onEmergencyTeardown` then re-checks the grant after a settle delay
+    //   and rebuilds the tap when the teardown was a false alarm.
+    nonisolated(unsafe) let watchdogPort = port
+    let watchdogRuntime = self.runtime
+    let onEmergencyTeardown = self.onEmergencyTeardown
+
+    // #59: revoking Accessibility under a live active tap wedges the event
+    // pipeline until the tap's mach port dies, and in the TCC-entry-DELETE
+    // case there is NO conventional signal to detect it by [ALL MEASURED
+    // 2026-08-05, one instrumented freeze each]:
+    //   - no `com.apple.accessibility.api` notification is posted (toggles
+    //     post it; deletes do not);
+    //   - `AXIsProcessTrustedWithOptions` keeps returning a stale `true`,
+    //     because the delete cannot COMMIT while the pipeline is wedged;
+    //   - WindowServer keeps answering RPCs (`CGWindowListCopyWindowInfo`
+    //     returned normally throughout a live freeze);
+    //   - the process is never suspended (state stayed S, all threads ran).
+    // Only event DELIVERY stalls. So the detector lives in the event stream
+    // itself: the prober posts a marker event every 2 s and the tap callback
+    // stamps its arrival. A healthy pipeline round-trips in milliseconds; a
+    // posted ping that has not arrived within 5 s means the pipeline is
+    // wedged, and the monitor invalidates the port — the same kernel-level
+    // release as the process death that recovered the machine each time.
+    let prober = Thread {
+      Self.watchdogLog.debug("prober started")
+      while true {
+        let current = watchdogRuntime.withLockUnchecked { $0.port === watchdogPort }
+        guard current else { Self.watchdogLog.debug("prober: port gone, exiting"); return }
+        // Post the ping only if the previous one arrived — a stuck ping must
+        // keep its original timestamp so the monitor's clock runs from the
+        // FIRST unanswered post.
+        let shouldPost = heartbeat.withLock { hb -> Bool in
+          guard hb.pingPosted == nil else { return false }
+          hb.pingPosted = Date()
+          return true
+        }
+        if shouldPost {
+          // NX_SYSDEFINED with no payload: inside our tap's event mask, so
+          // the callback sees and swallows it; inert to the rest of the
+          // system if the pipeline delivers it before we do.
+          if let ping = CGEvent(source: nil) {
+            ping.type = CGEventType(rawValue: UInt32(NX_SYSDEFINED))!
+            ping.setIntegerValueField(.eventSourceUserData, value: Self.pingMagic)
+            ping.post(tap: .cgSessionEventTap)
+          } else {
+            // Cannot construct events (should not happen); do not leave a
+            // phantom "posted" timestamp for the monitor to time out on.
+            heartbeat.withLock { $0.pingPosted = nil }
+          }
+        }
+        // Committed revocations (toggle path) still get a fast, clean
+        // teardown even when the distributed notification is missed.
+        heartbeat.withLock { $0.probing = Date() }
+        let trusted = AXIsProcessTrustedWithOptions(nil)
+        heartbeat.withLock { $0.probing = nil; $0.alive = Date() }
+        if !trusted {
+          Self.watchdogLog.notice("grant revoked — tearing down tap")
+          Self.teardown(watchdogRuntime)
+          Self.watchdogLog.notice("teardown complete")
+          onEmergencyTeardown?()
+          return
+        }
+        Thread.sleep(forTimeInterval: 2)
+      }
+    }
+    prober.name = "MediaKeyEventTap.wsProber"
+    prober.start()
+
+    // The monitor makes NO IPC calls — it compares clocks and, on staleness,
+    // performs the teardown (lock + mach-port destruction, all local, cannot
+    // block). Ping unanswered > 5 s: pipeline wedged. Probe/AX in flight
+    // > 5 s or prober loop silent > 12 s: the prober is stuck in a call.
+    // 5 s tolerates the platform's legitimate stalls (mode changes and
+    // rotation block up to ~1.1 s, measured on #11). A system sleep trips
+    // these on wake; `onEmergencyTeardown` re-checks the grant after a settle
+    // delay and rebuilds the tap, so a false fire self-heals.
+    let monitor = Thread {
+      Self.watchdogLog.debug("monitor started")
+      while true {
+        Thread.sleep(forTimeInterval: 1)
+        let current = watchdogRuntime.withLockUnchecked { $0.port === watchdogPort }
+        guard current else { Self.watchdogLog.debug("monitor: port gone, exiting"); return }
+        let hb = heartbeat.withLock { $0 }
+        let pingLost = hb.pingPosted.map { Date().timeIntervalSince($0) > 5 } ?? false
+        let probeStuck = hb.probing.map { Date().timeIntervalSince($0) > 5 } ?? false
+        let proberDead = Date().timeIntervalSince(hb.alive) > 12
+        if pingLost || probeStuck || proberDead {
+          Self.watchdogLog.fault(
+            "EMERGENCY — pingLost=\(pingLost) probeStuck=\(probeStuck) proberDead=\(proberDead)"
+          )
+          Self.teardown(watchdogRuntime)
+          // Invalidating the port is NOT enough once the wedge has formed
+          // [MEASURED 2026-08-05: the detector fired, teardown completed, and
+          // input stayed frozen until the process was killed]. Only process
+          // death clears an established wedge — five out of five times across
+          // this investigation. So: spawn a detached relauncher and exit.
+          // The relauncher's sleep outlives our death, by which point the
+          // pipeline is free again and the app comes back with the banner
+          // showing. A false fire (e.g. a wake edge) costs one app blink.
+          Self.watchdogLog.fault("event pipeline wedged — exiting to clear it; relauncher spawned")
+          let relauncher = Process()
+          relauncher.executableURL = URL(fileURLWithPath: "/bin/sh")
+          relauncher.arguments = [
+            "-c", "sleep 2; /usr/bin/open \"\(Bundle.main.bundlePath)\"",
+          ]
+          try? relauncher.run()
+          exit(70)
+        }
+      }
+    }
+    monitor.name = "MediaKeyEventTap.revocationMonitor"
+    monitor.start()
     isRunning = true
   }
 
