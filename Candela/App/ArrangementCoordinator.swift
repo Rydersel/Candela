@@ -306,8 +306,13 @@ final class ArrangementCoordinator {
   /// It writes NO preferences. A layout that could not be restored is not
   /// rewritten to whatever the machine settled on — what the user saved is what
   /// gets tried again the next time that display set shows up.
-  func restoreSavedArrangement() {
-    enqueue { await self.performRestore() }
+  ///
+  /// **Awaitable, and its one caller awaits it.** `UnattendedRestoreSequence`
+  /// runs the stored-mode reapply and then this, as one operation: the two claim
+  /// the same gate, and a refused pass cannot rely on the winner producing a
+  /// reconfiguration event when the winner applied nothing.
+  func restoreSavedArrangement() async {
+    await enqueueReturning { await self.performRestore() }
   }
 
   /// `answered` is the preview the caller was LOOKING AT. It is carried into the
@@ -449,6 +454,14 @@ final class ArrangementCoordinator {
     // AR12, asked BEFORE anything is staged, so a refusal costs nothing. Note
     // the guard above is what makes the release at the end ours to make: with no
     // preview outstanding, a claim taken here is protecting this pass alone.
+    //
+    // The claims go back on a refusal, which needs something to call this pass
+    // again — and that is NOT something the gate promises. It is true only of a
+    // claimant holding the gate around an outstanding reconfiguration or
+    // preview, whose resolution is itself a reconfiguration. The one claimant it
+    // was false for was the stored-mode reapply, which usually applies nothing;
+    // `UnattendedRestoreSequence` runs that pass to completion before this one
+    // starts, so it can no longer be the holder here.
     if let holder = await gate.claim(.arrangement).refusedBy {
       log.info("Deferred a layout restore: \(holder.rawValue, privacy: .public) is reconfiguring displays")
       release(claimed)

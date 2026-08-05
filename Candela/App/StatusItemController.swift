@@ -115,6 +115,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// (D11), which is what disables both restores for the session. Assigned in
   /// `init` rather than inline because it needs that flag.
   private let restoreCoordinator: RestoreCoordinator
+  /// The two unattended restore passes, chained (see `restoreUnattended()`).
+  /// A property rather than a local so two topology events cannot interleave
+  /// their halves — the second call's passes wait on the first call's.
+  private let unattendedRestores = UnattendedRestoreSequence()
   /// The only writer to `model.mirrorTopology`. Held for the app's lifetime —
   /// it owns a block-based notification registration, and dropping it would
   /// freeze the store at the launch sample without anything saying so.
@@ -437,8 +441,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         self.restoreCoordinator.noteLaunchOrReconfigure()
         self.wireInterferenceHooks()
         self.warmModeCatalogs()
-        self.reapplyStoredModes()
-        self.restoreSavedArrangement()
+        self.restoreUnattended()
         // Fork parity: the counter zeroes on every configure so unrelated
         // events across a long session never add up to an offer.
         // `suspendedForSession` survives.
@@ -568,8 +571,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // here: nothing the panel starts can be relied on to run while the menu
       // is tracking.
       warmModeCatalogs()
-      reapplyStoredModes()
-      restoreSavedArrangement()
+      restoreUnattended()
       #if DEBUG
         // Screenshot hook (DT6). After `model.refresh()`, so `display:first`
         // has a display list to resolve against.
@@ -684,7 +686,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
   }
 
-  /// Reapplies remembered resolutions for displays that have just arrived.
+  /// The two unattended restores — remembered resolutions, then the saved
+  /// layout — as ONE operation.
   ///
   /// Driven from exactly two places — the launch warm task and the topology
   /// loop above — and from nowhere else (DM7). The topology loop is this app's
@@ -696,34 +699,30 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// displays count as arrivals, so calling this on every quiet window is not
   /// the same as reapplying continuously.
   ///
-  /// Safe mode gates it here, where the flag lives. Safe mode is the launch you
+  /// **The layout restore runs AFTER the mode reapply, and that is now a
+  /// guarantee rather than an intent** (§7.4): a resolution change resizes the
+  /// display, so a layout applied first would be tiled against footprints that
+  /// are about to change. The two used to be fired back-to-back onto separate
+  /// queues, which made the ordering luck — and, worse, made the two starve each
+  /// other, because they claim the same AR12 gate and a refused pass gives its
+  /// arrival claims back on the premise that the holder's reconfiguration event
+  /// will call it again. Neither pass produces one when it decides to apply
+  /// nothing, which is the dominant case for both. `UnattendedRestoreSequence`
+  /// documents the whole of it.
+  ///
+  /// Safe mode gates BOTH here, where the flag lives. Safe mode is the launch you
   /// perform when the app's unattended restores are suspected of making things
-  /// worse, and a stored resolution is the one restored value that can leave a
-  /// screen unreadable — with no countdown behind it, because nobody is
-  /// watching. The alert's copy names resolution for the same reason.
-  private func reapplyStoredModes() {
+  /// worse: a stored resolution is the one restored value that can leave a
+  /// screen unreadable, and a restored layout is the one that can move the menu
+  /// bar onto a display the user is not looking at — both with no countdown
+  /// behind them, because nobody is watching. The alert's copy names resolution
+  /// for the same reason.
+  private func restoreUnattended() {
     guard !isSafeMode else { return }
-    model.displayModes.reapplyStoredModes()
-  }
-
-  /// Restores the saved layout for a display set that has just arrived.
-  ///
-  /// Driven from the same two places as `reapplyStoredModes()` and gated the
-  /// same way, and **called after it, which is load-bearing** (§7.4): a mode
-  /// change resizes the display, so a layout applied first would be tiled
-  /// against footprints that are about to change. The two run on separate
-  /// queues, so this is a sequencing INTENT rather than a guarantee — survivable
-  /// in exactly one direction, because a layout that no longer tiles is refused
-  /// and reported rather than sent (AR7), and a mode change is itself a
-  /// reconfiguration whose event runs this again.
-  ///
-  /// Safe mode gates it here, where the flag lives, for the reason it gates
-  /// stored modes: this is an unattended reconfiguration with no countdown
-  /// behind it, and it is the one that can move the menu bar onto a display the
-  /// user is not looking at.
-  private func restoreSavedArrangement() {
-    guard !isSafeMode else { return }
-    model.arrangement.restoreSavedArrangement()
+    unattendedRestores.run([
+      { [model] in await model.displayModes.reapplyStoredModes() },
+      { [model] in await model.arrangement.restoreSavedArrangement() },
+    ])
   }
 
   /// D12: full-domain wipe, explicitly confirmed by the caller (the General

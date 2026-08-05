@@ -347,7 +347,13 @@ final class DisplayModeCoordinator {
   /// the display shows up, and a monitor that came back on a reduced link once
   /// does not permanently rewrite their resolution. (Which is also why there is
   /// no `prefDidChange` here: nothing changed.)
-  func reapplyStoredModes() {
+  ///
+  /// **Awaitable, and its one caller awaits it.** `UnattendedRestoreSequence`
+  /// runs this and the arrangement restore as one operation, in this order,
+  /// because the two claim the same gate and a refused pass cannot rely on the
+  /// winner producing a reconfiguration event — see the comment in
+  /// `performReapply` on the refusal, and the type's own documentation.
+  func reapplyStoredModes() async {
     let live = configurator.displays()
     // Claiming marks, in one step: the work below is queued and asynchronous,
     // so a second call landing before it finishes must not act on the same
@@ -360,7 +366,7 @@ final class DisplayModeCoordinator {
     // the session, but it does apply modes at SESSION scope — landing that in
     // the middle of a `begin()`/`confirm()` would move a display out from under
     // a preview whose fallback was captured before it.
-    enqueue { await self.performReapply(displays) }
+    await enqueueReturning { await self.performReapply(displays) }
   }
 
   func dismissReapplyReport(for displayID: CGDirectDisplayID) {
@@ -372,8 +378,16 @@ final class DisplayModeCoordinator {
     // it applies to a pick — a stored mode re-asserted in the middle of an
     // arrangement preview changes the very tile sizes that layout was computed
     // from. Refused, every arrival claim goes back: the arrival has not been
-    // dealt with, and keeping it would mean "never". Resolving whatever holds
-    // the gate is itself a reconfiguration, and that event calls this again.
+    // dealt with, and keeping it would mean "never".
+    //
+    // Whether anything calls this again is NOT a property of the gate, and this
+    // used to claim it was. It holds only for a claimant that holds the gate
+    // around an outstanding reconfiguration or preview, because resolving one of
+    // those is itself a reconfiguration and produces the event. It does NOT hold
+    // for a claimant that decides to apply nothing — which is the arrangement
+    // restore's dominant case, and was this pass's too, so the two starved each
+    // other. `UnattendedRestoreSequence` is why they no longer race: the layout
+    // restore does not run until this pass has finished and released.
     if await gate.claim(.displayModes).refusedBy != nil {
       for display in displays { arrivals.release(display.id) }
       return
