@@ -15,6 +15,12 @@ import SwiftUI
 final class OnboardingWindowController: NSObject, NSWindowDelegate {
   private let permission: AccessibilityPermission
   private let onCompletion: () -> Void
+  /// Fires after the window closes ONLY when the close came from the footer's
+  /// "Start Using …" button — the explicit "I'm done, show me the app" action.
+  /// ⌘W and the red close button complete Setup (D14) but stay quiet: the
+  /// user asked to dismiss a window, not to be handed a menu.
+  var onFinishedByButton: (() -> Void)?
+  private var closedByFinishButton = false
   /// Constructed once and reused, exactly like the window — and that is only
   /// safe because `isEnabled` is a LIVE read of `SMAppService.mainApp.status`
   /// (D10). This object holds no copy of the registration state, so there is
@@ -65,7 +71,10 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
       rootView: OnboardingView(
         loginItem: loginItem,
         permission: permission,
-        onFinish: { [weak self] in self?.window?.performClose(nil) }
+        onFinish: { [weak self] in
+          self?.closedByFinishButton = true
+          self?.window?.performClose(nil)
+        }
       )
     )
     hosting.frame.size = hosting.fittingSize
@@ -91,5 +100,9 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
 
   func windowWillClose(_: Notification) {
     onCompletion()
+    if closedByFinishButton {
+      closedByFinishButton = false
+      onFinishedByButton?()
+    }
   }
 }

@@ -38,6 +38,7 @@ struct OnboardingView: View {
       VStack(alignment: .leading, spacing: 14) {
         card { openAtLogin }
         card { keyboard }
+        card { displayControl }
         card { accessibility }
       }
       footer
@@ -133,6 +134,20 @@ struct OnboardingView: View {
       keyRow(symbol: "speaker.wave.2", label: "Volume up and down")
       keyRow(symbol: "speaker.slash", label: "Mute")
       SettingsCaption("These keys act on whichever display your pointer is on. Hold Shift and Option together for fine steps. You can change all of this later in Settings → Keyboard.")
+    }
+  }
+
+  /// The display-configuration pitch. Copy constraint (RM11): resolutions are
+  /// "hidden by macOS", never "true native HiDPI" — every revealed mode except
+  /// one renders oversized and downsamples, and the app must not claim
+  /// otherwise here and then be honest in the mode picker.
+  private var displayControl: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      heading("Your displays, on your terms", symbol: "display", tint: .teal)
+      keyRow(symbol: "squares.leading.rectangle", label: "Every resolution your display supports — including HiDPI sizes macOS hides, made for 4K and 5K screens")
+      keyRow(symbol: "arrow.triangle.2.circlepath", label: "Refresh rate, rotation and mirroring")
+      keyRow(symbol: "rectangle.3.group", label: "Arrange displays and save the layout for later")
+      SettingsCaption("All of it lives in Settings, per display. A resolution change always previews first and reverts itself if you don't confirm.")
     }
   }
 

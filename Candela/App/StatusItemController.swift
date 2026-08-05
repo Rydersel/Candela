@@ -638,8 +638,125 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         PrefsSchema.recordCurrentVersion(in: .standard)
       }
     )
+    // "Start Using Candela" otherwise closes the window into… nothing — the
+    // app lives in the menu bar and a first-run user has no reason to know
+    // that. A popover anchored to the status button points its arrow at the
+    // exact spot the icon occupies — including on an auto-hidden menu bar,
+    // where the arrow aims at the top edge the bar slides out of. Pointing
+    // beats auto-opening the panel (tried first): with the bar hidden, a
+    // programmatic performClick shows a disembodied menu that teaches the
+    // user nothing about where the app lives.
+    controller.onFinishedByButton = { [weak self] in
+      Task { @MainActor in
+        try? await Task.sleep(for: .milliseconds(400))
+        self?.showSetupLandingCallout()
+      }
+    }
     onboardingController = controller
     controller.present()
+  }
+
+  /// Post-Setup "the app lives up here" callout. A borderless non-activating
+  /// floating panel, NOT an NSPopover: from a background LSUIElement app,
+  /// anchored to a status-bar window that may itself be offscreen (auto-hide),
+  /// `.transient` dies to the first system dialog and `.semitransient` never
+  /// appeared at all [both observed on hardware]. A panel we position
+  /// ourselves has no such moods. Skipped when the icon is hidden — there is
+  /// nothing to point at.
+  private var setupLandingPanel: NSPanel?
+  private func showSetupLandingCallout() {
+    guard let button = statusItem?.button, let buttonWindow = button.window else { return }
+
+    // The global-domain auto-hide pref is in every app's defaults search
+    // list. When the bar hides itself the icon's spot is empty air, so the
+    // words must say to move the pointer there — the hover reveals the bar
+    // with the icon right where the arrow points.
+    let barAutoHides = UserDefaults.standard.bool(forKey: "_HIHideMenuBar")
+    let message = barAutoHides
+      ? "\(AppInfo.productName) lives in the menu bar, which is set to hide itself. Move the pointer to the top of the screen — the icon is right about here."
+      : "\(AppInfo.productName) lives up here in the menu bar. Click the icon whenever you need it."
+
+    // Plain AppKit, deliberately: an NSHostingView used as a borderless
+    // panel's contentView re-sizes the WINDOW to SwiftUI's ideal size — a
+    // 1631-pt-tall window growing off the screen, with only empty background
+    // in view — and `sizingOptions = []` did not stop it [both measured via
+    // CGWindowList]. A label in a box has no opinions about window geometry.
+    let icon = NSImageView()
+    icon.image = NSImage(
+      systemSymbolName: "menubar.arrow.up.rectangle", accessibilityDescription: nil
+    )?.withSymbolConfiguration(.init(pointSize: 20, weight: .regular))
+    icon.contentTintColor = .secondaryLabelColor
+    icon.setFrameSize(NSSize(width: 28, height: 24))
+
+    let label = NSTextField(wrappingLabelWithString: message)
+    label.font = .systemFont(ofSize: NSFont.systemFontSize)
+    label.preferredMaxLayoutWidth = 240
+    let labelSize = label.sizeThatFits(NSSize(width: 240, height: CGFloat.greatestFiniteMagnitude))
+    label.frame = NSRect(origin: .zero, size: labelSize)
+
+    let inset: CGFloat = 14
+    let contentSize = NSSize(
+      width: inset + icon.frame.width + 10 + labelSize.width + inset,
+      height: max(labelSize.height, icon.frame.height) + inset * 2
+    )
+    let card = NSVisualEffectView(frame: NSRect(origin: .zero, size: contentSize))
+    card.material = .popover
+    card.state = .active
+    card.wantsLayer = true
+    card.layer?.cornerRadius = 12
+    card.layer?.masksToBounds = true
+    icon.setFrameOrigin(NSPoint(
+      x: inset, y: (contentSize.height - icon.frame.height) / 2
+    ))
+    label.setFrameOrigin(NSPoint(
+      x: inset + icon.frame.width + 10, y: (contentSize.height - labelSize.height) / 2
+    ))
+    card.addSubview(icon)
+    card.addSubview(label)
+
+    let panel = NSPanel(
+      contentRect: NSRect(origin: .zero, size: contentSize),
+      styleMask: [.borderless, .nonactivatingPanel],
+      backing: .buffered,
+      defer: false
+    )
+    panel.contentView = card
+    panel.isOpaque = false
+    panel.backgroundColor = .clear
+    panel.level = .statusBar
+    panel.isReleasedWhenClosed = false
+    panel.hidesOnDeactivate = false
+
+    // Placement anchors to the screen holding the POINTER — the user just
+    // clicked "Start Using" there, so that is where their attention is. The
+    // status window's own geometry is NOT trusted blindly: with an auto-
+    // hidden bar on a multi-display rig it reports a chimera (measured:
+    // icon x from one display, y from another), which put the panel on a
+    // monitor nobody was looking at. The icon's x is used only when it is
+    // sane for the pointer's screen; otherwise the panel sits in the
+    // status-item region at the top right, which is where the icon lives on
+    // every screen's bar anyway.
+    let iconRect = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+    let mouse = NSEvent.mouseLocation
+    let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
+      ?? buttonWindow.screen ?? NSScreen.main
+    let visible = screen?.visibleFrame ?? .zero
+    let iconXSane = iconRect.midX >= visible.minX && iconRect.midX <= visible.maxX
+    let anchorX = iconXSane ? iconRect.midX : visible.maxX - 160
+    var origin = NSPoint(
+      x: anchorX - contentSize.width / 2,
+      y: visible.maxY - contentSize.height
+    )
+    origin.x = max(visible.minX + 8, min(origin.x, visible.maxX - contentSize.width - 8))
+    panel.setFrameOrigin(origin)
+    panel.orderFrontRegardless()
+    setupLandingPanel = panel
+
+    Task { @MainActor [weak self, weak panel] in
+      try? await Task.sleep(for: .seconds(10))
+      panel?.orderOut(nil)
+      if let self, self.setupLandingPanel === panel { self.setupLandingPanel = nil }
+    }
   }
 
   /// Review M24 + D5: remove software dimming, then hand the DDC register the
