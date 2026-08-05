@@ -61,6 +61,23 @@ public struct ArrangementPlan: Sendable, Equatable {
   ///
   /// This is the whole reason the gate lives on the plan: it keeps the decision
   /// in a pure type, so `CoreGraphicsArrangementConfigurator` has none to make.
+  ///
+  /// **It has no production call site that can make it `false`** [audited
+  /// 2026-08-05], so the paragraph above describes a path the shipped app does
+  /// not currently take. All three plan-building sites refuse an invalid layout
+  /// before a plan exists: `ArrangementCoordinator.performApply` checks
+  /// `ArrangementRules.problems` before calling `begin`,
+  /// `ArrangementReapplyPolicy.decide` checks it before returning a layout to
+  /// restore, and `ArrangementPreviewSession.revert` builds from a capture of a
+  /// layout the machine was actually in.
+  ///
+  /// Kept, and stated rather than pretended away — the same treatment the
+  /// unreachable AR4 totality guard in `ArrangementPersistence.resolve` got.
+  /// It is the right shape: it keeps the configurator judgement-free, and the
+  /// alternative (a blanket throw) would make `.adjusted` unreportable the
+  /// moment any caller does need the documented gap/overlap adjustment. What it
+  /// must NOT be described as is the live path, because a reader who believes
+  /// the post-commit check is routinely off will reason wrongly about #53.
   public var expectsExactOrigins: Bool { ArrangementRules.isValid(arrangement) }
 
   /// `nil` when there is nothing to apply, or when the request cannot be
@@ -202,6 +219,21 @@ enum ArrangementVerification {
 public enum ArrangementApplyNotice: Sendable, Equatable {
   /// The system moved something. Carries the layout that is on screen NOW, not
   /// the one that was asked for.
+  ///
+  /// **The case it was designed for is currently unreachable in production**
+  /// [audited 2026-08-05]. It exists for macOS' documented gap/overlap
+  /// adjustment, which only happens to a plan that does not
+  /// `expectExactOrigins` — and no production path builds one, because all three
+  /// refuse an invalid layout first. On a plan that DOES expect exact origins,
+  /// `ArrangementVerification.unhonoured` throws before a preview exists, so
+  /// this notice is never computed for it either.
+  ///
+  /// What stays reachable is narrower than the sentence above suggests: the two
+  /// comparisons ask about the same displays but not the same property — the
+  /// verification compares origins, this compares whole tiles — so a display
+  /// whose FOOTPRINT changed between the commit and the read-back still lands
+  /// here. Do not read this case as "macOS rearranged your displays" evidence
+  /// without checking which of the two produced it.
   case adjusted(DisplayArrangement)
   /// The requested main display is not at the origin, so the menu bar did not
   /// move. Carries the display that was asked for. Expected when the target is
