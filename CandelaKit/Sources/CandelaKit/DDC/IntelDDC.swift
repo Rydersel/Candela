@@ -304,6 +304,14 @@ public class IntelDDC {
   }
 
   static func ioFramebufferPortFromDisplayId(displayId: CGDirectDisplayID) -> io_service_t? {
+    // The one `CGDisplayIsBuiltin` call in this package whose ID does not
+    // provably come from `CGGetOnlineDisplayList` — it is whatever the caller
+    // passed in. Equality with 1 rather than `!= 0` is what makes that safe:
+    // the call returns **-1** for an ID it does not know (measured, mirroring
+    // hardware pass §4.2), which `!= 0` would read as "built-in" and
+    // short-circuit to nil. As written, an unknown ID falls through and fails
+    // to find a framebuffer port, which is the honest answer. Do not
+    // "simplify" this to `!= 0`.
     if CGDisplayIsBuiltin(displayId) == boolean_t(truncating: true) {
       return nil
     }

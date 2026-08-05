@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import os
 
 /// The real `DisplayConfiguring`. Thin on purpose.
 public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
@@ -30,6 +31,14 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     var count: UInt32 = 0
     guard CGGetOnlineDisplayList(16, &ids, &count) == .success else { return [] }
     return ids.prefix(Int(count)).map { id in
+      // `!= 0` is safe HERE and only because `id` came out of the line above.
+      // `CGDisplayIsBuiltin` returns **-1**, not 0, for an ID it does not know
+      // (measured on the mirroring hardware pass §4.2), so this test calls any
+      // unknown ID "the built-in" — it bit that pass's own safety guard, which
+      // refused a probe because it believed display 99999 was the laptop panel.
+      // Every `CGDisplayIsBuiltin` call in this package reads an ID it just got
+      // from `CGGetOnlineDisplayList`; keep it that way rather than hardening
+      // the test, or the audit has to be redone per call site.
       let isBuiltIn = CGDisplayIsBuiltin(id) != 0
       return ConfiguredDisplay(
         id: id,
@@ -186,6 +195,39 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     let result = CGCompleteDisplayConfiguration(config, option)
     guard result == .success else {
       throw DisplayConfigError(cgErrorCode: result.rawValue)
+    }
+    // THE RETURN CODE IS NOT THE EVIDENCE — the achieved topology is. Measured:
+    // a cyclic list and a list naming one display twice both had every stage
+    // AND the complete return `.success`, and CoreGraphics did something else
+    // (`MirrorVerification`). `apply` carries this same check for a mode, and
+    // its absence here was the last place the platform could hand back a
+    // success this app forwarded unchallenged.
+    //
+    // Read immediately, with no settle loop, and that is measured rather than
+    // assumed: the rig re-read `CGDisplayMirrorsDisplay` directly after the
+    // complete in every run — the honoured ones and both divergences — and got
+    // the truth each time. `applyRotation` needs its bounded wait
+    // because `SLSSetDisplayRotation`'s readback was seen trailing its own
+    // return; a mirror commit was not.
+    if let unhonoured = MirrorVerification.unhonoured(
+      in: changes, achievedParent: CGDisplayMirrorsDisplay
+    ) {
+      // The only log line in this type, and it earns its place: the thrown code
+      // below is generic, so without this a real occurrence is a bare
+      // "CoreGraphics error 1000" in the UI with nothing naming which change
+      // the platform dropped.
+      Logger(subsystem: "com.rydersel.Candela", category: "topology").error(
+        """
+        CoreGraphics reported success for a mirror change it did not make: \
+        display \(unhonoured.display, privacy: .public) should mirror \
+        \(unhonoured.master, privacy: .public) but mirrors \
+        \(CGDisplayMirrorsDisplay(unhonoured.display), privacy: .public)
+        """
+      )
+      // Deliberately not a platform error code — the platform did not report
+      // one, which is the entire point of this check. Same reasoning, and the
+      // same code, as `applyRotation`'s readback guard below.
+      throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
     }
   }
 

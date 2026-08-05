@@ -61,6 +61,24 @@ public struct PreviewedMirrorTopology: Sendable, Equatable {
 ///   that throws changed nothing, so the fallback is still valid and still
 ///   needed, and retrying is the whole recovery path.
 ///
+/// **One qualification on that third invariant, and it is not a loophole.**
+/// `applyMirroring` gained a post-commit check (`MirrorVerification`) for the
+/// one case where CoreGraphics accepts a change list, returns `.success`, and
+/// does something else — so its throw no longer implies "nothing moved". What
+/// still holds is the part the recovery rests on: every revert here recomputes
+/// its change list from a LIVE `displays()` sample (`revertOutstanding`), and
+/// the one path that does not — `confirm`, which deliberately re-applies what
+/// was PREVIEWED — leaves the countdown armed on failure, so the expiry reverts
+/// from live instead. No path can retry into a permanent no-op that reports
+/// success, which is the failure mode this whole type exists to prevent.
+///
+/// What it does cost: a `begin` whose apply diverged leaves the machine in
+/// CoreGraphics' topology with nothing outstanding to revert it. That is at
+/// `.preview` scope, it is reported rather than hidden, and the next
+/// engage/toggle samples it live and works from there. The alternative is
+/// worse — recording the REQUESTED changes as outstanding and letting a later
+/// `confirm` commit them at session scope with `.committed`.
+///
 /// Only an `.engage` is previewed. A break is never previewed and never gains a
 /// countdown: breaking a set returns every display to its own desktop and cannot
 /// leave a screen unreadable, while a countdown there would *re-mirror* a rig

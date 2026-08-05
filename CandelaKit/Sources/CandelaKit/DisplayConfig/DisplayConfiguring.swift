@@ -121,6 +121,45 @@ public struct MirrorChange: Sendable, Equatable {
   }
 }
 
+/// The post-commit check `applyMirroring` owes its callers, factored out so the
+/// real configurator and its test double are held to the same rule.
+///
+/// **`CGCompleteDisplayConfiguration` returning `.success` is not evidence the
+/// request was honoured.** Measured on the mirroring hardware pass
+/// (`docs/spikes/2026-08-04-mirroring-hardware-pass.md` §6.2), with every stage
+/// AND the complete returning `.success` in both cases:
+///
+/// - a cyclic list `[166→167, 167→166]` achieved `166→167, 167→0`;
+/// - a list naming one display twice, `[166→167, 166→168]`, applied the FIRST
+///   change and silently discarded the second.
+///
+/// This is the same lesson `CoreGraphicsDisplayConfigurator.apply` already
+/// carries for a display MODE, where the resolved mode's geometry is re-derived
+/// and compared because `ioModeID` is positional. It was written there and not
+/// here; the gap is one loop.
+enum MirrorVerification {
+  /// The first requested change the achieved topology does not show, or nil
+  /// when every one of them stands.
+  ///
+  /// `achievedParent` is `CGDisplayMirrorsDisplay` in production: the parent
+  /// each named display ACTUALLY has, read after the commit.
+  ///
+  /// **Named displays only, deliberately.** CoreGraphics also re-parents
+  /// displays a change list never mentions — building `167→166` and then asking
+  /// the master `166` to mirror `168` silently moved `167` from `166` to `168`
+  /// (§6.3) — but that collapse is CoreGraphics enforcing the
+  /// one-master-N-slaves shape `MirrorTopology` already assumes, not a request
+  /// being ignored. Catching it needs a whole-topology comparison and a ruling
+  /// on what "achieved" means for a set. This closes the two measured
+  /// divergences and claims nothing more.
+  static func unhonoured(
+    in changes: [MirrorChange],
+    achievedParent: (CGDirectDisplayID) -> CGDirectDisplayID
+  ) -> MirrorChange? {
+    changes.first { achievedParent($0.display) != $0.master }
+  }
+}
+
 /// The seam between display-configuration policy and CoreGraphics. Everything
 /// decidable is tested against a fake conformance; the real one is a thin
 /// adapter with no judgement in it.
@@ -147,8 +186,21 @@ public protocol DisplayConfiguring: Sendable {
   /// half-broken set is a state no policy wants to reason about.
   ///
   /// Throws `DisplayConfigError` if the transaction cannot be begun, if any
-  /// change fails to STAGE, or if the completion fails. An empty `changes`
-  /// array does nothing and opens no transaction.
+  /// change fails to STAGE, if the completion fails, or if the committed
+  /// topology does not show what was asked for (`MirrorVerification`). An empty
+  /// `changes` array does nothing and opens no transaction.
+  ///
+  /// **That last throw is the ONE that can follow a committed change**, and it
+  /// is the only place in this protocol where a throw does not mean "nothing
+  /// moved". CoreGraphics accepted the batch and did something else; the
+  /// machine is in whatever topology it chose, and nothing here puts it back.
+  /// Reporting the divergence is still the right answer — the alternative is
+  /// what shipped, which was a caller recording the REQUESTED changes as
+  /// applied and later committing them at session scope with `.committed`, so a
+  /// topology CoreGraphics is known to ignore would outlive the process wearing
+  /// a success. Recovery is a retry, and every caller's retry recomputes its
+  /// change list from a LIVE sample, so no retry can be a no-op that reports
+  /// success forever.
   func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws
 
   /// Whether this build can rotate displays at all.

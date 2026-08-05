@@ -33,6 +33,7 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
   private var _appliedMirroring: [AppliedMirroring] = []
   private var _configuredDisplays: [ConfiguredDisplay] = []
   private var _failMirroringWith: DisplayConfigError?
+  private var _divergeNextMirroringTo: [CGDirectDisplayID: CGDirectDisplayID]?
   private var _canRotate = true
   private var _rotations: [CGDirectDisplayID: DisplayRotation] = [:]
   private var _appliedRotations: [(display: CGDirectDisplayID, rotation: DisplayRotation)] = []
@@ -81,6 +82,24 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
   var failMirroringWith: DisplayConfigError? {
     get { lock.withLock { _failMirroringWith } }
     set { lock.withLock { _failMirroringWith = newValue } }
+  }
+
+  /// Accept the next batch, commit it, and put the machine somewhere ELSE:
+  /// the parent each listed display ends up with, overriding what was
+  /// requested. Anything absent from the map follows the request.
+  ///
+  /// This is #53 reproduced — CoreGraphics returning `.success` from every
+  /// stage and from the complete while achieving a different topology, measured
+  /// for a cyclic change list. It is ONE-SHOT, consumed by the batch it
+  /// diverts, because the point of the second-call tests is that the RETRY
+  /// lands: a permanently diverting fake would prove a loop, not a recovery.
+  ///
+  /// The other measured case needs no injection at all: a display named twice
+  /// is diverted by the `first`-wins rule in `applyMirroring` below, which is
+  /// what CoreGraphics itself was measured doing.
+  var divergeNextMirroringTo: [CGDirectDisplayID: CGDirectDisplayID]? {
+    get { lock.withLock { _divergeNextMirroringTo } }
+    set { lock.withLock { _divergeNextMirroringTo = newValue } }
   }
 
   func displays() -> [ConfiguredDisplay] { configuredDisplays }
@@ -138,8 +157,24 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
       // `theFakeReportsSlaveMembershipAndSetMembersLikeCoreGraphicsDoes` asserts
       // it — otherwise deleting that OR would leave the fake lying about every
       // slave with this suite still green.
+
+      // What CoreGraphics ACHIEVES for this batch, which is not always what it
+      // was asked for. `first` rather than `last` is not a shrug: it is the
+      // measured accept-and-ignore rule for a display named twice —
+      // `[166→167, 166→168]` applied the FIRST change and silently discarded
+      // the second (#53) — so this fake diverges from the request exactly where
+      // the platform does, without being told to.
+      let diverted = _divergeNextMirroringTo
+      _divergeNextMirroringTo = nil
+      func achieved(
+        _ id: CGDirectDisplayID, currently: CGDirectDisplayID
+      ) -> CGDirectDisplayID {
+        if let forced = diverted?[id] { return forced }
+        return changes.first { $0.display == id }?.master ?? currently
+      }
+
       let post = _configuredDisplays.map { display in
-        (display, changes.first { $0.display == display.id }?.master ?? display.mirrorsDisplay)
+        (display, achieved(display.id, currently: display.mirrorsDisplay))
       }
       _configuredDisplays = post.map { display, mirrors in
         ConfiguredDisplay(
@@ -154,6 +189,22 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
           isInMirrorSet: post.contains { $0.1 == display.id && $0.1 != kCGNullDirectDisplay },
           isAlwaysInMirrorSet: display.isAlwaysInMirrorSet
         )
+      }
+
+      // THE SAME post-commit check production runs, on the same rule, and
+      // deliberately LAST: CoreGraphics committed, so the batch is recorded and
+      // the topology has moved before this throws. A fake that unwound here
+      // would let a session test "prove" that a divergent apply changed
+      // nothing — which is the one thing #53 established it does not.
+      //
+      // A display named in `changes` but absent from `_configuredDisplays` has
+      // no modelled parentage, so it reads back as whatever the batch asked
+      // for. That keeps the fixtures that set no display list at all (most of
+      // this file) honest rather than divergent by accident.
+      if MirrorVerification.unhonoured(in: changes, achievedParent: { id in
+        achieved(id, currently: kCGNullDirectDisplay)
+      }) != nil {
+        throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
       }
     }
   }
