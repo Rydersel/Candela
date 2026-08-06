@@ -141,6 +141,11 @@ final class DisplayModeCoordinator {
   let configurator: any DisplayConfiguring
   let persistence: ModePersistence
 
+  /// CR10. False means the mode list is exactly what CoreGraphics publishes —
+  /// reported in diagnostics rather than silently indistinguishable from a
+  /// panel that simply has no hidden modes.
+  var revealsHiddenModes: Bool { configurator.revealsHiddenModes }
+
   /// AR12. Held from just before `begin()` until nothing is outstanding, so no
   /// other display-reconfiguring feature can move a display out from under a
   /// preview whose fallback was captured before it.

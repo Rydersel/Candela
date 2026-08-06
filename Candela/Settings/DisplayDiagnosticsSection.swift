@@ -133,7 +133,41 @@ struct DisplayDiagnosticsSection: View {
       }
     }
 
+    resolutionSourceRows
+
     identityKeysRow
+  }
+
+  /// Where this display's resolutions came from.
+  ///
+  /// DT30 rule (d): this describes OUR OWN enumeration, never a claim about
+  /// what macOS is hiding. "Listed by macOS" is a count we made; "found beyond
+  /// that list" is a count we made. Neither asserts why macOS omitted them.
+  @ViewBuilder private var resolutionSourceRows: some View {
+    if let catalog = model.displayModes.catalogs[state.id] {
+      let publishedCount = catalog.all.count { $0.provenance == .coreGraphics }
+      let revealedCount = catalog.all.count { $0.provenance == .coreGraphicsServices }
+
+      LabeledContent("Resolutions listed by macOS") {
+        Text(verbatim: "\(publishedCount)").foregroundStyle(.secondary)
+      }
+
+      LabeledContent("Additional resolutions found") {
+        Text(verbatim: additionalResolutionsText(revealed: revealedCount))
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  /// Three distinct answers, and the distinction matters (DT30 rule (e)):
+  /// "none on this panel" is a measurement, "not available" is a missing
+  /// capability, and conflating them would report a capability gap as a fact
+  /// about the display.
+  private func additionalResolutionsText(revealed: Int) -> String {
+    guard model.displayModes.revealsHiddenModes else {
+      return "Not available on this version of macOS"
+    }
+    return revealed == 0 ? "None for this display" : "\(revealed)"
   }
 
   /// The two keys this display's settings hang off. Split out of the group so
