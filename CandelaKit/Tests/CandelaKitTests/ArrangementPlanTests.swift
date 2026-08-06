@@ -18,6 +18,14 @@ enum ArrangementFixtures {
     )
   }
 
+  static func rect(_ x: Int, _ y: Int, _ width: Int, _ height: Int) -> DisplayRect {
+    DisplayRect(x: x, y: y, width: width, height: height)
+  }
+
+  static func arrangement(_ tiles: [(CGDirectDisplayID, DisplayRect)]) -> DisplayArrangement {
+    DisplayArrangement(tiles: tiles.map { tile($0.0, $0.1) })
+  }
+
   /// Two 1920×1080 displays sharing their full vertical edge — gapless,
   /// non-overlapping, so `expectsExactOrigins` holds.
   static var pair: DisplayArrangement {
@@ -137,14 +145,6 @@ final class FakeArrangementConfigurator: DisplayArrangementConfiguring, @uncheck
 
 @Suite("Arrangement plan (AR4, AR6)")
 struct ArrangementPlanTests {
-  private func tile(
-    _ id: CGDirectDisplayID,
-    _ rect: DisplayRect,
-    mirroredIDs: [CGDirectDisplayID] = []
-  ) -> ArrangementTile {
-    ArrangementFixtures.tile(id, rect, mirroredIDs: mirroredIDs)
-  }
-
   // MARK: - What refuses to become a plan
 
   /// The proposal type is Task 6 and does not exist yet, so "a no-op proposal"
@@ -175,7 +175,7 @@ struct ArrangementPlanTests {
   @Test func aPlanForADifferentDisplaySetIsRefused() {
     let baseline = ArrangementFixtures.pair
     let arrived = DisplayArrangement(tiles: baseline.tiles + [
-      tile(3, DisplayRect(x: 3840, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(3, DisplayRect(x: 3840, y: 0, width: 1920, height: 1080)),
     ])
     #expect(ArrangementPlan(applying: arrived, to: baseline) == nil)
     #expect(ArrangementPlan(applying: baseline, to: arrived) == nil)
@@ -185,9 +185,11 @@ struct ArrangementPlanTests {
   /// not a request that can be made, so it is refused where it is expressible
   /// rather than trapped on at the boundary.
   @Test func anOriginOutsideInt32IsRefused() {
-    let baseline = DisplayArrangement(tiles: [tile(1, DisplayRect(x: 0, y: 0, width: 100, height: 100))])
+    let baseline = DisplayArrangement(tiles: [
+      ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 100, height: 100)),
+    ])
     let tooFar = DisplayArrangement(tiles: [
-      tile(1, DisplayRect(x: Int(Int32.max) + 1, y: 0, width: 100, height: 100)),
+      ArrangementFixtures.tile(1, DisplayRect(x: Int(Int32.max) + 1, y: 0, width: 100, height: 100)),
     ])
     #expect(ArrangementPlan(applying: tooFar, to: baseline) == nil)
   }
@@ -196,9 +198,9 @@ struct ArrangementPlanTests {
 
   @Test func aPlanCoversEveryDisplay() throws {
     let baseline = DisplayArrangement(tiles: [
-      tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
-      tile(2, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
-      tile(3, DisplayRect(x: 3840, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(2, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(3, DisplayRect(x: 3840, y: 0, width: 1920, height: 1080)),
     ])
     // ONE display moves. All three origins are still stated, because a display
     // whose origin is not set is repositioned by CoreGraphics (§4.2).
@@ -212,8 +214,8 @@ struct ArrangementPlanTests {
 
   @Test func mirrorSlavesNeverAppearInAPlan() throws {
     let baseline = DisplayArrangement(tiles: [
-      tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080), mirroredIDs: [9]),
-      tile(2, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080), mirroredIDs: [9]),
+      ArrangementFixtures.tile(2, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
     ])
     let plan = try #require(ArrangementPlan(applying: baseline.makingMain(2), to: baseline))
     #expect(plan.changes.map(\.id) == [1, 2])
@@ -226,8 +228,8 @@ struct ArrangementPlanTests {
   /// bought by breaking the other.
   @Test func anArrangementGivingAMirrorSlaveATileIsRefused() {
     let baseline = DisplayArrangement(tiles: [
-      tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080), mirroredIDs: [9]),
-      tile(9, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080), mirroredIDs: [9]),
+      ArrangementFixtures.tile(9, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
     ])
     #expect(ArrangementPlan(applying: baseline.makingMain(9), to: baseline) == nil)
   }
@@ -287,7 +289,7 @@ struct ArrangementPlanTests {
     let baseline = ArrangementFixtures.pair
     let plan = try #require(ArrangementPlan(applying: baseline.makingMain(2), to: baseline))
     let achieved = DisplayArrangement(tiles: plan.arrangement.tiles + [
-      tile(3, DisplayRect(x: -3840, y: -1080, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(3, DisplayRect(x: -3840, y: -1080, width: 1920, height: 1080)),
     ])
     #expect(ArrangementVerification.unhonoured(plan: plan, achieved: achieved) == nil)
   }

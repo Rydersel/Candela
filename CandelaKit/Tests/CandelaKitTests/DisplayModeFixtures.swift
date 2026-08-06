@@ -46,6 +46,14 @@ enum DisplayModeFixtures {
     m(1720, 720, 3440, 1440, native: true),
   ]
 
+  static func mode(
+    _ id: Int32, logical: (Int, Int), pixels: (Int, Int), hz: Double = 60
+  ) -> DisplayMode {
+    DisplayMode(ioModeID: id, logicalWidth: logical.0, logicalHeight: logical.1,
+                pixelWidth: pixels.0, pixelHeight: pixels.1, refreshHz: hz,
+                isNative: false)
+  }
+
   /// IDs are derived from the geometry rather than handed out by a counter —
   /// a mutable `static var` is a concurrency error under Swift 6 strict
   /// checking, and a derived ID is stable across reorderings of the arrays

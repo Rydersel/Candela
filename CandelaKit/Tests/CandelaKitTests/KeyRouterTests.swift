@@ -120,7 +120,7 @@ struct KeyRouterTests {
     #expect(action == .stepVolume(isUp: true, isFine: false))
   }
 
-  // Key-up: feedback-sound trigger for volume, nothing for mute/brightness
+  // Key-up: feedback-sound trigger for volume, nothing for mute
   @Test func volumeKeyUpRoutesTheFeedbackTrigger() {
     #expect(routeVol(.volumeUp, pressed: false) == .volumeKeyUp)
     #expect(routeVol(.volumeDown, pressed: false) == .volumeKeyUp)
@@ -129,10 +129,6 @@ struct KeyRouterTests {
     // "The mute key should not respond to press + hold or keyup" (fork).
     #expect(routeVol(.mute, pressed: false) == .none)
   }
-  @Test func brightnessKeyUpStillDoesNothing() {
-    #expect(route(.brightnessUp, pressed: false) == .none)
-  }
-
   // Mute
   @Test func muteFreshPressToggles() {
     #expect(routeVol(.mute) == .toggleMute)

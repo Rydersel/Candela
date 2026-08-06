@@ -18,7 +18,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// DM7 exists to forbid exactly that.
   ///
   /// It is also what every other enumeration in this codebase uses
-  /// (`DisplayDiscovery`, `BuiltInDisplay`, `Mirroring`, `KeyActionExecutor`),
+  /// (`DisplayDiscovery`, `BuiltInDisplay`, `KeyActionExecutor`),
   /// so please do not "correct" this back.
   ///
   /// The price of "online" is that it also includes MIRROR SLAVES, which no
@@ -126,15 +126,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       throw DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue)
     }
 
-    var config: CGDisplayConfigRef?
-    let begin = CGBeginDisplayConfiguration(&config)
-    guard begin == .success, let config else {
-      // A nil token after a `.success` begin would otherwise be reported as
-      // error code 0 — an error that reads as "no error".
-      throw DisplayConfigError(
-        cgErrorCode: begin == .success ? CGError.failure.rawValue : begin.rawValue
-      )
-    }
+    let config = try beginDisplayConfiguration()
     // Staging is checked, not discarded: if this fails, CGCompleteDisplayConfiguration
     // happily commits the (empty) configuration and returns .success, so `apply`
     // would return normally having changed nothing. Silent no-op is the worst
@@ -165,15 +157,7 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     // indistinguishable from having worked. Open nothing.
     guard !changes.isEmpty else { return }
 
-    var config: CGDisplayConfigRef?
-    let begin = CGBeginDisplayConfiguration(&config)
-    guard begin == .success, let config else {
-      // A nil token after a `.success` begin would otherwise be reported as
-      // error code 0 — an error that reads as "no error".
-      throw DisplayConfigError(
-        cgErrorCode: begin == .success ? CGError.failure.rawValue : begin.rawValue
-      )
-    }
+    let config = try beginDisplayConfiguration()
     for change in changes {
       // Staging is CHECKED, not discarded. If it fails,
       // CGCompleteDisplayConfiguration happily commits the (empty)

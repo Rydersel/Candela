@@ -12,7 +12,6 @@ public class IntelDDC {
   let displayId: CGDirectDisplayID
   let framebuffer: io_service_t
   let replyTransactionType: IOOptionBits
-  var enabled: Bool = false
 
   deinit {
     assert(IOObjectRelease(self.framebuffer) == KERN_SUCCESS)

@@ -74,9 +74,7 @@ struct DisplayArrivalTrackerTests {
   @Test func aReleasedClaimIsAnArrivalAgain() {
     var tracker = DisplayArrivalTracker()
     _ = tracker.claimArrivals(live: [dell])
-    #expect(tracker.hasHandled(dell))
     tracker.release(dell)
-    #expect(!tracker.hasHandled(dell))
     #expect(tracker.claimArrivals(live: [dell]) == [dell])
   }
 

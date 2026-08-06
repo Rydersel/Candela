@@ -23,7 +23,7 @@ public enum DisplayServices {
     let setBrightness: SetBrightnessFn?
   }
 
-  private static let log = Logger(subsystem: "app.candela.CandelaKit", category: "DisplayServices")
+  private static let log = Logger(subsystem: "com.rydersel.Candela", category: "DisplayServices")
 
   /// Resolved once, thread-safely (static-let semantics). The dlopen handle is
   /// deliberately not stored: we never dlclose a system framework, and a stored

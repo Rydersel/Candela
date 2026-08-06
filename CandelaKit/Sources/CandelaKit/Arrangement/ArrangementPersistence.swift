@@ -56,9 +56,10 @@ public struct TopologySignature: Sendable, Hashable {
 
 /// One display's place in a saved layout.
 ///
-/// The size is recorded for VALIDATION, never as authority (§7.4): a layout's
-/// geometry is only valid for the modes the displays were in when it was
-/// captured, and the display's current footprint is what a restore has to tile.
+/// The size is persisted for future validation and diagnostics — nothing reads
+/// it back yet — and never as authority (§7.4): a layout's geometry is only
+/// valid for the modes the displays were in when it was captured, and the
+/// display's current footprint is what a restore has to tile.
 public struct SavedArrangementEntry: Sendable, Equatable, Codable {
   /// `DisplayConfigIdentity.key`. A String rather than the struct because this
   /// is an on-disk format and the identity's key format is frozen; storing the

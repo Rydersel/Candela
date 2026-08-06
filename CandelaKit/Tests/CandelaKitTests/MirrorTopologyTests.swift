@@ -61,16 +61,6 @@ extension Result where Failure == DisplayConfigError {
 
 @Suite("Mirror topology reconstruction (DT13)")
 struct MirrorTopologyTests {
-  private func display(
-    _ id: CGDirectDisplayID,
-    mirrors: CGDirectDisplayID = kCGNullDirectDisplay,
-    inSet: Bool = false,
-    always: Bool = false,
-    builtIn: Bool = false
-  ) -> ConfiguredDisplay {
-    MirrorFixtures.display(id, mirrors: mirrors, inSet: inSet, always: always, builtIn: builtIn)
-  }
-
   @Test func aSetIsReconstructedByGroupingOnTheMasterEachSlaveNames() {
     let topology = MirrorFixtures.mirroredTrio
     #expect(topology.masters == [2])
@@ -117,7 +107,9 @@ struct MirrorTopologyTests {
   }
 
   @Test func aDisplayLockedIntoASetIsReportedAsUnbreakable() {
-    let topology = MirrorTopology([display(1, builtIn: true), display(2, mirrors: 1, always: true)])
+    let topology = MirrorTopology([
+      MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2, mirrors: 1, always: true),
+    ])
     #expect(topology.cannotBeUnmirrored(2))
     #expect(!topology.cannotBeUnmirrored(1))
     #expect(!topology.cannotBeUnmirrored(99))
@@ -128,7 +120,8 @@ struct MirrorTopologyTests {
   /// answer that can be reproduced in a bug report.
   @Test func everyListIsSortedByDisplayIDRegardlessOfSampleOrder() {
     let topology = MirrorTopology([
-      display(7, mirrors: 4), display(4, inSet: true), display(2, mirrors: 4),
+      MirrorFixtures.display(7, mirrors: 4), MirrorFixtures.display(4, inSet: true),
+      MirrorFixtures.display(2, mirrors: 4),
     ])
     #expect(topology.slaves(of: 4) == [2, 7])
     #expect(topology.expand(4) == [4, 2, 7])
@@ -150,7 +143,7 @@ struct MirrorTopologyTests {
   /// a change for a phantom. `master(of:)` still reports what the slave names,
   /// because that is a fact about the slave rather than a target.
   @Test func aSetNeverNamesAMasterThisSampleDoesNotContain() {
-    let topology = MirrorTopology([display(1, builtIn: true), display(2, mirrors: 9)])
+    let topology = MirrorTopology([MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2, mirrors: 9)])
     #expect(topology.setMembers(containing: 2) == [2])
     #expect(topology.master(of: 2) == 9)
     #expect(topology.masters.isEmpty)
@@ -164,7 +157,7 @@ struct MirrorTopologyTests {
   /// merely stale about mirroring. `master(of:)` above still reports the
   /// phantom, because that is a fact about the slave rather than a target.
   @Test func aDrawableTargetIsNeverADisplayThisSampleDoesNotContain() {
-    let topology = MirrorTopology([display(1, builtIn: true), display(2, mirrors: 9)])
+    let topology = MirrorTopology([MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2, mirrors: 9)])
     #expect(topology.drawableDisplayID(for: 2) == 2)
     #expect(topology.master(of: 2) == 9)
     // The present-master case is untouched: intersection narrows nothing real.
@@ -176,9 +169,11 @@ struct MirrorTopologyTests {
   /// `CGGetOnlineDisplayList` order are the same topology, and `Equatable` —
   /// which compares the stored array — has to agree.
   @Test func theSampleItselfIsSortedSoEnumerationOrderCannotLeakIntoEquality() {
-    let scrambled = MirrorTopology([display(7), display(2), display(4)])
+    let scrambled = MirrorTopology([MirrorFixtures.display(7), MirrorFixtures.display(2), MirrorFixtures.display(4)])
     #expect(scrambled.displays.map(\.id) == [2, 4, 7])
-    #expect(scrambled == MirrorTopology([display(2), display(4), display(7)]))
+    #expect(scrambled == MirrorTopology([
+      MirrorFixtures.display(2), MirrorFixtures.display(4), MirrorFixtures.display(7),
+    ]))
   }
 
   /// The "one HUD per set" property, stated purely. A stepped mirror set has to

@@ -185,7 +185,7 @@ public enum ArrangementReapplyPolicy {
   /// Mirror slaves are expected to be absent: a slave has no independent origin
   /// and setting one would remove it from the mirror set (AR6), so it gets no
   /// tile by design. Anything else missing is a display the read could not place.
-  static func describesEveryPositionableDisplay(
+  private static func describesEveryPositionableDisplay(
     _ arrangement: DisplayArrangement, of attached: [ConfiguredDisplay]
   ) -> Bool {
     let described = Set(arrangement.tiles.map(\.id))
@@ -257,9 +257,5 @@ public struct TopologyArrivalTracker: Sendable, Equatable {
   /// again. For work that was claimed and then deliberately not done.
   public mutating func release(_ displayID: CGDirectDisplayID) {
     displays.release(displayID)
-  }
-
-  public func hasHandled(_ displayID: CGDirectDisplayID) -> Bool {
-    displays.hasHandled(displayID)
   }
 }

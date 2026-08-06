@@ -5,16 +5,8 @@ import Testing
 @MainActor
 @Suite("Brightness persistence")
 struct BrightnessPersistenceTests {
-  /// In-memory store; UserDefaults-backed store gets its own test below.
-  final class MemoryStore: BrightnessStoring, @unchecked Sendable {
-    // Confinement: tests touch it only from one actor at a time.
-    var values: [String: Double] = [:]
-    func savedBrightness(for key: String) -> Double? { values[key] }
-    func saveBrightness(_ value: Double, for key: String) { values[key] = value }
-  }
-
   @Test func restoresSavedValueAtInit() {
-    let store = MemoryStore()
+    let store = PathMemoryStore()
     store.values["brightness.test-display"] = 0.8125
     let c = makeLegacyPathController(writer: FakeDDC(), store: store, storageKey: "brightness.test-display")
     #expect(c.brightness == 0.8125)
@@ -23,19 +15,19 @@ struct BrightnessPersistenceTests {
   @Test func defaultsToFullWithoutSavedValue() {
     // Task 6 first-run rule (review I13): post-M3, 0.5 means "hardware
     // minimum" on the combined scale, so a fresh display starts at 1.0.
-    let c = makeLegacyPathController(writer: FakeDDC(), store: MemoryStore(), storageKey: "brightness.x")
+    let c = makeLegacyPathController(writer: FakeDDC(), store: PathMemoryStore(), storageKey: "brightness.x")
     #expect(c.brightness == 1.0)
   }
 
   @Test func savesOnSetBrightness() {
-    let store = MemoryStore()
+    let store = PathMemoryStore()
     let c = makeLegacyPathController(writer: FakeDDC(), store: store, storageKey: "brightness.x")
     c.setBrightness(0.25)
     #expect(store.values["brightness.x"] == 0.25)
   }
 
   @Test func savesOnStep() {
-    let store = MemoryStore()
+    let store = PathMemoryStore()
     let c = makeLegacyPathController(writer: FakeDDC(), store: store, storageKey: "brightness.x")
     c.setBrightness(0.5)
     c.step(isUp: true, isFine: false)

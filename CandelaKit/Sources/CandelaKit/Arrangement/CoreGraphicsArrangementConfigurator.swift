@@ -34,15 +34,7 @@ public struct CoreGraphicsArrangementConfigurator: DisplayArrangementConfiguring
   }
 
   public func apply(_ plan: ArrangementPlan, scope: DisplayConfigScope) throws -> DisplayArrangement {
-    var config: CGDisplayConfigRef?
-    let begin = CGBeginDisplayConfiguration(&config)
-    guard begin == .success, let config else {
-      // A nil token after a `.success` begin would otherwise be reported as
-      // error code 0 — an error that reads as "no error".
-      throw DisplayConfigError(
-        cgErrorCode: begin == .success ? CGError.failure.rawValue : begin.rawValue
-      )
-    }
+    let config = try beginDisplayConfiguration()
     // EVERY change, including the displays that are already where the plan puts
     // them (AR4). displayplacer skips those because "setting a screen to its
     // current origin makes displayplacer hang for a couple seconds"

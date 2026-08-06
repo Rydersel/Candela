@@ -9,15 +9,11 @@ import Testing
 /// renormalisation that follows every successful apply.
 @Suite("Arrangement outcome policy")
 struct ArrangementOutcomePolicyTests {
-  private func tile(_ id: CGDirectDisplayID, _ rect: DisplayRect) -> ArrangementTile {
-    ArrangementFixtures.tile(id, rect)
-  }
-
   private var requested: DisplayArrangement {
     // 2 stacked above 1, 1 main. A valid layout: full shared horizontal edge.
     DisplayArrangement(tiles: [
-      tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
-      tile(2, DisplayRect(x: 0, y: -1080, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(2, DisplayRect(x: 0, y: -1080, width: 1920, height: 1080)),
     ])
   }
 
@@ -40,8 +36,8 @@ struct ArrangementOutcomePolicyTests {
   @Test func aGenuinelyDifferentLayoutIsReportedAsAdjusted() {
     // Side by side rather than stacked: no translation maps one onto the other.
     let resulting = DisplayArrangement(tiles: [
-      tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
-      tile(2, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(2, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
     ])
     #expect(ArrangementOutcomePolicy.notices(
       requested: requested, resulting: resulting, requestedMain: 1
@@ -79,8 +75,8 @@ struct ArrangementOutcomePolicyTests {
   /// only the first notice shows the bigger fact.
   @Test func anAdjustedLayoutThatAlsoMissedTheMainDisplayReportsBothLayoutFirst() {
     let resulting = DisplayArrangement(tiles: [
-      tile(1, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
-      tile(2, DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(1, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(2, DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
     ])
     #expect(ArrangementOutcomePolicy.notices(
       requested: requested, resulting: resulting, requestedMain: 1
@@ -100,8 +96,8 @@ struct ArrangementOutcomePolicyTests {
     ).isEmpty)
 
     let elsewhere = DisplayArrangement(tiles: [
-      tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
-      tile(2, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(2, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
     ])
     #expect(ArrangementOutcomePolicy.notices(
       requested: offOrigin, resulting: elsewhere, requestedMain: nil
@@ -133,7 +129,7 @@ struct ArrangementOutcomePolicyTests {
     // Placed left of and above everything requested, so it is the newcomer that
     // owns the achieved bounding box's minimum corner — the case an unfiltered
     // normalisation gets wrong.
-    let arrived = tile(3, DisplayRect(x: -3440, y: -2520, width: 3440, height: 1440))
+    let arrived = ArrangementFixtures.tile(3, DisplayRect(x: -3440, y: -2520, width: 3440, height: 1440))
     let resulting = DisplayArrangement(tiles: requested.tiles + [arrived])
 
     #expect(ArrangementOutcomePolicy.notices(
@@ -144,10 +140,10 @@ struct ArrangementOutcomePolicyTests {
   /// The filter must not become a blindfold: with the newcomer present, a
   /// requested display that genuinely moved is still reported.
   @Test func anExtraDisplayDoesNotHideAGenuineAdjustmentOfThePlannedOnes() {
-    let arrived = tile(3, DisplayRect(x: -3440, y: -2520, width: 3440, height: 1440))
+    let arrived = ArrangementFixtures.tile(3, DisplayRect(x: -3440, y: -2520, width: 3440, height: 1440))
     let resulting = DisplayArrangement(tiles: [
-      tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
-      tile(2, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
+      ArrangementFixtures.tile(2, DisplayRect(x: 1920, y: 0, width: 1920, height: 1080)),
       arrived,
     ])
     #expect(ArrangementOutcomePolicy.notices(
@@ -160,7 +156,7 @@ struct ArrangementOutcomePolicyTests {
   /// was asked for, which is a fact about the machine rather than about the
   /// planned displays' relative positions.
   @Test func anExtraDisplayAtTheOriginStillReportsTheMainDisplayUnchanged() {
-    let arrived = tile(3, DisplayRect(x: 0, y: 0, width: 3440, height: 1440))
+    let arrived = ArrangementFixtures.tile(3, DisplayRect(x: 0, y: 0, width: 3440, height: 1440))
     // The requested pair, translated so 3 owns the origin and the pair's own
     // relative geometry is untouched.
     let resulting = DisplayArrangement(tiles: requested.translated(dx: 3440, dy: 0).tiles + [arrived])

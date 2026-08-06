@@ -74,8 +74,6 @@ public final class DDCValueController {
   /// supersedes the failures that preceded it in its pass. The ordering in
   /// `DDCReadEvidence` is untouched; only the scope of the fold changed.
   public private(set) var readEvidence: DDCReadEvidence = .notAttempted
-  /// Test seam, mirroring `BrightnessController._onSubmit`.
-  @ObservationIgnored var _onSubmit: ((HardwareTarget) -> Void)?
 
   public init(
     writer: any DDCWriting,
@@ -434,7 +432,6 @@ public final class DDCValueController {
   private func submitRaw(_ raw: UInt16) {
     let tuning = prefs.tuning(for: command)
     let target = HardwareTarget.ddc(raw: raw)
-    _onSubmit?(target)
     issuedGeneration += 1
     coalescer.submit(.init(
       target: target,
@@ -447,7 +444,6 @@ public final class DDCValueController {
 
   private func submitMuteWire(_ wireValue: UInt16) {
     let target = HardwareTarget.ddc(raw: wireValue)
-    _onSubmit?(target)
     issuedMuteGeneration += 1
     muteCoalescer.submit(.init(
       target: target,

@@ -6,17 +6,9 @@ import Testing
 /// here rather than left to the one call site.
 @Suite("Mode reapply policy")
 struct ModeReapplyPolicyTests {
-  private func mode(
-    _ id: Int32, logical: (Int, Int), pixels: (Int, Int), hz: Double = 60
-  ) -> DisplayMode {
-    DisplayMode(ioModeID: id, logicalWidth: logical.0, logicalHeight: logical.1,
-                pixelWidth: pixels.0, pixelHeight: pixels.1, refreshHz: hz,
-                isNative: false)
-  }
-
-  private var native: DisplayMode { mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 60) }
-  private var faster: DisplayMode { mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 120) }
-  private var smaller: DisplayMode { mode(3, logical: (1920, 1080), pixels: (3840, 2160), hz: 60) }
+  private var native: DisplayMode { DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 60) }
+  private var faster: DisplayMode { DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 120) }
+  private var smaller: DisplayMode { DisplayModeFixtures.mode(3, logical: (1920, 1080), pixels: (3840, 2160), hz: 60) }
 
   /// DM5. The stored descriptor is only half the gate; a display whose owner
   /// never opted in must not be moved even when a perfect match is sitting
@@ -57,7 +49,7 @@ struct ModeReapplyPolicyTests {
   /// CoreGraphics reports 59.997 for 60 Hz. Comparing exactly would decide the
   /// display is never already where it is, and reconfigure it on every launch.
   @Test func floatNoiseDoesNotCountAsADifferentMode() {
-    let noisy = mode(9, logical: (2560, 1440), pixels: (5120, 2880), hz: 59.997)
+    let noisy = DisplayModeFixtures.mode(9, logical: (2560, 1440), pixels: (5120, 2880), hz: 59.997)
     let decision = ModeReapplyPolicy.decide(
       isEnabled: true, stored: native.descriptor, available: [noisy], current: noisy
     )
@@ -68,7 +60,7 @@ struct ModeReapplyPolicyTests {
   /// are positional and get reassigned across replug, which is the whole reason
   /// a DESCRIPTOR is what gets stored.
   @Test func aReassignedModeIDIsNotAReasonToReconfigure() {
-    let sameGeometryNewID = mode(77, logical: (2560, 1440), pixels: (5120, 2880), hz: 60)
+    let sameGeometryNewID = DisplayModeFixtures.mode(77, logical: (2560, 1440), pixels: (5120, 2880), hz: 60)
     let decision = ModeReapplyPolicy.decide(
       isEnabled: true, stored: native.descriptor,
       available: [sameGeometryNewID], current: sameGeometryNewID

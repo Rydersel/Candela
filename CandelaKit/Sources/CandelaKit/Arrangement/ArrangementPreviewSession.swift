@@ -148,11 +148,12 @@ public actor ArrangementPreviewSession {
   /// that no longer exists. Drops the outstanding preview WITHOUT applying
   /// anything, and reports whether it dropped one.
   ///
-  /// **It takes no display argument, and that is the point** — the same fix
-  /// `dropPreviewIfDeparted` got. A preview about a *set* is invalidated by any
-  /// display arriving or leaving, not only by one particular ID going away, so a
-  /// method that had to be told which display would be a method that could be
-  /// asked the wrong question.
+  /// **It takes no display argument, and that is the point** — the contrast with
+  /// `ModePreviewSession.discard(displayID:)`, which drops ONE display's preview
+  /// because a stored mode is per display. A preview about a *set* is invalidated
+  /// by any display arriving or leaving, not only by one particular ID going
+  /// away, so a method that had to be told which display would be a method that
+  /// could be asked the wrong question.
   ///
   /// The outcome recorded is `.reverted`, for the reason
   /// `ModePreviewSession.discard` records it: nothing is being KEPT, and no path

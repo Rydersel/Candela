@@ -12,7 +12,7 @@ struct DDCValueControllerTests {
     let defaults: UserDefaults
     let prefs: DisplayPrefs
     let fake = FakeDDC(readResult: nil) // write-only panel by default (MAG parity)
-    let store = MemoryValueStore()
+    let store = PathMemoryStore()
     let controller: DDCValueController
 
     init(
@@ -36,13 +36,6 @@ struct DDCValueControllerTests {
       await controller.waitForPendingWrites()
       return await fake.recordedWrites()
     }
-  }
-
-  private final class MemoryValueStore: BrightnessStoring, @unchecked Sendable {
-    // Test-only; single-actor access in practice, lock omitted deliberately.
-    private var values: [String: Double] = [:]
-    func savedBrightness(for key: String) -> Double? { values[key] }
-    func saveBrightness(_ value: Double, for key: String) { values[key] = value }
   }
 
   /// Scripted read queue + counter and scripted write results — the

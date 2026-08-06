@@ -2,8 +2,6 @@
 
 import os
 
-private let applierLog = Logger(subsystem: "com.rydersel.Candela", category: "applier")
-
 /// Command-generic DDC applier (D1): carries the VCP byte the write targets,
 /// plus the user's control-code remap — fork `getRemapControlCodes` semantics:
 /// a non-empty remap REPLACES the command, and writes go to EVERY remapped
@@ -24,14 +22,7 @@ public struct DDCCommandApplier: BrightnessApplying {
 
   public func apply(_ target: HardwareTarget) async -> Bool {
     guard case let .ddc(raw) = target else {
-      let firstTime = mismatchLogged.withLock { logged -> Bool in
-        if logged { return false }
-        logged = true
-        return true
-      }
-      if firstTime {
-        applierLog.error("DDCCommandApplier received a .native target — path-selection wiring bug")
-      }
+      logMismatchOnce(mismatchLogged, "DDCCommandApplier received a .native target")
       return false
     }
     let codes = remapCodes.isEmpty ? [command] : remapCodes
