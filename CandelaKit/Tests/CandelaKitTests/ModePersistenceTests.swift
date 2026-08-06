@@ -6,14 +6,6 @@ import Testing
 struct ModePersistenceTests {
   private let identity = DisplayConfigIdentity(vendor: 0x10AC, model: 0x436A, serial: 0x4433334C, isBuiltIn: false)
 
-  private func mode(
-    _ id: Int32, logical: (Int, Int), pixels: (Int, Int), hz: Double = 60
-  ) -> DisplayMode {
-    DisplayMode(ioModeID: id, logicalWidth: logical.0, logicalHeight: logical.1,
-                pixelWidth: pixels.0, pixelHeight: pixels.1, refreshHz: hz,
-                isNative: false)
-  }
-
   @Test func persistenceIsOffUntilExplicitlyEnabled() {
     let store = ModePersistence(defaults: InMemoryDefaults())
     #expect(!store.isEnabled(for: identity))
@@ -23,7 +15,7 @@ struct ModePersistenceTests {
 
   @Test func aStoredDescriptorRoundTrips() {
     let store = ModePersistence(defaults: InMemoryDefaults())
-    let descriptor = mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 120).descriptor
+    let descriptor = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 120).descriptor
     store.store(descriptor, for: identity)
     #expect(store.storedMode(for: identity) == descriptor)
     store.clear(for: identity)
@@ -33,7 +25,7 @@ struct ModePersistenceTests {
   @Test func twoDisplaysDoNotShareStoredModes() {
     let store = ModePersistence(defaults: InMemoryDefaults())
     let other = DisplayConfigIdentity(vendor: 0x3669, model: 0x3DD0, serial: 0, isBuiltIn: false)
-    store.store(mode(1, logical: (2560, 1440), pixels: (5120, 2880)).descriptor, for: identity)
+    store.store(DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880)).descriptor, for: identity)
     #expect(store.storedMode(for: other) == nil)
   }
 
@@ -56,7 +48,7 @@ struct ModePersistenceTests {
     let defaults = InMemoryDefaults()
     let store = ModePersistence(defaults: defaults)
     store.setEnabled(true, for: identity)
-    store.store(mode(1, logical: (2560, 1440), pixels: (5120, 2880)).descriptor, for: identity)
+    store.store(DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880)).descriptor, for: identity)
     #expect(defaults.bool(forKey: "rememberDisplayMode.10ac-436a-4433334c"))
     #expect(defaults.data(forKey: "storedDisplayMode.10ac-436a-4433334c") != nil)
   }
@@ -64,23 +56,23 @@ struct ModePersistenceTests {
   // MARK: - Resolution order (spec §8)
 
   @Test func anExactMatchWinsOutright() {
-    let target = mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 120)
-    let modes = [mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 60), target]
+    let target = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 120)
+    let modes = [DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 60), target]
     #expect(ModePersistence.resolve(target.descriptor, in: modes) == .exact(target))
   }
 
   @Test func sameGeometryWithADifferentRefreshRateIsSecond() {
-    let stored = mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 120).descriptor
-    let available = mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 60)
+    let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 120).descriptor
+    let available = DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 60)
     #expect(ModePersistence.resolve(stored, in: [available]) == .refreshRateDiffers(available))
   }
 
   /// Degrading a stored HiDPI choice to 1x is the worst outcome here — it
   /// looks like the feature silently stopped working.
   @Test func sameLogicalSizePrefersHiDPIOverOneX() {
-    let stored = mode(1, logical: (2560, 1440), pixels: (5120, 2880)).descriptor
-    let oneX = mode(2, logical: (2560, 1440), pixels: (2560, 1440))
-    let hiDPI = mode(3, logical: (2560, 1440), pixels: (5120, 2880), hz: 30)
+    let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880)).descriptor
+    let oneX = DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (2560, 1440))
+    let hiDPI = DisplayModeFixtures.mode(3, logical: (2560, 1440), pixels: (5120, 2880), hz: 30)
     #expect(ModePersistence.resolve(stored, in: [oneX, hiDPI]) == .refreshRateDiffers(hiDPI))
     #expect(ModePersistence.resolve(stored, in: [oneX]) == .scaleDiffers(oneX))
   }
@@ -98,9 +90,9 @@ struct ModePersistenceTests {
   /// step 3's preference needs a test that constructs the choice rather than
   /// hoping the enumeration supplies one.
   @Test func aDifferentFramebufferStillPrefersHiDPIOverOneX() {
-    let stored = mode(1, logical: (2560, 1440), pixels: (3840, 2160)).descriptor
-    let oneX = mode(2, logical: (2560, 1440), pixels: (2560, 1440))
-    let hiDPI = mode(3, logical: (2560, 1440), pixels: (5120, 2880))
+    let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (3840, 2160)).descriptor
+    let oneX = DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (2560, 1440))
+    let hiDPI = DisplayModeFixtures.mode(3, logical: (2560, 1440), pixels: (5120, 2880))
     #expect(ModePersistence.resolve(stored, in: [oneX, hiDPI]) == .scaleDiffers(hiDPI))
     // Order must not decide it.
     #expect(ModePersistence.resolve(stored, in: [hiDPI, oneX]) == .scaleDiffers(hiDPI))
@@ -111,8 +103,8 @@ struct ModePersistenceTests {
   /// their refresh rate moved while their scaling silently changed instead —
   /// step 3 is only ever reached when no same-geometry candidate exists.
   @Test func aScaleSubstituteIsNeverReportedAsARefreshChange() {
-    let stored = mode(1, logical: (2560, 1440), pixels: (3840, 2160), hz: 60).descriptor
-    let sameRateOtherScale = mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 60)
+    let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (3840, 2160), hz: 60).descriptor
+    let sameRateOtherScale = DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 60)
     #expect(ModePersistence.resolve(stored, in: [sameRateOtherScale])
       == .scaleDiffers(sameRateOtherScale))
   }
@@ -121,16 +113,16 @@ struct ModePersistenceTests {
   /// quietly switch to "fastest wins" and bump a deliberate 60 Hz choice to
   /// 144 Hz on the way through.
   @Test func aScaleSubstituteKeepsTheNearestRefreshRate() {
-    let stored = mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 60).descriptor
-    let fast = mode(2, logical: (2560, 1440), pixels: (3840, 2160), hz: 144)
-    let near = mode(3, logical: (2560, 1440), pixels: (3840, 2160), hz: 60)
+    let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 60).descriptor
+    let fast = DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (3840, 2160), hz: 144)
+    let near = DisplayModeFixtures.mode(3, logical: (2560, 1440), pixels: (3840, 2160), hz: 60)
     #expect(ModePersistence.resolve(stored, in: [fast, near]) == .scaleDiffers(near))
   }
 
   @Test func nearestSizeIsUsedWhenNothingMatchesExactly() {
-    let stored = mode(1, logical: (2560, 1440), pixels: (5120, 2880)).descriptor
-    let near = mode(2, logical: (2400, 1350), pixels: (4800, 2700))
-    let far = mode(3, logical: (1280, 720), pixels: (2560, 1440))
+    let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880)).descriptor
+    let near = DisplayModeFixtures.mode(2, logical: (2400, 1350), pixels: (4800, 2700))
+    let far = DisplayModeFixtures.mode(3, logical: (1280, 720), pixels: (2560, 1440))
     #expect(ModePersistence.resolve(stored, in: [far, near]) == .sizeDiffers(near))
   }
 
@@ -139,10 +131,10 @@ struct ModePersistenceTests {
   /// first would hand the user a 1x 24 Hz desktop and call it the nearest
   /// match — the same HiDPI and refresh preferences apply here.
   @Test func theNearestSizeIsDisambiguatedNotLeftToEnumerationOrder() {
-    let stored = mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 60).descriptor
-    let oneXSlow = mode(2, logical: (2400, 1350), pixels: (2400, 1350), hz: 24)
-    let hiDPISlow = mode(3, logical: (2400, 1350), pixels: (4800, 2700), hz: 24)
-    let hiDPIRight = mode(4, logical: (2400, 1350), pixels: (4800, 2700), hz: 60)
+    let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 60).descriptor
+    let oneXSlow = DisplayModeFixtures.mode(2, logical: (2400, 1350), pixels: (2400, 1350), hz: 24)
+    let hiDPISlow = DisplayModeFixtures.mode(3, logical: (2400, 1350), pixels: (4800, 2700), hz: 24)
+    let hiDPIRight = DisplayModeFixtures.mode(4, logical: (2400, 1350), pixels: (4800, 2700), hz: 60)
     #expect(ModePersistence.resolve(stored, in: [oneXSlow, hiDPISlow, hiDPIRight])
       == .sizeDiffers(hiDPIRight))
     #expect(ModePersistence.resolve(stored, in: [hiDPIRight, hiDPISlow, oneXSlow])
@@ -152,13 +144,13 @@ struct ModePersistenceTests {
   /// A 16:9 substitute on a 21:9 panel is worse than doing nothing — it
   /// letterboxes or stretches, and the user did not ask for it.
   @Test func aDifferentAspectRatioIsNeverSubstituted() {
-    let stored = mode(1, logical: (2580, 1080), pixels: (5160, 2160)).descriptor // 21:9
-    let wrongShape = mode(2, logical: (1920, 1080), pixels: (3840, 2160))        // 16:9
+    let stored = DisplayModeFixtures.mode(1, logical: (2580, 1080), pixels: (5160, 2160)).descriptor // 21:9
+    let wrongShape = DisplayModeFixtures.mode(2, logical: (1920, 1080), pixels: (3840, 2160))        // 16:9
     #expect(ModePersistence.resolve(stored, in: [wrongShape]) == .none)
   }
 
   @Test func anEmptyModeListResolvesToNone() {
-    let stored = mode(1, logical: (2560, 1440), pixels: (5120, 2880)).descriptor
+    let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880)).descriptor
     #expect(ModePersistence.resolve(stored, in: []) == .none)
   }
 
@@ -166,8 +158,8 @@ struct ModePersistenceTests {
   /// with == means a stored mode NEVER matches on real hardware and every
   /// reconnect silently takes a fallback branch.
   @Test func refreshRatesMatchWithinATolerance() {
-    let stored = mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 60).descriptor
-    let real = mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 59.997)
+    let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 60).descriptor
+    let real = DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 59.997)
     #expect(ModePersistence.resolve(stored, in: [real]) == .exact(real))
     #expect(ModePersistence.refreshMatches(59.997, 60))
     #expect(!ModePersistence.refreshMatches(59.997, 120))
@@ -194,8 +186,8 @@ struct ModePersistenceTests {
   /// Asserted in both list orders: passing in one ordering only is exactly what
   /// an enumeration-order-dependent implementation looks like.
   @Test func theNearerOfTwoRatesInsideTheToleranceWins() {
-    let ntsc = mode(3, logical: (2560, 1440), pixels: (5120, 2880), hz: 59.9)
-    let sixty = mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 60)
+    let ntsc = DisplayModeFixtures.mode(3, logical: (2560, 1440), pixels: (5120, 2880), hz: 59.9)
+    let sixty = DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: 60)
     // The premise: without both inside the window there is nothing to choose.
     #expect(ModePersistence.refreshMatches(59.9, 60))
 

@@ -444,11 +444,10 @@ public final class BrightnessController {
   /// `DimmingMath.stepCombined` is wired only behind the app-level
   /// `separateCombinedScale` default (review M39).
   ///
-  /// `isFresh` (fresh press vs key-repeat) is plumbed from the key path but no
-  /// longer changes stepping — it was the HDR Boost gate's input, kept for the
-  /// media-key semantics that distinguish the two.
+  /// Stepping does not distinguish a fresh press from key-repeat — the HDR
+  /// Boost gate that once needed that distinction is gone.
   @discardableResult
-  public func step(isUp: Bool, isFine: Bool, isFresh _: Bool = true) -> Double {
+  public func step(isUp: Bool, isFine: Bool) -> Double {
     let value: Double
     if prefs.separateCombinedScale, !usesNative, !prefs.forceSoftware,
        !prefs.disableCombinedBrightness {
@@ -547,12 +546,8 @@ public final class BrightnessController {
     )
   }
 
-  /// `DDCBrightnessApplier` stays for the untuned leg (D1); a remap forces
-  /// the command-generic applier because the write must fan out to every code.
   private func brightnessApplier(tuning: CommandTuning) -> any BrightnessApplying {
-    tuning.remapCodes.isEmpty
-      ? DDCBrightnessApplier(writer: writer)
-      : DDCCommandApplier(writer: writer, command: VCP.brightness, remapCodes: tuning.remapCodes)
+    DDCCommandApplier(writer: writer, command: VCP.brightness, remapCodes: tuning.remapCodes)
   }
 
   private func submitHardware(_ target: HardwareTarget, applier: any BrightnessApplying) {
@@ -592,7 +587,7 @@ public final class BrightnessController {
   /// display stayed bright while the engine reported the value as applied.
   private func applySoftware(_ sw: Double) {
     guard lastAppliedSw != sw else { return }
-    let transformed = DimmingMath.swTransform(sw, allowZero: prefs.allowZeroSwBrightness, reverse: false)
+    let transformed = DimmingMath.swTransform(sw, allowZero: prefs.allowZeroSwBrightness)
     let drawable = drawableDisplayID
     let landed: Bool
     if prefs.avoidGamma {

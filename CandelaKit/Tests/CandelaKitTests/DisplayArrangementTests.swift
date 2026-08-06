@@ -5,20 +5,6 @@ import Testing
 
 @Suite("Display arrangement")
 struct DisplayArrangementTests {
-  private func tile(
-    _ id: CGDirectDisplayID,
-    _ rect: DisplayRect,
-    mirroredIDs: [CGDirectDisplayID] = []
-  ) -> ArrangementTile {
-    ArrangementTile(
-      id: id,
-      identity: .init(vendor: id, model: id, serial: id, isBuiltIn: false),
-      name: "Display \(id)",
-      rect: rect,
-      mirroredIDs: mirroredIDs
-    )
-  }
-
   @Test func tileOrderDoesNotAffectEquality() {
     let a = ArrangementTile(id: 1, identity: .init(vendor: 1, model: 1, serial: 1, isBuiltIn: false),
                             name: "A", rect: DisplayRect(x: 0, y: 0, width: 100, height: 100), mirroredIDs: [])
@@ -29,16 +15,16 @@ struct DisplayArrangementTests {
 
   @Test func mainDisplayIsTheTileAtTheOrigin() {
     let arrangement = DisplayArrangement(tiles: [
-      tile(7, DisplayRect(x: -1440, y: 0, width: 1440, height: 900)),
-      tile(3, DisplayRect(x: 0, y: 0, width: 3440, height: 1440)),
+      ArrangementFixtures.tile(7, DisplayRect(x: -1440, y: 0, width: 1440, height: 900)),
+      ArrangementFixtures.tile(3, DisplayRect(x: 0, y: 0, width: 3440, height: 1440)),
     ])
     #expect(arrangement.mainDisplayID == 3)
   }
 
   @Test func anArrangementWithNoTileAtTheOriginHasNoMain() {
     let arrangement = DisplayArrangement(tiles: [
-      tile(1, DisplayRect(x: 10, y: 0, width: 100, height: 100)),
-      tile(2, DisplayRect(x: 110, y: 0, width: 100, height: 100)),
+      ArrangementFixtures.tile(1, DisplayRect(x: 10, y: 0, width: 100, height: 100)),
+      ArrangementFixtures.tile(2, DisplayRect(x: 110, y: 0, width: 100, height: 100)),
     ])
     #expect(arrangement.mainDisplayID == nil)
   }
@@ -46,9 +32,9 @@ struct DisplayArrangementTests {
   @Test func makingMainIsAPureTranslation() {
     // THE property: "make main" must never rearrange anything.
     let arrangement = DisplayArrangement(tiles: [
-      tile(1, DisplayRect(x: 0, y: 0, width: 3440, height: 1440)),
-      tile(2, DisplayRect(x: -1470, y: 200, width: 1470, height: 956)),
-      tile(3, DisplayRect(x: 3440, y: -300, width: 1200, height: 1920)),
+      ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 3440, height: 1440)),
+      ArrangementFixtures.tile(2, DisplayRect(x: -1470, y: 200, width: 1470, height: 956)),
+      ArrangementFixtures.tile(3, DisplayRect(x: 3440, y: -300, width: 1200, height: 1920)),
     ])
     let after = arrangement.makingMain(3)
 
@@ -74,8 +60,8 @@ struct DisplayArrangementTests {
 
   @Test func makingMainPutsThatTileAtTheOrigin() {
     let arrangement = DisplayArrangement(tiles: [
-      tile(1, DisplayRect(x: 0, y: 0, width: 3440, height: 1440)),
-      tile(2, DisplayRect(x: -1470, y: 200, width: 1470, height: 956)),
+      ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 3440, height: 1440)),
+      ArrangementFixtures.tile(2, DisplayRect(x: -1470, y: 200, width: 1470, height: 956)),
     ])
     let after = arrangement.makingMain(2)
     #expect(after.tile(2)?.rect.origin == .zero)
@@ -83,15 +69,17 @@ struct DisplayArrangementTests {
   }
 
   @Test func makingMainOnAnUnknownIDChangesNothing() {
-    let arrangement = DisplayArrangement(tiles: [tile(1, DisplayRect(x: 0, y: 0, width: 100, height: 100))])
+    let arrangement = DisplayArrangement(tiles: [
+      ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 100, height: 100)),
+    ])
     #expect(arrangement.makingMain(99) == arrangement)
   }
 
   @Test func movingChangesOnlyTheNamedTile() {
     let arrangement = DisplayArrangement(tiles: [
-      tile(1, DisplayRect(x: 0, y: 0, width: 100, height: 100)),
-      tile(2, DisplayRect(x: 100, y: 0, width: 100, height: 100)),
-      tile(3, DisplayRect(x: 200, y: 0, width: 100, height: 100)),
+      ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 100, height: 100)),
+      ArrangementFixtures.tile(2, DisplayRect(x: 100, y: 0, width: 100, height: 100)),
+      ArrangementFixtures.tile(3, DisplayRect(x: 200, y: 0, width: 100, height: 100)),
     ])
     let after = arrangement.moving(2, to: DisplayPoint(x: 0, y: 100))
     #expect(after.tile(2)?.rect == DisplayRect(x: 0, y: 100, width: 100, height: 100))
@@ -100,7 +88,9 @@ struct DisplayArrangementTests {
   }
 
   @Test func movingAnUnknownIDChangesNothing() {
-    let arrangement = DisplayArrangement(tiles: [tile(1, DisplayRect(x: 0, y: 0, width: 100, height: 100))])
+    let arrangement = DisplayArrangement(tiles: [
+      ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 100, height: 100)),
+    ])
     #expect(arrangement.moving(99, to: DisplayPoint(x: 50, y: 50)) == arrangement)
   }
 
@@ -110,7 +100,9 @@ struct DisplayArrangementTests {
       DisplayRect(x: -1470, y: 200, width: 1470, height: 956),
       DisplayRect(x: 3440, y: -300, width: 1200, height: 1920),
     ]
-    let arrangement = DisplayArrangement(tiles: rects.enumerated().map { tile(CGDirectDisplayID($0.offset + 1), $0.element) })
+    let arrangement = DisplayArrangement(
+      tiles: rects.enumerated().map { ArrangementFixtures.tile(CGDirectDisplayID($0.offset + 1), $0.element) }
+    )
     #expect(arrangement.bounds == DisplayRect.union(rects))
     #expect(arrangement.bounds == DisplayRect(x: -1470, y: -300, width: 6110, height: 1920))
   }
@@ -118,7 +110,6 @@ struct DisplayArrangementTests {
   @Test func anEmptyArrangementHasEmptyBoundsAndNoMain() {
     let arrangement = DisplayArrangement(tiles: [])
     #expect(arrangement.isEmpty)
-    #expect(arrangement.bounds.isEmpty)
     #expect(arrangement.bounds == DisplayRect(x: 0, y: 0, width: 0, height: 0))
     #expect(arrangement.mainDisplayID == nil)
     #expect(arrangement.tile(1) == nil)
@@ -128,8 +119,8 @@ struct DisplayArrangementTests {
 
   @Test func translatingShiftsEveryTile() {
     let arrangement = DisplayArrangement(tiles: [
-      tile(1, DisplayRect(x: 0, y: 0, width: 100, height: 100)),
-      tile(2, DisplayRect(x: 100, y: 0, width: 100, height: 100)),
+      ArrangementFixtures.tile(1, DisplayRect(x: 0, y: 0, width: 100, height: 100)),
+      ArrangementFixtures.tile(2, DisplayRect(x: 100, y: 0, width: 100, height: 100)),
     ])
     let after = arrangement.translated(dx: -5, dy: 7)
     #expect(after.tile(1)?.rect == DisplayRect(x: -5, y: 7, width: 100, height: 100))
@@ -138,9 +129,9 @@ struct DisplayArrangementTests {
 
   @Test func tilesAreSortedByID() {
     let arrangement = DisplayArrangement(tiles: [
-      tile(9, DisplayRect(x: 0, y: 0, width: 10, height: 10)),
-      tile(2, DisplayRect(x: 10, y: 0, width: 10, height: 10)),
-      tile(5, DisplayRect(x: 20, y: 0, width: 10, height: 10)),
+      ArrangementFixtures.tile(9, DisplayRect(x: 0, y: 0, width: 10, height: 10)),
+      ArrangementFixtures.tile(2, DisplayRect(x: 10, y: 0, width: 10, height: 10)),
+      ArrangementFixtures.tile(5, DisplayRect(x: 20, y: 0, width: 10, height: 10)),
     ])
     #expect(arrangement.tiles.map(\.id) == [2, 5, 9])
   }

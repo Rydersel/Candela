@@ -34,7 +34,7 @@ struct GeneralPane: View {
 
   var body: some View {
     // `DisplayPrefs` is plain UserDefaults and not observable, so `.refreshUI`
-    // — which Task 2 unions into EVERY known `PrefName` — is the only thing
+    // — which is unioned into EVERY known `PrefName` — is the only thing
     // that re-evaluates this body after a write. Without this reference the
     // startup caption below would never follow its own picker.
     let _ = model.prefsRevision
@@ -139,7 +139,7 @@ struct GeneralPane: View {
       // slider range IS the software leg. Disabling it there would lock a user
       // out of the one control that governs how dark that display can go. The
       // caption carries the condition instead.
-      SettingRow("The slider can reach 0%, which blanks the display completely. Applies wherever software dimming is in use — combined dimming above, or a display with hardware control turned off in the Displays pane. If keyboard control is also off, a blank display can be hard to undo.") {
+      SettingRow("The slider can reach 0%, which blanks the display completely. Applies wherever software dimming is in use — combined dimming above, or a display with hardware control turned off on its own page in the sidebar. If keyboard control is also off, a blank display can be hard to undo.") {
         Toggle("Allow a fully dark display", isOn: Binding(
           get: { prefs.allowZeroSwBrightness },
           set: { enabled in

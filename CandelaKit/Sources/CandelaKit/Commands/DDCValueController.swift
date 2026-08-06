@@ -1,4 +1,3 @@
-import CoreGraphics
 import Observation
 
 /// Single source of truth for one display's value on one pure-DDC command —
@@ -36,7 +35,6 @@ public final class DDCValueController {
   /// identity and not the writer object.
   @ObservationIgnored private var boundPanelIdentity: String?
   @ObservationIgnored private let prefs: DisplayPrefs
-  @ObservationIgnored let displayID: CGDirectDisplayID
   private let coalescer: BrightnessWriteCoalescer
   private let muteCoalescer: BrightnessWriteCoalescer
   @ObservationIgnored private var issuedGeneration: UInt64 = 0
@@ -74,14 +72,11 @@ public final class DDCValueController {
   /// supersedes the failures that preceded it in its pass. The ordering in
   /// `DDCReadEvidence` is untouched; only the scope of the fold changed.
   public private(set) var readEvidence: DDCReadEvidence = .notAttempted
-  /// Test seam, mirroring `BrightnessController._onSubmit`.
-  @ObservationIgnored var _onSubmit: ((HardwareTarget) -> Void)?
 
   public init(
     writer: any DDCWriting,
     command: DDCCommand,
     prefs: DisplayPrefs,
-    displayID: CGDirectDisplayID,
     store: (any BrightnessStoring)? = nil,
     storageKey: String? = nil,
     panelIdentity: String? = nil
@@ -89,7 +84,6 @@ public final class DDCValueController {
     self.writer = writer
     self.command = command
     self.prefs = prefs
-    self.displayID = displayID
     // Seeded at construction, not left nil: without it the FIRST rebind would
     // always look like an identity change and reset a verdict this controller
     // had just earned. `nil` is honest for callers with no notion of panel
@@ -434,7 +428,6 @@ public final class DDCValueController {
   private func submitRaw(_ raw: UInt16) {
     let tuning = prefs.tuning(for: command)
     let target = HardwareTarget.ddc(raw: raw)
-    _onSubmit?(target)
     issuedGeneration += 1
     coalescer.submit(.init(
       target: target,
@@ -447,7 +440,6 @@ public final class DDCValueController {
 
   private func submitMuteWire(_ wireValue: UInt16) {
     let target = HardwareTarget.ddc(raw: wireValue)
-    _onSubmit?(target)
     issuedMuteGeneration += 1
     muteCoalescer.submit(.init(
       target: target,

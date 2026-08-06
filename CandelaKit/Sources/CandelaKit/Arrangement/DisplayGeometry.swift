@@ -42,7 +42,6 @@ public struct DisplayRect: Sendable, Equatable, Hashable {
   public var origin: DisplayPoint { DisplayPoint(x: x, y: y) }
   public var maxX: Int { x + width }
   public var maxY: Int { y + height }
-  public var isEmpty: Bool { width == 0 || height == 0 }
 
   public func moved(to origin: DisplayPoint) -> DisplayRect {
     DisplayRect(x: origin.x, y: origin.y, width: width, height: height)

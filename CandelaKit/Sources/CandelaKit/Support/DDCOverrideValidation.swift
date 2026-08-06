@@ -22,7 +22,7 @@ public enum DDCOverrideValidation {
   public static let range = 0...65535
 
   /// Which of a command's two override fields is being edited.
-  public enum Field: Sendable, Equatable, CaseIterable {
+  public enum Field: Sendable, Equatable {
     case minimum, maximum
   }
 

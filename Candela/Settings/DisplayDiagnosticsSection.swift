@@ -318,13 +318,13 @@ struct DisplayDiagnosticsSection: View {
     case .software(.overlay):
       "Software, through a dark overlay"
     case let .combined(switching, .gamma):
-      "Split at \(percent(switching)) — software below, the data cable above"
+      "Split at \(SliderSnap.percentText(switching)) — software below, the data cable above"
     case let .combined(switching, .overlay):
-      "Split at \(percent(switching)) — overlay below, the data cable above"
+      "Split at \(SliderSnap.percentText(switching)) — overlay below, the data cable above"
     case let .softwareOnly(.gamma, .ddcTurnedOff, dimsBelow):
-      "Software only below \(percent(dimsBelow)), through the display's color profile"
+      "Software only below \(SliderSnap.percentText(dimsBelow)), through the display's color profile"
     case let .softwareOnly(.overlay, .ddcTurnedOff, dimsBelow):
-      "Software only below \(percent(dimsBelow)), through a dark overlay"
+      "Software only below \(SliderSnap.percentText(dimsBelow)), through a dark overlay"
     case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
       "Nothing is moving this display's brightness"
     }
@@ -339,16 +339,12 @@ struct DisplayDiagnosticsSection: View {
     case .software:
       "The display's own backlight is not touched. \(AppInfo.productName) darkens what is drawn on it."
     case let .combined(switching, _):
-      "Below \(percent(switching)) this display dims in software while the cable holds at its lowest level; above it, the cable carries the whole range."
+      "Below \(SliderSnap.percentText(switching)) this display dims in software while the cable holds at its lowest level; above it, the cable carries the whole range."
     case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
-      "The hardware brightness command is turned off for this display, so only the part of the slider below \(percent(dimsBelow)) dims. Above that, nothing moves."
+      "The hardware brightness command is turned off for this display, so only the part of the slider below \(SliderSnap.percentText(dimsBelow)) dims. Above that, nothing moves."
     case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
       "Combined dimming is off for this display and its hardware brightness command is turned off, so nothing is left to carry the value."
     }
-  }
-
-  private func percent(_ value: Double) -> String {
-    "\(Int((value * 100).rounded()))%"
   }
 
   // MARK: - 3. What the display told us
@@ -608,7 +604,7 @@ struct DisplayDiagnosticsSection: View {
     case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
       "Unavailable — combined dimming is off for this display and its hardware brightness command is turned off"
     case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
-      "Partly available — the hardware brightness command is turned off, so only the part of the slider below \(percent(dimsBelow)) moves anything"
+      "Partly available — the hardware brightness command is turned off, so only the part of the slider below \(SliderSnap.percentText(dimsBelow)) moves anything"
     case .native, .software, .hardware, .combined:
       "Available"
     }
@@ -790,7 +786,7 @@ struct DisplayDiagnosticsSection: View {
       LabeledContent("Last resolution problem") {
         Text(verbatim: reapplyText(report.notice)).foregroundStyle(.secondary)
       }
-      .modifier(ReapplyErrorCode(notice: report.notice))
+      .modifier(ReapplyDiagnostic(notice: report.notice))
     }
 
     LabeledContent("Mirroring") {
@@ -854,7 +850,7 @@ struct DisplayDiagnosticsSection: View {
     }
     let value: String = switch target {
     case let .ddc(raw): "value \(raw) over the data cable"
-    case let .native(level): "\(percent(Double(level))) through macOS"
+    case let .native(level): "\(SliderSnap.percentText(Double(level))) through macOS"
     }
     return state.controller.lastApplyFailed()
       ? "Last accepted: \(value). The most recent command was not accepted."
@@ -885,22 +881,5 @@ struct DisplayDiagnosticsSection: View {
     return configured.isMirrorSlave
       ? "Showing another display's contents"
       : "Showing its own contents"
-  }
-}
-
-/// The CoreGraphics code stays out of the sentence and goes in a tooltip — it
-/// is diagnostic, and belongs nowhere near text someone reads while working out
-/// what happened to their screen. Only a `.failed` notice has one; an empty
-/// tooltip would suggest there was an error when there was not. Same rule and
-/// same shape as `ReapplyDiagnostic` in `DisplayModeSection`.
-private struct ReapplyErrorCode: ViewModifier {
-  let notice: ModeReapplyNotice
-
-  @ViewBuilder func body(content: Content) -> some View {
-    if case let .failed(error) = notice {
-      content.help("CoreGraphics error \(error.cgErrorCode)")
-    } else {
-      content
-    }
   }
 }

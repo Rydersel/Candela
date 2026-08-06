@@ -13,6 +13,11 @@ enum RotationCopy {
   /// would be a second vocabulary for the same four values, and would be wrong
   /// for an already-portrait panel.
   static func angle(_ rotation: DisplayRotation) -> LocalizedStringKey {
+    LocalizedStringKey(angleText(rotation))
+  }
+
+  /// The same four words, for the `String`-returning surfaces.
+  private static func angleText(_ rotation: DisplayRotation) -> String {
     switch rotation {
     case .standard: "Standard"
     case .ninety: "90°"
@@ -47,12 +52,7 @@ enum RotationCopy {
 
   /// The subtitle under the question: which display, and to what.
   static func previewSubtitle(name: String, to rotation: DisplayRotation) -> String {
-    let angle = switch rotation {
-    case .standard: "Standard"
-    case .ninety: "90°"
-    case .oneEighty: "180°"
-    case .twoSeventy: "270°"
-    }
+    let angle = angleText(rotation)
     return name.isEmpty ? angle : "\(name) — \(angle)"
   }
 

@@ -264,11 +264,12 @@ actor GatedApplier: BrightnessApplying {
 
 // MARK: - Concrete appliers
 
-/// DDCBrightnessApplier maps `.ddc` onto the writer's brightness VCP write
-/// and rejects `.native` targets (wiring bug) without touching the writer.
+/// The brightness leg's applier (an unremapped `DDCCommandApplier`) maps `.ddc`
+/// onto ONE brightness VCP write and rejects `.native` targets (wiring bug)
+/// without touching the writer.
 @Test func ddcApplierWritesBrightnessAndRejectsNativeTargets() async {
   let fake = FakeDDC()
-  let applier = DDCBrightnessApplier(writer: fake)
+  let applier = DDCCommandApplier(writer: fake, command: VCP.brightness)
   #expect(await applier.apply(.ddc(raw: 55)) == true)
   #expect(await applier.apply(.native(0.5)) == false)
   let writes = await fake.recordedWrites()

@@ -147,7 +147,7 @@ private struct Fixture {
   #expect(gamma.events.count == 2)
   #expect(gamma.events.first == .verify(3))
   if case let .apply(scale) = gamma.events.last {
-    #expect(scale == DimmingMath.swTransform(0.5, allowZero: false, reverse: false))
+    #expect(scale == DimmingMath.swTransform(0.5, allowZero: false))
   } else {
     Issue.record("expected the controller's gamma apply right after the check")
   }

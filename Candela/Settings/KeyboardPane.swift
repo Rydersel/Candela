@@ -10,7 +10,7 @@ import SwiftUI
 /// that wants the media-key tap does nothing at all without the grant, and
 /// every control below it is inert until that is fixed.
 ///
-/// `@MainActor` as declared by the Task 3 stub — keep it: `SettingsActions` is
+/// `@MainActor` is load-bearing: `SettingsActions` is
 /// `@MainActor`, and a plain `struct … : View` has nonisolated stored and
 /// computed properties under Swift 6 complete concurrency.
 @MainActor
@@ -43,16 +43,15 @@ struct KeyboardPane: View {
   /// AND the grant is missing. Custom shortcuts are Carbon hotkeys and work
   /// without the grant (`KeyModePolicy.requiresAccessibility`), so an
   /// all-custom rig is never warned about a permission it does not use — the
-  /// same gate Task 7 put on `SettingsActions.recheckPermissions`.
+  /// same gate as on `SettingsActions.recheckPermissions`.
   ///
   /// `AppModel.accessibility` polls while the grant is missing, so this row
   /// clears itself the moment the grant appears — no reopen, no relaunch.
   ///
   /// The predicate is `AccessibilityPermission.isWarningWarranted`, the SAME
-  /// property the panel's banner gates on (Task 9), not a second local copy of
-  /// the rule. Two implementations of one rule is exactly how the pane and the
-  /// banner end up disagreeing on an all-custom rig — the split Task 9 flagged
-  /// for this task to close.
+  /// property the panel's banner gates on, not a second local copy of the rule.
+  /// Two implementations of one rule is exactly how the pane and the banner end
+  /// up disagreeing on an all-custom rig.
   @ViewBuilder private var accessibilitySection: some View {
     if model.accessibility.isWarningWarranted {
       Section {
@@ -198,7 +197,7 @@ struct KeyboardPane: View {
 
   private var volumeTargetCaption: LocalizedStringKey {
     prefs.multiKeyboardVolume == .audioDeviceNameMatching
-      ? "Matches on the display's name. You can override the name a display is matched against in the Displays pane."
+      ? "Matches on the display's name. To override the name a display is matched against, use Audio device name on that display's page in the sidebar."
       : "Applies when the selected audio device has no volume control of its own."
   }
 
@@ -232,8 +231,8 @@ struct KeyboardPane: View {
   // reads prefs at construction and at key time, not reactively (D20).
   // `prefDidChange` takes a `PrefName` case, never a string (D27).
 
-  /// Task 7 handoff: without this call site a mode change never re-arms the
-  /// media-key tap, so the setting appears to do nothing until relaunch.
+  /// Without this call site a mode change never re-arms the media-key tap, so
+  /// the setting appears to do nothing until relaunch.
   /// `.keyboardBrightness` fans out to rearmTap + recheckPermissions + refreshUI
   /// — the recheck is D2 bug 2 (the fork's `handleListenForChanged` has zero
   /// call sites, so switching INTO a media-key mode never re-prompts for

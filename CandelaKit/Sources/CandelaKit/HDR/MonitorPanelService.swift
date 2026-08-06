@@ -23,7 +23,7 @@ public protocol HDRToggling: Sendable {
 /// DispatchQueue; MPDisplay/MPDisplayMgr existentials are non-Sendable and
 /// must never escape this actor (the compiler enforces this).
 public actor MonitorPanelService: HDRToggling {
-  private let log = Logger(subsystem: "app.candela.CandelaKit", category: "MonitorPanel")
+  private let log = Logger(subsystem: "com.rydersel.Candela", category: "MonitorPanel")
 
   public init() {}
 

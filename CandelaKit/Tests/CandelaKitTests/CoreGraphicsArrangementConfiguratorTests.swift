@@ -115,6 +115,6 @@ struct CoreGraphicsArrangementConfiguratorTests {
     // no layout to read and nothing to assert about one.
     try #require(!arrangement.isEmpty)
     #expect(arrangement.mainDisplayID == CGMainDisplayID())
-    #expect(arrangement.tiles.allSatisfy { !$0.rect.isEmpty })
+    #expect(arrangement.tiles.allSatisfy { $0.rect.width > 0 && $0.rect.height > 0 })
   }
 }

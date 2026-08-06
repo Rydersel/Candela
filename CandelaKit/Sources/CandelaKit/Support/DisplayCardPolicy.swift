@@ -3,7 +3,7 @@ import Foundation
 /// Which path is actually driving a display's brightness. Named for what the
 /// user sees, not for the prefs behind it (D25) — `forceSw` and `avoidGamma`
 /// never reach a label.
-public enum DisplayControlMethod: Sendable, Equatable, CaseIterable {
+public enum DisplayControlMethod: Sendable, Equatable {
   /// DDC over the data cable. `avoidGamma` is inert on this path.
   case hardwareDDC
   /// Software dimming through the display's color profile (gamma table).

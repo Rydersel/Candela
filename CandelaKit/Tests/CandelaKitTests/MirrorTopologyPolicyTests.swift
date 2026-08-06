@@ -5,22 +5,12 @@ import Testing
 
 @Suite("Mirror toggle policy (DT13, DT14)")
 struct MirrorTopologyPolicyTests {
-  private func display(
-    _ id: CGDirectDisplayID,
-    mirrors: CGDirectDisplayID = kCGNullDirectDisplay,
-    inSet: Bool = false,
-    always: Bool = false,
-    builtIn: Bool = false
-  ) -> ConfiguredDisplay {
-    MirrorFixtures.display(id, mirrors: mirrors, inSet: inSet, always: always, builtIn: builtIn)
-  }
-
   /// Two independent mirror sets: 1 owns 2, and 3 owns 4. Nothing on this rig
   /// is locked, so every member is breakable.
   private var twoIndependentSets: MirrorTopology {
     MirrorTopology([
-      display(1, inSet: true), display(2, mirrors: 1),
-      display(3, inSet: true), display(4, mirrors: 3),
+      MirrorFixtures.display(1, inSet: true), MirrorFixtures.display(2, mirrors: 1),
+      MirrorFixtures.display(3, inSet: true), MirrorFixtures.display(4, mirrors: 3),
     ])
   }
 
@@ -28,14 +18,16 @@ struct MirrorTopologyPolicyTests {
   /// key executor falls through to a plain brightness-down step on this refusal
   /// and on no other.
   @Test func oneDisplayRefusesWithTheReasonTheKeyPathFallsThroughOn() {
-    let decision = MirrorTopologyPolicy.toggle(MirrorTopology([display(1, builtIn: true)]))
+    let decision = MirrorTopologyPolicy.toggle(MirrorTopology([MirrorFixtures.display(1, builtIn: true)]))
     #expect(decision == .refused(.onlyOneDisplay))
   }
 
   /// T4. The fork picks the first NON-built-in as master and makes the built-in
   /// a slave deliberately; the determinism (lowest id, not list order) is ours.
   @Test func togglingAnUnmirroredRigBuildsASetAroundTheLowestExternal() {
-    let topology = MirrorTopology([display(1, builtIn: true), display(5), display(3)])
+    let topology = MirrorTopology([
+      MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(5), MirrorFixtures.display(3),
+    ])
     #expect(MirrorTopologyPolicy.toggle(topology) == .engage(
       master: 3,
       changes: [
@@ -61,8 +53,8 @@ struct MirrorTopologyPolicyTests {
   /// forever. The toggle was permanently stuck off.
   @Test func aSetNobodyCanBreakIsRefusedWithItsMembersNamed() {
     let topology = MirrorTopology([
-      display(1, mirrors: 2, always: true, builtIn: true),
-      display(2, inSet: true, always: true),
+      MirrorFixtures.display(1, mirrors: 2, always: true, builtIn: true),
+      MirrorFixtures.display(2, inSet: true, always: true),
     ])
     #expect(MirrorTopologyPolicy.toggle(topology) == .refused(.setCannotBeBroken([1, 2])))
   }
@@ -77,9 +69,9 @@ struct MirrorTopologyPolicyTests {
   /// at.
   @Test func aLockedMemberIsNeverStagedAndTheSetItLeavesBehindIsNamed() {
     let topology = MirrorTopology([
-      display(1, mirrors: 2, builtIn: true),
-      display(2, inSet: true),
-      display(3, mirrors: 2, always: true),
+      MirrorFixtures.display(1, mirrors: 2, builtIn: true),
+      MirrorFixtures.display(2, inSet: true),
+      MirrorFixtures.display(3, mirrors: 2, always: true),
     ])
     #expect(MirrorTopologyPolicy.toggle(topology) == .disengage(
       changes: [
@@ -101,9 +93,9 @@ struct MirrorTopologyPolicyTests {
   /// locked is refused with its members named — by BOTH paths.
   @Test func aSecondPressOnTheResidualSetRefusesRatherThanStagingANoOp() {
     let afterFirstPress = MirrorTopology([
-      display(1, builtIn: true),
-      display(2, inSet: true),
-      display(3, mirrors: 2, always: true),
+      MirrorFixtures.display(1, builtIn: true),
+      MirrorFixtures.display(2, inSet: true),
+      MirrorFixtures.display(3, mirrors: 2, always: true),
     ])
     #expect(MirrorTopologyPolicy.toggle(afterFirstPress)
       == .refused(.setCannotBeBroken([2, 3])))
@@ -116,7 +108,7 @@ struct MirrorTopologyPolicyTests {
   /// the automatic scan's answer, and the only refusal that speaks about the
   /// whole machine.
   @Test func noEligibleMasterIsRefusedRatherThanForcedOntoTheBuiltIn() {
-    let topology = MirrorTopology([display(1, builtIn: true), display(2, always: true)])
+    let topology = MirrorTopology([MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2, always: true)])
     #expect(MirrorTopologyPolicy.toggle(topology) == .refused(.noEligibleMaster))
   }
 
@@ -124,7 +116,7 @@ struct MirrorTopologyPolicyTests {
   /// it cannot leave. Its own refusal, not the machine-wide one — the fact is
   /// about the display the user pointed at.
   @Test func aLockedDisplayIsNeverOfferedAsAMaster() {
-    let topology = MirrorTopology([display(1, builtIn: true), display(2, always: true)])
+    let topology = MirrorTopology([MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2, always: true)])
     #expect(MirrorTopologyPolicy.engage(topology, master: 2)
       == .refused(.masterIsAlwaysMirrored))
   }
@@ -134,7 +126,7 @@ struct MirrorTopologyPolicyTests {
   /// a set — and there is simply nothing left that may join it. "No display can
   /// be the mirror master" would be false about the very display they chose.
   @Test func anEligibleMasterWithNothingToMirrorIsRefusedForThatReasonNotForBeingIneligible() {
-    let topology = MirrorTopology([display(1, builtIn: true), display(2, always: true)])
+    let topology = MirrorTopology([MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2, always: true)])
     #expect(MirrorTopologyPolicy.engage(topology, master: 1) == .refused(.nothingToMirror))
   }
 
@@ -149,7 +141,9 @@ struct MirrorTopologyPolicyTests {
   /// The UI's engage names its master. Unlike the hotkey's, it may name the
   /// built-in — that is the user asking for it by name.
   @Test func theUICanNameAnyEligibleMasterIncludingTheBuiltIn() {
-    let topology = MirrorTopology([display(1, builtIn: true), display(2), display(3)])
+    let topology = MirrorTopology([
+      MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2), MirrorFixtures.display(3),
+    ])
     #expect(MirrorTopologyPolicy.engage(topology, master: 1) == .engage(
       master: 1,
       changes: [
@@ -202,8 +196,8 @@ struct MirrorTopologyPolicyTests {
   /// SCOPE, never leniency.
   @Test func theUIRefusesALockedSetWithItsMembersNamedJustAsTheHotkeyDoes() {
     let topology = MirrorTopology([
-      display(1, mirrors: 2, always: true, builtIn: true),
-      display(2, inSet: true, always: true),
+      MirrorFixtures.display(1, mirrors: 2, always: true, builtIn: true),
+      MirrorFixtures.display(2, inSet: true, always: true),
     ])
     #expect(MirrorTopologyPolicy.disengage(topology, containing: 1)
       == .refused(.setCannotBeBroken([1, 2])))
@@ -215,7 +209,7 @@ struct MirrorTopologyPolicyTests {
   /// all-or-nothing, so one impossible change would stop a set that CAN break
   /// from breaking at all.
   @Test func aSlaveWhoseMasterIsAbsentBreaksAloneRatherThanStagingThePhantom() {
-    let topology = MirrorTopology([display(1, builtIn: true), display(2, mirrors: 9)])
+    let topology = MirrorTopology([MirrorFixtures.display(1, builtIn: true), MirrorFixtures.display(2, mirrors: 9)])
     #expect(MirrorTopologyPolicy.disengage(topology, containing: 2) == .disengage(
       changes: [MirrorChange(display: 2, master: kCGNullDirectDisplay)],
       residualMembers: []

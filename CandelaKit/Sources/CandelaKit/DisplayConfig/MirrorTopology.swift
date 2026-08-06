@@ -16,8 +16,8 @@ import Foundation
 /// (the two set predicates AND a null `mirrorsDisplay`), and
 /// `Mirroring.engageMirror` (the two set predicates alone). Where they
 /// disagreed, mode reapply deferred a display the key path was treating as a
-/// master. Later tasks unify those call sites onto this; the definition itself
-/// lives here so it can be judged once.
+/// master. Those call sites were unified onto this; the definition itself lives
+/// here so it can be judged once.
 ///
 /// The shape of a set is fixed by the SDK and assumed throughout: ONE master
 /// with N slaves, no nesting. A slave names its master with a single ID, so

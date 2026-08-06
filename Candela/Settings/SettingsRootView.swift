@@ -126,15 +126,7 @@ struct SettingsRootView: View {
   private var currentTitle: String {
     switch selection {
     case let .pane(id):
-      // The registry holds a LocalizedStringKey for the sidebar row; the
-      // window needs a plain String, and these are the same words.
-      switch id {
-      case .general: "General"
-      case .menuBar: "Menu Bar"
-      case .arrangement: "Arrangement"
-      case .keyboard: "Keyboard"
-      case .about: "About"
-      }
+      SettingsRegistry.descriptor(for: id).title
     case let .display(key):
       model.allControlledStates
         .first { $0.display.persistenceKey == key }

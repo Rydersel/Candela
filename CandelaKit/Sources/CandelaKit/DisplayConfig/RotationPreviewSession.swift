@@ -4,11 +4,11 @@ import Foundation
 /// A rotation applied and waiting to be answered.
 ///
 /// **There is no commit step, and that is the structural difference from the
-/// other two preview sessions in this codebase.** A display mode is applied at
+/// other three preview sessions in this codebase.** A display mode is applied at
 /// `kCGConfigureForAppOnly` and has to be re-applied at session scope to stick;
-/// a mirror likewise. A rotation is **already permanent the instant it is
-/// applied** — RS7 measured one outliving the process that set it entirely, so
-/// there is no per-process scope to promote out of.
+/// a mirror likewise, and an arrangement commits at `.permanent`. A rotation is
+/// **already permanent the instant it is applied** — RS7 measured one outliving
+/// the process that set it entirely, so there is no scope to promote out of.
 ///
 /// So `confirm` does not write anything. It stops the countdown, and that is the
 /// whole of it. `revert` is the only answer that touches the hardware.

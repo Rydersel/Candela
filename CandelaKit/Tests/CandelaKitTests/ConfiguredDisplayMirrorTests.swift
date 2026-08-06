@@ -5,31 +5,13 @@ import Testing
 
 @Suite("Mirror facts on a configured display (DT10)")
 struct ConfiguredDisplayMirrorTests {
-  private func display(
-    _ id: CGDirectDisplayID,
-    mirrors: CGDirectDisplayID = kCGNullDirectDisplay,
-    inSet: Bool = false,
-    always: Bool = false,
-    builtIn: Bool = false
-  ) -> ConfiguredDisplay {
-    ConfiguredDisplay(
-      id: id,
-      identity: DisplayConfigIdentity(vendor: 1, model: 2, serial: id, isBuiltIn: builtIn),
-      name: "Display \(id)",
-      isBuiltIn: builtIn,
-      mirrorsDisplay: mirrors,
-      isInMirrorSet: inSet,
-      isAlwaysInMirrorSet: always
-    )
-  }
-
   /// The ambiguity this whole pair of fields exists for. A standalone display
   /// and a master both report a null `mirrorsDisplay`, so the second call is
   /// what separates them — measured on this machine, where an unmirrored
   /// built-in reports `IsInMirrorSet=0, MirrorsDisplay=0`.
   @Test func aMasterAndAStandaloneDisplayAreIndistinguishableByMirrorsDisplayAlone() {
-    let master = display(1, inSet: true)
-    let standalone = display(2)
+    let master = MirrorFixtures.display(1, inSet: true)
+    let standalone = MirrorFixtures.display(2)
     #expect(master.mirrorsDisplay == standalone.mirrorsDisplay)
     #expect(master.isMirrorMaster)
     #expect(!standalone.isMirrorMaster)
@@ -39,14 +21,14 @@ struct ConfiguredDisplayMirrorTests {
   /// should have to defend against, and the defaulted parameters make it
   /// constructible by accident in every fixture that sets only `mirrorsDisplay`.
   @Test func aSlaveIsInAMirrorSetEvenWhenTheFixtureForgotToSaySo() {
-    let slave = display(3, mirrors: 1)
+    let slave = MirrorFixtures.display(3, mirrors: 1)
     #expect(slave.isInMirrorSet)
     #expect(slave.isMirrorSlave)
     #expect(!slave.isMirrorMaster)
   }
 
   @Test func aDisplayLockedIntoASetReportsBothMembershipAndPermanence() {
-    let locked = display(4, mirrors: 1, always: true)
+    let locked = MirrorFixtures.display(4, mirrors: 1, always: true)
     #expect(locked.isInMirrorSet)
     #expect(locked.isAlwaysInMirrorSet)
   }

@@ -91,18 +91,10 @@ struct CanvasTransformTests {
     DisplayRect(x: 3440, y: -300, width: 1200, height: 1920),
   ]
 
-  private func tile(_ id: CGDirectDisplayID, _ rect: DisplayRect) -> ArrangementTile {
-    ArrangementTile(
-      id: id,
-      identity: .init(vendor: id, model: id, serial: id, isBuiltIn: false),
-      name: "Display \(id)",
-      rect: rect,
-      mirroredIDs: []
-    )
-  }
-
   private var arrangement: DisplayArrangement {
-    DisplayArrangement(tiles: Self.rects.enumerated().map { tile(CGDirectDisplayID($0.offset + 1), $0.element) })
+    DisplayArrangement(
+      tiles: Self.rects.enumerated().map { ArrangementFixtures.tile(CGDirectDisplayID($0.offset + 1), $0.element) }
+    )
   }
 
   private var transform: CanvasTransform {
@@ -224,7 +216,9 @@ struct CanvasTransformTests {
   }
 
   @Test func aSingleDisplayCentres() {
-    let solo = DisplayArrangement(tiles: [tile(1, DisplayRect(x: -1470, y: 733, width: 1470, height: 956))])
+    let solo = DisplayArrangement(tiles: [
+      ArrangementFixtures.tile(1, DisplayRect(x: -1470, y: 733, width: 1470, height: 956)),
+    ])
     let t = CanvasTransform.fitting(solo.bounds, in: Self.canvas, margin: Self.margin, headroom: Self.headroom)
     let r = t.canvasRect(solo.bounds)
     #expect(abs(r.midX - Self.canvas.width / 2) < 1e-9)
@@ -239,7 +233,9 @@ struct CanvasTransformTests {
   /// used to leave the entire suite green. What it actually breaks is filling
   /// the canvas, which is what this asserts.
   @Test func f_aSmallArrangementIsScaledUpToFillTheCanvas() {
-    let small = DisplayArrangement(tiles: [tile(1, DisplayRect(x: -40, y: 12, width: 100, height: 100))])
+    let small = DisplayArrangement(tiles: [
+      ArrangementFixtures.tile(1, DisplayRect(x: -40, y: 12, width: 100, height: 100)),
+    ])
     let t = CanvasTransform.fitting(small.bounds, in: Self.canvas, margin: Self.margin, headroom: Self.headroom)
     #expect(t.scale > 1)
 
@@ -292,9 +288,7 @@ struct CanvasTransformTests {
 
   @Test func distancesConvertWithoutTheOffset() {
     let t = transform
-    #expect(t.canvasDistance(100) == 100 * t.scale)
     // A length must not pick up the centring offset — only a point does.
-    #expect(t.displayDistance(t.canvasDistance(1_000)) == 1_000)
     #expect(t.displayDistance(0) == 0)
     // The snap threshold's own conversion, from §3.3.
     #expect(t.displayDistance(8) == Int((8 / t.scale).rounded()))

@@ -61,9 +61,4 @@ public struct DisplayArrivalTracker: Sendable, Equatable {
   public mutating func release(_ displayID: CGDirectDisplayID) {
     handled.remove(displayID)
   }
-
-  /// Whether this display's arrival has already been acted on.
-  public func hasHandled(_ displayID: CGDirectDisplayID) -> Bool {
-    handled.contains(displayID)
-  }
 }

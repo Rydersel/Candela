@@ -64,38 +64,19 @@ public enum DimmingMath {
     return (ddc: 0, sw: value / switching)
   }
 
-  /// The DDC portion of a combined value, for restore/readback paths that don't
-  /// need the software component (fork `OtherDisplay.getDDCValueFromPrefs`).
-  public static func ddcPortion(ofValue v: Double, switching s: Double) -> Double {
-    let value = clamp01(v)
-    let switching = clamp01(s)
-    guard switching < 1 else { return 0 }
-    return max(0, value - switching) * (1 / (1 - switching))
-  }
-
   // MARK: - Software dimming
 
   /// Maps a 0…1 sw value onto the physical multiplier `[t, 1]` where
   /// `t = allowZero ? 0 : 0.15` (fork `Display.swBrightnessTransform`). Applied
-  /// to both the current and the new value before any gamma/shade write; the
-  /// reverse direction recovers the sw value on readback.
-  public static func swTransform(_ v: Double, allowZero: Bool, reverse: Bool) -> Double {
+  /// to both the current and the new value before any gamma/shade write.
+  public static func swTransform(_ v: Double, allowZero: Bool) -> Double {
     let lowThreshold = allowZero ? 0 : swLowThreshold
-    if !reverse {
-      return v * (1 - lowThreshold) + lowThreshold
-    } else {
-      return (v - lowThreshold) / (1 - lowThreshold)
-    }
+    return v * (1 - lowThreshold) + lowThreshold
   }
 
   /// Overlay alpha for the shade dimming path: `alpha = 1 − v^1.5`.
   public static func shadeAlpha(fromValue v: Double) -> Double {
     1 - pow(clamp01(v), shadeCurveExponent)
-  }
-
-  /// Inverse of ``shadeAlpha(fromValue:)``: `v = (1 − alpha)^(1/1.5)`.
-  public static func shadeValue(fromAlpha a: Double) -> Double {
-    pow(clamp01(1 - a), 1 / shadeCurveExponent)
   }
 
   // MARK: - Stepping

@@ -38,7 +38,6 @@ public struct CanvasRect: Sendable, Equatable {
     self.height = height
   }
 
-  public var origin: CanvasPoint { CanvasPoint(x: x, y: y) }
   public var maxX: Double { x + width }
   public var maxY: Double { y + height }
   public var midX: Double { x + width / 2 }
@@ -131,9 +130,5 @@ public struct CanvasTransform: Sendable, Equatable {
   /// A length, not a position: converts **without** the centring offset.
   public func displayDistance(_ distance: Double) -> Int {
     Int((distance / scale).rounded())
-  }
-
-  public func canvasDistance(_ distance: Int) -> Double {
-    Double(distance) * scale
   }
 }

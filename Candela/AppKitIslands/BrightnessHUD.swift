@@ -19,10 +19,6 @@ protocol BrightnessHUDPresenting: AnyObject {
 }
 
 extension BrightnessHUDPresenting {
-  @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double) {
-    self.showBrightness(displayID: displayID, name: name, value: value, nameSuffix: nil)
-  }
-
   @MainActor func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String, value: Float) {
     self.showHUD(displayID: displayID, type: type, name: name, value: value, maxValue: 1, nameSuffix: nil)
   }
@@ -291,9 +287,8 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   }
 }
 
-/// Internal, not fileprivate: every AppKit island that has to put a window on a
-/// particular display needs this, and a second copy is a second thing to get
-/// wrong. `ModeConfirmationWindow` is the other caller.
+/// Internal, not fileprivate: used by every AppKit island that places a window
+/// on a particular display, and a second copy is a second thing to get wrong.
 extension NSScreen {
   var displayID: CGDirectDisplayID? {
     self.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID

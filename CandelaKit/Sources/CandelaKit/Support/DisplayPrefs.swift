@@ -43,7 +43,7 @@ public enum PollingMode: Int, Sendable, CaseIterable {
 /// Overrides exist because a capabilities string is unreliable in the field:
 /// monitors truncate them, omit codes they implement, and advertise codes they
 /// ignore.
-public enum AudioSinkOverride: Int, Sendable, CaseIterable {
+public enum AudioSinkOverride: Int, Sendable {
   /// Trust `CapabilityString.support(forVCP:in:)` via `VolumeSliderPolicy`.
   case auto = 0
   /// Always greyed — the panel advertises volume it does not actually apply.
@@ -183,8 +183,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(clampSwitchingPoint(newValue), forKey: key("combinedSwitchingPoint")) }
   }
 
-  // MARK: - Per-command DDC tuning (M4, engine-level per D2 — settings UI is M5;
-  // test via `defaults write` + candela-probe)
+  // MARK: - Per-command DDC tuning
 
   public func tuning(for command: DDCCommand) -> CommandTuning {
     CommandTuning(
@@ -443,8 +442,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: "hideBuiltInDisplay") }
   }
 
-  // Folded raw app-level keys (previously read straight off UserDefaults.standard
-  // in AppModel/StatusItemController — key strings are shipped schema, unchanged).
+  // App-level keys. The key strings are shipped schema — never rename them.
 
   public var enableBrightnessSync: Bool {
     get { defaults.bool(forKey: "enableBrightnessSync") }

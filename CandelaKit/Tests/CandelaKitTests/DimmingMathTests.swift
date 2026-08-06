@@ -6,9 +6,9 @@ import Testing
 /// (§1, §2, §3, §6, §9) — the fork is the behavior oracle for every number here.
 @Suite("Dimming math")
 struct DimmingMathTests {
-  /// Only for the two expectations that carry unavoidable binary-float residue
-  /// (the sw reverse transform and the shade round-trip); everything else is
-  /// exactly representable and asserted with `==`.
+  /// Only for the expectations that carry unavoidable binary-float residue (the
+  /// sw reverse transform, the shade curve); everything else is exactly
+  /// representable and asserted with `==`.
   private func isClose(_ actual: Double, _ expected: Double, accuracy: Double) -> Bool {
     abs(actual - expected) <= accuracy
   }
@@ -84,37 +84,23 @@ struct DimmingMathTests {
     #expect(low.sw == 0)
   }
 
-  @Test func ddcPortionIsTheInverseOfTheSplit() {
-    #expect(DimmingMath.ddcPortion(ofValue: 0.71875, switching: 0.5) == 0.4375)
-  }
-
-  @Test func ddcPortionIsZeroInTheSoftwareZone() {
-    #expect(DimmingMath.ddcPortion(ofValue: 0.25, switching: 0.5) == 0)
-  }
-
   // MARK: - §3a software brightness transform
 
   @Test func swTransformForwardAtZeroLandsOnTheLowThreshold() {
-    #expect(DimmingMath.swTransform(0, allowZero: false, reverse: false) == 0.15)
+    #expect(DimmingMath.swTransform(0, allowZero: false) == 0.15)
   }
 
   @Test func swTransformForwardAtHalf() {
-    #expect(DimmingMath.swTransform(0.5, allowZero: false, reverse: false) == 0.575)
+    #expect(DimmingMath.swTransform(0.5, allowZero: false) == 0.575)
   }
 
   @Test func swTransformForwardAtOne() {
-    #expect(DimmingMath.swTransform(1, allowZero: false, reverse: false) == 1.0)
-  }
-
-  @Test func swTransformReverse() {
-    let reversed = DimmingMath.swTransform(0.575, allowZero: false, reverse: true)
-    #expect(isClose(reversed, 0.5, accuracy: 1e-9))
+    #expect(DimmingMath.swTransform(1, allowZero: false) == 1.0)
   }
 
   @Test func swTransformIsIdentityWhenZeroIsAllowed() {
-    #expect(DimmingMath.swTransform(0, allowZero: true, reverse: false) == 0)
-    #expect(DimmingMath.swTransform(0.5, allowZero: true, reverse: false) == 0.5)
-    #expect(DimmingMath.swTransform(0.5, allowZero: true, reverse: true) == 0.5)
+    #expect(DimmingMath.swTransform(0, allowZero: true) == 0)
+    #expect(DimmingMath.swTransform(0.5, allowZero: true) == 0.5)
   }
 
   // MARK: - §3b shade curve
@@ -131,15 +117,9 @@ struct DimmingMathTests {
     #expect(isClose(DimmingMath.shadeAlpha(fromValue: 0.575), 0.5640, accuracy: 1e-3))
   }
 
-  @Test func shadeRoundTrips() {
-    #expect(isClose(DimmingMath.shadeValue(fromAlpha: DimmingMath.shadeAlpha(fromValue: 0.3)), 0.3, accuracy: 1e-9))
-  }
-
   @Test func shadeClampsOutOfRangeInputs() {
     #expect(DimmingMath.shadeAlpha(fromValue: 1.5) == 0)
     #expect(DimmingMath.shadeAlpha(fromValue: -0.5) == 1)
-    #expect(DimmingMath.shadeValue(fromAlpha: 1.5) == 0)
-    #expect(DimmingMath.shadeValue(fromAlpha: -0.5) == 1)
   }
 
   // MARK: - §6 combined-scale stepping

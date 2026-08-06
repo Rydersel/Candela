@@ -18,7 +18,9 @@ import SwiftUI
 /// read while their screen is wrong.
 enum MirroringCopy {
   static var sectionTitle: LocalizedStringKey { "Mirroring" }
-  static var notMirrored: LocalizedStringKey { "Not mirrored" }
+  static var notMirrored: LocalizedStringKey { LocalizedStringKey(Self.notMirroredText) }
+  /// One spelling, shared with the `String`-returning `state(_:)`.
+  static let notMirroredText = "Not mirrored"
   static var question: LocalizedStringKey { "Keep mirroring?" }
   static var keep: LocalizedStringKey { "Keep" }
   static var stopNow: LocalizedStringKey { "Stop Mirroring Now" }
@@ -245,7 +247,7 @@ enum MirroringCopy {
       return "Showing \(name(master))"
     }
     let slaves = topology.slaves(of: displayID)
-    guard !slaves.isEmpty else { return "Not mirrored" }
+    guard !slaves.isEmpty else { return Self.notMirroredText }
     return slaves.count == 1
       ? "Mirrored to 1 display"
       : "Mirrored to \(slaves.count) displays"

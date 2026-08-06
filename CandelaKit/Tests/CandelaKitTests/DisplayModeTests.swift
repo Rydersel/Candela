@@ -37,9 +37,8 @@ struct DisplayModeTests {
     #expect(scaled.isScaled(nativePixelWidth: 2160, nativePixelHeight: 3840))
   }
 
-  @Test func scaleFactorAndAreaAreDerivedFromLogicalDimensions() {
+  @Test func logicalAreaIsDerivedFromLogicalDimensions() {
     let m = mode(logical: (1280, 720), pixels: (2560, 1440))
-    #expect(m.scaleFactor == 2.0)
     #expect(m.logicalArea == 1280 * 720)
   }
 
