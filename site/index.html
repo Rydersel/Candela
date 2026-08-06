@@ -31,10 +31,31 @@ a{color:var(--accent);text-decoration:none}
 .reveal{opacity:0;transform:translateY(16px);transition:opacity .6s ease,transform .6s ease}
 .reveal.in{opacity:1;transform:none}
 @media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
+#hero{padding:96px 24px 24px;text-align:center}
+.app-mark{margin-bottom:28px}
+#hero h1{font-size:clamp(40px,7vw,64px);font-weight:700;letter-spacing:-.02em;line-height:1.05}
+#hero .sub{max-width:620px;margin:20px auto 0;font-size:19px;color:var(--text-2)}
+#hero .cta{display:flex;gap:12px;justify-content:center;margin-top:32px;flex-wrap:wrap}
+#hero .fineprint{margin-top:18px;font-size:13px;color:var(--text-3)}
 </style>
 </head>
 <body>
-<section id="hero" class="wrap"></section>
+<section id="hero" class="wrap">
+  <div class="app-mark" aria-hidden="true">
+    <svg viewBox="0 0 64 64" width="72" height="72">
+      <rect x="4" y="4" width="56" height="56" rx="14" fill="#232326" stroke="rgba(255,255,255,.1)"/>
+      <path d="M32 16c5 7 9 11 9 17a9 9 0 1 1-18 0c0-6 4-10 9-17z" fill="none" stroke="#ffb340" stroke-width="2.5" stroke-linejoin="round"/>
+      <circle cx="32" cy="34" r="3" fill="#ffb340"/>
+    </svg>
+  </div>
+  <h1>Your displays, properly&nbsp;controlled.</h1>
+  <p class="sub">Candela is a free, open-source menu bar app for macOS that gives external monitors everything the built-in display gets — sharp HiDPI scaling, real brightness control, and more.</p>
+  <div class="cta">
+    <a class="btn btn-primary" href="https://github.com/Rydersel/Candela/releases/latest">Download for macOS</a>
+    <a class="btn btn-quiet" href="https://github.com/Rydersel/Candela">View on GitHub</a>
+  </div>
+  <p class="fineprint">Free &amp; open source&ensp;·&ensp;macOS 14+&ensp;·&ensp;Apple Silicon</p>
+</section>
 <section id="panel" class="wrap"></section>
 <section id="features" class="wrap"></section>
 <section id="everything" class="wrap"></section>
