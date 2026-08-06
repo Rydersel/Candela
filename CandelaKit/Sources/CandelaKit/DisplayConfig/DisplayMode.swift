@@ -1,5 +1,19 @@
 import Foundation
 
+/// Which enumeration published this mode, and therefore which call applies it.
+///
+/// CoreGraphics and CGS share ONE mode-ID space — measured 2026-08-06 across
+/// three panels, 0 IDs absent (S6 §4) — so this is not a second identity, only
+/// a routing tag. It deliberately does NOT reach `DisplayModeDescriptor`: the
+/// persisted form stays geometry-keyed so a mode that migrates between the two
+/// sources across an OS update still re-finds (CR3).
+public enum ModeProvenance: Sendable, Equatable, Hashable {
+  /// `CGDisplayCopyAllDisplayModes`, applied with `CGConfigureDisplayWithDisplayMode`.
+  case coreGraphics
+  /// Revealed from the CGS mode list, applied with `CGSConfigureDisplayMode`.
+  case coreGraphicsServices
+}
+
 /// One mode a display can run in.
 ///
 /// `ioModeID` is a RUNTIME handle only — it is not stable across replug, so it
@@ -15,11 +29,13 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
   public let refreshHz: Double
   /// `kDisplayModeNativeFlag` — the panel's own timing.
   public let isNative: Bool
+  /// Which list published this mode, and therefore which call applies it.
+  public let provenance: ModeProvenance
 
   public init(
     ioModeID: Int32, logicalWidth: Int, logicalHeight: Int,
     pixelWidth: Int, pixelHeight: Int, refreshHz: Double,
-    isNative: Bool
+    isNative: Bool, provenance: ModeProvenance = .coreGraphics
   ) {
     self.ioModeID = ioModeID
     self.logicalWidth = logicalWidth
@@ -28,6 +44,7 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
     self.pixelHeight = pixelHeight
     self.refreshHz = refreshHz
     self.isNative = isNative
+    self.provenance = provenance
   }
 
   public var id: Int32 { ioModeID }
