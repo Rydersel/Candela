@@ -184,6 +184,10 @@ case "modeapply":
     exit(2)
   }
   let holdSeconds = arguments.count >= 3 ? UInt32(arguments[2]) ?? 5 : 5
+  // Third arg picks the scope. Session scope OUTLIVES this process, so the
+  // caller is responsible for putting the display back.
+  let applyScope: DisplayConfigScope =
+    (arguments.count >= 4 && arguments[3] == "session") ? .session : .preview
   guard let target = displayFilter else {
     print("modeapply requires --display <id>")
     exit(2)
@@ -197,10 +201,10 @@ case "modeapply":
   print("before: \(before.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID)" } ?? "unknown")")
   print("applying: \(mode.logicalWidth)x\(mode.logicalHeight) fb \(mode.pixelWidth)x\(mode.pixelHeight) id \(mode.ioModeID) provenance \(mode.provenance)")
   do {
-    try configurator.apply(mode, to: target, scope: .preview)
+    try configurator.apply(mode, to: target, scope: applyScope)
     let after = configurator.currentMode(for: target)
     print("after:  \(after.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID)" } ?? "unknown")")
-    print("holding \(holdSeconds)s, then exiting to self-revert...")
+    print("scope: \(applyScope); holding \(holdSeconds)s...")
     sleep(holdSeconds)
     print("exiting — preview scope reverts now.")
   } catch {
