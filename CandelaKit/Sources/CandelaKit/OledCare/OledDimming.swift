@@ -30,19 +30,29 @@ public struct OledDimConfig: Equatable, Sendable {
   /// control that lies about what it did.
   public static let levelRange: ClosedRange<Double> = 0.1...0.9
 
+  /// Floor for every idle-driven threshold. Below this a "timeout" is
+  /// indistinguishable from "always on", and the blackout row derives its own
+  /// threshold from the idle one — so an unfloored idle threshold is how a
+  /// display ends up blacked out at zero idle with no input to recover it.
+  public static let minimumThresholdSeconds: Double = 30
+
   public init(idleDimSeconds: Double, idleDimLevel: Double, lockDim: Bool,
               blackoutEnabled: Bool, blackoutSeconds: Double,
               unfocusedDimEnabled: Bool, unfocusedDimSeconds: Double,
               unfocusedDimLevel: Double) {
-    self.idleDimSeconds = idleDimSeconds
+    // Floored FIRST, so the blackout clamp below compounds off a sane idle
+    // threshold: a zero or negative threshold means "dimmed always", and a
+    // negative blackout derived from it would black the display out at zero
+    // idle — unrecoverable from inside the app.
+    self.idleDimSeconds = max(idleDimSeconds, Self.minimumThresholdSeconds)
     self.idleDimLevel = Self.sanitizedLevel(idleDimLevel)
     self.lockDim = lockDim
     self.blackoutEnabled = blackoutEnabled
     // A blackout that fires at or below the idle threshold is a config error;
     // clamp rather than trust the pane (spec §3).
-    self.blackoutSeconds = max(blackoutSeconds, idleDimSeconds + 60)
+    self.blackoutSeconds = max(blackoutSeconds, self.idleDimSeconds + 60)
     self.unfocusedDimEnabled = unfocusedDimEnabled
-    self.unfocusedDimSeconds = unfocusedDimSeconds
+    self.unfocusedDimSeconds = max(unfocusedDimSeconds, Self.minimumThresholdSeconds)
     self.unfocusedDimLevel = Self.sanitizedLevel(unfocusedDimLevel)
   }
 
@@ -93,44 +103,67 @@ public struct IdleDimmingEngine: Sendable {
   /// Lock dim is edge-armed by the lock notification, lifted by input, and
   /// re-armed by the idle threshold (spec §3 row 2).
   private var lockDimArmed = false
+  /// `secondsSinceLastEventType` counts through system sleep, so the first tick
+  /// after a wake reports idle time the user never spent awake. Every
+  /// idle-driven row measures from this floor instead; input clears it.
+  private var idleFloor: Double = 0
+  private var idleFloorPending = false
 
   public init(config: OledDimConfig) { self.config = config }
 
   public mutating func updateConfig(_ config: OledDimConfig) { self.config = config }
   public mutating func noteLock() { lockDimArmed = true }
   public mutating func noteUnlock() { lockDimArmed = false }
-  public mutating func noteWake() { lockDimArmed = false }  // wake beats lock
+
+  /// Wake beats lock: the user woke the machine to use it. Disarming alone is
+  /// not enough — the stale idle counter would re-arm on the very next tick, so
+  /// the floor is what actually makes wake land and STAY `.active`.
+  public mutating func noteWake() {
+    lockDimArmed = false
+    idleFloorPending = true
+  }
 
   public mutating func tick(_ signals: OledDimSignals) -> OledDimState {
     defer { lastIdleSeconds = signals.idleSeconds }
     let inputOccurred = signals.idleSeconds < lastIdleSeconds
+    let current = state
+
+    if idleFloorPending {
+      idleFloor = signals.idleSeconds
+      idleFloorPending = false
+    }
+    if inputOccurred { idleFloor = 0 }  // a real event: the counter is honest again
+    let idleSinceWake = max(0, signals.idleSeconds - idleFloor)
 
     if signals.isMirrored { state = .suspended; return state }
 
     if signals.isLocked && config.lockDim {
       if inputOccurred { lockDimArmed = false }
-      if signals.idleSeconds >= config.idleDimSeconds { lockDimArmed = true }
+      if idleSinceWake >= config.idleDimSeconds { lockDimArmed = true }
+      // Locking never brightens: a display already blacked out stays black
+      // rather than rising to lock dim's lighter alpha. Input still lifts it.
+      if current == .blackout, !inputOccurred { state = .blackout; return state }
       state = lockDimArmed ? .lockDim : .active
       return state
     }
     lockDimArmed = false  // not locked (or lock dim off): the edge is stale
 
-    let wasDimmed = state != .active && state != .suspended
-    // HDR settle defers entry, never forces exit (spec §8).
-    let canEnter = !signals.isHDRSettling || wasDimmed
+    // The assertion and the HDR settle window gate ENTRY only — a dim already
+    // up holds through both, and neither forces an exit (spec §3, §8). Lock dim
+    // is deliberately outside this gate: it returns above, because a full-bright
+    // lock screen during an HDR settle is worse than the settle it defers to,
+    // and locking is an explicit user action rather than an inferred idle.
+    func mayShow(_ target: OledDimState) -> Bool {
+      current == target || (!signals.isHDRSettling && !signals.assertionHeld)
+    }
 
-    if config.blackoutEnabled, !signals.assertionHeld,
-       signals.idleSeconds >= config.blackoutSeconds, canEnter {
+    if config.blackoutEnabled, idleSinceWake >= config.blackoutSeconds, mayShow(.blackout) {
       state = .blackout
-    } else if !signals.assertionHeld,
-              signals.idleSeconds >= config.idleDimSeconds, canEnter {
+    } else if idleSinceWake >= config.idleDimSeconds, mayShow(.idleDim) {
       state = .idleDim
-    } else if config.unfocusedDimEnabled, !signals.assertionHeld,
+    } else if config.unfocusedDimEnabled,
               let unfocused = signals.unfocusedSeconds,
-              unfocused >= config.unfocusedDimSeconds, canEnter {
-      state = .unfocusedDim
-    } else if state == .unfocusedDim, signals.unfocusedSeconds != nil {
-      // Global input does not exit unfocused dim; only focus arrival does.
+              unfocused >= config.unfocusedDimSeconds, mayShow(.unfocusedDim) {
       state = .unfocusedDim
     } else {
       state = .active
