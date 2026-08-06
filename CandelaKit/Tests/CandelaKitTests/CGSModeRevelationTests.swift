@@ -188,3 +188,99 @@ struct CGSModeRevelationMergeTests {
     #expect(result.modes.allSatisfy { $0.provenance == .coreGraphicsServices })
   }
 }
+
+@Suite("Revealed modes reach the curated picker")
+struct RevealedModeCurationTests {
+  private let nativeW = 3440
+  private let nativeH = 1440
+
+  /// The MAG's real shape: CoreGraphics publishes a 1x mode at a logical size,
+  /// and revelation adds a 2x mode at the SAME logical size. Both land in the
+  /// same curation group, and only one row survives.
+  private func collidingPair(logicalWidth: Int, logicalHeight: Int, cgID: Int32, cgsID: Int32)
+    -> [DisplayMode]
+  {
+    [
+      DisplayMode(
+        ioModeID: cgID, logicalWidth: logicalWidth, logicalHeight: logicalHeight,
+        pixelWidth: logicalWidth, pixelHeight: logicalHeight, refreshHz: 175,
+        isNative: false, provenance: .coreGraphics),
+      DisplayMode(
+        ioModeID: cgsID, logicalWidth: logicalWidth, logicalHeight: logicalHeight,
+        pixelWidth: logicalWidth * 2, pixelHeight: logicalHeight * 2, refreshHz: 175,
+        isNative: false, provenance: .coreGraphicsServices),
+    ]
+  }
+
+  /// The defect this suite exists for: curation tie-broke on the LOWER
+  /// ioModeID, and CoreGraphics ids are lower than revealed ones — so the
+  /// blurry 1x mode won its size group and the revealed 2x mode never
+  /// reached the picker at all.
+  @Test func aRevealedHiDPIModeBeatsTheOneXModeAtTheSameSize() throws {
+    let rows = DisplayModeCatalog.curated(
+      collidingPair(logicalWidth: 1920, logicalHeight: 804, cgID: 57, cgsID: 101),
+      nativePixelWidth: nativeW, nativePixelHeight: nativeH)
+    #expect(rows.count == 1)
+    let row = try #require(rows.first)
+    #expect(row.mode.isHiDPI)
+    #expect(row.mode.ioModeID == 101)
+    #expect(row.mode.pixelWidth == 3840)
+  }
+
+  /// Preferring HiDPI must NOT displace the panel's own timing. The native row
+  /// is what a user reads as "native resolution", and promoting a 2x variant
+  /// there would silently make the default a 6880x2880 framebuffer.
+  @Test func theNativeModeKeepsItsOwnSizeGroup() throws {
+    let modes = [
+      DisplayMode(
+        ioModeID: 69, logicalWidth: 3440, logicalHeight: 1440,
+        pixelWidth: 3440, pixelHeight: 1440, refreshHz: 175,
+        isNative: true, provenance: .coreGraphics),
+      DisplayMode(
+        ioModeID: 109, logicalWidth: 3440, logicalHeight: 1440,
+        pixelWidth: 6880, pixelHeight: 2880, refreshHz: 120,
+        isNative: false, provenance: .coreGraphicsServices),
+    ]
+    let rows = DisplayModeCatalog.curated(
+      modes, nativePixelWidth: nativeW, nativePixelHeight: nativeH)
+    let row = try #require(rows.first { $0.mode.logicalWidth == 3440 })
+    #expect(row.mode.isNative)
+    #expect(row.mode.ioModeID == 69)
+  }
+
+  /// HiDPI preference outranks refresh, because sharpness is the reason the
+  /// feature exists and the full list remains the escape hatch for the rest.
+  @Test func hiDPIOutranksAFasterOneXMode() throws {
+    let modes = [
+      DisplayMode(
+        ioModeID: 57, logicalWidth: 1920, logicalHeight: 804,
+        pixelWidth: 1920, pixelHeight: 804, refreshHz: 175,
+        isNative: false, provenance: .coreGraphics),
+      DisplayMode(
+        ioModeID: 104, logicalWidth: 1920, logicalHeight: 804,
+        pixelWidth: 3840, pixelHeight: 1608, refreshHz: 60,
+        isNative: false, provenance: .coreGraphicsServices),
+    ]
+    let rows = DisplayModeCatalog.curated(
+      modes, nativePixelWidth: nativeW, nativePixelHeight: nativeH)
+    #expect(try #require(rows.first).mode.isHiDPI)
+  }
+
+  /// Among equally-HiDPI modes the fastest still wins, and ties are still
+  /// broken deterministically on id.
+  @Test func amongHiDPIModesTheFastestStillWins() throws {
+    let modes = [
+      DisplayMode(
+        ioModeID: 104, logicalWidth: 1920, logicalHeight: 804,
+        pixelWidth: 3840, pixelHeight: 1608, refreshHz: 60,
+        isNative: false, provenance: .coreGraphicsServices),
+      DisplayMode(
+        ioModeID: 101, logicalWidth: 1920, logicalHeight: 804,
+        pixelWidth: 3840, pixelHeight: 1608, refreshHz: 175,
+        isNative: false, provenance: .coreGraphicsServices),
+    ]
+    let rows = DisplayModeCatalog.curated(
+      modes, nativePixelWidth: nativeW, nativePixelHeight: nativeH)
+    #expect(try #require(rows.first).mode.refreshHz == 175)
+  }
+}

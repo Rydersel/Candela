@@ -152,6 +152,29 @@ case "modes":
           + "  id \(mode.ioModeID)")
     }
   }
+case "curated":
+  // What the DEFAULT picker actually shows, after DisplayModeCatalog curation.
+  let cur = CoreGraphicsDisplayConfigurator()
+  for display in online where displayFilter == nil || display.id == displayFilter {
+    let all = cur.modes(for: display.id)
+    guard let native = all.first(where: { $0.isNative }) else { continue }
+    let rows = DisplayModeCatalog.curated(
+      all, nativePixelWidth: native.pixelWidth, nativePixelHeight: native.pixelHeight)
+    let revealedRows = rows.filter { $0.mode.provenance == .coreGraphicsServices }
+    print("\n\(display.name): \(all.count) modes -> \(rows.count) rows, \(revealedRows.count) of them revealed")
+    for row in rows {
+      let m = row.mode
+      print("  \(m.logicalWidth)x\(m.logicalHeight) fb \(m.pixelWidth)x\(m.pixelHeight) @\(Int(m.refreshHz))Hz id \(m.ioModeID) \(m.provenance) hidpi=\(m.isHiDPI)")
+    }
+    let groups = Dictionary(grouping: all) { "\($0.logicalWidth)x\($0.logicalHeight)" }
+    for (size, group) in groups.sorted(by: { $0.key < $1.key }) {
+      let cgOnly = group.filter { $0.provenance == .coreGraphics }
+      let cgsOnly = group.filter { $0.provenance == .coreGraphicsServices }
+      if !cgOnly.isEmpty && !cgsOnly.isEmpty {
+        print("  COLLISION \(size): cg=\(cgOnly.count) cgs=\(cgsOnly.count)")
+      }
+    }
+  }
 case "modeapply":
   // Applies one mode BY ID at preview scope, through the real configurator, so
   // the revealed apply path and its post-commit verification are both exercised.
