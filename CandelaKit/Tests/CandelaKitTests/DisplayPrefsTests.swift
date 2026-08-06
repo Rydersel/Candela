@@ -511,4 +511,53 @@ struct DisplayPrefsTests {
     #expect(safe.startupAction == .doNothing)
     #expect(safe.pollingTries == 0)
   }
+
+  // MARK: - OLED care (W3a)
+
+  @Test func oledDefaultsAreTheRecommendedPreset() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      #expect(prefs.oledCareEnrolled == false)
+      #expect(prefs.oledIdleDimSeconds == 300)
+      #expect(prefs.oledIdleDimLevel == 0.5)
+      #expect(prefs.oledLockDim == true)
+      #expect(prefs.oledBlackoutEnabled == false)
+      #expect(prefs.oledBlackoutSeconds == 1200)
+      #expect(prefs.oledUnfocusedDimEnabled == false)
+      #expect(prefs.oledUnfocusedDimSeconds == 600)
+      #expect(prefs.oledUnfocusedDimLevel == 0.7)
+      #expect(prefs.oledHoursTracking == true)
+    }
+  }
+
+  @Test func oledPrefsArePerDisplay() {
+    withSuite { defaults in
+      let a = DisplayPrefs(defaults: defaults, persistenceKey: "a")
+      let b = DisplayPrefs(defaults: defaults, persistenceKey: "b")
+      a.oledCareEnrolled = true
+      a.oledIdleDimSeconds = 120
+      #expect(b.oledCareEnrolled == false)
+      #expect(b.oledIdleDimSeconds == 300)
+    }
+  }
+
+  @Test func trueDefaultOledBoolsStoreInverted() {
+    // Absence must read as ON, so these two persist under `…Off` keys. A
+    // straight `bool(forKey:)` would silently ship lock dimming disabled on
+    // every fresh install, and the getter alone cannot show the round trip.
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      prefs.oledLockDim = false
+      prefs.oledHoursTracking = false
+      #expect(prefs.oledLockDim == false)
+      #expect(prefs.oledHoursTracking == false)
+      #expect(defaults.bool(forKey: "oledLockDimOff.pk"))
+      #expect(defaults.bool(forKey: "oledHoursTrackingOff.pk"))
+      #expect(defaults.object(forKey: "oledLockDim.pk") == nil)
+      prefs.oledLockDim = true
+      prefs.oledHoursTracking = true
+      #expect(prefs.oledLockDim == true)
+      #expect(prefs.oledHoursTracking == true)
+    }
+  }
 }

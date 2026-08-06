@@ -183,6 +183,65 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(clampSwitchingPoint(newValue), forKey: key("combinedSwitchingPoint")) }
   }
 
+  // MARK: - OLED care (W3a)
+
+  // The defaults ARE the Recommended preset, so enrolling writes nothing but
+  // `oledCareEnrolled` and an un-tuned display stays on the preset even as the
+  // preset changes. The two true-default bools store INVERTED, under
+  // `…Off` keys, so an absent key reads as ON rather than as OFF.
+
+  public var oledCareEnrolled: Bool {
+    get { defaults.bool(forKey: key("oledCareEnrolled")) }
+    set { defaults.set(newValue, forKey: key("oledCareEnrolled")) }
+  }
+
+  /// Idle before the care dim engages, in seconds.
+  public var oledIdleDimSeconds: Int {
+    get { defaults.object(forKey: key("oledIdleDimSeconds")) as? Int ?? 300 }
+    set { defaults.set(newValue, forKey: key("oledIdleDimSeconds")) }
+  }
+
+  /// Fraction of the user's brightness the care dim drops to.
+  public var oledIdleDimLevel: Double {
+    get { defaults.object(forKey: key("oledIdleDimLevel")) as? Double ?? 0.5 }
+    set { defaults.set(newValue, forKey: key("oledIdleDimLevel")) }
+  }
+
+  public var oledLockDim: Bool {
+    get { !defaults.bool(forKey: key("oledLockDimOff")) }
+    set { defaults.set(!newValue, forKey: key("oledLockDimOff")) }
+  }
+
+  public var oledBlackoutEnabled: Bool {
+    get { defaults.bool(forKey: key("oledBlackoutEnabled")) }
+    set { defaults.set(newValue, forKey: key("oledBlackoutEnabled")) }
+  }
+
+  public var oledBlackoutSeconds: Int {
+    get { defaults.object(forKey: key("oledBlackoutSeconds")) as? Int ?? 1200 }
+    set { defaults.set(newValue, forKey: key("oledBlackoutSeconds")) }
+  }
+
+  public var oledUnfocusedDimEnabled: Bool {
+    get { defaults.bool(forKey: key("oledUnfocusedDimEnabled")) }
+    set { defaults.set(newValue, forKey: key("oledUnfocusedDimEnabled")) }
+  }
+
+  public var oledUnfocusedDimSeconds: Int {
+    get { defaults.object(forKey: key("oledUnfocusedDimSeconds")) as? Int ?? 600 }
+    set { defaults.set(newValue, forKey: key("oledUnfocusedDimSeconds")) }
+  }
+
+  public var oledUnfocusedDimLevel: Double {
+    get { defaults.object(forKey: key("oledUnfocusedDimLevel")) as? Double ?? 0.7 }
+    set { defaults.set(newValue, forKey: key("oledUnfocusedDimLevel")) }
+  }
+
+  public var oledHoursTracking: Bool {
+    get { !defaults.bool(forKey: key("oledHoursTrackingOff")) }
+    set { defaults.set(!newValue, forKey: key("oledHoursTrackingOff")) }
+  }
+
   // MARK: - Per-command DDC tuning
 
   public func tuning(for command: DDCCommand) -> CommandTuning {
