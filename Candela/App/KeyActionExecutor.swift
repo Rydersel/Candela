@@ -16,9 +16,9 @@ final class KeyActionExecutor {
     self.hud = hud
   }
 
-  /// `isFresh` distinguishes a fresh keypress from key-repeat (review I18) and
-  /// is plumbed down to `step` for the media-key semantics that separate the
-  /// two.
+  /// `isFresh` distinguishes a fresh keypress from key-repeat (review I18);
+  /// mute toggling and the mirror-toggle fallback consume it — brightness
+  /// stepping deliberately does not.
   func execute(_ action: KeyAction, isFresh: Bool = true) {
     switch action {
     case let .stepBrightness(isUp, isFine, scope):
@@ -39,9 +39,9 @@ final class KeyActionExecutor {
         if mode == .allScreens {
           // Fork getAffectedDisplays(.allScreens): every display, built-in
           // included — so this is NOT the same as the `.allExternal` scope.
-          stepAllExternal(isUp: isUp, isFine: isFine, isFresh: isFresh)
+          stepAllExternal(isUp: isUp, isFine: isFine)
           if let (id, name, newValue) = model.stepBrightnessBuiltIn(
-            isUp: isUp, isFine: isFine, isFresh: isFresh
+            isUp: isUp, isFine: isFine
           ) {
             showHUD(id: id, name: name, value: newValue)
           }
@@ -55,7 +55,7 @@ final class KeyActionExecutor {
           : nil) ?? Self.pointerDisplayID()
         let affected = anchor.map(expandToMirrorSet) ?? []
         let stepped = model.stepBrightness(
-          displayIDs: affected, isUp: isUp, isFine: isFine, isFresh: isFresh
+          displayIDs: affected, isUp: isUp, isFine: isFine
         )
         if !stepped.isEmpty {
           for (id, name, newValue) in stepped {
@@ -68,15 +68,15 @@ final class KeyActionExecutor {
           // rule). A resolved-but-keyboard-disabled display does NOT take
           // this branch: the fork skips it in the loop body and swallows
           // the press (R1).
-          stepAllExternal(isUp: isUp, isFine: isFine, isFresh: isFresh)
+          stepAllExternal(isUp: isUp, isFine: isFine)
         }
       case .allExternal:
-        stepAllExternal(isUp: isUp, isFine: isFine, isFresh: isFresh)
+        stepAllExternal(isUp: isUp, isFine: isFine)
       case .builtInOnly:
         // Ctrl-directed steps drive the built-in panel through its
         // native-path controller. HUD on the built-in display.
         if let (id, name, newValue) = model.stepBrightnessBuiltIn(
-          isUp: isUp, isFine: isFine, isFresh: isFresh
+          isUp: isUp, isFine: isFine
         ) {
           showHUD(id: id, name: name, value: newValue)
         }
@@ -152,8 +152,8 @@ final class KeyActionExecutor {
     }
   }
 
-  private func stepAllExternal(isUp: Bool, isFine: Bool, isFresh: Bool) {
-    for (id, name, newValue) in model.stepBrightnessAllExternal(isUp: isUp, isFine: isFine, isFresh: isFresh) {
+  private func stepAllExternal(isUp: Bool, isFine: Bool) {
+    for (id, name, newValue) in model.stepBrightnessAllExternal(isUp: isUp, isFine: isFine) {
       showHUD(id: id, name: name, value: newValue)
     }
   }

@@ -1,4 +1,3 @@
-import CoreGraphics
 import Observation
 
 /// Single source of truth for one display's value on one pure-DDC command —
@@ -36,7 +35,6 @@ public final class DDCValueController {
   /// identity and not the writer object.
   @ObservationIgnored private var boundPanelIdentity: String?
   @ObservationIgnored private let prefs: DisplayPrefs
-  @ObservationIgnored let displayID: CGDirectDisplayID
   private let coalescer: BrightnessWriteCoalescer
   private let muteCoalescer: BrightnessWriteCoalescer
   @ObservationIgnored private var issuedGeneration: UInt64 = 0
@@ -79,7 +77,6 @@ public final class DDCValueController {
     writer: any DDCWriting,
     command: DDCCommand,
     prefs: DisplayPrefs,
-    displayID: CGDirectDisplayID,
     store: (any BrightnessStoring)? = nil,
     storageKey: String? = nil,
     panelIdentity: String? = nil
@@ -87,7 +84,6 @@ public final class DDCValueController {
     self.writer = writer
     self.command = command
     self.prefs = prefs
-    self.displayID = displayID
     // Seeded at construction, not left nil: without it the FIRST rebind would
     // always look like an identity change and reset a verdict this controller
     // had just earned. `nil` is honest for callers with no notion of panel

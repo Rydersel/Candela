@@ -28,7 +28,6 @@ public class Arm64DDC: NSObject {
     var displayID: CGDirectDisplayID = 0
     var service: IOAVService?
     var serviceLocation: Int = 0
-    var discouraged: Bool = false
     var dummy: Bool = false
     var serviceDetails: IOregService
     var matchScore: Int = 0
@@ -41,9 +40,8 @@ public class Arm64DDC: NSObject {
     for displayID in displayIDs {
       for ioregServiceForMatching in ioregServicesForMatching {
         let score = self.ioregMatchScore(displayID: displayID, ioregEdidUUID: ioregServiceForMatching.edidUUID, ioDisplayLocation: ioregServiceForMatching.ioDisplayLocation, ioregProductName: ioregServiceForMatching.productName, ioregSerialNumber: ioregServiceForMatching.serialNumber)
-        let discouraged = self.checkIfDiscouraged(ioregService: ioregServiceForMatching)
         let dummy = self.checkIfDummy(ioregService: ioregServiceForMatching)
-        let displayService = Arm64Service(displayID: displayID, service: ioregServiceForMatching.service, serviceLocation: ioregServiceForMatching.serviceLocation, discouraged: discouraged, dummy: dummy, serviceDetails: ioregServiceForMatching, matchScore: score)
+        let displayService = Arm64Service(displayID: displayID, service: ioregServiceForMatching.service, serviceLocation: ioregServiceForMatching.serviceLocation, dummy: dummy, serviceDetails: ioregServiceForMatching, matchScore: score)
         if scoredCandidateDisplayServices[score] == nil {
           scoredCandidateDisplayServices[score] = []
         }
@@ -341,9 +339,5 @@ public class Arm64DDC: NSObject {
       return true
     }
     return false
-  }
-
-  static func checkIfDiscouraged(ioregService _: IOregService) -> Bool {
-    false
   }
 }

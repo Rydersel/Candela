@@ -8,7 +8,9 @@ import SwiftUI
 @MainActor
 struct SettingsPaneDescriptor: Identifiable {
   let id: PaneID
-  let title: LocalizedStringKey
+  /// Plain `String`: the sidebar row and the toolbar title are the same
+  /// words, and the toolbar needs a String (D25 — English only, no catalog).
+  let title: String
   let symbol: String
   let tint: Color
   let content: () -> AnyView
@@ -16,7 +18,7 @@ struct SettingsPaneDescriptor: Identifiable {
 
 /// The ONLY place a settings pane is declared. Adding a feature area is one
 /// `PaneID` case, one entry here, and one view file — the sidebar, the split
-/// view and the selection logic are untouched.
+/// view, the toolbar title and the selection logic are untouched.
 @MainActor
 enum SettingsRegistry {
   static var panes: [SettingsPaneDescriptor] {

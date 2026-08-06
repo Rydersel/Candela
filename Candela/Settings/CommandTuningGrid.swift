@@ -256,16 +256,12 @@ struct CommandTuningGrid: View {
   @ViewBuilder private var brightnessLegCaption: some View {
     switch state.controller.brightnessPath {
     case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
-      SettingsCaption("With brightness off, this display dims in software only below \(percent(dimsBelow)). Above that, nothing moves.")
+      SettingsCaption("With brightness off, this display dims in software only below \(SliderSnap.percentText(dimsBelow)). Above that, nothing moves.")
     case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
       SettingsCaption("With brightness off, nothing is moving this display's brightness.")
     case .native, .software, .hardware, .combined:
       EmptyView()
     }
-  }
-
-  private func percent(_ value: Double) -> String {
-    "\(Int((value * 100).rounded()))%"
   }
 
   /// Commands whose stored max override is silently inert — the rule the fork

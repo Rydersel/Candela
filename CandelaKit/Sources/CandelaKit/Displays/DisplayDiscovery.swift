@@ -24,7 +24,7 @@ public enum DisplayDiscovery {
       }
       let externalIDs = displayIDs.prefix(Int(count)).filter { CGDisplayIsBuiltin($0) == 0 }
       return Arm64DDC.getServiceMatches(displayIDs: Array(externalIDs))
-        .filter { !$0.dummy && !$0.discouraged && $0.service != nil }
+        .filter { !$0.dummy && $0.service != nil }
         .map { match in
           (ExternalDisplay(id: match.displayID,
                            name: displayName(from: match.serviceDetails, displayID: match.displayID),

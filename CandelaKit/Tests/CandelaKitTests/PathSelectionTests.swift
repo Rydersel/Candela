@@ -399,14 +399,14 @@ struct PathSelectionTests {
     let top = Harness()
     await top.prime()
     top.controller.setBrightness(1.0)
-    #expect(top.controller.step(isUp: true, isFine: false, isFresh: true) == 1.0)
+    #expect(top.controller.step(isUp: true, isFine: false) == 1.0)
     #expect(await top.hdr!.recordedSetCalls().isEmpty)
     #expect(top.controller.hdrMode == .off)
 
     let bottom = Harness(hdrEnabled: true) { prefs, _ in prefs.hdrMode = .alwaysOn }
     await bottom.prime()
     bottom.controller.setBrightness(0.0)
-    #expect(bottom.controller.step(isUp: false, isFine: false, isFresh: true) == 0.0)
+    #expect(bottom.controller.step(isUp: false, isFine: false) == 0.0)
     #expect(await bottom.hdr!.recordedSetCalls().isEmpty)
     #expect(bottom.controller.hdrMode == .alwaysOn)
   }

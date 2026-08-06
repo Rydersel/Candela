@@ -23,36 +23,16 @@ public protocol BrightnessApplying: Sendable {
   func apply(_ target: HardwareTarget) async -> Bool
 }
 
-/// Wraps the existing per-display DDC actor. A `.native` target is a
-/// path-selection wiring bug: rejected (`false`), logged once per instance.
-public struct DDCBrightnessApplier: BrightnessApplying {
-  /// Per-instance, not static (review M2): with multiple displays a static
-  /// flag would let the first display's wiring bug suppress the log for all
-  /// others. Copies share the lock's heap storage, so copies of one instance
-  /// still log once; the per-submit-constructed applier logs once per
-  /// affected write — acceptable, since a live wiring bug is a must-fix.
-  private let mismatchLogged = OSAllocatedUnfairLock(initialState: false)
-  private let writer: any DDCWriting
-
-  public init(writer: any DDCWriting) {
-    self.writer = writer
-  }
-
-  public func apply(_ target: HardwareTarget) async -> Bool {
-    guard case let .ddc(raw) = target else {
-      logMismatchOnce(mismatchLogged, "DDCBrightnessApplier received a .native target")
-      return false
-    }
-    return await writer.write(command: VCP.brightness, value: raw)
-  }
-}
-
 /// Native-brightness applier over an injected apply closure — the app injects
 /// `DisplayServices.setBrightness`; injection keeps this type (and CandelaKit
 /// tests) independent of the private-framework shim. A `.ddc` target is a
 /// path-selection wiring bug: rejected (`false`), logged once per instance.
 public struct NativeBrightnessApplier: BrightnessApplying {
-  /// Per-instance, not static — see `DDCBrightnessApplier.mismatchLogged`.
+  /// Per-instance, not static (review M2): with multiple displays a static
+  /// flag would let the first display's wiring bug suppress the log for all
+  /// others. Copies share the lock's heap storage, so copies of one instance
+  /// still log once; the per-submit-constructed applier logs once per
+  /// affected write — acceptable, since a live wiring bug is a must-fix.
   private let mismatchLogged = OSAllocatedUnfairLock(initialState: false)
   private let displayID: CGDirectDisplayID
   private let applyNative: @Sendable (Float, CGDirectDisplayID) -> Bool

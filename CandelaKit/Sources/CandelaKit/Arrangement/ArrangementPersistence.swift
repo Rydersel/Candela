@@ -207,6 +207,9 @@ public final class ArrangementPersistence: @unchecked Sendable {
   /// `ModePersistence.clear`'s reason: "forget this layout" and "stop restoring
   /// layouts" are separate answers, and clearing both here would silently opt
   /// the user back out the first time one layout was dropped.
+  ///
+  /// No production caller yet — this is the engine seam issue #49 (forget a
+  /// remembered layout) wires up.
   public func clear(for signature: TopologySignature) {
     defaults.removeObject(forKey: key(.savedArrangements, signature))
   }

@@ -96,8 +96,8 @@ public actor DisplayReconfigurationGate {
 
   public init() {}
 
-  /// Who holds the gate, for a surface that wants to name them without asking
-  /// for a claim it does not intend to use.
+  /// Who holds the gate. Exists for test assertions — the app names a holder
+  /// from `ReconfigurationClaimOutcome.refusedBy` instead.
   public var holder: ReconfigurationClaimant? { claimant }
 
   /// Takes the gate for `claimant`, or refuses and names the holder.

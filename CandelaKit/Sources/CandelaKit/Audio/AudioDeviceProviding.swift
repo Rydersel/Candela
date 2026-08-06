@@ -26,9 +26,8 @@ public protocol AudioDeviceProviding: Sendable {
   /// Names of every device with output channels, default or not. Same
   /// freshness contract as `defaultOutputDevice()`.
   ///
-  /// No production caller in v1 — D24 retired the only one (the panel's
-  /// volume-slider gate). Kept because it is the input `displayHasAudioSink`
-  /// needs and is covered by that function's tests.
+  /// Superseded: volume-slider gating now reads the DDC capabilities string
+  /// (D24). Zero production callers; held in reserve for future audio features.
   func outputDeviceNames() -> [String]
   /// Fires on default-output-device change (any thread). Pass nil to clear.
   func setOnDefaultOutputChange(_ handler: (@Sendable () -> Void)?)

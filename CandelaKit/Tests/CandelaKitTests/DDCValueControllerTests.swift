@@ -28,7 +28,7 @@ struct DDCValueControllerTests {
       if let savedValue { store.saveBrightness(savedValue, for: storageKey) }
       controller = DDCValueController(
         writer: writer ?? fake, command: command, prefs: prefs,
-        displayID: 1, store: store, storageKey: storageKey, panelIdentity: panelIdentity
+        store: store, storageKey: storageKey, panelIdentity: panelIdentity
       )
     }
 
@@ -355,8 +355,8 @@ struct DDCValueControllerTests {
     let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
     let fake = FakeDDC(readResult: nil)
-    let volume = DDCValueController(writer: fake, command: .volume, prefs: prefs, displayID: 1)
-    let contrast = DDCValueController(writer: fake, command: .contrast, prefs: prefs, displayID: 1)
+    let volume = DDCValueController(writer: fake, command: .volume, prefs: prefs)
+    let contrast = DDCValueController(writer: fake, command: .contrast, prefs: prefs)
     volume.setValue(0.5)
     contrast.setValue(0.5)
     await volume.waitForPendingWrites()

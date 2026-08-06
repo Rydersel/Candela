@@ -87,26 +87,20 @@ struct DimmingMathTests {
   // MARK: - §3a software brightness transform
 
   @Test func swTransformForwardAtZeroLandsOnTheLowThreshold() {
-    #expect(DimmingMath.swTransform(0, allowZero: false, reverse: false) == 0.15)
+    #expect(DimmingMath.swTransform(0, allowZero: false) == 0.15)
   }
 
   @Test func swTransformForwardAtHalf() {
-    #expect(DimmingMath.swTransform(0.5, allowZero: false, reverse: false) == 0.575)
+    #expect(DimmingMath.swTransform(0.5, allowZero: false) == 0.575)
   }
 
   @Test func swTransformForwardAtOne() {
-    #expect(DimmingMath.swTransform(1, allowZero: false, reverse: false) == 1.0)
-  }
-
-  @Test func swTransformReverse() {
-    let reversed = DimmingMath.swTransform(0.575, allowZero: false, reverse: true)
-    #expect(isClose(reversed, 0.5, accuracy: 1e-9))
+    #expect(DimmingMath.swTransform(1, allowZero: false) == 1.0)
   }
 
   @Test func swTransformIsIdentityWhenZeroIsAllowed() {
-    #expect(DimmingMath.swTransform(0, allowZero: true, reverse: false) == 0)
-    #expect(DimmingMath.swTransform(0.5, allowZero: true, reverse: false) == 0.5)
-    #expect(DimmingMath.swTransform(0.5, allowZero: true, reverse: true) == 0.5)
+    #expect(DimmingMath.swTransform(0, allowZero: true) == 0)
+    #expect(DimmingMath.swTransform(0.5, allowZero: true) == 0.5)
   }
 
   // MARK: - §3b shade curve

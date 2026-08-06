@@ -6,9 +6,9 @@ import os
 /// plus the user's control-code remap — fork `getRemapControlCodes` semantics:
 /// a non-empty remap REPLACES the command, and writes go to EVERY remapped
 /// code (reads use only the first; the read side lives in the controllers).
-/// `DDCBrightnessApplier` stays for the untuned M3 brightness leg.
+/// Every DDC leg goes through this — an empty remap is one write to `command`.
 public struct DDCCommandApplier: BrightnessApplying {
-  /// Per-instance, not static — same rationale as `DDCBrightnessApplier`.
+  /// Per-instance, not static — same rationale as `NativeBrightnessApplier`.
   private let mismatchLogged = OSAllocatedUnfairLock(initialState: false)
   private let writer: any DDCWriting
   private let command: UInt8

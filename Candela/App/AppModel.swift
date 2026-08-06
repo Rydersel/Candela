@@ -242,9 +242,9 @@ final class AppModel {
     states.filter { !DisplayPrefs(persistenceKey: $0.display.persistenceKey).isDisabled }
   }
 
-  func stepBrightnessAllExternal(isUp: Bool, isFine: Bool, isFresh: Bool) -> [(id: CGDirectDisplayID, name: String, newValue: Double)] {
+  func stepBrightnessAllExternal(isUp: Bool, isFine: Bool) -> [(id: CGDirectDisplayID, name: String, newValue: Double)] {
     keyEnabledStates(displays).map { state in
-      (state.id, state.display.name, state.controller.step(isUp: isUp, isFine: isFine, isFresh: isFresh))
+      (state.id, state.display.name, state.controller.step(isUp: isUp, isFine: isFine))
     }
   }
 
@@ -258,7 +258,7 @@ final class AppModel {
   /// Resolving-by-pointer is the fork's default; picking the *focused* display
   /// instead (fork `useFocusInsteadOfMouse`) is an M5 preference, and lands in
   /// the executor's resolution step, not here.
-  func stepBrightness(displayIDs: [CGDirectDisplayID], isUp: Bool, isFine: Bool, isFresh: Bool) -> [(id: CGDirectDisplayID, name: String, newValue: Double)] {
+  func stepBrightness(displayIDs: [CGDirectDisplayID], isUp: Bool, isFine: Bool) -> [(id: CGDirectDisplayID, name: String, newValue: Double)] {
     displayIDs.compactMap { displayID in
       let slot = displays.first { $0.id == displayID } ?? builtIn.flatMap { $0.id == displayID ? $0 : nil }
       // isDisabled filters the loop body (R1): a resolved-but-disabled
@@ -266,17 +266,17 @@ final class AppModel {
       // fallback path itself re-runs through keyEnabledStates.
       guard let slot, !keyEnabledStates([slot]).isEmpty else { return nil }
       return (slot.id, slot.display.name,
-              slot.controller.step(isUp: isUp, isFine: isFine, isFresh: isFresh))
+              slot.controller.step(isUp: isUp, isFine: isFine))
     }
   }
 
   /// Steps the built-in panel (Ctrl-directed keys only — plain presses target
   /// the pointer's display, which may well be the built-in). Returns nil when
   /// no built-in display is online.
-  func stepBrightnessBuiltIn(isUp: Bool, isFine: Bool, isFresh: Bool) -> (id: CGDirectDisplayID, name: String, newValue: Double)? {
+  func stepBrightnessBuiltIn(isUp: Bool, isFine: Bool) -> (id: CGDirectDisplayID, name: String, newValue: Double)? {
     guard let builtIn, !keyEnabledStates([builtIn]).isEmpty else { return nil }
     return (builtIn.id, builtIn.display.name,
-            builtIn.controller.step(isUp: isUp, isFine: isFine, isFresh: isFresh))
+            builtIn.controller.step(isUp: isUp, isFine: isFine))
   }
 
   /// Watch brightness keys only when an EXTERNAL display is present (fork:
@@ -591,13 +591,11 @@ final class AppModel {
       )
       let volume = DDCValueController(
         writer: entry.writer, command: .volume, prefs: prefs,
-        displayID: entry.display.id,
         store: UserDefaultsBrightnessStore(), storageKey: "volume.\(persistenceKey)",
         panelIdentity: persistenceKey
       )
       let contrast = DDCValueController(
         writer: entry.writer, command: .contrast, prefs: prefs,
-        displayID: entry.display.id,
         store: UserDefaultsBrightnessStore(), storageKey: "contrast.\(persistenceKey)",
         panelIdentity: persistenceKey
       )
@@ -719,11 +717,11 @@ final class AppModel {
       display: display, controller: controller,
       volume: DDCValueController(
         writer: NoopDDCWriter(), command: .volume,
-        prefs: DisplayPrefs(persistenceKey: "builtIn"), displayID: found.id
+        prefs: DisplayPrefs(persistenceKey: "builtIn")
       ),
       contrast: DDCValueController(
         writer: NoopDDCWriter(), command: .contrast,
-        prefs: DisplayPrefs(persistenceKey: "builtIn"), displayID: found.id
+        prefs: DisplayPrefs(persistenceKey: "builtIn")
       ),
       // No DDC wire, and nothing ever probes the built-in slot (the D24 pass
       // walks `displays`, which is external-only) — but `DisplayState` has one

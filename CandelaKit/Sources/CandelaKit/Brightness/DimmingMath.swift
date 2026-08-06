@@ -68,15 +68,10 @@ public enum DimmingMath {
 
   /// Maps a 0…1 sw value onto the physical multiplier `[t, 1]` where
   /// `t = allowZero ? 0 : 0.15` (fork `Display.swBrightnessTransform`). Applied
-  /// to both the current and the new value before any gamma/shade write; the
-  /// reverse direction recovers the sw value on readback.
-  public static func swTransform(_ v: Double, allowZero: Bool, reverse: Bool) -> Double {
+  /// to both the current and the new value before any gamma/shade write.
+  public static func swTransform(_ v: Double, allowZero: Bool) -> Double {
     let lowThreshold = allowZero ? 0 : swLowThreshold
-    if !reverse {
-      return v * (1 - lowThreshold) + lowThreshold
-    } else {
-      return (v - lowThreshold) / (1 - lowThreshold)
-    }
+    return v * (1 - lowThreshold) + lowThreshold
   }
 
   /// Overlay alpha for the shade dimming path: `alpha = 1 − v^1.5`.
