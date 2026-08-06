@@ -14,7 +14,7 @@ import SwiftUI
 /// (D4/D28), which is also what makes an override take effect immediately
 /// instead of on the user's next slider drag.
 ///
-/// `@MainActor` for the same reason as `DisplayCard`: it stores a `@MainActor`
+/// `@MainActor` for the same reason as `DisplayDetailView`: it stores a `@MainActor`
 /// `DisplayPrefWriter` and reads it from computed properties that are
 /// nonisolated on a plain `View` (lens-1 I3).
 @MainActor
@@ -65,8 +65,9 @@ struct CommandTuningGrid: View {
   /// Both now come off `BrightnessPath`, so the page gives one answer.
   ///
   /// Disable, don't hide (panel §5.4). The mute recovery affordance that D29
-  /// rule 3 requires for this state lives in `DisplayCard` (Task 13), above the
-  /// grid and never disabled.
+  /// rule 3 requires for this state lives in
+  /// `DisplayDetailView.recoverFromHardwareMute`, above the grid and never
+  /// disabled.
   private var trafficBlock: DDCTrafficBlock? {
     DisplayCardPolicy.ddcTrafficBlock(for: state.controller.brightnessPath)
   }
@@ -208,7 +209,8 @@ struct CommandTuningGrid: View {
     guard let tuning = DDCOverrideValidation.applied(input, to: current, field: target.field),
           // Return then blur commits the same field twice; the second commit
           // has nothing to say, and a re-write would fan out to a pointless
-          // `reapplyAfterPrefChange()`. Same rule as `DisplayCard.commitName`.
+          // `reapplyAfterPrefChange()`. Same rule as
+          // `DisplayDetailView.commitName`.
           tuning != current
     else {
       drafts[target] = storedText(target)

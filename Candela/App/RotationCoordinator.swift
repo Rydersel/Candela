@@ -42,9 +42,6 @@ final class RotationCoordinator {
   private(set) var isApplying = false
 
   @ObservationIgnored weak var confirmation: (any RotationConfirmationPresenting)?
-  /// Friendly-name resolution belongs to the surfaces. Empty by default so an
-  /// unwired coordinator looks unfinished in testing rather than plausibly right.
-  @ObservationIgnored var displayName: (CGDirectDisplayID) -> String = { _ in "" }
 
   @ObservationIgnored private let configurator: any DisplayConfiguring
   /// AR12. Held from just before the rotation applies until nothing is
@@ -256,8 +253,6 @@ final class RotationCoordinator {
     }
     return outcome
   }
-
-  private enum FailureUpdate { case clear, keep, set(DisplayConfigError) }
 
   /// Rebuilds the UI's picture FROM the session, and is the only writer of
   /// `preview` — so no path can leave the two disagreeing, including a countdown

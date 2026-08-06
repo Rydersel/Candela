@@ -20,7 +20,7 @@ import SwiftUI
 struct OnboardingView: View {
   let loginItem: LoginItem
   /// The app's ONE permission object (`AppModel.accessibility`), not a second
-  /// checker: `isGranted` is observable and Task 9 monitors it for the app's
+  /// checker: `isGranted` is observable and monitored for the app's
   /// lifetime, so this screen updates live when the grant lands while it is
   /// open. The fork computed its checkmark once in `viewDidLoad` and never
   /// refreshed it.
@@ -102,7 +102,7 @@ struct OnboardingView: View {
       // Benefit heading, not a restatement: the toggle's own label is the
       // General pane's exact string and must not be duplicated above it.
       heading("Always there when you need it", symbol: "power", tint: .gray)
-      // BYTE-IDENTICAL to the General pane's toggle (Task 10). Same setting,
+      // BYTE-IDENTICAL to the General pane's toggle. Same setting,
       // same words, and macOS's own Login Items wording.
       Toggle("Open at Login", isOn: Binding(
         // D10: a LIVE read of `SMAppService.mainApp.status` — not a bool this

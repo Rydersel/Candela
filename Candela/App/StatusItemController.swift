@@ -303,24 +303,31 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     settingsActions.updateStatusItem = { [weak self] in self?.updateStatusItemVisibility() }
     settingsActions.performReset = { [weak self] in self?.performSettingsReset() }
 
+    // The panel's own naming rule, so a renamed display is named the same way in
+    // the row that started a change, in the window that confirms it, and on the
+    // arrangement canvas. Falls back to "" for a display `DisplayDiscovery` never
+    // saw — it filters on a non-nil `IOAVService`, so virtual, AirPlay and
+    // Sidecar displays have no settings state to be renamed in, and each surface
+    // substitutes the topology's own name for them.
+    let displayName: (CGDirectDisplayID) -> String = { [weak self] displayID in
+      guard let state = self?.model.allControlledStates.first(where: { $0.id == displayID })
+      else { return "" }
+      return PanelView.title(for: state.display)
+    }
+    // Resolved through the store on each use rather than captured as a value:
+    // a window outlives any single topology, and a mirror can engage while it
+    // is up — which for a MIRROR preview is not a hypothetical, it is the thing
+    // being previewed.
+    let drawableDisplayID: (CGDirectDisplayID) -> CGDirectDisplayID = { [weak self] displayID in
+      self?.model.mirrorTopology.drawableDisplayID(for: displayID) ?? displayID
+    }
+
     // Resolution previews started from the panel are answered in a window of
     // their own: the panel is a menu tracking session and cannot be relied on
     // to still exist half a minute later. See `ModeConfirmationWindow`.
     let confirmation = ModeConfirmationWindow(coordinator: model.displayModes)
-    confirmation.displayName = { [weak self] displayID in
-      guard let state = self?.model.allControlledStates.first(where: { $0.id == displayID })
-      else { return "" }
-      // The panel's own naming rule, so a renamed display is named the same way
-      // in the row that started the change and in the window that confirms it.
-      return PanelView.title(for: state.display)
-    }
-    // Resolved through the store on each use rather than captured as a value:
-    // the window outlives any single topology, and a mirror can engage while it
-    // is up — which for a MIRROR preview is not a hypothetical, it is the thing
-    // being previewed.
-    confirmation.drawableDisplayID = { [weak self] displayID in
-      self?.model.mirrorTopology.drawableDisplayID(for: displayID) ?? displayID
-    }
+    confirmation.displayName = displayName
+    confirmation.drawableDisplayID = drawableDisplayID
     modeConfirmation = confirmation
     model.displayModes.confirmation = confirmation
     // D27: the coordinator writes `storedDisplayMode` on a commit, and the seam
@@ -340,32 +347,18 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // with no panel and no settings window anywhere, so without this a refusal
     // or a failed apply would be completely silent.
     let mirrorConfirmation = MirrorConfirmationWindow(coordinator: model.mirroring)
-    mirrorConfirmation.drawableDisplayID = { [weak self] displayID in
-      self?.model.mirrorTopology.drawableDisplayID(for: displayID) ?? displayID
-    }
+    mirrorConfirmation.drawableDisplayID = drawableDisplayID
     self.mirrorConfirmation = mirrorConfirmation
     model.mirroring.confirmation = mirrorConfirmation
-    model.mirroring.displayName = { [weak self] displayID in
-      guard let state = self?.model.allControlledStates.first(where: { $0.id == displayID })
-      else { return "" }
-      // The panel's own naming rule, so a renamed display is named the same way
-      // wherever it is named.
-      return PanelView.title(for: state.display)
-    }
+    model.mirroring.displayName = displayName
     // Rotation's own surface, the third caller of `ConfirmationPanel`. It needs
     // one for the settings window's reason rather than the hotkey's — there is
     // no rotation hotkey (RT1) — but the settings window is very often on a
     // DIFFERENT display from the one that just rotated, which is exactly the
     // "answered blind" case the window exists to prevent.
     let rotationConfirmation = RotationConfirmationWindow(coordinator: model.rotation)
-    rotationConfirmation.drawableDisplayID = { [weak self] displayID in
-      self?.model.mirrorTopology.drawableDisplayID(for: displayID) ?? displayID
-    }
-    rotationConfirmation.displayName = { [weak self] displayID in
-      guard let state = self?.model.allControlledStates.first(where: { $0.id == displayID })
-      else { return "" }
-      return PanelView.title(for: state.display)
-    }
+    rotationConfirmation.drawableDisplayID = drawableDisplayID
+    rotationConfirmation.displayName = displayName
     self.rotationConfirmation = rotationConfirmation
     model.rotation.confirmation = rotationConfirmation
 
@@ -376,27 +369,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // bar onto a different display, so the surface asking about it must go where
     // the menu bar ended up rather than where the request was made.
     let arrangementConfirmation = ArrangementConfirmationWindow(coordinator: model.arrangement)
-    arrangementConfirmation.drawableDisplayID = { [weak self] displayID in
-      self?.model.mirrorTopology.drawableDisplayID(for: displayID) ?? displayID
-    }
-    arrangementConfirmation.displayName = { [weak self] displayID in
-      guard let state = self?.model.allControlledStates.first(where: { $0.id == displayID })
-      else { return "" }
-      return PanelView.title(for: state.display)
-    }
+    arrangementConfirmation.drawableDisplayID = drawableDisplayID
+    arrangementConfirmation.displayName = displayName
     self.arrangementConfirmation = arrangementConfirmation
     model.arrangement.confirmation = arrangementConfirmation
     // The canvas names its tiles through the coordinator, so the map and the
-    // confirmation window call a display by the same name. Same resolution as
-    // the window's closure above, and both fall back to "" for a display
-    // `DisplayDiscovery` never saw — it filters on a non-nil `IOAVService`, so
-    // virtual, AirPlay and Sidecar displays have no settings state to be renamed
-    // in, and each surface substitutes the topology's own name for them.
-    model.arrangement.displayName = { [weak self] displayID in
-      guard let state = self?.model.allControlledStates.first(where: { $0.id == displayID })
-      else { return "" }
-      return PanelView.title(for: state.display)
-    }
+    // confirmation window call a display by the same name.
+    model.arrangement.displayName = displayName
     // D27, the same wiring `didStoreMode` gets and for the same reason: the
     // coordinator writes `savedArrangements` when a layout is kept, and the seam
     // has to hear about it whichever surface answered. App-level, so no

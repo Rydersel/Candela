@@ -79,7 +79,7 @@ struct PanelResolutionSection: View {
           overflowCaption(catalog)
         }
         if isAwaitingAnswer {
-          caption("Waiting for you to keep or revert the new resolution on \(displayName).")
+          PanelCaption("Waiting for you to keep or revert the new resolution on \(displayName).", style: .tertiary)
         }
         startFailure
         reapplyReport
@@ -125,7 +125,7 @@ struct PanelResolutionSection: View {
   /// list left out.
   @ViewBuilder private func overflowCaption(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
     if catalog.rows.count > Self.maximumRows {
-      caption("All sizes and refresh rates are in Settings.")
+      PanelCaption("All sizes and refresh rates are in Settings.", style: .tertiary)
     }
   }
 
@@ -141,15 +141,8 @@ struct PanelResolutionSection: View {
   /// control that lives here.
   @ViewBuilder private var startFailure: some View {
     if let failure = coordinator.startFailure, failure.displayID == displayID {
-      HStack(alignment: .firstTextBaseline, spacing: 6) {
-        Text(DisplayModeCopy.startFailure(failure.reason))
-          .font(.system(size: 11))
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-        Button("OK") { coordinator.dismissStartFailure() }
-          .buttonStyle(.link)
-          .font(.system(size: 11))
-          .fixedSize()
+      PanelReportRow(text: Text(DisplayModeCopy.startFailure(failure.reason))) {
+        coordinator.dismissStartFailure()
       }
       .help(DisplayModeCopy.startFailureDiagnostic(failure.reason))
     }
@@ -161,26 +154,13 @@ struct PanelResolutionSection: View {
   /// themselves, or unplug the display.
   @ViewBuilder private var reapplyReport: some View {
     if let report {
-      HStack(alignment: .firstTextBaseline, spacing: 6) {
-        Text(DisplayModeCopy.reapply(requested: report.requested, notice: report.notice))
-          .font(.system(size: 11))
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-        Button("OK") { coordinator.dismissReapplyReport(for: displayID) }
-          .buttonStyle(.link)
-          .font(.system(size: 11))
-          .fixedSize()
+      PanelReportRow(
+        text: Text(DisplayModeCopy.reapply(requested: report.requested, notice: report.notice))
+      ) {
+        coordinator.dismissReapplyReport(for: displayID)
       }
       .padding(.horizontal, 4)
     }
-  }
-
-  private func caption(_ text: LocalizedStringKey) -> some View {
-    Text(text)
-      .font(.system(size: 11))
-      .foregroundStyle(.tertiary)
-      .fixedSize(horizontal: false, vertical: true)
-      .padding(.horizontal, 4)
   }
 
   // MARK: - Selection

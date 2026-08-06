@@ -8,12 +8,12 @@ import ServiceManagement
 /// failed register() shows OFF plus an error instead of the fork's lying
 /// checkbox.
 ///
-/// Follow-up (Task 18): a one-line `status: @escaping () -> SMAppService.Status`
+/// Follow-up: a one-line `status: @escaping () -> SMAppService.Status`
 /// injection seam would make that invariant testable. Left out here because M5
 /// adds no app test target and an untested seam buys nothing.
 @MainActor @Observable
 final class LoginItem {
-  /// D10: ONE source of truth. Never a mirrored bool — Task 8's settings reset
+  /// D10: ONE source of truth. Never a mirrored bool — the settings reset
   /// unregisters the main app directly (`SMAppService.mainApp.unregister()`),
   /// and System Settings → General → Login Items can disable it at any moment
   /// with no notification to us. Both would leave a mirror reading ON forever,
@@ -38,7 +38,7 @@ final class LoginItem {
   @ObservationIgnored nonisolated(unsafe) private var activationObserver: (any NSObjectProtocol)?
 
   init() {
-    // Closes the last hole in D10 (Task 10 hand-off): a live *read* is not a
+    // Closes the last hole in D10: a live *read* is not a
     // live *render*, and `.onAppear` only fires when a pane appears. Becoming
     // active is the moment any already-open window showing this toggle is
     // about to be looked at, and it is the only signal that covers a change
