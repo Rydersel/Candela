@@ -152,6 +152,38 @@ case "modes":
           + "  id \(mode.ioModeID)")
     }
   }
+case "modeapply":
+  // Applies one mode BY ID at preview scope, through the real configurator, so
+  // the revealed apply path and its post-commit verification are both exercised.
+  // Preview scope self-reverts when this process exits.
+  guard arguments.count >= 2, let wanted = Int32(arguments[1]) else {
+    print("usage: candela-probe --display <id> modeapply <ioModeID> [holdSeconds=5]")
+    exit(2)
+  }
+  let holdSeconds = arguments.count >= 3 ? UInt32(arguments[2]) ?? 5 : 5
+  guard let target = displayFilter else {
+    print("modeapply requires --display <id>")
+    exit(2)
+  }
+  let configurator = CoreGraphicsDisplayConfigurator()
+  guard let mode = configurator.modes(for: target).first(where: { $0.ioModeID == wanted }) else {
+    print("no mode with id \(wanted) on display \(target)")
+    exit(3)
+  }
+  let before = configurator.currentMode(for: target)
+  print("before: \(before.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID)" } ?? "unknown")")
+  print("applying: \(mode.logicalWidth)x\(mode.logicalHeight) fb \(mode.pixelWidth)x\(mode.pixelHeight) id \(mode.ioModeID) provenance \(mode.provenance)")
+  do {
+    try configurator.apply(mode, to: target, scope: .preview)
+    let after = configurator.currentMode(for: target)
+    print("after:  \(after.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID)" } ?? "unknown")")
+    print("holding \(holdSeconds)s, then exiting to self-revert...")
+    sleep(holdSeconds)
+    print("exiting — preview scope reverts now.")
+  } catch {
+    print("apply FAILED: \(error)")
+    exit(4)
+  }
 case "caps":
   requireDDCDisplays()
   for entry in found {
