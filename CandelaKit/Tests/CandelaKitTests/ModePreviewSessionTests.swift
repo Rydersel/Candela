@@ -35,6 +35,7 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
   private var _failMirroringWith: DisplayConfigError?
   private var _divergeNextMirroringTo: [CGDirectDisplayID: CGDirectDisplayID]?
   private var _canRotate = true
+  private var _revealsHiddenModes = false
   private var _rotations: [CGDirectDisplayID: DisplayRotation] = [:]
   private var _appliedRotations: [(display: CGDirectDisplayID, rotation: DisplayRotation)] = []
   private var _swallowRotations = false
@@ -207,6 +208,13 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
         throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
       }
     }
+  }
+
+  // MARK: - Revelation
+
+  var revealsHiddenModes: Bool {
+    get { lock.withLock { _revealsHiddenModes } }
+    set { lock.withLock { _revealsHiddenModes = newValue } }
   }
 
   // MARK: - Rotation

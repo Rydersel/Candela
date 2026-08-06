@@ -31,6 +31,7 @@ usage: candela-probe [--display <id>] <subcommand>
   contrast get|set <0-100>                DDC read/write of VCP 0x12
   mute on|off                             DDC write of VCP 0x8D (1=mute, 2=unmute)
   vcp get <hex>|set <hex> <0-65535>       raw VCP prober
+  modes                                   merged mode list, marking CGS-revealed entries
   caps                                    DDC/CI capabilities string (VCP 0xF3) + volume verdict
   audio devices                           default CoreAudio output + native-volume check
   native get                              DisplayServicesGetBrightness per display
@@ -129,6 +130,27 @@ case "list", nil:
     // Column 2 is the persistence key: every per-display `defaults write`
     // key is suffixed with it (docs/ADVANCED-SETTINGS.md).
     print("\(entry.display.id)\t\(entry.display.persistenceKey)\t\(entry.display.name)")
+  }
+case "modes":
+  // Reports the merged list THROUGH CoreGraphicsDisplayConfigurator, so what
+  // prints here is exactly what the app's pickers see — revelation included.
+  let configurator = CoreGraphicsDisplayConfigurator()
+  print(
+    "hidden-mode revelation: \(configurator.revealsHiddenModes ? "available" : "UNAVAILABLE")")
+  for display in online where displayFilter == nil || display.id == displayFilter {
+    let all = configurator.modes(for: display.id)
+    let published = all.filter { $0.provenance == .coreGraphics }
+    let revealed = all.filter { $0.provenance == .coreGraphicsServices }
+    print("\n\(display.name)  published \(published.count)  revealed \(revealed.count)")
+    for mode in revealed.sorted(by: {
+      ($0.logicalWidth, $0.refreshHz) > ($1.logicalWidth, $1.refreshHz)
+    }) {
+      print(
+        "  \(mode.logicalWidth)x\(mode.logicalHeight)"
+          + "  fb \(mode.pixelWidth)x\(mode.pixelHeight)"
+          + "  @\(String(format: "%g", mode.refreshHz))Hz"
+          + "  id \(mode.ioModeID)")
+    }
   }
 case "caps":
   requireDDCDisplays()
