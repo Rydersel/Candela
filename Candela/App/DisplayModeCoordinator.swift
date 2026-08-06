@@ -741,14 +741,6 @@ final class DisplayModeCoordinator {
     }
   }
 
-  /// What to do with the failure currently on screen when re-reading the
-  /// session.
-  private enum FailureUpdate {
-    case clear
-    case keep
-    case set(DisplayConfigError)
-  }
-
   /// Rebuilds the UI's picture of the preview from the session. THE only writer
   /// of `preview`, so no path can leave the two disagreeing — including a
   /// countdown tick that resumes late, which reconciles here instead of being

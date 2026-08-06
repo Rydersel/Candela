@@ -8,7 +8,7 @@ import Foundation
 /// downgrades never wipe; the enum unknown-raw fallbacks carry the app.
 public enum PrefsSchema {
   public static let currentVersion = 1
-  public static let versionKey = "prefsSchemaVersion"
+  static let versionKey = "prefsSchemaVersion"
 
   public static func storedVersion(in defaults: UserDefaults) -> Int? {
     defaults.object(forKey: versionKey) == nil ? nil : defaults.integer(forKey: versionKey)

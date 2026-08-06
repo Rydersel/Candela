@@ -55,8 +55,6 @@ final class ConfirmationPanel<Content: View> {
     self.accessibilityTitle = accessibilityTitle
   }
 
-  var isShowing: Bool { shown != nil }
-
   /// Idempotent for unchanged `identity`: the content view reads its coordinator
   /// directly, so ticks and late failures re-render themselves without the window
   /// being touched.

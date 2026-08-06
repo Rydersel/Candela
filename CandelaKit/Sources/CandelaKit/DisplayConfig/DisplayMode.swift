@@ -44,16 +44,6 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
 
   public var isHiDPI: Bool { logicalWidth > 0 && pixelWidth >= logicalWidth * 2 }
 
-  public var scaleFactor: Double {
-    logicalWidth > 0 ? Double(pixelWidth) / Double(logicalWidth) : 1
-  }
-
-  public var logicalArea: Int { logicalWidth * logicalHeight }
-
-  public var aspectRatio: Double {
-    logicalHeight > 0 ? Double(logicalWidth) / Double(logicalHeight) : 0
-  }
-
   /// A scaled mode renders oversized and downsamples. The comparison is
   /// against the PANEL's native pixel count — taken from the mode flagged
   /// `isNative` — and NOT against `CGDisplayPixelsWide`, which reports the
@@ -98,10 +88,23 @@ public struct DisplayModeDescriptor: Sendable, Equatable, Hashable, Codable {
     case pixelHeight
     case refreshHz
   }
+}
 
-  public var aspectRatio: Double {
+/// The point-space shape a runtime mode and its persisted descriptor both have.
+/// Mode matching compares the two against each other, so the derived values must
+/// come out of one implementation.
+protocol LogicalGeometry {
+  var logicalWidth: Int { get }
+  var logicalHeight: Int { get }
+}
+
+extension LogicalGeometry {
+  var aspectRatio: Double {
     logicalHeight > 0 ? Double(logicalWidth) / Double(logicalHeight) : 0
   }
 
-  public var logicalArea: Int { logicalWidth * logicalHeight }
+  var logicalArea: Int { logicalWidth * logicalHeight }
 }
+
+extension DisplayMode: LogicalGeometry {}
+extension DisplayModeDescriptor: LogicalGeometry {}

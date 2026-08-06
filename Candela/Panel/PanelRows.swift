@@ -110,6 +110,52 @@ struct PanelDisclosureRow: View {
   }
 }
 
+/// A sentence about something that did not happen, with the OK that dismisses
+/// it on the same baseline.
+///
+/// Takes a built `Text` because the three reports differ in how their words are
+/// made — two from a `LocalizedStringKey`, one from an interpolated `String` —
+/// and in nothing else. Padding and any `.help(…)` stay at the call site: the
+/// row sits inside a list on one surface and under a status line on another.
+struct PanelReportRow: View {
+  let text: Text
+  let dismiss: () -> Void
+
+  var body: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 6) {
+      text
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+      Button("OK", action: dismiss)
+        .buttonStyle(.link)
+        .font(.system(size: 11))
+        .fixedSize()
+    }
+  }
+}
+
+/// Explanatory text under a panel disclosure. The hierarchy level is a
+/// parameter: a caption under a list of choices sits a step further back than
+/// one carrying a refusal.
+struct PanelCaption: View {
+  let text: LocalizedStringKey
+  let style: HierarchicalShapeStyle
+
+  init(_ text: LocalizedStringKey, style: HierarchicalShapeStyle) {
+    self.text = text
+    self.style = style
+  }
+
+  var body: some View {
+    Text(text)
+      .font(.system(size: 11))
+      .foregroundStyle(style)
+      .fixedSize(horizontal: false, vertical: true)
+      .padding(.horizontal, 4)
+  }
+}
+
 /// One action inside an open disclosure. A row-shaped button: the whole row is
 /// the hit region (a bare `.plain` button is only as clickable as its text is
 /// wide), with hover and pressed states, without which it reads as static text —

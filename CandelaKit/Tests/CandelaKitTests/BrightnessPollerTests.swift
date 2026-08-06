@@ -47,7 +47,6 @@ private final class Probe: Sendable {
   func setNativeActive(_ value: Bool) { state.withLock { $0.nativeActive = value } }
   func setConverging(_ value: Bool) { state.withLock { $0.converging = value } }
   func setEpochCurrent(_ value: Bool) { state.withLock { $0.epochCurrent = value } }
-  func setHardware(_ value: Double?) { state.withLock { $0.hardware = value } }
 
   func read(_ id: CGDirectDisplayID) -> Double? {
     state.withLock { state in

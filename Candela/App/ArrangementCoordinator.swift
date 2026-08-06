@@ -633,9 +633,6 @@ final class ArrangementCoordinator {
     return outcome
   }
 
-  /// What to do with the failure currently on screen when re-reading the session.
-  private enum FailureUpdate { case clear, keep, set(DisplayConfigError) }
-
   /// Rebuilds the UI's picture FROM the session. THE only writer of `preview`,
   /// so no path can leave the two disagreeing — including a countdown tick that
   /// resumes late, which reconciles here instead of being discarded. A discarded

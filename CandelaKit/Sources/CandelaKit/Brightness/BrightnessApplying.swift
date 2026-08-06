@@ -3,7 +3,7 @@ import os
 
 /// Wiring-bug diagnostics for the appliers: a mismatched target kind means
 /// path selection handed a target to the wrong applier.
-private let applierLog = Logger(subsystem: "com.rydersel.Candela", category: "applier")
+let applierLog = Logger(subsystem: "com.rydersel.Candela", category: "applier")
 
 /// One hardware brightness endpoint's target value. `Equatable` so the
 /// coalescer's duplicate-skip compares what actually hits hardware,
@@ -73,7 +73,7 @@ public struct NativeBrightnessApplier: BrightnessApplying {
 
 /// Logs `message` only the first time its (per-instance) flag is seen unset:
 /// repeated mismatches on the same applier instance produce one line.
-private func logMismatchOnce(_ flag: OSAllocatedUnfairLock<Bool>, _ message: String) {
+func logMismatchOnce(_ flag: OSAllocatedUnfairLock<Bool>, _ message: String) {
   let firstTime = flag.withLock { logged -> Bool in
     if logged { return false }
     logged = true

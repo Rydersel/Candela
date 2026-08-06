@@ -16,9 +16,9 @@ final class SettingsActions {
   @ObservationIgnored var rearmTap: () -> Void = {}
   @ObservationIgnored var updateStatusItem: () -> Void = {}
   @ObservationIgnored var recheckPermissions: () -> Void = {}
-  @ObservationIgnored var performReset: () -> Void = {} // wired in Task 8
-  @ObservationIgnored var postReset: () -> Void = {} // wired in Task 8
-  @ObservationIgnored var showOnboarding: () -> Void = {} // wired in Task 15
+  @ObservationIgnored var performReset: () -> Void = {}
+  @ObservationIgnored var postReset: () -> Void = {}
+  @ObservationIgnored var showOnboarding: () -> Void = {}
   @ObservationIgnored private weak var model: AppModel?
 
   init(model: AppModel) {

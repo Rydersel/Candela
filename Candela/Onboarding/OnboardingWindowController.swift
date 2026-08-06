@@ -46,8 +46,8 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // MUST be `activate(ignoringOtherApps: true)`, NOT the modern
     // `NSApp.activate()`: the modern call cannot activate an accessory
     // (LSUIElement) app from inside a status-item menu tracking session, so
-    // Setup opens BEHIND the frontmost app. Measured by Task 3 on an isolated
-    // harness (4/4 runs). The deprecation is accepted deliberately here.
+    // Setup opens BEHIND the frontmost app. Measured on an isolated harness
+    // (4/4 runs). The deprecation is accepted deliberately here.
     //
     // The call must also stay inside the click's event context — every
     // `DispatchQueue.main.async` variant lost the activation grant, and

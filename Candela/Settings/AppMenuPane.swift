@@ -10,10 +10,10 @@ import SwiftUI
 /// the schema slots can never be reused, but nothing in Candela reads them,
 /// they are not `PrefName` cases, and this pane writes neither. The fork's
 /// app-wide "show brightness slider" / "show volume slider" toggles are cut
-/// too — the per-display controls in the Displays pane say the same thing more
+/// too — the controls on each display's own destination say the same thing more
 /// precisely — as are the `multiSliders` combined/relevant modes.
 ///
-/// `@MainActor` as declared by the Task 3 stub — keep it. A `View`'s stored and
+/// `@MainActor` is load-bearing. A `View`'s stored and
 /// computed properties are nonisolated under `SWIFT_STRICT_CONCURRENCY:
 /// complete`, so `SettingsActions` (itself `@MainActor`) could not be held or
 /// touched outside `body` without it.

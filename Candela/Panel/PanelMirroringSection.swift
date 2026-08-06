@@ -156,7 +156,7 @@ struct PanelMirroringSection: View {
     if isLocked {
       actionRow(MirroringCopy.stopMirroring, enabled: false) {}
       // Never a bare grey (R8 generalised: no state is carried by shape alone).
-      caption(MirroringCopy.cannotBeUnmirrored)
+      PanelCaption(MirroringCopy.cannotBeUnmirrored, style: .secondary)
     } else if isInSet {
       actionRow(MirroringCopy.stopMirroring) {
         coordinator.disengage(containing: displayID)
@@ -201,26 +201,13 @@ struct PanelMirroringSection: View {
   /// dismisses rather than retrying.
   @ViewBuilder private var partialBreakReport: some View {
     if let residual = partialBreak {
-      HStack(alignment: .firstTextBaseline, spacing: 6) {
-        Text(verbatim: MirroringCopy.partialBreak(residual: residual, name: name))
-          .font(.system(size: 11))
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-        Button("OK") { coordinator.dismissReport() }
-          .buttonStyle(.link)
-          .font(.system(size: 11))
-          .fixedSize()
+      PanelReportRow(
+        text: Text(verbatim: MirroringCopy.partialBreak(residual: residual, name: name))
+      ) {
+        coordinator.dismissReport()
       }
       .padding(.horizontal, 4)
     }
-  }
-
-  private func caption(_ text: LocalizedStringKey) -> some View {
-    Text(text)
-      .font(.system(size: 11))
-      .foregroundStyle(.secondary)
-      .fixedSize(horizontal: false, vertical: true)
-      .padding(.horizontal, 4)
   }
 
   // MARK: - Naming

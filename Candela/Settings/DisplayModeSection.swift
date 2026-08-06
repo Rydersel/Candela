@@ -111,7 +111,7 @@ struct DisplayModeSection: View {
             .help("CoreGraphics error \(failure.cgErrorCode)")
         }
         if preview.isCountingDown {
-          Text(verbatim: countdownText(preview.secondsRemaining))
+          Text(verbatim: DisplayModeCopy.countdown(preview.secondsRemaining))
             .foregroundStyle(.secondary)
         } else if preview.failure != nil {
           SettingsCaption(DisplayModeCopy.expiryAlreadyRan)
@@ -121,8 +121,10 @@ struct DisplayModeSection: View {
           // Both answers carry the preview THIS banner is rendering, so a
           // selection landing between the click and the queued operation is
           // refused as stale rather than resolved by an answer given about
-          // something else.
-          Button("Keep") { Task { await keep(preview) } }
+          // something else. The stored-mode fan-out is NOT done here:
+          // `DisplayModeCoordinator` owns it (`didStoreMode`), so the panel's
+          // confirmation surface cannot forget it.
+          Button("Keep") { Task { await coordinator.confirm(preview) } }
             .buttonStyle(.borderedProminent)
           Button("Revert Now") { Task { await coordinator.revert(preview) } }
         }
@@ -165,16 +167,6 @@ struct DisplayModeSection: View {
       }
       .padding(.vertical, 2)
     }
-  }
-
-  private func countdownText(_ seconds: Int) -> String {
-    DisplayModeCopy.countdown(seconds)
-  }
-
-  /// The stored-mode fan-out is NOT done here: `DisplayModeCoordinator` owns it
-  /// (`didStoreMode`), so the panel's confirmation surface cannot forget it.
-  private func keep(_ answered: DisplayModeCoordinator.Preview) async {
-    await coordinator.confirm(answered)
   }
 
   // MARK: - Rows
@@ -370,7 +362,7 @@ struct DisplayModeSection: View {
 /// what happened to their screen. Only a `.failed` notice has one: for a
 /// substitution or an unavailable mode there is no error, and an empty tooltip
 /// would suggest there was.
-private struct ReapplyDiagnostic: ViewModifier {
+struct ReapplyDiagnostic: ViewModifier {
   let notice: ModeReapplyNotice
 
   @ViewBuilder func body(content: Content) -> some View {

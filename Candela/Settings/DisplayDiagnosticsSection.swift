@@ -790,7 +790,7 @@ struct DisplayDiagnosticsSection: View {
       LabeledContent("Last resolution problem") {
         Text(verbatim: reapplyText(report.notice)).foregroundStyle(.secondary)
       }
-      .modifier(ReapplyErrorCode(notice: report.notice))
+      .modifier(ReapplyDiagnostic(notice: report.notice))
     }
 
     LabeledContent("Mirroring") {
@@ -885,22 +885,5 @@ struct DisplayDiagnosticsSection: View {
     return configured.isMirrorSlave
       ? "Showing another display's contents"
       : "Showing its own contents"
-  }
-}
-
-/// The CoreGraphics code stays out of the sentence and goes in a tooltip — it
-/// is diagnostic, and belongs nowhere near text someone reads while working out
-/// what happened to their screen. Only a `.failed` notice has one; an empty
-/// tooltip would suggest there was an error when there was not. Same rule and
-/// same shape as `ReapplyDiagnostic` in `DisplayModeSection`.
-private struct ReapplyErrorCode: ViewModifier {
-  let notice: ModeReapplyNotice
-
-  @ViewBuilder func body(content: Content) -> some View {
-    if case let .failed(error) = notice {
-      content.help("CoreGraphics error \(error.cgErrorCode)")
-    } else {
-      content
-    }
   }
 }

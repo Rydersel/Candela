@@ -9,11 +9,6 @@ let ARM64_DDC_7BIT_ADDRESS: UInt8 = 0x37 // This works with DisplayPort devices
 let ARM64_DDC_DATA_ADDRESS: UInt8 = 0x51
 
 public class Arm64DDC: NSObject {
-  #if arch(arm64)
-    static let isArm64: Bool = true
-  #else
-    static let isArm64: Bool = false
-  #endif
   static let MAX_MATCH_SCORE: Int = 20
 
   public struct IOregService {
@@ -22,13 +17,11 @@ public class Arm64DDC: NSObject {
     var productName: String = ""
     var serialNumber: Int64 = 0
     var alphanumericSerialNumber: String = ""
-    var location: String = ""
     var ioDisplayLocation: String = ""
     var transportUpstream: String = ""
     var transportDownstream: String = ""
     var service: IOAVService?
     var serviceLocation: Int = 0
-    var displayAttributes: NSDictionary?
   }
 
   public struct Arm64Service {
@@ -47,7 +40,7 @@ public class Arm64DDC: NSObject {
     var scoredCandidateDisplayServices: [Int: [Arm64Service]] = [:]
     for displayID in displayIDs {
       for ioregServiceForMatching in ioregServicesForMatching {
-        let score = self.ioregMatchScore(displayID: displayID, ioregEdidUUID: ioregServiceForMatching.edidUUID, ioDisplayLocation: ioregServiceForMatching.ioDisplayLocation, ioregProductName: ioregServiceForMatching.productName, ioregSerialNumber: ioregServiceForMatching.serialNumber, serviceLocation: ioregServiceForMatching.serviceLocation)
+        let score = self.ioregMatchScore(displayID: displayID, ioregEdidUUID: ioregServiceForMatching.edidUUID, ioDisplayLocation: ioregServiceForMatching.ioDisplayLocation, ioregProductName: ioregServiceForMatching.productName, ioregSerialNumber: ioregServiceForMatching.serialNumber)
         let discouraged = self.checkIfDiscouraged(ioregService: ioregServiceForMatching)
         let dummy = self.checkIfDummy(ioregService: ioregServiceForMatching)
         let displayService = Arm64Service(displayID: displayID, service: ioregServiceForMatching.service, serviceLocation: ioregServiceForMatching.serviceLocation, discouraged: discouraged, dummy: dummy, serviceDetails: ioregServiceForMatching, matchScore: score)
@@ -178,7 +171,7 @@ public class Arm64DDC: NSObject {
     return chkd
   }
 
-  static func ioregMatchScore(displayID: CGDirectDisplayID, ioregEdidUUID: String, ioDisplayLocation: String = "", ioregProductName: String = "", ioregSerialNumber: Int64 = 0, serviceLocation _: Int = 0) -> Int {
+  static func ioregMatchScore(displayID: CGDirectDisplayID, ioregEdidUUID: String, ioDisplayLocation: String = "", ioregProductName: String = "", ioregSerialNumber: Int64 = 0) -> Int {
     var matchScore = 0
     if let dictionary = CoreDisplay_DisplayCreateInfoDictionary(displayID)?.takeRetainedValue() as NSDictionary? {
       if let kDisplayYearOfManufacture = dictionary[kDisplayYearOfManufacture] as? Int64, let kDisplayWeekOfManufacture = dictionary[kDisplayWeekOfManufacture] as? Int64, let kDisplayVendorID = dictionary[kDisplayVendorID] as? Int64, let kDisplayProductID = dictionary[kDisplayProductID] as? Int64, let kDisplayVerticalImageSize = dictionary[kDisplayVerticalImageSize] as? Int64, let kDisplayHorizontalImageSize = dictionary[kDisplayHorizontalImageSize] as? Int64 {
@@ -276,7 +269,6 @@ public class Arm64DDC: NSObject {
     IORegistryEntryGetPath(entry, kIOServicePlane, cpath)
     ioregService.ioDisplayLocation = String(cString: cpath)
     if let unmanagedDisplayAttrs = IORegistryEntryCreateCFProperty(entry, "DisplayAttributes" as CFString, kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)), let displayAttrs = unmanagedDisplayAttrs.takeRetainedValue() as? NSDictionary {
-      ioregService.displayAttributes = displayAttrs
       if let productAttrs = displayAttrs.value(forKey: "ProductAttributes") as? NSDictionary {
         if let manufacturerID = productAttrs.value(forKey: "ManufacturerID") as? String {
           ioregService.manufacturerID = manufacturerID
@@ -305,7 +297,6 @@ public class Arm64DDC: NSObject {
 
   static func setIORegServiceDCPAVServiceProxy(entry: io_service_t, ioregService: inout IOregService) {
     if let unmanagedLocation = IORegistryEntryCreateCFProperty(entry, "Location" as CFString, kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)), let location = unmanagedLocation.takeRetainedValue() as? String {
-      ioregService.location = location
       if location == "External" {
         ioregService.service = IOAVServiceCreateWithService(kCFAllocatorDefault, entry)?.takeRetainedValue() as IOAVService
       }

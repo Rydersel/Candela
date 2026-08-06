@@ -40,7 +40,6 @@ actor FakeHDR: HDRToggling {
 final class FakeShade: ShadeRendering {
   private(set) var alphaCalls: [(alpha: Double, id: CGDirectDisplayID)] = []
   private(set) var removed: [CGDirectDisplayID] = []
-  private(set) var removedAllCount = 0
   private(set) var repinCount = 0
 
   @discardableResult
@@ -50,7 +49,7 @@ final class FakeShade: ShadeRendering {
   }
 
   func removeShade(for displayID: CGDirectDisplayID) { removed.append(displayID) }
-  func removeAllShades() { removedAllCount += 1 }
+  func removeAllShades() {}
   func repinFrames() { repinCount += 1 }
 }
 
@@ -58,7 +57,6 @@ final class FakeShade: ShadeRendering {
 final class FakeGamma: GammaApplying {
   private(set) var scales: [Double] = []
   private(set) var recaptured: [CGDirectDisplayID] = []
-  private(set) var resetCount = 0
 
   @discardableResult
   func applyGammaScale(
@@ -70,7 +68,7 @@ final class FakeGamma: GammaApplying {
 
   func verifyTableIntact(on _: CGDirectDisplayID) -> Bool { true }
   func recaptureDefaultTable(on displayID: CGDirectDisplayID) { recaptured.append(displayID) }
-  func resetAllGamma() { resetCount += 1 }
+  func resetAllGamma() {}
 }
 
 /// Records every target applied through the native leg (post-coalescing).

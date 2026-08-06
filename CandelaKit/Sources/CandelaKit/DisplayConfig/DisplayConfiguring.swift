@@ -97,8 +97,8 @@ public struct ConfiguredDisplay: Sendable, Equatable, Identifiable {
   ///
   /// Requires BOTH halves. `CGDisplayMirrorsDisplay` returns null for a master
   /// and for a standalone display alike, so it is not a membership test on its
-  /// own — this is the exact predicate that was hand-written at
-  /// `KeyActionExecutor.swift:250-251` before this type carried it.
+  /// own — this is the exact predicate that was hand-written in
+  /// `KeyActionExecutor` before this type carried it.
   public var isMirrorMaster: Bool {
     isInMirrorSet && mirrorsDisplay == kCGNullDirectDisplay
   }
@@ -129,6 +129,21 @@ public struct ConfiguredDisplay: Sendable, Equatable, Identifiable {
 public struct DisplayConfigError: Error, Sendable, Equatable {
   public let cgErrorCode: Int32
   public init(cgErrorCode: Int32) { self.cgErrorCode = cgErrorCode }
+}
+
+/// Opens a display-configuration transaction, or throws.
+///
+/// A nil token after a `.success` begin would otherwise be reported as error
+/// code 0 — an error that reads as "no error".
+func beginDisplayConfiguration() throws -> CGDisplayConfigRef {
+  var config: CGDisplayConfigRef?
+  let begin = CGBeginDisplayConfiguration(&config)
+  guard begin == .success, let config else {
+    throw DisplayConfigError(
+      cgErrorCode: begin == .success ? CGError.failure.rawValue : begin.rawValue
+    )
+  }
+  return config
 }
 
 /// One staged mirror change. `master == kCGNullDirectDisplay` REMOVES `display`
@@ -163,8 +178,8 @@ public struct MirrorChange: Sendable, Equatable {
 ///
 /// This is the same lesson `CoreGraphicsDisplayConfigurator.apply` already
 /// carries for a display MODE, where the resolved mode's geometry is re-derived
-/// and compared because `ioModeID` is positional. It was written there and not
-/// here; the gap is one loop.
+/// and compared because `ioModeID` is positional. That check was written there
+/// first; this type closed the same gap for mirroring.
 enum MirrorVerification {
   /// The first requested change the achieved topology does not show, or nil
   /// when every one of them stands.

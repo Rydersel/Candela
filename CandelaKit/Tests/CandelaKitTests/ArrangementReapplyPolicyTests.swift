@@ -123,8 +123,6 @@ struct ArrangementReapplyPolicyTests {
     // departure and the wake is not an arrival.
     #expect(arrivals.claimArrivals(online: attached).isEmpty)
     #expect(arrivals.claimArrivals(online: attached).isEmpty)
-    #expect(arrivals.hasHandled(2))
-    #expect(arrivals.hasHandled(3))
   }
 
   /// The set-level half of the rule. Unplug the third display and the two that

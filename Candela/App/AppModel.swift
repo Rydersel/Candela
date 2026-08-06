@@ -102,9 +102,6 @@ final class AppModel {
   /// Owned here for `displayModes`' reason — the countdown must outlive whatever
   /// started the change, and an arrangement change is the one that can move the
   /// menu bar out from under the window that asked for it.
-  ///
-  /// It has no UI caller yet: the drag canvas is a later task, and this is the
-  /// spine it will drive.
   @ObservationIgnored private(set) lazy var arrangement = ArrangementCoordinator(
     gate: reconfigurationGate
   )

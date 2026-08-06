@@ -17,14 +17,6 @@ struct SettingRow<Control: View>: View {
     self.init(caption: caption.map { SettingsCaption($0) }, control: control)
   }
 
-  /// A caption that has to be BUILT rather than written — one with a display
-  /// name or a count interpolated into it. Same styling by construction, rather
-  /// than by a caller remembering which three modifiers `SettingsCaption`
-  /// applies.
-  init(verbatim caption: String, @ViewBuilder control: () -> Control) {
-    self.init(caption: SettingsCaption(verbatim: caption), control: control)
-  }
-
   init(caption: SettingsCaption?, @ViewBuilder control: () -> Control) {
     self.caption = caption
     self.control = control()

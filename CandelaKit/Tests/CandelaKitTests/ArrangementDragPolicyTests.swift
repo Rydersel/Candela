@@ -5,30 +5,12 @@ import Testing
 
 @Suite("Arrangement drag policy")
 struct ArrangementDragPolicyTests {
-  private func tile(_ id: CGDirectDisplayID, _ rect: DisplayRect) -> ArrangementTile {
-    ArrangementTile(
-      id: id,
-      identity: .init(vendor: id, model: id, serial: id, isBuiltIn: false),
-      name: "Display \(id)",
-      rect: rect,
-      mirroredIDs: []
-    )
-  }
-
-  private func rect(_ x: Int, _ y: Int, _ width: Int, _ height: Int) -> DisplayRect {
-    DisplayRect(x: x, y: y, width: width, height: height)
-  }
-
-  private func arrangement(_ tiles: [(CGDirectDisplayID, DisplayRect)]) -> DisplayArrangement {
-    DisplayArrangement(tiles: tiles.map { tile($0.0, $0.1) })
-  }
-
   /// Two 1000×1000 displays, abutting. At scale 0.1 one canvas point is ten
   /// display points, so the default 8-point threshold is 80 display points.
   private var pair: DisplayArrangement {
-    arrangement([
-      (1, rect(0, 0, 1_000, 1_000)),
-      (2, rect(1_000, 0, 1_000, 1_000)),
+    ArrangementFixtures.arrangement([
+      (1, ArrangementFixtures.rect(0, 0, 1_000, 1_000)),
+      (2, ArrangementFixtures.rect(1_000, 0, 1_000, 1_000)),
     ])
   }
 
@@ -80,9 +62,9 @@ struct ArrangementDragPolicyTests {
   @Test func oneRoundingNotTwo() {
     // Far enough apart that nothing is within the snap threshold, so the origin
     // reported is the translation arithmetic and nothing else.
-    let baseline = arrangement([
-      (1, rect(0, 0, 1_000, 1_000)),
-      (2, rect(5_000, 0, 1_000, 1_000)),
+    let baseline = ArrangementFixtures.arrangement([
+      (1, ArrangementFixtures.rect(0, 0, 1_000, 1_000)),
+      (2, ArrangementFixtures.rect(5_000, 0, 1_000, 1_000)),
     ])
     // A non-integral offset in display points, which is what makes the two
     // routes disagree. `fitting` produces one of these for almost every real
@@ -253,10 +235,10 @@ struct ArrangementDragPolicyTests {
     // §3.5: connectivity is judged on the WHOLE proposed arrangement. Pulling
     // the middle display out of a row of three disconnects the far one, which
     // the user never touched and has to be shown.
-    let row = arrangement([
-      (1, rect(0, 0, 1_000, 1_000)),
-      (2, rect(1_000, 0, 1_000, 1_000)),
-      (3, rect(2_000, 0, 1_000, 1_000)),
+    let row = ArrangementFixtures.arrangement([
+      (1, ArrangementFixtures.rect(0, 0, 1_000, 1_000)),
+      (2, ArrangementFixtures.rect(1_000, 0, 1_000, 1_000)),
+      (3, ArrangementFixtures.rect(2_000, 0, 1_000, 1_000)),
     ])
 
     let proposal = ArrangementDragPolicy.propose(
