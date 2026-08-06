@@ -37,6 +37,33 @@ a{color:var(--accent);text-decoration:none}
 #hero .sub{max-width:620px;margin:20px auto 0;font-size:19px;color:var(--text-2)}
 #hero .cta{display:flex;gap:12px;justify-content:center;margin-top:32px;flex-wrap:wrap}
 #hero .fineprint{margin-top:18px;font-size:13px;color:var(--text-3)}
+#panel{padding-top:24px;display:flex;justify-content:center}
+.stage{position:relative;width:min(360px,90vw)}
+.glowbed{position:absolute;inset:-40px -60px;background:radial-gradient(ellipse at 50% 30%,rgba(255,179,64,.14),transparent 65%);pointer-events:none}
+.mock{position:relative;border-radius:var(--radius);overflow:hidden;border:1px solid var(--line);
+  box-shadow:0 30px 60px rgba(0,0,0,.5),0 8px 20px rgba(0,0,0,.4)}
+.menubar{display:flex;justify-content:space-between;align-items:center;background:#2a2a2c;padding:5px 12px;font-size:11px;color:var(--text-2)}
+.mb-right{display:flex;align-items:center;gap:8px}
+.mb-icon.active{background:rgba(255,255,255,.18);border-radius:4px;padding:2px 5px;color:var(--text)}
+.dropdown{background:var(--surface);padding:8px}
+.row{padding:6px 10px;font-size:13px}
+.row.head{display:flex;justify-content:space-between;font-weight:600;font-size:14px}
+.chev{color:var(--text-3)}
+.row.label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-3);padding-bottom:2px}
+.row.slider{display:flex;align-items:center;gap:8px;color:var(--text-2)}
+.track{position:relative;flex:1;height:5px;border-radius:3px;background:rgba(255,255,255,.12)}
+.fill{position:absolute;inset:0 auto 0 0;border-radius:3px;background:#fff}
+.knob{position:absolute;top:50%;transform:translate(-50%,-50%);width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.5)}
+.divider{height:1px;background:var(--line);margin:8px 4px}
+.row.option{display:flex;align-items:center;border-radius:6px;color:var(--text-2)}
+.row.option.on{background:rgba(255,255,255,.07);color:var(--text)}
+.check{width:16px;color:var(--accent);font-weight:700}
+.tag{font-size:10px;border:1px solid var(--line);border-radius:4px;padding:0 4px;color:var(--text-3)}
+.toggle-row{display:flex;justify-content:space-between;align-items:center;font-weight:500}
+.switch{width:34px;height:20px;border-radius:10px;background:rgba(255,255,255,.15);position:relative;display:inline-block}
+.switch.on{background:var(--accent)}
+.switch .dot{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+.switch.on .dot{left:16px}
 </style>
 </head>
 <body>
@@ -56,7 +83,44 @@ a{color:var(--accent);text-decoration:none}
   </div>
   <p class="fineprint">Free &amp; open source&ensp;·&ensp;macOS 14+&ensp;·&ensp;Apple Silicon</p>
 </section>
-<section id="panel" class="wrap"></section>
+<section id="panel" class="wrap reveal">
+  <div class="stage">
+    <div class="glowbed" aria-hidden="true"></div>
+    <div class="mock" role="img" aria-label="The Candela menu bar panel: brightness and volume sliders, HiDPI resolution list, and an HDR toggle">
+      <div class="menubar">
+        <span class="mb-left">&#63743;&ensp;Candela</span>
+        <span class="mb-right">
+          <span class="mb-icon active">
+            <svg viewBox="0 0 64 64" width="14" height="14"><path d="M32 14c5 7 9 11 9 17a9 9 0 1 1-18 0c0-6 4-10 9-17z" fill="none" stroke="currentColor" stroke-width="4"/></svg>
+          </span>
+          <span class="mb-time">Wed 9:41 AM</span>
+        </span>
+      </div>
+      <div class="dropdown">
+        <div class="row head"><span>MSI MAG 341C</span><span class="chev">›</span></div>
+        <div class="row label">Brightness</div>
+        <div class="row slider">
+          <svg class="s-ic" viewBox="0 0 16 16" width="13" height="13"><circle cx="8" cy="8" r="3.2" fill="currentColor"/></svg>
+          <div class="track"><div class="fill" style="width:72%"></div><div class="knob" style="left:72%"></div></div>
+          <svg class="s-ic" viewBox="0 0 16 16" width="15" height="15"><circle cx="8" cy="8" r="3" fill="currentColor"/><g stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 1.2v2M8 12.8v2M1.2 8h2M12.8 8h2M3.2 3.2l1.4 1.4M11.4 11.4l1.4 1.4M12.8 3.2l-1.4 1.4M4.6 11.4l-1.4 1.4"/></g></svg>
+        </div>
+        <div class="row label">Volume</div>
+        <div class="row slider">
+          <svg class="s-ic" viewBox="0 0 16 16" width="13" height="13"><path d="M2 6h3l4-3v10L5 10H2z" fill="currentColor"/></svg>
+          <div class="track"><div class="fill" style="width:45%"></div><div class="knob" style="left:45%"></div></div>
+          <svg class="s-ic" viewBox="0 0 16 16" width="15" height="15"><path d="M2 6h3l4-3v10L5 10H2z" fill="currentColor"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.5a6 6 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        </div>
+        <div class="divider"></div>
+        <div class="row label">Resolution</div>
+        <div class="row option on"><span class="check">✓</span>3440 × 1440&ensp;<span class="tag">HiDPI</span></div>
+        <div class="row option"><span class="check"></span>2752 × 1152&ensp;<span class="tag">HiDPI</span></div>
+        <div class="row option"><span class="check"></span>2560 × 1080&ensp;<span class="tag">HiDPI</span></div>
+        <div class="divider"></div>
+        <div class="row toggle-row"><span>HDR</span><span class="switch on"><span class="dot"></span></span></div>
+      </div>
+    </div>
+  </div>
+</section>
 <section id="features" class="wrap"></section>
 <section id="everything" class="wrap"></section>
 <footer class="wrap"></footer>
