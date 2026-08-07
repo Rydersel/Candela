@@ -964,12 +964,16 @@ final class DisplayModeCoordinator {
     // window does not show — the banner region renders the buttons and the
     // hub's other renderings are passive text.
     //
-    // Known residue, accepted with SO6: nothing keeps the settings window on
-    // screen, and ownership does not migrate mid-preview. An armed countdown
-    // survives that — expiry reverts unattended. A failed EXPIRY after the
-    // owning window closed leaves the answer only on that window's banner until
-    // it is reopened; reachable only by closing the very window the change was
-    // started from seconds earlier.
+    // Known residue, accepted with SO6: nothing keeps the owning banner on
+    // screen, and ownership does not migrate mid-preview. The banner region
+    // renders only on the preview's own display destination, so SWITCHING THE
+    // SIDEBAR — to another display, General, or the built-in — hides the
+    // answerable surface with the window still open and key; closing the
+    // window (⌘W) does the same. An armed countdown survives both — expiry
+    // reverts unattended. A failed EXPIRY in that state leaves the answer
+    // only on the owning banner until the user navigates back to that
+    // display's destination (or reopens the window), which is also the
+    // recovery: the banner is still there, buttons live.
     if let preview {
       switch preview.surface {
       case .floatingPanel:
