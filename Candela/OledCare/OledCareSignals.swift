@@ -173,6 +173,18 @@ final class LockStateObserver {
 final class FocusSampler {
   private var lastResolved: CGDirectDisplayID?
 
+  /// Forgets the held resolution. The coordinator calls this on every display
+  /// reconfiguration, and the reason is ID REASSIGNMENT, not just departure:
+  /// display IDs reassign across a replug with both panels still present
+  /// (measured: MAG 3→2, Dell 2→3 across one dock cycle), so a held ID can
+  /// silently come to name a DIFFERENT physical panel. A liveness check cannot
+  /// catch that — the reassigned ID is still online. Cleared, the next
+  /// successful `resolve()` re-seeds; until then `focusedDisplayID()` returns
+  /// nil, which consumers treat as "no data" rather than "no display focused".
+  func invalidate() {
+    self.lastResolved = nil
+  }
+
   func focusedDisplayID() -> CGDirectDisplayID? {
     if let resolved = self.resolve() {
       self.lastResolved = resolved
