@@ -542,7 +542,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // trigger (D13/D14): it is written at Setup *completion*, so an
     // interrupted first run still counts as a first run.
     let isFirstRun = PrefsSchema.storedVersion(in: .standard) == nil
-    if !isFirstRun {
+    // Fork bug 2 (#60): gated on the SAME predicate as every other surface
+    // (panel banner, Keyboard pane warning row, diagnostics), never on the
+    // bare grant. Custom shortcuts are Carbon hotkeys and need no grant, so an
+    // all-custom rig must not be shown a TCC prompt it can only refuse — one
+    // question, answered one way everywhere it is asked.
+    if !isFirstRun, permission.isWarningWarranted {
       permission.promptIfNeeded()
     }
     if permission.isGranted {
@@ -903,9 +908,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // controller strands the panel in HDR while the app believes it is off —
       // and the next launch then writes DDC into a register the monitor has
       // locked, so brightness silently stops working with no diagnostic.
-      if state.controller.hdrMode != .off {
-        await state.controller.setHDRMode(.off)
-      }
+      // UNCONDITIONAL (#83): the `hdrMode != .off` gate skipped HDR engaged in
+      // System Settings, which is exactly the state this paragraph warns
+      // about. `setHDRMode` decides whether there is anything to do.
+      await state.controller.setHDRMode(.off)
 
       // D29 rule 2: clear the AVAILABILITY prefs BEFORE attempting the unmute,
       // never after. `DDCValueController.toggleMute` opens with

@@ -108,10 +108,12 @@ public final class BrightnessController {
   /// plain UserDefaults and not observable). Change it via `setHDRMode`.
   public private(set) var hdrMode: HDRMode
 
-  /// The fork's `usesNativeBrightness` gate (dossier §10): an HDR mode is set
-  /// AND HDR is currently live. The second half is empirically load-bearing:
-  /// with HDR off the MAG341C answers `DisplayServicesSetBrightness` with
-  /// SUCCESS but changes nothing, so native must never be routed on mode alone.
+  /// The fork's `usesNativeBrightness` gate (dossier §10), corrected by #52:
+  /// HDR is currently live, WHOEVER engaged it — System Settings can turn HDR
+  /// on with `hdrMode` still `.off`, and DDC writes cannot land there. The
+  /// live-state half is empirically load-bearing the other way too: with HDR
+  /// off the MAG341C answers `DisplayServicesSetBrightness` with SUCCESS but
+  /// changes nothing, so native must never be routed on mode alone.
   /// Role `.builtIn` is constitutively native (Task 10): the built-in panel
   /// has no DDC wire and no combined/software routing — every path-selection
   /// consumer (applyPaths, step's combined math, handleReconfigure) short-
@@ -122,7 +124,7 @@ public final class BrightnessController {
   /// pinned against the full table by
   /// `theStandalonePredicateAgreesWithTheTableEverywhere`.
   private var usesNative: Bool {
-    BrightnessPathPolicy.usesNative(role: role, hdrMode: hdrMode, isHDRActive: cachedHDRActive)
+    BrightnessPathPolicy.usesNative(role: role, isHDRActive: cachedHDRActive)
   }
 
   /// Whether the display reports HDR capability — a published mirror of the
@@ -157,7 +159,6 @@ public final class BrightnessController {
   private func pathInputs(tuning: CommandTuning) -> BrightnessPathPolicy.Inputs {
     BrightnessPathPolicy.Inputs(
       role: role,
-      hdrMode: hdrMode,
       isHDRActive: cachedHDRActive,
       forceSoftware: prefs.forceSoftware,
       avoidGamma: prefs.avoidGamma,
@@ -670,7 +671,32 @@ public final class BrightnessController {
     // here would persist a meaningless mode under the builtIn prefs key.
     guard role == .external else { return }
     let previous = hdrMode
-    guard mode != previous else { return }
+    // #83: `.off` is actionable whenever HDR is LIVE, not only when Candela's
+    // own mode says Candela engaged it. HDR turned on in System Settings leaves
+    // `hdrMode` at `.off`, so a plain inequality guard returned early and left
+    // the app with no path at all to drop HDR — while the reset paths that call
+    // this were relying on it to unlock the DDC register before writing.
+    //
+    // The engage arm has handled the mirror-image case since backlog #8; this
+    // is the exit catching up. Ruling: Candela's mode and the system's HDR state
+    // stay in sync, so `.off` means the display leaves HDR whoever put it there.
+    //
+    // The inequality still guards the case it exists for — a mode the display
+    // is ALREADY in is still a no-op, so a reset does not drive a pointless
+    // re-mode across every attached panel.
+    //
+    // Symmetric on purpose. The panel's HDR button reads the STATE (#84), so
+    // with HDR switched off in System Settings under a stale `.alwaysOn` the
+    // button offers "HDR On" — and a mode-only guard would return early and
+    // leave that click dead.
+    //
+    // NOT preceded by a refresh, though the cache can be stale (R3). That was
+    // tried: an await here is a suspension point BEFORE `beginHDRTransition`
+    // takes the supersession token, and it broke the overlapping-transition
+    // guarantees. The engage arm's own post-refresh re-check remains the answer
+    // to a stale cache. See #87.
+    let observed: HDRMode = cachedHDRActive ? .alwaysOn : .off
+    guard mode != previous || mode != observed else { return }
     prefs.hdrMode = mode
     hdrMode = mode
     pathLog.log("hdrMode \(previous.rawValue) -> \(mode.rawValue) display=\(self.displayID)")

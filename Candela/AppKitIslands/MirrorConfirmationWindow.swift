@@ -111,12 +111,12 @@ struct MirrorConfirmationView: View {
   @ViewBuilder private var reportBody: some View {
     ConfirmationCard {
       ConfirmationTitle(MirroringCopy.reportTitle)
-      // Every refusal states a reason, and there are SEVEN of them. There is no
+      // Every refusal states a reason, and there are EIGHT of them. There is no
       // "it did not work", and no `default:` arm — `MirroringCopy.refusal`
       // switches exhaustively so a new case is a compile error rather than a
       // silently generic sentence.
       if let refusal = coordinator.lastRefusal {
-        // Named through the coordinator, because one of the seven refusals
+        // Named through the coordinator, because one of the eight refusals
         // carries the displays it is about and says nothing true without them.
         ConfirmationCaption(MirroringCopy.refusal(refusal, name: coordinator.displayName))
       }

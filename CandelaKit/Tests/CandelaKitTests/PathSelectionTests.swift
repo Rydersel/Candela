@@ -301,6 +301,56 @@ struct PathSelectionTests {
     #expect(h.shade.removed.contains(Harness.displayID))
   }
 
+  /// #83. `.off` must DISENGAGE HDR that Candela never engaged. The engage arm
+  /// already handles the mirror case (an externally live HDR with mode `.off`);
+  /// the exit assumed Candela set it, so `mode != previous` returned early and
+  /// nothing could drop HDR from inside the app. Ruling: Candela and System
+  /// Settings stay in sync, so `.off` means the display leaves HDR whoever put
+  /// it there.
+  @Test func offDisengagesHDRThatWasEngagedOutsideCandela() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    await h.hdr!.setHDR(displayID: Harness.displayID, enabled: true) // external toggle
+    await h.controller.noteHDRStateMayHaveChanged()
+    #expect(h.controller.hdrMode == .off) // Candela never set a mode
+    #expect(h.controller.isHDREngaged)
+
+    await h.controller.setHDRMode(.off)
+
+    #expect(await h.hdr!.recordedSetCalls() == [true, false])
+    #expect(!h.controller.isHDREngaged)
+  }
+
+  /// The mirror of the case above, and the one the panel's state-sourced HDR
+  /// button (#84) makes reachable: HDR switched off in System Settings leaves a
+  /// stale `.alwaysOn`, the button then reads "HDR Off" and offers `.alwaysOn`,
+  /// and a mode-only guard would return early and leave that click dead.
+  @Test func alwaysOnReEngagesHDRSwitchedOffOutsideCandela() async {
+    let h = Harness(hdrEnabled: true, settle: .milliseconds(5)) { prefs, _ in
+      prefs.hdrMode = .alwaysOn
+    }
+    await h.prime()
+    await h.hdr!.setHDR(displayID: Harness.displayID, enabled: false) // external
+    await h.controller.noteHDRStateMayHaveChanged()
+    #expect(!h.controller.isHDREngaged)
+    #expect(h.controller.hdrMode == .alwaysOn) // the mode is now stale
+
+    await h.controller.setHDRMode(.alwaysOn)
+
+    #expect(await h.hdr!.recordedSetCalls() == [false, true])
+    #expect(h.controller.isHDREngaged)
+  }
+
+  /// The early return still has to hold for the case it exists for: `.off` on a
+  /// display that is genuinely not in HDR must not run a transition, or every
+  /// reset would drive a pointless re-mode across every attached panel.
+  @Test func offOnADisplayAlreadyOutOfHDRStaysANoOp() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    await h.controller.setHDRMode(.off)
+    #expect(await h.hdr!.recordedSetCalls().isEmpty)
+  }
+
   // MARK: Native-entry brightness assert (hardware round 1)
 
   /// Entering the native path by an EXTERNAL toggle must re-assert the

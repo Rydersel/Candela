@@ -246,6 +246,13 @@ public protocol DisplayConfiguring: Sendable {
   /// success forever.
   func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws
 
+  /// Whether the private CGS mode list is reachable on this OS.
+  ///
+  /// **CR10** — false degrades to exactly the behaviour that shipped before
+  /// revelation existed: the public mode list, no error, no alert. Same
+  /// capability-answer shape as `canRotate` below.
+  var revealsHiddenModes: Bool { get }
+
   /// Whether this build can rotate displays at all.
   ///
   /// **RT5** — a missing private symbol is a capability answer, not a crash. When

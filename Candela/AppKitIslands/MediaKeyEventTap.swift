@@ -260,17 +260,33 @@ final class MediaKeyEventTap {
     // release as the process death that recovered the machine each time.
     let prober = Thread {
       Self.watchdogLog.debug("prober started")
+      // The trust check and the self-ping run at DIFFERENT cadences, and the
+      // reason is a measured platform deadline: WindowServer force-times-out a
+      // tap whose owner has lost its Accessibility grant after ~1s, and a wedge
+      // that has already formed is cleared only by process death. A 2s poll
+      // cannot win that race — it samples strictly slower than the deadline it
+      // exists to beat. Trust is therefore sampled every 0.5s.
+      //
+      // The ping stays at 2s. It is a liveness probe for the event pipeline,
+      // not a race against a deadline, and posting it four times as often would
+      // put four times the synthetic traffic through a tap whose whole failure
+      // mode is stalling.
+      let trustPollInterval: TimeInterval = 0.5
+      let pollsPerPing = 4
+      var pollsSinceLastPing = pollsPerPing
       while true {
         let current = watchdogRuntime.withLockUnchecked { $0.port === watchdogPort }
         guard current else { Self.watchdogLog.debug("prober: port gone, exiting"); return }
         // Post the ping only if the previous one arrived — a stuck ping must
         // keep its original timestamp so the monitor's clock runs from the
         // FIRST unanswered post.
-        let shouldPost = heartbeat.withLock { hb -> Bool in
+        let dueForPing = pollsSinceLastPing >= pollsPerPing
+        let shouldPost = dueForPing && heartbeat.withLock { hb -> Bool in
           guard hb.pingPosted == nil else { return false }
           hb.pingPosted = Date()
           return true
         }
+        pollsSinceLastPing = dueForPing ? 1 : pollsSinceLastPing + 1
         if shouldPost {
           // NX_SYSDEFINED with no payload: inside our tap's event mask, so
           // the callback sees and swallows it; inert to the rest of the
@@ -297,7 +313,7 @@ final class MediaKeyEventTap {
           onEmergencyTeardown?()
           return
         }
-        Thread.sleep(forTimeInterval: 2)
+        Thread.sleep(forTimeInterval: trustPollInterval)
       }
     }
     prober.name = "MediaKeyEventTap.wsProber"

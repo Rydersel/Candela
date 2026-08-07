@@ -47,10 +47,24 @@ public enum DisplayModeCatalog {
     let groups = Dictionary(grouping: usable) { SizeKey(width: $0.logicalWidth, height: $0.logicalHeight) }
 
     return groups.compactMap { _, group -> DisplayModeRow? in
-      // Fastest first; tie-break on ioModeID so the choice is deterministic
-      // rather than dependent on dictionary ordering.
-      let sorted = group.sorted {
-        $0.refreshHz != $1.refreshHz ? $0.refreshHz > $1.refreshHz : $0.ioModeID < $1.ioModeID
+      // Representative choice, in strict precedence order.
+      //
+      // 1. NATIVE WINS ITS OWN SIZE. The panel's own timing is what a person
+      //    reads as "native resolution"; promoting a 2x variant into that row
+      //    would silently make the default framebuffer 6880x2880 on a
+      //    3440x1440 panel. That mode stays reachable through `full`.
+      // 2. HiDPI BEATS 1x AT THE SAME LOGICAL SIZE. [MEASURED 2026-08-06] with
+      //    revelation on, CoreGraphics and CGS both offer 1920x804 on the MAG,
+      //    and the old ioModeID tie-break handed the row to the BLURRY one:
+      //    every revealed mode lost its group and the picker showed none of
+      //    the 44 found. Sharpness is the point, so it outranks refresh.
+      // 3. Then fastest, then lowest id, so the choice is deterministic rather
+      //    than dependent on dictionary ordering.
+      let sorted = group.sorted { lhs, rhs in
+        if lhs.isNative != rhs.isNative { return lhs.isNative }
+        if lhs.isHiDPI != rhs.isHiDPI { return lhs.isHiDPI }
+        if lhs.refreshHz != rhs.refreshHz { return lhs.refreshHz > rhs.refreshHz }
+        return lhs.ioModeID < rhs.ioModeID
       }
       guard let representative = sorted.first else { return nil }
       return DisplayModeRow(

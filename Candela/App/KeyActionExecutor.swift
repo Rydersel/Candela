@@ -68,10 +68,10 @@ final class KeyActionExecutor {
           // rule). A resolved-but-keyboard-disabled display does NOT take
           // this branch: the fork skips it in the loop body and swallows
           // the press (R1).
-          stepAllExternal(isUp: isUp, isFine: isFine)
+          stepEveryControlledDisplay(isUp: isUp, isFine: isFine)
         }
       case .allExternal:
-        stepAllExternal(isUp: isUp, isFine: isFine)
+        stepEveryControlledDisplay(isUp: isUp, isFine: isFine)
       case .builtInOnly:
         // Ctrl-directed steps drive the built-in panel through its
         // native-path controller. HUD on the built-in display.
@@ -86,7 +86,7 @@ final class KeyActionExecutor {
       // single display), Cmd+BrightnessDown acts as a normal brightness-down
       // step — and a plain step is `.affected`, same as rule 6.
       //
-      // `.onlyOneDisplay` is the ONE refusal that falls through. The other six
+      // `.onlyOneDisplay` is the ONE refusal that falls through. The other seven
       // become a report on screen rather than a silent `false`, which is what
       // the bare `Bool` this replaced could not express.
       //
@@ -156,6 +156,42 @@ final class KeyActionExecutor {
     for (id, name, newValue) in model.stepBrightnessAllExternal(isUp: isUp, isFine: isFine) {
       showHUD(id: id, name: name, value: newValue)
     }
+  }
+
+  /// The BOTTOM of the brightness fallback chain: every external, and the
+  /// built-in only if that stepped nothing.
+  ///
+  /// #72. The tap commits the swallow on its own thread, from
+  /// `config.watchedKeys`, before anything knows what the press would act on
+  /// (`MediaKeyEventTap.process`). That config is refreshed AFTER
+  /// `await model.refresh()` (`StatusItemController`), so for the duration of a
+  /// refresh — a dock cycle, a replug — brightness keys are still swallowed
+  /// against the old config while `model.displays` is already empty. The press
+  /// is consumed and then has nothing left to act on: the key is simply dead.
+  ///
+  /// Stepping the built-in is the last resort that keeps that from happening.
+  /// It is where all three bottom-out routes meet — `.allExternal`, a stale
+  /// pointer ID, and a nil anchor — so no site can acquire the dead-key
+  /// behaviour again on its own.
+  ///
+  /// Deliberately NOT pushed down into `stepBrightness`'s loop body: R1 rules
+  /// that a resolved-but-keyboard-disabled display SWALLOWS its press, and this
+  /// must fire only where nothing resolved at all. `.allScreens` keeps calling
+  /// `stepAllExternal` plus its own unconditional built-in step — it steps both
+  /// every time by definition, which is not a fallback.
+  ///
+  /// A machine with no built-in and no controlled external is still dead here;
+  /// only tap-side pass-through reaches that, and #72 records why the tap was
+  /// left alone (#59: an active head-insert tap froze the machine twice).
+  private func stepEveryControlledDisplay(isUp: Bool, isFine: Bool) {
+    let stepped = model.stepBrightnessAllExternal(isUp: isUp, isFine: isFine)
+    for (id, name, newValue) in stepped {
+      showHUD(id: id, name: name, value: newValue)
+    }
+    guard stepped.isEmpty,
+          let (id, name, newValue) = model.stepBrightnessBuiltIn(isUp: isUp, isFine: isFine)
+    else { return }
+    showHUD(id: id, name: name, value: newValue)
   }
 
   /// Volume-key target set per multiKeyboardVolume (D4). Every branch runs

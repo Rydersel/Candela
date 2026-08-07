@@ -188,7 +188,7 @@ public enum MirrorRefusal: Sendable, Equatable {
   /// display is either the built-in (which the hotkey never promotes, fork
   /// parity) or locked into a set it cannot leave.
   ///
-  /// Reachable from `toggle` ONLY. The named-master path has its own three
+  /// Reachable from `toggle` ONLY. The named-master path has its own four
   /// answers below, because "nothing can be the master" is a false statement
   /// when the caller has just named a display that can.
   case noEligibleMaster
@@ -211,6 +211,14 @@ public enum MirrorRefusal: Sendable, Equatable {
   /// out of `setCannotBeBroken`. Saying "no display can be the mirror master"
   /// to someone who has just picked one that can is simply untrue.
   case nothingToMirror
+  /// Everything that could join the named master's set is already in it, so
+  /// there is no work to stage. Its own case because the truthful sentence is
+  /// "already mirroring" — and because the empty transaction it forbids is a
+  /// measured platform trap (#56): `CGCompleteDisplayConfiguration` fails a
+  /// commit whose changes are all no-ops with `1001` after every stage
+  /// succeeded, which would surface an opaque error for a request whose honest
+  /// answer is "done, nothing to do".
+  case alreadyMirrored
   /// Mirroring here cannot be broken: no member of the set can be REMOVED from
   /// it. Every slave reports `isAlwaysInMirrorSet`, and unmirroring the master
   /// alone changes nothing — it is not mirroring anyone. Carries the members so
@@ -269,10 +277,11 @@ public enum MirrorTopologyPolicy {
   /// built-in is an acceptable master here — that is a person asking for it by
   /// name, not a heuristic choosing for them.
   ///
-  /// Its three refusals are three different sentences, never `noEligibleMaster`:
+  /// Its four refusals are four different sentences, never `noEligibleMaster`:
   /// the display is not here (`noSuchDisplay`), the display cannot own a set
-  /// (`masterIsAlwaysMirrored`), or nothing else can join the one it would own
-  /// (`nothingToMirror`). Only the last of those is about the machine.
+  /// (`masterIsAlwaysMirrored`), nothing else can join the one it would own
+  /// (`nothingToMirror`), or everything that could join it already has
+  /// (`alreadyMirrored`). Only the last two of those are about the machine.
   public static func engage(
     _ topology: MirrorTopology, master: CGDirectDisplayID
   ) -> MirrorToggleDecision {
@@ -284,12 +293,20 @@ public enum MirrorTopologyPolicy {
     // A locked display is never STAGED either: the change cannot succeed, and
     // one failed stage cancels the whole transaction (Task 3), so including it
     // would mirror nothing at all.
-    let changes = topology.displays
+    let eligible = topology.displays
       .filter { $0.id != chosen.id && !$0.isAlwaysInMirrorSet }
+    guard !eligible.isEmpty else { return .refused(.nothingToMirror) }
+
+    // Nor is a display already mirroring `chosen` — the change is a no-op, and
+    // a transaction of ONLY no-ops fails at the commit with 1001 despite every
+    // stage succeeding (#56, measured). Dropping them keeps the platform's
+    // one honest failure mode out of reach.
+    let changes = eligible
+      .filter { $0.mirrorsDisplay != chosen.id }
       .map(\.id)
       .sorted()
       .map { MirrorChange(display: $0, master: chosen.id) }
-    guard !changes.isEmpty else { return .refused(.nothingToMirror) }
+    guard !changes.isEmpty else { return .refused(.alreadyMirrored) }
     return .engage(master: chosen.id, changes: changes)
   }
 

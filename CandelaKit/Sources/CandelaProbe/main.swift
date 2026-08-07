@@ -31,6 +31,7 @@ usage: candela-probe [--display <id>] <subcommand>
   contrast get|set <0-100>                DDC read/write of VCP 0x12
   mute on|off                             DDC write of VCP 0x8D (1=mute, 2=unmute)
   vcp get <hex>|set <hex> <0-65535>       raw VCP prober
+  modes                                   merged mode list, marking CGS-revealed entries
   caps                                    DDC/CI capabilities string (VCP 0xF3) + volume verdict
   audio devices                           default CoreAudio output + native-volume check
   native get                              DisplayServicesGetBrightness per display
@@ -129,6 +130,86 @@ case "list", nil:
     // Column 2 is the persistence key: every per-display `defaults write`
     // key is suffixed with it (docs/ADVANCED-SETTINGS.md).
     print("\(entry.display.id)\t\(entry.display.persistenceKey)\t\(entry.display.name)")
+  }
+case "modes":
+  // Reports the merged list THROUGH CoreGraphicsDisplayConfigurator, so what
+  // prints here is exactly what the app's pickers see — revelation included.
+  let configurator = CoreGraphicsDisplayConfigurator()
+  print(
+    "hidden-mode revelation: \(configurator.revealsHiddenModes ? "available" : "UNAVAILABLE")")
+  for display in online where displayFilter == nil || display.id == displayFilter {
+    let all = configurator.modes(for: display.id)
+    let published = all.filter { $0.provenance == .coreGraphics }
+    let revealed = all.filter { $0.provenance == .coreGraphicsServices }
+    print("\n\(display.name)  published \(published.count)  revealed \(revealed.count)")
+    for mode in revealed.sorted(by: {
+      ($0.logicalWidth, $0.refreshHz) > ($1.logicalWidth, $1.refreshHz)
+    }) {
+      print(
+        "  \(mode.logicalWidth)x\(mode.logicalHeight)"
+          + "  fb \(mode.pixelWidth)x\(mode.pixelHeight)"
+          + "  @\(String(format: "%g", mode.refreshHz))Hz"
+          + "  id \(mode.ioModeID)")
+    }
+  }
+case "curated":
+  // What the DEFAULT picker actually shows, after DisplayModeCatalog curation.
+  let cur = CoreGraphicsDisplayConfigurator()
+  for display in online where displayFilter == nil || display.id == displayFilter {
+    let all = cur.modes(for: display.id)
+    guard let native = all.first(where: { $0.isNative }) else { continue }
+    let rows = DisplayModeCatalog.curated(
+      all, nativePixelWidth: native.pixelWidth, nativePixelHeight: native.pixelHeight)
+    let revealedRows = rows.filter { $0.mode.provenance == .coreGraphicsServices }
+    print("\n\(display.name): \(all.count) modes -> \(rows.count) rows, \(revealedRows.count) of them revealed")
+    for row in rows {
+      let m = row.mode
+      print("  \(m.logicalWidth)x\(m.logicalHeight) fb \(m.pixelWidth)x\(m.pixelHeight) @\(Int(m.refreshHz))Hz id \(m.ioModeID) \(m.provenance) hidpi=\(m.isHiDPI)")
+    }
+    let groups = Dictionary(grouping: all) { "\($0.logicalWidth)x\($0.logicalHeight)" }
+    for (size, group) in groups.sorted(by: { $0.key < $1.key }) {
+      let cgOnly = group.filter { $0.provenance == .coreGraphics }
+      let cgsOnly = group.filter { $0.provenance == .coreGraphicsServices }
+      if !cgOnly.isEmpty && !cgsOnly.isEmpty {
+        print("  COLLISION \(size): cg=\(cgOnly.count) cgs=\(cgsOnly.count)")
+      }
+    }
+  }
+case "modeapply":
+  // Applies one mode BY ID at preview scope, through the real configurator, so
+  // the revealed apply path and its post-commit verification are both exercised.
+  // Preview scope self-reverts when this process exits.
+  guard arguments.count >= 2, let wanted = Int32(arguments[1]) else {
+    print("usage: candela-probe --display <id> modeapply <ioModeID> [holdSeconds=5]")
+    exit(2)
+  }
+  let holdSeconds = arguments.count >= 3 ? UInt32(arguments[2]) ?? 5 : 5
+  // Third arg picks the scope. Session scope OUTLIVES this process, so the
+  // caller is responsible for putting the display back.
+  let applyScope: DisplayConfigScope =
+    (arguments.count >= 4 && arguments[3] == "session") ? .session : .preview
+  guard let target = displayFilter else {
+    print("modeapply requires --display <id>")
+    exit(2)
+  }
+  let configurator = CoreGraphicsDisplayConfigurator()
+  guard let mode = configurator.modes(for: target).first(where: { $0.ioModeID == wanted }) else {
+    print("no mode with id \(wanted) on display \(target)")
+    exit(3)
+  }
+  let before = configurator.currentMode(for: target)
+  print("before: \(before.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID)" } ?? "unknown")")
+  print("applying: \(mode.logicalWidth)x\(mode.logicalHeight) fb \(mode.pixelWidth)x\(mode.pixelHeight) id \(mode.ioModeID) provenance \(mode.provenance)")
+  do {
+    try configurator.apply(mode, to: target, scope: applyScope)
+    let after = configurator.currentMode(for: target)
+    print("after:  \(after.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID)" } ?? "unknown")")
+    print("scope: \(applyScope); holding \(holdSeconds)s...")
+    sleep(holdSeconds)
+    print("exiting — preview scope reverts now.")
+  } catch {
+    print("apply FAILED: \(error)")
+    exit(4)
   }
 case "caps":
   requireDDCDisplays()
