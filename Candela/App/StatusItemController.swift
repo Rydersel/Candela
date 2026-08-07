@@ -875,9 +875,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // controller strands the panel in HDR while the app believes it is off —
       // and the next launch then writes DDC into a register the monitor has
       // locked, so brightness silently stops working with no diagnostic.
-      if state.controller.hdrMode != .off {
-        await state.controller.setHDRMode(.off)
-      }
+      // UNCONDITIONAL (#83): the `hdrMode != .off` gate skipped HDR engaged in
+      // System Settings, which is exactly the state this paragraph warns
+      // about. `setHDRMode` decides whether there is anything to do.
+      await state.controller.setHDRMode(.off)
 
       // D29 rule 2: clear the AVAILABILITY prefs BEFORE attempting the unmute,
       // never after. `DDCValueController.toggleMute` opens with

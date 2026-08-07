@@ -333,15 +333,23 @@ private struct DisplayHeaderRow: View {
 
   @State private var isHovering = false
 
+  /// Reads the STATE, not the mode pref (#84). `hdrMode` is Candela's policy;
+  /// `isHDREngaged` is what the display is actually doing, and they diverge the
+  /// moment HDR is toggled in System Settings. The badge to the left of this
+  /// button already reads the state, so sourcing the label from the mode put a
+  /// flat contradiction on screen — an "HDR" badge beside an "HDR Off" button,
+  /// for a display in HDR.
   private var modeLabel: String {
-    switch controller.hdrMode {
-    case .off: return "HDR Off"
-    case .alwaysOn: return "HDR On"
-    }
+    controller.isHDREngaged ? "HDR On" : "HDR Off"
   }
 
+  /// Same source, so the click always moves the display AWAY from what the
+  /// label reports. Both directions need the engine door to act on a mode it
+  /// nominally already holds — `.off` on an externally-engaged display, and
+  /// `.alwaysOn` on one externally switched off — which is what
+  /// `setHDRMode`'s state-aware guard is for.
   private var nextMode: HDRMode {
-    controller.hdrMode == .off ? .alwaysOn : .off
+    controller.isHDREngaged ? .off : .alwaysOn
   }
 
   var body: some View {
