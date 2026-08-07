@@ -587,9 +587,14 @@ final class DisplayModeCoordinator {
   func pinCurrentMode(on displayID: CGDirectDisplayID) {
     enqueue {
       guard await self.session.previewedMode?.displayID != displayID else { return }
+      // Live read FIRST, cache only as the fallback: a countdown expiry
+      // reverts on the session actor and enqueues nothing but `adopt(.keep)`,
+      // which never refreshes the catalog — so in that window the cache still
+      // names the mode that was just reverted away from, while the display has
+      // physically changed back.
       guard let identity = self.identity(for: displayID),
-            let current = self.catalogs[displayID]?.current
-              ?? self.configurator.currentMode(for: displayID)
+            let current = self.configurator.currentMode(for: displayID)
+              ?? self.catalogs[displayID]?.current
       else { return }
       self.store(current, on: displayID, for: identity)
     }
