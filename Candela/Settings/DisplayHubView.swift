@@ -455,19 +455,19 @@ struct DisplayHubView: View {
   }
 
   private func apply(_ mode: DisplayMode, in catalog: DisplayModeCoordinator.Catalog) {
-    // Clicking the mode already on screen used to apply a no-op and then demand
-    // "Keep this resolution?" with a full countdown for a change nobody made.
-    guard mode.ioModeID != catalog.current?.ioModeID else { return }
     // Never speculative: this runs only from an explicit click naming this
-    // display's mode. No `Task` here — `select` is fire-and-forget into the
-    // coordinator's queue, which is what serialises two fast clicks; spawning
-    // one per click is precisely how the banner ends up naming a different mode
-    // than the one "Keep" would commit.
+    // display's mode. No `Task` here — `selectFromList` is fire-and-forget into
+    // the coordinator's queue, which is what serialises two fast clicks;
+    // spawning one per click is precisely how the banner ends up naming a
+    // different mode than the one "Keep" would commit. It also carries the
+    // already-on-screen guard, shared with the full mode list.
     //
     // `.settings` no longer picks the answering surface — the confirmation
     // window takes every preview now — but it still routes a failed `begin()`,
     // which this page reports in `startFailureBanner` and the panel cannot.
-    coordinator.select(mode, on: displayID, from: .settings)
+    coordinator.selectFromList(
+      mode, on: displayID, from: .settings, currentModeID: catalog.current?.ioModeID
+    )
   }
 
   // MARK: - Sound

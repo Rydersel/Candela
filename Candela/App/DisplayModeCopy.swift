@@ -17,11 +17,15 @@ enum DisplayModeCopy {
   /// WHICH way a mode is inexact, and it reads as evasive next to a picker
   /// labelled Size.
   ///
-  /// RM11 is carried by the Native / HiDPI / Scaled badges
-  /// (`DisplayModeCoordinator.Catalog.badges(for:)`) on surfaces that offer
-  /// EVERY mode — the menu-bar list today, the All Sizes & Refresh Rates page
-  /// when it lands — because there the size alone says nothing about which
-  /// duplicate is which. The settings hub's curated Size picker is the ruled
+  /// RM11 is carried by badges on the surfaces that offer EVERY mode, because
+  /// there the size alone says nothing about which duplicate is which: the
+  /// menu-bar list wears Native / HiDPI / Scaled
+  /// (`DisplayModeCoordinator.Catalog.badges(for:)`), and the All Sizes &
+  /// Refresh Rates page wears the same rule with SO14's inversion applied —
+  /// "HiDPI" retired, the 1x duplicate tagged "low resolution" instead
+  /// (`fullListTags(for:isLowResolutionDuplicate:)`).
+  ///
+  /// The settings hub's curated Size picker is the ruled
   /// exception (SO14/SO18): it is deduplicated by logical size, "HiDPI" is
   /// retired from copy, and the row states its OUTCOME (the caps-at marker)
   /// instead of its catalog entry. Surfaces that merely NAME the mode already

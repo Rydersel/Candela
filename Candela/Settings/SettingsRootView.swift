@@ -279,10 +279,12 @@ struct SettingsRootView: View {
     .id(key)
   }
 
-  /// One case per sub-page; Task 14 replaces the last placeholder. Each real
-  /// page owns its own `Form` (a grouped `Form` only reliably sizes structure
-  /// declared in its own builder — see `DisplayHubView.body`), so this switch
-  /// names a view and nothing else.
+  /// One case per sub-page — all three pages are real. Each page owns its
+  /// own `Form` (a grouped `Form` only reliably sizes structure declared in
+  /// its own builder — see `DisplayHubView.body`), so this switch names a
+  /// view and nothing else. Every page starts with `SubPageHeader` — title
+  /// focus on push, and the display switcher that carries THIS sub-page onto
+  /// another display (SO23).
   @ViewBuilder
   private func subPage(_ page: DisplaySubPage, key: String, state: AppModel.DisplayState) -> some View {
     // Rename dependency, registered HERE because `switcherDisplays` is read at
@@ -293,7 +295,11 @@ struct SettingsRootView: View {
     let _ = model.prefsRevision
     switch page {
     case .allModes:
-      placeholderSubPage(page, key: key)
+      AllModesPage(
+        state: state,
+        displays: switcherDisplays,
+        onSwitch: { newKey in switchDisplay(from: key, to: newKey) }
+      )
     case .advanced:
       AdvancedPage(
         state: state,
@@ -308,26 +314,6 @@ struct SettingsRootView: View {
         onSwitch: { newKey in switchDisplay(from: key, to: newKey) }
       )
     }
-  }
-
-  /// Placeholder sub-page (Task 14 replaces it). The header is the real
-  /// contract — title focus on push, and the display switcher that carries
-  /// THIS sub-page onto another display (SO23).
-  private func placeholderSubPage(_ page: DisplaySubPage, key: String) -> some View {
-    // Rename dependency: switcher names must track `friendlyName` writes, and
-    // `DisplayPrefs` is plain UserDefaults with no observation of its own.
-    let _ = model.prefsRevision
-    return Form {
-      SubPageHeader(
-        title: page.title,
-        currentKey: key,
-        displays: switcherDisplays,
-        onSwitch: { newKey in switchDisplay(from: key, to: newKey) }
-      )
-      Text("This page arrives with a later task.")
-        .foregroundStyle(.secondary)
-    }
-    .formStyle(.grouped)
   }
 
   /// Pop focus restoration (accessibility contract 1's pop half) is the

@@ -647,6 +647,24 @@ final class DisplayModeCoordinator {
     }
   }
 
+  /// `select`, plus the no-op guard every mode LIST needs: applying the mode
+  /// already on screen reconfigures nothing and then demands "Keep this
+  /// resolution?" with a full countdown for a change nobody made.
+  ///
+  /// Here rather than at each call site because the settings window now offers
+  /// modes from two surfaces — the hub's size pop-up and the full list — and a
+  /// guard held in agreement by discipline is the shape this branch has been
+  /// bitten by. The menu-bar list keeps its own copy deliberately: it also has
+  /// to decide whether to end the menu's tracking session, which is a question
+  /// only that surface has.
+  func selectFromList(
+    _ mode: DisplayMode, on displayID: CGDirectDisplayID,
+    from origin: PreviewOrigin, currentModeID: Int32?
+  ) {
+    guard mode.ioModeID != currentModeID else { return }
+    select(mode, on: displayID, from: origin)
+  }
+
   /// `answered` is the preview the caller was LOOKING AT when it answered. It
   /// is carried into the session, which refuses an answer that no longer names
   /// the outstanding preview.
@@ -1050,11 +1068,34 @@ extension DisplayModeCoordinator.Catalog {
     var badges: [String] = []
     if mode.isNative { badges.append("Native") }
     if mode.isHiDPI { badges.append("HiDPI") }
-    if let nativePixels, !mode.isNative,
-       mode.isScaled(nativePixelWidth: nativePixels.width, nativePixelHeight: nativePixels.height) {
-      badges.append("Scaled")
-    }
+    if isScaled(mode) { badges.append("Scaled") }
     return badges
+  }
+
+  /// The same words for the All Sizes & Refresh Rates page, where SO14 retires
+  /// "HiDPI": the sharp mode says nothing, and the 1x duplicate it used to be
+  /// distinguished FROM carries "low resolution" instead — macOS's own
+  /// vocabulary. Native and Scaled are unchanged, and share `isScaled` with
+  /// `badges` so the one rule that decides them cannot fork.
+  ///
+  /// `isLowResolutionDuplicate` is asked of `DisplayModeCatalog`, once per
+  /// catalog rather than once per row: the answer depends on the mode's
+  /// siblings at the same logical size, and this page renders hundreds of rows.
+  func fullListTags(for mode: DisplayMode, isLowResolutionDuplicate: Bool) -> [String] {
+    var tags: [String] = []
+    if mode.isNative { tags.append("Native") }
+    if isScaled(mode) { tags.append("Scaled") }
+    if isLowResolutionDuplicate { tags.append("low resolution") }
+    return tags
+  }
+
+  /// Suppressed rather than guessed when the panel's native size is unknown,
+  /// and never said about the native mode itself.
+  private func isScaled(_ mode: DisplayMode) -> Bool {
+    guard let nativePixels, !mode.isNative else { return false }
+    return mode.isScaled(
+      nativePixelWidth: nativePixels.width, nativePixelHeight: nativePixels.height
+    )
   }
 
   /// The size and its badges as one label, for surfaces that draw a single

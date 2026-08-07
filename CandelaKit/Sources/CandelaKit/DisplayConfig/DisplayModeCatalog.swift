@@ -221,6 +221,35 @@ public enum DisplayModeCatalog {
       }
   }
 
+  /// The modes the full list tags "low resolution", by `ioModeID`.
+  ///
+  /// SO14's inversion, and macOS's: where one logical size is offered both
+  /// sharp and blurry, the BLURRY one is tagged. Tagging the sharp one "HiDPI"
+  /// names an implementation detail, and it leaves the 1x mode looking like the
+  /// plain choice when it is the compromised one.
+  ///
+  /// A size with no sharp variant tags NOTHING. Most sizes on a standard-PPI
+  /// panel are 1x and unremarkable; tagging all of them would say "low
+  /// resolution" about every resolution such a display has.
+  ///
+  /// One pass over the whole list rather than a per-mode question, because the
+  /// answer depends on the mode's SIBLINGS at the same logical size and the
+  /// caller renders hundreds of rows.
+  public static func lowResolutionDuplicates(_ modes: [DisplayMode]) -> Set<Int32> {
+    let sharpSizes = Set(
+      modes.filter(\.isHiDPI).map { SizeKey(width: $0.logicalWidth, height: $0.logicalHeight) }
+    )
+    guard !sharpSizes.isEmpty else { return [] }
+    return Set(
+      modes
+        .filter {
+          !$0.isHiDPI
+            && sharpSizes.contains(SizeKey(width: $0.logicalWidth, height: $0.logicalHeight))
+        }
+        .map(\.ioModeID)
+    )
+  }
+
   /// Every rate in the list, once each, descending — the filter's menu.
   /// Quantized, so CoreGraphics' float noise cannot offer 60 twice while
   /// keeping NTSC's 59.9 as its own entry.

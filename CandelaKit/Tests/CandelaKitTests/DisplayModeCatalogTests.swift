@@ -303,4 +303,37 @@ struct DisplayModeGroupingTests {
   @Test func distinctRatesSpanEverySizeInTheList() {
     #expect(DisplayModeCatalog.distinctRates(ladder) == [175, 120, 60])
   }
+
+  /// SO14: the 1x mode is tagged, never its sharp twin.
+  @Test func onlyTheBlurryHalfOfAPairIsTagged() {
+    let sharp = DisplayModeFixtures.mode(1, logical: (1920, 804), pixels: (3840, 1608))
+    let blurry = DisplayModeFixtures.mode(2, logical: (1920, 804), pixels: (1920, 804))
+    let tagged = DisplayModeCatalog.lowResolutionDuplicates([sharp, blurry])
+    #expect(tagged == [blurry.ioModeID])
+  }
+
+  /// The MAG's whole 1x ladder has no HiDPI twin anywhere, and calling every
+  /// resolution that display has "low resolution" would be both useless and
+  /// untrue.
+  @Test func aSizeWithNoSharpVariantTagsNothing() {
+    #expect(DisplayModeCatalog.lowResolutionDuplicates(ladder).isEmpty)
+  }
+
+  /// The test is per SIZE, not per list: a sharp mode at 1440 × 2560 says
+  /// nothing about a 1x mode at 900 × 1600.
+  @Test func theSharpTwinMustBeAtTheSameLogicalSize() {
+    let sharpElsewhere = DisplayModeFixtures.mode(1, logical: (1440, 2560), pixels: (2880, 5120))
+    let lone = DisplayModeFixtures.mode(2, logical: (900, 1600), pixels: (900, 1600))
+    #expect(DisplayModeCatalog.lowResolutionDuplicates([sharpElsewhere, lone]).isEmpty)
+  }
+
+  /// Every rate of the blurry size is tagged — the pairing is by size, and a
+  /// 60 Hz row and a 120 Hz row at that size are equally low-resolution.
+  @Test func everyRateOfATaggedSizeIsTagged() {
+    let sharp = DisplayModeFixtures.mode(1, logical: (1920, 1080), pixels: (3840, 2160))
+    let blurry60 = DisplayModeFixtures.mode(2, logical: (1920, 1080), pixels: (1920, 1080), hz: 60)
+    let blurry120 = DisplayModeFixtures.mode(3, logical: (1920, 1080), pixels: (1920, 1080), hz: 120)
+    #expect(DisplayModeCatalog.lowResolutionDuplicates([sharp, blurry60, blurry120])
+            == [blurry60.ioModeID, blurry120.ioModeID])
+  }
 }
