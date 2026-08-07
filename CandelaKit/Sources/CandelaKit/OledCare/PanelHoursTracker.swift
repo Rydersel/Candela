@@ -58,7 +58,11 @@ public final class PanelHoursTracker {
     if unwrittenSeconds > Self.debounceSeconds { writeThrough() }
   }
 
-  /// Display slept, departed, or answered a DDC power-mode (0xD6) standby.
+  /// Display slept or departed. A panel switched off at the monitor itself may
+  /// not be one of these: macOS reports a DPMS-blanked panel as awake and never
+  /// reconfigures (#94, measured for a `0xD6` write), so a panel held in soft
+  /// standby is invisible here. If the button instead deasserts hot-plug detect
+  /// the display departs and this IS called — untested, per monitor (#23).
   public func noteStandby() {
     sinceStandbySeconds = 0
     // The panel got its rest, so the next crossing has earned a fresh note.
