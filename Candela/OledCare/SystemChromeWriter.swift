@@ -1,6 +1,7 @@
 import CandelaKit
 import CoreFoundation
 import Foundation
+import os
 
 /// The one place system chrome settings are touched (OC10: only the pane's
 /// toggles call the writes; enrollment suggests auto-hide and never applies
@@ -16,8 +17,20 @@ import Foundation
 /// in-process `CFPreferencesSetValue` reads back immediately even before a
 /// synchronize, and an external `defaults write` was visible on the next read;
 /// the synchronize is the guarantee rather than the observed behaviour.]
+///
+/// **What that read-back does and does not prove.** It proves the preference
+/// now holds the requested value. It says nothing about whether the system
+/// ADOPTED it — the Dock leg in particular writes a pref another process owns
+/// and then asks that process to restart, and a `killall` that never reached a
+/// running Dock leaves the pref right and the screen unchanged. That gap is
+/// logged here (the `killall` exit status) and is a hardware-checklist item
+/// (spike §6a verified the Dock through System Events, and only *named* this
+/// pref+killall fallback — it was never measured). The menu-bar leg needs no
+/// such item: §6a proved live apply through this exact CFPreferences triple.
 @MainActor
 final class SystemChromeWriter: ChromeWriting {
+  private static let log = Logger(subsystem: "com.rydersel.Candela", category: "oledcare")
+
   private static let menuBarKey = "_HIHideMenuBar" as CFString
   private static let dockDomain = "com.apple.dock" as CFString
   private static let dockKey = "autohide" as CFString
@@ -32,8 +45,8 @@ final class SystemChromeWriter: ChromeWriting {
     CFPreferencesSetValue(Self.menuBarKey, on ? kCFBooleanTrue : kCFBooleanFalse,
                           kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
     CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
-    // Hardware-verification item: confirm live apply matches the spike's
-    // `defaults write` evidence (NSScreen visibleFrame inset changes).
+    // No restart and no notification: spike §6a measured this exact triple
+    // applying live (MAG menu-bar inset 0 → 30 → 0).
   }
 
   func readDockAutoHide() -> Bool {
@@ -46,9 +59,29 @@ final class SystemChromeWriter: ChromeWriting {
     CFPreferencesSetValue(Self.dockKey, on ? kCFBooleanTrue : kCFBooleanFalse,
                           Self.dockDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
     CFPreferencesSynchronize(Self.dockDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+    // The Dock restarts visibly; the pane copy says so. Waited on rather than
+    // fired and forgotten, because the exit status is the only evidence the
+    // restart was even requested of a running Dock — nonzero means the pref
+    // landed and nothing adopted it. The wait costs [MEASURED 2026-08-06:
+    // 66 ms] of main actor, once, on an explicit toggle whose whole point is a
+    // Dock that visibly restarts. Deliberately not surfaced as a return value:
+    // `ChromeWriting` reports state by read-back, and a killall that failed to
+    // launch does not make the pref wrong.
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
     process.arguments = ["Dock"]
-    try? process.run()   // the Dock restarts visibly; the pane copy says so
+    do {
+      try process.run()
+      process.waitUntilExit()
+      if process.terminationStatus != 0 {
+        Self.log.warning(
+          "killall Dock exited \(process.terminationStatus, privacy: .public) — autohide pref written but the Dock may not have adopted it"
+        )
+      }
+    } catch {
+      Self.log.warning(
+        "killall Dock could not launch: \(error.localizedDescription, privacy: .public) — autohide pref written but the Dock has not adopted it"
+      )
+    }
   }
 }

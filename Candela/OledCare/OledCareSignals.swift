@@ -6,7 +6,14 @@ import IOKit.pwr_mgt
 /// The system readings `OledCareCoordinator` turns into `OledDimSignals`. All
 /// of it is app-target: the engine takes abstract signals so it stays testable,
 /// and every platform call that produces one lives here.
-@MainActor
+///
+/// The isolation is deliberately split. The two per-tick reads are nonisolated
+/// — both platform calls are thread-safe and neither touches stored state, so
+/// they must not be forced through a main-actor hop the 10 Hz tick would pay
+/// for [MEASURED 2026-08-06: sub-microsecond and 0.07 ms per call]. Only
+/// `displaySleepMinutes()` is `@MainActor`, and only because it owns a cache —
+/// it is also 1000× the cost of the other two, which is the other half of the
+/// reason it is not on the tick path.
 enum OledCareSignalSources {
   /// Seconds since the last user input, system-wide.
   ///
@@ -17,6 +24,11 @@ enum OledCareSignalSources {
   ///
   /// Counts through system sleep — `IdleDimmingEngine` holds the wake floor
   /// that corrects for it, deliberately, so this stays a raw reading.
+  ///
+  /// Degradation if it ever stuck at 0: nothing dims, and — because the engine
+  /// detects input as a FALLING idle count — the input-lift of a lock overlay
+  /// is lost with it. The unlock notification is then the only recovery, which
+  /// is why lock dim does not depend on this reading alone.
   static func systemIdleSeconds() -> Double {
     // 0 reads as "just used", so a raw value that ever stopped resolving costs
     // the dim, not a dim nobody can clear.
@@ -39,11 +51,16 @@ enum OledCareSignalSources {
     return (dict[kIOPMAssertionTypePreventUserIdleDisplaySleep as String] ?? 0) > 0
   }
 
-  private static var cachedDisplaySleep: (minutes: Int?, at: ContinuousClock.Instant)?
+  @MainActor private static var cachedDisplaySleep: (minutes: Int?, at: ContinuousClock.Instant)?
 
   /// The system `displaysleep` setting in minutes (0 = never), for the pane's
   /// "your dim never fires" warning. Read via `pmset -g` — no public API
-  /// reports it — and cached for 60 s because this spawns a process.
+  /// reports it.
+  ///
+  /// **79 ms process spawn** [MEASURED 2026-08-06], on the main actor. Call it
+  /// once per pane appearance, NEVER from a timer — the 60 s cache is a
+  /// backstop against a re-render loop, not a licence to poll it.
+  @MainActor
   static func displaySleepMinutes() -> Int? {
     if let cached = cachedDisplaySleep, cached.at.duration(to: .now) < .seconds(60) {
       return cached.minutes
@@ -114,6 +131,15 @@ final class LockStateObserver {
     for token in tokens { center.removeObserver(token) }
     tokens.removeAll()
   }
+
+  isolated deinit {
+    // `isolated` so this can call `stop()` at all: a nonisolated deinit cannot
+    // touch the non-Sendable token array on a `@MainActor` class. The blocks
+    // capture `self` weakly, so this is tidiness rather than a leak fix — an
+    // observer left registered would keep firing into a nil `self` for the
+    // process's lifetime.
+    stop()
+  }
 }
 
 /// Resolves which display holds the frontmost app's front window, for
@@ -125,15 +151,37 @@ final class LockStateObserver {
 /// `unfocusedSeconds` by timestamping the transitions this returns — a focus
 /// visit RESETS that clock, and a missed visit is a display that stays dimmed
 /// while the user works on it. Spec §3 row 5 is explicit that only focus
-/// arrival exits `unfocusedDim`; global input does not. So this samples live
-/// state every call and caches nothing.
+/// arrival exits `unfocusedDim`; global input does not. So this resolves live
+/// on every call.
 ///
-/// `nil` means "could not be determined" and the caller must treat it as
-/// everything-focused rather than nothing-focused — the failure mode of a
-/// wrong guess here is a dimmed display the user is looking at.
+/// **Sampling cadence is therefore part of the contract.** At the 5 s focus
+/// poll, a display the user clicks stays dimmed for up to 5 s — visible, and
+/// exactly the lag #21 calls unusable. The consumer MUST sample this at the
+/// overlay-up cadence (0.1 s) for as long as an `unfocusedDim` overlay is up.
+/// That is affordable: [MEASURED 2026-08-06: 0.46 ms per call over 200 calls
+/// with 24 windows on screen; the review measured 0.71 ms on a busier desktop],
+/// i.e. well under 1% of a core at 10 Hz.
+///
+/// **It holds the last resolution** rather than reporting `nil` on a transient
+/// miss. Spotlight, a Dock-activated app that has not opened a window yet, and
+/// an app whose windows are on another Space all make the live resolution fail
+/// for a tick or two, and treating those as "focus went nowhere" would reset —
+/// or fail to reset — someone's unfocused clock on a frontmost app that never
+/// owned a window. `nil` therefore means only "no display has been resolved
+/// yet", before the first successful sample.
 @MainActor
 final class FocusSampler {
+  private var lastResolved: CGDirectDisplayID?
+
   func focusedDisplayID() -> CGDirectDisplayID? {
+    if let resolved = self.resolve() {
+      self.lastResolved = resolved
+      return resolved
+    }
+    return self.lastResolved
+  }
+
+  private func resolve() -> CGDirectDisplayID? {
     guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
     guard let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
       as? [[String: Any]] else { return nil }
