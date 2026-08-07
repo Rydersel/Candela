@@ -6,7 +6,6 @@ import Testing
 struct BrightnessPathPolicyTests {
   private func inputs(
     role: DisplayRole = .external,
-    hdrMode: HDRMode = .off,
     isHDRActive: Bool = false,
     forceSoftware: Bool = false,
     avoidGamma: Bool = false,
@@ -15,7 +14,7 @@ struct BrightnessPathPolicyTests {
     switchingValue: Double = 0.47
   ) -> BrightnessPathPolicy.Inputs {
     BrightnessPathPolicy.Inputs(
-      role: role, hdrMode: hdrMode, isHDRActive: isHDRActive,
+      role: role, isHDRActive: isHDRActive,
       forceSoftware: forceSoftware, avoidGamma: avoidGamma,
       disableCombinedBrightness: disableCombinedBrightness,
       unavailableDDC: unavailableDDC, switchingValue: switchingValue
@@ -34,20 +33,23 @@ struct BrightnessPathPolicyTests {
     ) == .native)
   }
 
-  /// Both halves are load-bearing. With HDR OFF the MAG341C answers
-  /// `DisplayServicesSetBrightness` with SUCCESS and changes nothing, so an
-  /// HDR *mode* alone must never route native.
-  @Test func nativeNeedsAnHDRModeAndLiveHDRTogether() {
-    #expect(BrightnessPathPolicy.usesNative(role: .external, hdrMode: .alwaysOn, isHDRActive: true))
-    #expect(!BrightnessPathPolicy.usesNative(role: .external, hdrMode: .alwaysOn, isHDRActive: false))
-    #expect(!BrightnessPathPolicy.usesNative(role: .external, hdrMode: .off, isHDRActive: true))
-    #expect(BrightnessPathPolicy.usesNative(role: .builtIn, hdrMode: .off, isHDRActive: false))
+  /// Live HDR is the condition, and Candela's own HDR mode is not even an
+  /// input (#52): System Settings can engage HDR with our mode still `.off`,
+  /// where DDC writes cannot land, so requiring the mode routed `.combined` —
+  /// a locked wire captioned as live control. The other direction stays
+  /// measured fact: with HDR off the MAG341C answers
+  /// `DisplayServicesSetBrightness` with SUCCESS and changes nothing, so only
+  /// LIVE HDR may route an external display native.
+  @Test func nativeFollowsLiveHDRWhoeverEngagedIt() {
+    #expect(BrightnessPathPolicy.usesNative(role: .external, isHDRActive: true))
+    #expect(!BrightnessPathPolicy.usesNative(role: .external, isHDRActive: false))
+    #expect(BrightnessPathPolicy.usesNative(role: .builtIn, isHDRActive: false))
   }
 
+  /// #52's measured scenario is now the only way to say "HDR is live": the
+  /// mode is not an input, so the outside-Candela engage cannot diverge.
   @Test func liveHDROnAnExternalDisplayIsTheNativePath() {
-    #expect(BrightnessPathPolicy.path(
-      inputs(hdrMode: .alwaysOn, isHDRActive: true)
-    ) == .native)
+    #expect(BrightnessPathPolicy.path(inputs(isHDRActive: true)) == .native)
   }
 
   /// Native OUTRANKS force-software: under live HDR the software leg is torn
@@ -55,7 +57,7 @@ struct BrightnessPathPolicyTests {
   /// HDR ignores.
   @Test func nativeWinsOverForceSoftware() {
     #expect(BrightnessPathPolicy.path(
-      inputs(hdrMode: .alwaysOn, isHDRActive: true, forceSoftware: true)
+      inputs(isHDRActive: true, forceSoftware: true)
     ) == .native)
   }
 
@@ -135,21 +137,19 @@ struct BrightnessPathPolicyTests {
   @Test func noInputWhateverCanProduceACombinedPathWithADeadDDCLeg() {
     let bools = [false, true]
     for role in [DisplayRole.external, .builtIn] {
-      for hdrMode in HDRMode.allCases {
-        for isHDRActive in bools {
-          for forceSoftware in bools {
-            for avoidGamma in bools {
-              for disableCombined in bools {
-                for switchingValue in [0, 0.47, 0.9375] {
-                  let candidate = inputs(
-                    role: role, hdrMode: hdrMode, isHDRActive: isHDRActive,
-                    forceSoftware: forceSoftware, avoidGamma: avoidGamma,
-                    disableCombinedBrightness: disableCombined,
-                    unavailableDDC: true, switchingValue: switchingValue
-                  )
-                  if case .combined = BrightnessPathPolicy.path(candidate) {
-                    Issue.record("combined reported for a dead DDC leg: \(candidate)")
-                  }
+      for isHDRActive in bools {
+        for forceSoftware in bools {
+          for avoidGamma in bools {
+            for disableCombined in bools {
+              for switchingValue in [0, 0.47, 0.9375] {
+                let candidate = inputs(
+                  role: role, isHDRActive: isHDRActive,
+                  forceSoftware: forceSoftware, avoidGamma: avoidGamma,
+                  disableCombinedBrightness: disableCombined,
+                  unavailableDDC: true, switchingValue: switchingValue
+                )
+                if case .combined = BrightnessPathPolicy.path(candidate) {
+                  Issue.record("combined reported for a dead DDC leg: \(candidate)")
                 }
               }
             }
@@ -167,22 +167,20 @@ struct BrightnessPathPolicyTests {
   @Test func theStandalonePredicateAgreesWithTheTableEverywhere() {
     let bools = [false, true]
     for role in [DisplayRole.external, .builtIn] {
-      for hdrMode in HDRMode.allCases {
-        for isHDRActive in bools {
-          for forceSoftware in bools {
-            for disableCombined in bools {
-              for unavailableDDC in bools {
-                let candidate = inputs(
-                  role: role, hdrMode: hdrMode, isHDRActive: isHDRActive,
-                  forceSoftware: forceSoftware,
-                  disableCombinedBrightness: disableCombined,
-                  unavailableDDC: unavailableDDC
-                )
-                let isNative = BrightnessPathPolicy.path(candidate) == .native
-                #expect(isNative == BrightnessPathPolicy.usesNative(
-                  role: role, hdrMode: hdrMode, isHDRActive: isHDRActive
-                ))
-              }
+      for isHDRActive in bools {
+        for forceSoftware in bools {
+          for disableCombined in bools {
+            for unavailableDDC in bools {
+              let candidate = inputs(
+                role: role, isHDRActive: isHDRActive,
+                forceSoftware: forceSoftware,
+                disableCombinedBrightness: disableCombined,
+                unavailableDDC: unavailableDDC
+              )
+              let isNative = BrightnessPathPolicy.path(candidate) == .native
+              #expect(isNative == BrightnessPathPolicy.usesNative(
+                role: role, isHDRActive: isHDRActive
+              ))
             }
           }
         }
