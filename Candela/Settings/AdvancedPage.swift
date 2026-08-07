@@ -242,7 +242,13 @@ struct AdvancedPage: View {
       .disabled(isBlocked)
 
       LabeledContent("\(DDCCommandCopy.title(command)) control code") {
-        TextField("Standard", text: remapBinding(command))
+        // An empty title + explicit prompt, the audio-name field's shape: a
+        // TITLE of "Standard" is treated as a label by the grouped `Form` and
+        // rendered wrapped inside the 100 pt frame ("Stan-/dard", combined
+        // pass D6); a PROMPT lays out as single-line placeholder text. The
+        // border matches the tuning grid's fields one section up.
+        TextField("", text: remapBinding(command), prompt: Text("Standard"))
+          .textFieldStyle(.roundedBorder)
           .focused($remapFocus, equals: command)
           .onSubmit { commitRemap(command) }
           .frame(width: 100)

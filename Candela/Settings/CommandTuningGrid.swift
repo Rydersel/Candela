@@ -120,6 +120,14 @@ struct CommandTuningGrid: View {
           columnHeader("Max")
           columnHeader("Invert")
         }
+        // No row-level accessibility group: a modifier applied to a `GridRow`
+        // distributes onto EACH CELL, so the old `.accessibilityElement(
+        // children: .contain)` + row label pair wrapped every cell in its own
+        // container named after the command (the T15 concern, confirmed by the
+        // combined pass's D5). The per-control labels below carry the command
+        // name themselves, so a11y contract 9's per-control clause holds; the
+        // row-as-group clause is traded away because no spelling of it
+        // survives `GridRow`'s modifier distribution.
         ForEach(DDCCommand.allCases, id: \.self) { command in
           GridRow {
             Text(verbatim: DDCCommandCopy.title(command))
@@ -132,11 +140,6 @@ struct CommandTuningGrid: View {
               .labelsHidden()
               .accessibilityLabel(Text("Invert \(rowName(command))"))
           }
-          // a11y contract 9's second clause: each command row is additionally a
-          // labeled group. `.contain`, never `.combine` — combining would
-          // collapse four operable controls into one unreachable element.
-          .accessibilityElement(children: .contain)
-          .accessibilityLabel(Text(verbatim: DDCCommandCopy.title(command)))
         }
       }
       // Belt to the section-level disable `AdvancedPage` applies (SO12): this
@@ -171,6 +174,11 @@ struct CommandTuningGrid: View {
       get: { focus == target ? (drafts[target] ?? storedText(target)) : storedText(target) },
       set: { drafts[target] = $0 }
     ))
+    // A grouped `Form` styles a bare `TextField` borderless, and with an empty
+    // value that renders as NOTHING: no border, no focus ring, no way to know
+    // a field is there (combined pass D4), under a caption inviting people to
+    // leave the boxes empty. The explicit border is what makes the box a box.
+    .textFieldStyle(.roundedBorder)
     .focused($focus, equals: target)
     .onSubmit { commit(target) }
     .frame(width: 60)
