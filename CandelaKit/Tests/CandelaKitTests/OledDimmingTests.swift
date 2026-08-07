@@ -180,7 +180,9 @@ struct OledDimmingTests {
     #expect(c.blackoutSeconds == 1200)
     #expect(c.unfocusedDimEnabled == false)
     #expect(c.unfocusedDimSeconds == 600)
-    #expect(c.unfocusedDimLevel == 0.7)
+    // Lighter than `idleDimLevel`: the level is the overlay's opacity, so
+    // higher is darker, and an unfocused display is still in the user's view.
+    #expect(c.unfocusedDimLevel == 0.3)
   }
 
   // MARK: - Additions beyond the brief

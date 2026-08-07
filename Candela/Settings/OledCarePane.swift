@@ -44,8 +44,8 @@ struct OledCarePane: View {
         // gets a divider above it, so two paragraphs of the same introduction
         // read as two settings.
         VStack(alignment: .leading, spacing: 6) {
-          SettingsCaption("Software can do two things about OLED wear: show fewer bright pixels, and show them for less time. \(AppInfo.productName) dims a display that has been idle, and can hide the fixed bright areas of the screen. Enrolling a display applies the recommended settings; every value can be tuned below.")
-          SettingsCaption("OLED care applies to external displays. A built-in Apple panel is managed by macOS.")
+          SettingsCaption("Software can do two things about OLED wear: show fewer bright pixels, and show them for less time. \(AppInfo.productName) dims a display that has been idle, and can turn on macOS's own auto-hiding for the menu bar and the Dock. Enrolling a display applies the recommended settings; every value can be tuned below.")
+          SettingsCaption("OLED care applies to external displays.")
         }
         if model.isSafeMode {
           safeModeNote
@@ -54,7 +54,14 @@ struct OledCarePane: View {
 
       chromeSection
 
-      ForEach(model.displays) { state in
+      // Identified by `persistenceKey`, NOT by `DisplayState.id` (which is the
+      // `CGDirectDisplayID`). IDs reassign across a replug with both displays
+      // still attached — measured, the MAG went 3→2 and the Dell 2→3 across one
+      // dock cycle — and `ForEach` keyed on a reused id hands the OLD view
+      // instance, with its `@State`, to the OTHER panel. The worst case is not
+      // cosmetic: an open power-off confirmation would retarget, and the DDC
+      // power-off would go to the wrong display.
+      ForEach(model.displays, id: \.display.persistenceKey) { state in
         OledCareDisplaySection(state: state, displaySleepMinutes: displaySleepMinutes)
       }
       if model.displays.isEmpty {
@@ -116,30 +123,38 @@ struct OledCarePane: View {
   @ViewBuilder private var chromeSection: some View {
     Section("Screen chrome") {
       if let chrome = model.oledCare.chrome {
+        // The refusal note lives INSIDE the switch's own row, like the
+        // displaysleep warning below: a note in a `Form` row of its own gets a
+        // divider and full padding, which reads as a separate setting rather
+        // than as this switch failing.
         SettingRow(caption: SettingsCaption("The menu bar and the Dock are the most static bright areas on a Mac screen. Hiding them stops those pixels being driven at all. The trade-off is real: the clock, status items and menus then take a trip to the edge of the screen.")) {
-          Toggle("Automatically hide the menu bar", isOn: Binding(
-            get: { chrome.menuBarAutoHide },
-            set: { on in
-              chrome.setMenuBarAutoHide(on)
-              menuBarRefused = chrome.menuBarAutoHide == on ? nil : on
+          VStack(alignment: .leading, spacing: 6) {
+            Toggle("Automatically hide the menu bar", isOn: Binding(
+              get: { chrome.menuBarAutoHide },
+              set: { on in
+                chrome.setMenuBarAutoHide(on)
+                menuBarRefused = chrome.menuBarAutoHide == on ? nil : on
+              }
+            ))
+            if menuBarRefused != nil {
+              OledInlineNote(Text("macOS did not take that change. Menu bar auto-hiding can also be set in System Settings > Control Center."))
             }
-          ))
-        }
-        if menuBarRefused != nil {
-          SettingsCaption("macOS did not take that change. Menu bar auto-hiding can also be set in System Settings > Control Center.")
+          }
         }
 
         SettingRow(caption: SettingsCaption("Changing this restarts the Dock, which takes a moment and is visible.")) {
-          Toggle("Automatically hide the Dock", isOn: Binding(
-            get: { chrome.dockAutoHide },
-            set: { on in
-              chrome.setDockAutoHide(on)
-              dockRefused = chrome.dockAutoHide == on ? nil : on
+          VStack(alignment: .leading, spacing: 6) {
+            Toggle("Automatically hide the Dock", isOn: Binding(
+              get: { chrome.dockAutoHide },
+              set: { on in
+                chrome.setDockAutoHide(on)
+                dockRefused = chrome.dockAutoHide == on ? nil : on
+              }
+            ))
+            if dockRefused != nil {
+              OledInlineNote(Text("macOS did not take that change. Dock auto-hiding can also be set in System Settings > Desktop & Dock."))
             }
-          ))
-        }
-        if dockRefused != nil {
-          SettingsCaption("macOS did not take that change. Dock auto-hiding can also be set in System Settings > Desktop & Dock.")
+          }
         }
 
         SettingsCaption("Both settings belong to macOS rather than to \(AppInfo.productName): they apply to every display, and enrolling a display never changes them on its own.")
@@ -159,6 +174,31 @@ struct OledCarePane: View {
     }
     if let requested = dockRefused, chrome.dockAutoHide == requested {
       dockRefused = nil
+    }
+  }
+}
+
+// MARK: - Inline note
+
+/// A note about the control directly ABOVE it, drawn inside that control's own
+/// `Form` row. Never its own row: a `Form` puts a divider and full padding
+/// around every row, so a note about a control reads as a separate setting —
+/// the defect `SettingRow` exists to prevent.
+///
+/// Symbol AND text, like the General pane's Safe Mode note — never state by
+/// colour alone. Stronger than a caption on purpose: every use says the
+/// control above it did not do, or is not doing, what it says.
+private struct OledInlineNote: View {
+  private let text: Text
+
+  init(_ text: Text) { self.text = text }
+
+  var body: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 6) {
+      Image(systemName: "exclamationmark.triangle")
+        .foregroundStyle(.secondary)
+      text
+        .fixedSize(horizontal: false, vertical: true)
     }
   }
 }
@@ -215,7 +255,12 @@ private struct OledCareDisplaySection: View {
     let _ = hoursRevision
     Section(name) {
       SettingRow("Off by default. Enrolling applies the recommended settings; nothing on the display changes until it has been idle for a while.") {
-        Toggle("Protect this display from burn-in", isOn: Binding(
+        // OC11: software cannot protect a panel from burn-in — it can reduce
+        // luminance and time at luminance, and that limit is the point of the
+        // rule. "Enroll" is also the word the intro and the empty state
+        // already use, so the pane's primary control now contains the verb its
+        // own copy is written around.
+        Toggle("Enroll this display in OLED care", isOn: Binding(
           get: { prefs.oledCareEnrolled },
           set: { on in writer.write(.oledCareEnrolled) { $0.oledCareEnrolled = on } }
         ))
@@ -268,7 +313,7 @@ private struct OledCareDisplaySection: View {
     SettingRow(caption: SettingsCaption("Counted from the last keyboard or mouse activity anywhere on the Mac. Video playback, calls and anything else holding the screen awake postpone it.")) {
       VStack(alignment: .leading, spacing: 6) {
         Stepper(value: idleMinutesBinding, in: Self.idleMinuteRange) {
-          Text(verbatim: "Dim after \(Self.minutesPhrase(minutes(prefs.oledIdleDimSeconds))) idle")
+          Text(verbatim: "Dim after \(Self.minutesPhrase(minutes(prefs.oledIdleDimSeconds))) of inactivity")
         }
         // In the SAME row as the control it is about: a divider between a
         // threshold and the sentence saying that threshold does nothing turns
@@ -318,7 +363,7 @@ private struct OledCareDisplaySection: View {
         // clamped value, and a label showing a lower number than the stepper
         // holds would be the silent-rewrite this clamp exists to make visible.
         Stepper(value: blackoutMinutesBinding, in: blackoutMinuteRange) {
-          Text(verbatim: "Go black after \(Self.minutesPhrase(blackoutMinutesBinding.wrappedValue)) idle")
+          Text(verbatim: "Go black after \(Self.minutesPhrase(blackoutMinutesBinding.wrappedValue)) of inactivity")
         }
         displaySleepWarning(forThresholdSeconds: prefs.oledBlackoutSeconds)
       }
@@ -367,9 +412,11 @@ private struct OledCareDisplaySection: View {
 
     // Both numbers live here, always — the since-standby figure is the one the
     // note below is about, and a dismissed note must not be the only place it
-    // can be read.
+    // can be read. With counting off the numbers stay on screen (they are the
+    // accumulated total, not a live reading) but they stop moving, and two
+    // frozen figures with nothing saying so read as a broken counter.
     LabeledContent("Panel on time") {
-      Text(verbatim: "\(Self.hoursPhrase(tracker.totalHours)) in total · \(Self.hoursPhrase(tracker.hoursSinceStandby)) since the last standby")
+      Text(verbatim: hoursLine(tracker))
         .foregroundStyle(.secondary)
     }
 
@@ -387,24 +434,38 @@ private struct OledCareDisplaySection: View {
     }
 
     SettingRow(caption: SettingsCaption("Sends the display's own power-off command over the data cable. Nothing is closed or logged out.")) {
-      Button("Turn Off This Display…") {
-        powerOffFailed = false
-        confirmingPowerOff = true
-      }
-      .confirmationDialog(
-        Text(verbatim: "Turn off \(name)?"),
-        isPresented: $confirmingPowerOff,
-        titleVisibility: .visible
-      ) {
-        Button("Turn Off Display") { powerOff() }
-        Button("Cancel", role: .cancel) {}
-      } message: {
-        Text("The display goes dark, and anything on it may move to another display until it comes back. The keyboard or mouse usually wakes it; if it stays dark, use the display's own power button.")
+      VStack(alignment: .leading, spacing: 6) {
+        Button("Turn Off This Display…") {
+          powerOffFailed = false
+          confirmingPowerOff = true
+        }
+        .confirmationDialog(
+          Text(verbatim: "Turn off \(name)?"),
+          isPresented: $confirmingPowerOff,
+          titleVisibility: .visible
+        ) {
+          Button("Turn Off Display") { powerOff() }
+          Button("Cancel", role: .cancel) {}
+        } message: {
+          Text("The display goes dark, and anything on it may move to another display until it comes back. The keyboard or mouse usually wakes it; if it stays dark, use the display's own power button.")
+        }
+        // In the button's own row: a failure notice one divider below the
+        // button reads as an unrelated setting rather than as this button's
+        // result.
+        if powerOffFailed {
+          OledInlineNote(Text("The display did not accept the power-off command. Not every display supports it."))
+        }
       }
     }
-    if powerOffFailed {
-      SettingsCaption("The display did not accept the power-off command. Not every display supports it.")
-    }
+  }
+
+  /// The hours line, with the counter's own state in it. `oledHoursTracking`
+  /// off freezes both figures; saying so is the difference between a paused
+  /// counter and a stuck one.
+  private func hoursLine(_ tracker: PanelHoursTracker) -> String {
+    let figures = "\(Self.hoursPhrase(tracker.totalHours)) in total · "
+      + "\(Self.hoursPhrase(tracker.hoursSinceStandby)) since the last standby"
+    return prefs.oledHoursTracking ? figures : figures + " · counting is paused"
   }
 
   private func powerOff() {
@@ -433,8 +494,20 @@ private struct OledCareDisplaySection: View {
   private static let unfocusedMinuteRange = minimumMinutes...max(120, minimumMinutes)
 
   /// Likewise the engine's blackout gap, not a local constant.
+  ///
+  /// The idle term rounds UP, unlike `minutes(_:)` which rounds to nearest for
+  /// display. The engine clamps the blackout threshold to exactly
+  /// `idleDimSeconds + blackoutGapSeconds`, so an idle threshold that is not a
+  /// whole number of minutes — reachable with a `defaults write` (D26) — would
+  /// otherwise put this floor up to 30 s UNDER the engine's, and the engine
+  /// would silently clamp a value the stepper allowed. Rounding up can only
+  /// overshoot, which the engine accepts unchanged.
   private var blackoutMinimumMinutes: Int {
-    minutes(prefs.oledIdleDimSeconds) + Int((OledDimConfig.blackoutGapSeconds / 60).rounded(.up))
+    let idleMinutes = max(
+      Self.minimumMinutes,
+      Int((Double(prefs.oledIdleDimSeconds) / 60).rounded(.up))
+    )
+    return idleMinutes + Int((OledDimConfig.blackoutGapSeconds / 60).rounded(.up))
   }
 
   private var blackoutMinuteRange: ClosedRange<Int> {
@@ -489,22 +562,14 @@ private struct OledCareDisplaySection: View {
   /// configuration: the panel blanks before the dim would ever engage. Stated
   /// with both numbers, because the fix is to change one of them.
   ///
-  /// Symbol AND text, like the General pane's Safe Mode note — never state by
-  /// colour alone, and this is a stronger statement than a caption: the control
-  /// above it currently does nothing.
   @ViewBuilder
   private func displaySleepWarning(forThresholdSeconds seconds: Int) -> some View {
     if let displaySleepMinutes, displaySleepMinutes > 0, seconds >= displaySleepMinutes * 60 {
-      HStack(alignment: .firstTextBaseline, spacing: 6) {
-        Image(systemName: "exclamationmark.triangle")
-          .foregroundStyle(.secondary)
-        Text(verbatim: """
-        macOS turns this display off after \(Self.minutesPhrase(displaySleepMinutes)) of \
-        inactivity, so this would never happen first. Lower it, or raise the display sleep \
-        time in System Settings > Lock Screen.
-        """)
-        .fixedSize(horizontal: false, vertical: true)
-      }
+      OledInlineNote(Text(verbatim: """
+      macOS turns this display off after \(Self.minutesPhrase(displaySleepMinutes)) of \
+      inactivity, so the display sleeps before the dim ever engages. Lower it, or raise the \
+      display sleep time in System Settings > Lock Screen.
+      """))
     }
   }
 

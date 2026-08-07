@@ -525,7 +525,10 @@ struct DisplayPrefsTests {
       #expect(prefs.oledBlackoutSeconds == 1200)
       #expect(prefs.oledUnfocusedDimEnabled == false)
       #expect(prefs.oledUnfocusedDimSeconds == 600)
-      #expect(prefs.oledUnfocusedDimLevel == 0.7)
+      // Lighter than the idle dim's 0.5, because the level IS the black
+      // overlay's opacity — higher is darker — and an unfocused display is
+      // still in view.
+      #expect(prefs.oledUnfocusedDimLevel == 0.3)
       #expect(prefs.oledHoursTracking == true)
     }
   }
@@ -578,6 +581,13 @@ struct DisplayPrefsTests {
       prefs.oledUnfocusedDimSeconds = 900
       prefs.oledUnfocusedDimLevel = 0.4
       prefs.oledHoursTracking = false
+      // Panel hours are NOT prefs — they live under `PanelHoursTracker`'s own
+      // keys and the reset must leave them alone. Written directly here
+      // because the tracker owns them, and because the sweep below needs them
+      // present to prove it distinguishes "kept" from "wiped".
+      defaults.set(3600.0, forKey: "oledPanelSeconds.pk")
+      defaults.set(120.0, forKey: "oledStandbySeconds.pk")
+      defaults.set(true, forKey: "oledStandbyNoteDismissed.pk")
 
       prefs.resetOledCare()
 
@@ -589,17 +599,33 @@ struct DisplayPrefsTests {
       #expect(prefs.oledBlackoutSeconds == 1200)
       #expect(prefs.oledUnfocusedDimEnabled == false)
       #expect(prefs.oledUnfocusedDimSeconds == 600)
-      #expect(prefs.oledUnfocusedDimLevel == 0.7)
+      #expect(prefs.oledUnfocusedDimLevel == 0.3)
       #expect(prefs.oledHoursTracking == true)
 
-      for name in [
-        "oledCareEnrolled", "oledIdleDimSeconds", "oledIdleDimLevel", "oledLockDimOff",
-        "oledBlackoutEnabled", "oledBlackoutSeconds",
-        "oledUnfocusedDimEnabled", "oledUnfocusedDimSeconds", "oledUnfocusedDimLevel",
-        "oledHoursTrackingOff",
-      ] {
-        #expect(defaults.object(forKey: "\(name).pk") == nil, "\(name) survived the reset")
-      }
+      // The sweep can only see keys something wrote above, so pin the
+      // population first: an eleventh OLED pref fails HERE, which is the
+      // prompt to add its write — and only then can the sweep catch a
+      // `resetOledCare` that forgot to remove it.
+      let oledPrefNames = PrefName.allCases.filter { $0.rawValue.hasPrefix("oled") }
+      #expect(oledPrefNames.count == 10, "a new OLED pref needs a write above")
+
+      // A SWEEP of the store, not a second hand-written key list. These ten are
+      // already enumerated by hand in two other places and in two spellings —
+      // `PrefName` cases in the per-display reset's fan-out, and key strings in
+      // `resetOledCare`, where `oledLockDim` and `oledHoursTracking` carry the
+      // inverted `…Off` suffix. A third copy here would have the same defect
+      // the other two do: an eleventh pref compiles clean and silently survives
+      // the reset. Asking the store instead cannot miss one.
+      let keptHoursKeys: Set<String> = [
+        "oledPanelSeconds.pk", "oledStandbySeconds.pk", "oledStandbyNoteDismissed.pk",
+      ]
+      let survivors = defaults.dictionaryRepresentation().keys
+        .filter { $0.hasPrefix("oled") && $0.hasSuffix(".pk") && !keptHoursKeys.contains($0) }
+        .sorted()
+      #expect(survivors.isEmpty, "survived the reset: \(survivors.joined(separator: ", "))")
+      // …and the wear data is still there, so "nothing left" above is not
+      // passing because the reset wiped everything.
+      #expect(keptHoursKeys.allSatisfy { defaults.object(forKey: $0) != nil })
     }
   }
 

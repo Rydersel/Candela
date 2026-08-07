@@ -11,6 +11,10 @@ public enum OledDimState: Equatable, Sendable {
 /// a settable property would make them advisory. Task 7 rebuilds the config
 /// from prefs and hands the whole value to `updateConfig`, so nothing needs to
 /// mutate a field in place.
+///
+/// Both `…DimLevel`s are the black overlay's OPACITY — higher is darker, and
+/// blackout is the same scale at 1.0. They are not a fraction of the user's
+/// brightness, and nothing here writes the display's brightness.
 public struct OledDimConfig: Equatable, Sendable {
   public private(set) var idleDimSeconds: Double
   public private(set) var idleDimLevel: Double

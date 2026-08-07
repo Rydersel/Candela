@@ -201,7 +201,10 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("oledIdleDimSeconds")) }
   }
 
-  /// Fraction of the user's brightness the care dim drops to.
+  /// Opacity of the black care overlay, NOT a fraction of the user's
+  /// brightness: **higher is darker**. `IdleDimmingEngine.alpha(for:)` hands
+  /// this straight to the overlay's content-view alpha, and blackout is the
+  /// same scale at 1.0. The display's own brightness is never written.
   public var oledIdleDimLevel: Double {
     get { defaults.object(forKey: key("oledIdleDimLevel")) as? Double ?? 0.5 }
     set { defaults.set(newValue, forKey: key("oledIdleDimLevel")) }
@@ -232,8 +235,15 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("oledUnfocusedDimSeconds")) }
   }
 
+  /// Overlay opacity, same scale as `oledIdleDimLevel` — higher is darker.
+  ///
+  /// Default 0.3, LIGHTER than the idle dim's 0.5 on purpose: an unfocused
+  /// display is still in the user's view, so it gets a gentler dim than one
+  /// nobody has touched for five minutes. The original 0.7 was chosen under an
+  /// inverted reading of this scale (it would have made the unfocused dim the
+  /// darker of the two).
   public var oledUnfocusedDimLevel: Double {
-    get { defaults.object(forKey: key("oledUnfocusedDimLevel")) as? Double ?? 0.7 }
+    get { defaults.object(forKey: key("oledUnfocusedDimLevel")) as? Double ?? 0.3 }
     set { defaults.set(newValue, forKey: key("oledUnfocusedDimLevel")) }
   }
 
