@@ -224,6 +224,18 @@ final class AppModel {
     prefsRevision &+= 1
   }
 
+  /// First-sight lines dismissed this session (SO22), by persistence key.
+  /// In-memory ON PURPOSE — never a marker pref: the line renders while the
+  /// display's pref domain is empty, and writing anything to dismiss it would
+  /// defeat the emptiness check it is gated on. Dying with the process is the
+  /// intended lifetime for an informational line about a display that is,
+  /// definitionally, about to acquire stored values or stay untouched.
+  private(set) var dismissedFirstSightKeys: Set<String> = []
+
+  func dismissFirstSight(_ persistenceKey: String) {
+    dismissedFirstSightKeys.insert(persistenceKey)
+  }
+
   /// Software-dimming islands (AppKit lives in the app target behind
   /// CandelaKit protocols). Constructed by StatusItemController and injected
   /// here — implementer's choice per the Task 6 brief, so tests can hand the

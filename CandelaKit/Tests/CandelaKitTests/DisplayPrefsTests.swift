@@ -511,4 +511,23 @@ struct DisplayPrefsTests {
     #expect(safe.startupAction == .doNothing)
     #expect(safe.pollingTries == 0)
   }
+
+  // MARK: - First-sight (SO22)
+
+  @Test func anEmptyDomainHasNoStoredValue() {
+    withSuite { defaults in
+      #expect(!DisplayPrefs.hasAnyStoredValue(forKey: "AAAA-BBBB", defaults: defaults))
+    }
+  }
+
+  @Test func anySeededKeyCountsAsStored() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "AAAA-BBBB")
+      prefs.friendlyName = "Desk"
+      #expect(DisplayPrefs.hasAnyStoredValue(forKey: "AAAA-BBBB", defaults: defaults))
+      // Suffix match, not substring: another display's domain stays fresh.
+      #expect(!DisplayPrefs.hasAnyStoredValue(forKey: "BBBB", defaults: defaults))
+      #expect(!DisplayPrefs.hasAnyStoredValue(forKey: "CCCC-DDDD", defaults: defaults))
+    }
+  }
 }

@@ -56,6 +56,28 @@ enum DisplayModeCopy {
       : "Reverting to the previous resolution in \(seconds) seconds."
   }
 
+  /// The NON-owning surface's whole rendering (SO6): status plus a pointer to
+  /// where the buttons are. Never shown beside buttons — a passive line that
+  /// named a deadline without saying where to answer would read as a countdown
+  /// to nothing.
+  static func passiveCountdown(_ seconds: Int) -> String {
+    seconds == 1
+      ? "Reverting in 1 second — answer in the confirmation window."
+      : "Reverting in \(seconds) seconds — answer in the confirmation window."
+  }
+
+  /// A11y contract 8: the announcement posted when the answerable banner
+  /// appears. Names the new mode in spoken form and the deadline; the 10- and
+  /// 3-second re-announcements reuse `countdown(_:)`.
+  static func previewAnnouncement(mode: DisplayMode, seconds: Int) -> String {
+    let spoken = ModeSpeech.spoken(
+      logicalWidth: mode.logicalWidth,
+      logicalHeight: mode.logicalHeight,
+      refreshHz: mode.refreshHz
+    )
+    return "Display changed to \(spoken). Keep this resolution? \(countdown(seconds))"
+  }
+
   // The three sentences below are shown by two surfaces each and are stated
   // once here for the same reason as the labels above: they agree today, and
   // agreement is not a property two literals keep. The CoreGraphics code stays

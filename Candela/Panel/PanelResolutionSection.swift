@@ -199,7 +199,7 @@ struct PanelResolutionSection: View {
     // tracking session that ends on Escape, on a menu-bar click, and possibly
     // on the reconfiguration this very call performs, so the coordinator puts
     // the Keep/Revert surface in a window of its own.
-    coordinator.select(mode, on: displayID, from: .panel)
+    coordinator.select(mode, on: displayID, from: .panel, surface: .floatingPanel)
     // Ending tracking is the point of this line, not a courtesy.
     //
     // Everything `select` queues — the reconfiguration, the countdown, the

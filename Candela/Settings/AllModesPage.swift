@@ -48,6 +48,9 @@ struct AllModesPage: View {
   @FocusState private var focusedRow: Int32?
 
   @Environment(AppModel.self) private var model
+  /// SO6's "key settings window" test, read at the click that starts a
+  /// preview: `.key` exactly when this view's window is the key window.
+  @Environment(\.controlActiveState) private var controlActiveState
 
   private var displayID: CGDirectDisplayID { state.display.id }
   private var coordinator: DisplayModeCoordinator { model.displayModes }
@@ -274,10 +277,13 @@ struct AllModesPage: View {
   private func apply(_ mode: DisplayMode, in catalog: DisplayModeCoordinator.Catalog) {
     // THE apply path, shared with the hub's Size pop-up — including the
     // already-on-screen guard, which lives on the coordinator so the two
-    // surfaces cannot drift. `.settings` still routes a failed `begin()` to the
-    // hub's start-failure banner.
+    // surfaces cannot drift. `.settings` routes a failed `begin()` to the
+    // banner region; the SURFACE is the SO6 decision, sampled from this
+    // window's key state synchronously at the click (see `DisplayHubView`).
     coordinator.selectFromList(
-      mode, on: displayID, from: .settings, currentModeID: catalog.current?.ioModeID
+      mode, on: displayID, from: .settings,
+      surface: controlActiveState == .key ? .settingsBanner : .floatingPanel,
+      currentModeID: catalog.current?.ioModeID
     )
   }
 

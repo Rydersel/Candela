@@ -256,7 +256,7 @@ struct SettingsRootView: View {
   private func displayStack(key: String, state: AppModel.DisplayState) -> some View {
     NavigationStack(path: pathBinding(for: key)) {
       VStack(spacing: 0) {
-        BannerRegion(persistenceKey: key)
+        BannerRegion(state: state)
         if key == "builtIn" {
           BuiltInDisplayPane(selection: $selection, path: pathBinding(for: key))
         } else {
@@ -265,7 +265,7 @@ struct SettingsRootView: View {
       }
       .navigationDestination(for: DisplaySubPage.self) { page in
         VStack(spacing: 0) {
-          BannerRegion(persistenceKey: key)
+          BannerRegion(state: state)
           subPage(page, key: key, state: state)
         }
         // The root's principal title does NOT survive a push (measured in the
@@ -376,17 +376,6 @@ struct SettingsRootView: View {
   /// rather than a blank pane, which reads as a broken window.
   private var generalFallback: some View {
     SettingsRegistry.descriptor(for: .general).content()
-  }
-}
-
-/// SO7's single banner placement. Empty until Task 17 — it exists now so the
-/// two call sites in `displayStack` are already the ONLY places a banner can
-/// render, and pages never grow their own.
-struct BannerRegion: View {
-  let persistenceKey: String
-
-  var body: some View {
-    EmptyView()
   }
 }
 

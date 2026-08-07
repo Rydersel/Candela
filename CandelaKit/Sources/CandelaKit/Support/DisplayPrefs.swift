@@ -490,6 +490,20 @@ public final class DisplayPrefs: @unchecked Sendable {
     "\(name).\(persistenceKey)"
   }
 
+  /// SO22: whether ANYTHING has ever been stored for this display — prefs,
+  /// saved levels, tuning. Every per-display key ends `".<persistenceKey>"`
+  /// (this type's `key`/`commandKey`, the brightness/volume/contrast stores'
+  /// `"<name>.<pk>"` storage keys), so an empty answer means the domain is
+  /// genuinely fresh, which is what distinguishes "first time seeing this
+  /// display" from "its settings failed to restore". A suffix scan, not a
+  /// prefix: the persistence key is the TAIL of every stored key.
+  public static func hasAnyStoredValue(
+    forKey persistenceKey: String, defaults: UserDefaults = .standard
+  ) -> Bool {
+    let suffix = ".\(persistenceKey)"
+    return defaults.dictionaryRepresentation().keys.contains { $0.hasSuffix(suffix) }
+  }
+
   private func clampSwitchingPoint(_ point: Int) -> Int {
     min(max(point, DimmingMath.switchingPointRange.lowerBound), DimmingMath.switchingPointRange.upperBound)
   }

@@ -11,12 +11,10 @@ import SwiftUI
 ///
 /// Section order is the spec's: identity, Display, Sound, navigation, reset.
 ///
-/// **Interim placements, owned by later tasks:** the preview/start-failure/
-/// reapply banners and the stranded-mute recovery block render inline here
-/// until Task 17's `BannerRegion` takes them (SO7/SO4). They are kept rather
-/// than dropped because the recovery block is D29 rule 3 — a recovery control
-/// must exist in the state it recovers from, and the Advanced sub-page that
-/// will hold the DDC toggle is still a placeholder.
+/// Banners — the countdown surface, start failures, reapply notices, the
+/// stranded-mute recovery, the first-sight line — are NOT this page's:
+/// `BannerRegion` renders them above this view and above every pushed
+/// sub-page (SO7), from `SettingsRootView`'s two placements alone.
 ///
 /// `@MainActor` for the reason every settings view records: a `View`'s stored
 /// and computed properties other than `body` are nonisolated under complete
@@ -34,6 +32,9 @@ struct DisplayHubView: View {
 
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
+  /// SO6's "key settings window" test, read at the click that starts a
+  /// preview: `.key` exactly when this view's window is the key window.
+  @Environment(\.controlActiveState) private var controlActiveState
 
   /// Drafts, not direct pref bindings: a `TextField` bound straight to a pref
   /// would write (and fan out, and bump `prefsRevision`) on every keystroke,
@@ -161,10 +162,6 @@ struct DisplayHubView: View {
 
   @ViewBuilder private var displaySection: some View {
     Section {
-      previewBanner
-      startFailureBanner
-      reapplyBanner
-
       // A nil catalog is "not enumerated yet", NOT "no modes" — rendering the
       // empty state for it flashes false copy on every pane switch.
       if let catalog {
@@ -352,86 +349,6 @@ struct DisplayHubView: View {
     return live.descriptor == stored
   }
 
-  // MARK: - Preview banners (interim — Task 17 moves these to BannerRegion)
-
-  /// The SECOND surface, kept deliberately.
-  ///
-  /// `ModeConfirmationWindow` is the primary one — it takes every preview
-  /// whatever started it, on the display that changed. This banner is the
-  /// recovery path for every case where that window is on screen but not
-  /// usable: a failed revert on a mode that left the display barely readable, a
-  /// window that landed on a display the user cannot see, a preview whose
-  /// display departed. Gated on the DISPLAY and never on origin, and answering
-  /// with the same intent-carrying values, so whichever surface is reachable
-  /// can end the same session.
-  @ViewBuilder private var previewBanner: some View {
-    if let preview = coordinator.preview, preview.displayID == displayID {
-      VStack(alignment: .leading, spacing: 6) {
-        Text("Keep this resolution?")
-          .font(.callout.weight(.semibold))
-        Text(verbatim: "\(DisplayModeCopy.size(preview.mode)), \(DisplayModeCopy.refresh(preview.mode.refreshHz))")
-          .foregroundStyle(.secondary)
-
-        if let failure = preview.failure {
-          // Nothing auto-retries a failed resolution. Staying silent here would
-          // leave the display on a mode the user never approved, held only
-          // until the app exits.
-          SettingsCaption(DisplayModeCopy.resolveFailure)
-            .help("CoreGraphics error \(failure.cgErrorCode)")
-        }
-        if preview.isCountingDown {
-          Text(verbatim: DisplayModeCopy.countdown(preview.secondsRemaining))
-            .foregroundStyle(.secondary)
-        } else if preview.failure != nil {
-          SettingsCaption(DisplayModeCopy.expiryAlreadyRan)
-        }
-
-        HStack(spacing: 8) {
-          // Both answers carry the preview THIS banner is rendering, so a
-          // selection landing between the click and the queued operation is
-          // refused as stale rather than resolved by an answer given about
-          // something else. Keeping writes NO stored mode (SO19).
-          Button("Keep") { Task { await coordinator.confirm(preview) } }
-            .buttonStyle(.borderedProminent)
-          Button("Revert Now") { Task { await coordinator.revert(preview) } }
-        }
-        // Belt to the intent check's braces: while a selection is still landing
-        // the banner is about to change, so offering an answer to the old one
-        // is pointless even though it is now harmless.
-        .disabled(coordinator.isApplying)
-      }
-      .padding(.vertical, 2)
-    }
-  }
-
-  @ViewBuilder private var startFailureBanner: some View {
-    if let failure = coordinator.startFailure, failure.displayID == displayID {
-      VStack(alignment: .leading, spacing: 6) {
-        SettingsCaption(DisplayModeCopy.startFailure(failure.reason))
-          .help(DisplayModeCopy.startFailureDiagnostic(failure.reason))
-        Button("OK") { coordinator.dismissStartFailure() }
-      }
-    }
-  }
-
-  /// What reapply could not do, said where the stored-mode toggle that asked
-  /// for it lives: the control that made the promise is the one that has to
-  /// admit it could not keep it. An unplug does not take it away (SO8).
-  @ViewBuilder private var reapplyBanner: some View {
-    if let report = coordinator.report(for: displayID) {
-      VStack(alignment: .leading, spacing: 6) {
-        SettingsCaption(DisplayModeCopy.reapply(
-          requested: report.requested, notice: report.notice
-        ))
-        .modifier(ReapplyDiagnostic(notice: report.notice))
-        // Keyed by the report on screen, so OK can only clear the notice the
-        // user is reading — and the same call the panel's OK makes.
-        Button("OK") { coordinator.dismissReport(forKey: report.key) }
-      }
-      .padding(.vertical, 2)
-    }
-  }
-
   // MARK: - Mode selection
 
   /// Applies the chosen SIZE while keeping the refresh rate the display is
@@ -462,11 +379,15 @@ struct DisplayHubView: View {
     // different mode than the one "Keep" would commit. It also carries the
     // already-on-screen guard, shared with the full mode list.
     //
-    // `.settings` no longer picks the answering surface — the confirmation
-    // window takes every preview now — but it still routes a failed `begin()`,
-    // which this page reports in `startFailureBanner` and the panel cannot.
+    // `.settings` routes a failed `begin()` to the banner region, which the
+    // panel cannot show. The SURFACE is the SO6 decision, sampled from this
+    // window's key state synchronously at the click: key settings window →
+    // the banner region answers and the floating window stays away; anything
+    // else keeps the floating default.
     coordinator.selectFromList(
-      mode, on: displayID, from: .settings, currentModeID: catalog.current?.ioModeID
+      mode, on: displayID, from: .settings,
+      surface: controlActiveState == .key ? .settingsBanner : .floatingPanel,
+      currentModeID: catalog.current?.ioModeID
     )
   }
 
@@ -505,12 +426,12 @@ struct DisplayHubView: View {
         ))
         // Disable, don't hide: the control does not apply while the volume
         // command is off, and saying so beats a missing row. Disabling it does
-        // NOT make the D22 hazard unreachable, and the recovery below works
-        // regardless of `isAvailable` (D29 rule 3).
+        // NOT make the D22 hazard unreachable, and the stranded-mute recovery
+        // in `BannerRegion` works regardless of `isAvailable` (D29 rule 3) —
+        // rendered above this page and every sub-page, so it cannot be
+        // scrolled out of existence by the state it recovers from.
         .disabled(!state.volume.isAvailable)
       }
-
-      strandedMuteRecovery
 
       SettingRow("\(AppInfo.productName) asks the display; the slider is greyed only when it says no.") {
         Picker("Volume slider", selection: Binding(
@@ -573,49 +494,6 @@ struct DisplayHubView: View {
     state.volume.isAvailable
       ? "Off: muting sets volume to zero. On: sends the display's own mute command."
       : "Volume control is off for this display, so mute is unavailable."
-  }
-
-  /// D29 rule 3 — the explicit unmute affordance, never `.disabled`. This is
-  /// the ONLY control that can leave the state, because `toggleMute` refuses
-  /// while `isAvailable` is false; it clears the two prefs that make it false
-  /// FIRST (D29 rule 2), then unmutes while the display's current mute strategy
-  /// is still in force. Interim placement: Task 17 moves this block to the
-  /// destination's banner region (SO4) — it must never be dropped in between,
-  /// because the DDC toggle that re-enables the command lives on a sub-page
-  /// that is still a placeholder.
-  @ViewBuilder private var strandedMuteRecovery: some View {
-    if isStrandedMuted {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("This display is muted in hardware.")
-        Button("Turn Hardware Control Back On and Unmute") { recoverFromHardwareMute() }
-      }
-      SettingsCaption("Muting used the display's own mute command, and that command can only be undone over hardware control. This turns hardware control back on for this display and unmutes it.")
-    }
-  }
-
-  /// Hardware-muted with the volume command turned off: `toggleMute` refuses
-  /// while `isAvailable` is false, so nothing but `recoverFromHardwareMute`
-  /// leaves this state.
-  private var isStrandedMuted: Bool {
-    state.volume.isMuted && !state.volume.isAvailable
-  }
-
-  /// Clears the availability prefs FIRST, then unmutes. Doing it in the other
-  /// order is a silent no-op: `toggleMute` returns `isMuted` unchanged while
-  /// `isAvailable` is false, and the user is left believing they unmuted.
-  /// `enableMuteUnmute` is deliberately NOT touched — the display was muted
-  /// under whatever strategy is in force, and that strategy has to still be in
-  /// force for the unmute to send the right wire value.
-  private func recoverFromHardwareMute() {
-    // Two prefs, two rows, one union — `writeAll`, never a single
-    // representative name.
-    writer.writeAll([.forceSw, .unavailableDDC]) { prefs in
-      prefs.forceSoftware = false
-      var tuning = prefs.tuning(for: .volume)
-      tuning.unavailableDDC = false
-      prefs.setTuning(tuning, for: .volume)
-    }
-    _ = state.volume.toggleMute()
   }
 
   // MARK: - Navigation

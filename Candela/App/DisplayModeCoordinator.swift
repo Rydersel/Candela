@@ -30,16 +30,33 @@ import os
 final class DisplayModeCoordinator {
   /// Which surface asked for the preview that is outstanding.
   ///
-  /// It no longer decides where a PREVIEW is answered — the confirmation window
-  /// takes every preview now, whatever started it (`syncConfirmation`). What it
-  /// still decides is where a failed `begin()` is reported: the settings pane
-  /// has a row of its own for that and stays on screen, while the panel is an
-  /// `NSMenu` tracking session that ends on Escape, on a click in the menu bar,
-  /// and — the case that matters — on the selection itself, so a panel-origin
-  /// failure would otherwise be shown to nobody.
+  /// It does not decide where a PREVIEW is answered — `PreviewSurface` does,
+  /// and the two are separate values because they answer different questions
+  /// ("who asked" vs "who answers"). What origin decides is where a failed
+  /// `begin()` is reported: the settings pane has a row of its own for that and
+  /// stays on screen, while the panel is an `NSMenu` tracking session that ends
+  /// on Escape, on a click in the menu bar, and — the case that matters — on
+  /// the selection itself, so a panel-origin failure would otherwise be shown
+  /// to nobody.
   enum PreviewOrigin: Sendable {
     case settings
     case panel
+  }
+
+  /// Which surface ANSWERS the outstanding preview (SO6): exactly one is
+  /// answerable per preview. Decided at preview start and carried on the
+  /// preview — never re-derived mid-countdown, so the buttons cannot migrate
+  /// under the user's pointer.
+  ///
+  /// `.settingsBanner` iff the change originated from the settings window while
+  /// that window was key (the caller reads its own `controlActiveState` at the
+  /// click); everything else — the panel, and a settings surface in a non-key
+  /// window — is answered by the floating `ConfirmationPanel`, which then does
+  /// not show while a banner owns the answer. The non-owning surface renders
+  /// passive text only.
+  enum PreviewSurface: Sendable {
+    case floatingPanel
+    case settingsBanner
   }
 
   /// Everything one display's UI renders, computed once per enumeration.
@@ -78,6 +95,8 @@ final class DisplayModeCoordinator {
   struct Preview: Equatable {
     let displayID: CGDirectDisplayID
     let mode: DisplayMode
+    /// The one answerable surface (SO6), fixed at preview start.
+    let surface: PreviewSurface
     var secondsRemaining: Int
     /// Set when `confirm()`, `revert()` or the expiry threw. The display did
     /// not move, the session still holds the fallback, and both buttons stay
@@ -196,6 +215,12 @@ final class DisplayModeCoordinator {
   /// coordinator to `.settings` and torn down A's confirmation window while A
   /// was still counting down. Keyed, the surface follows the preview.
   @ObservationIgnored private var origins: [CGDirectDisplayID: PreviewOrigin] = [:]
+  /// Keyed like `origins` and for its reason: the answering surface follows the
+  /// preview, not the coordinator. Read back in `adopt`, which rebuilds
+  /// `Preview` from the session and needs the one field the session does not
+  /// hold. A missing entry answers `.floatingPanel` — the safe default, since
+  /// the floating window shows on the display that changed.
+  @ObservationIgnored private var surfaces: [CGDirectDisplayID: PreviewSurface] = [:]
   @ObservationIgnored private var countdown: Task<Void, Never>?
   @ObservationIgnored private var pending: Task<Void, Never>?
   @ObservationIgnored private var inFlightSelects = 0
@@ -403,11 +428,6 @@ final class DisplayModeCoordinator {
   }
 
   // MARK: - Reports
-
-  /// Identity keys with a notice nobody has dismissed. What a summary surface —
-  /// the sidebar badge, a banner region — asks, so no such surface has to
-  /// reproduce the "is there anything to say about this display" test.
-  var unreadReportKeys: Set<String> { Set(reapplyReports.keys) }
 
   /// The report for a display that is plugged in RIGHT NOW.
   ///
@@ -629,10 +649,15 @@ final class DisplayModeCoordinator {
   /// so no caller can create a second in-flight `begin()` by spawning its own
   /// task.
   ///
-  /// `origin` is not defaulted: every caller has to say where its answer will
-  /// be offered, because getting it wrong is invisible until a countdown
-  /// expires against nobody.
-  func select(_ mode: DisplayMode, on displayID: CGDirectDisplayID, from origin: PreviewOrigin) {
+  /// `origin` and `surface` are not defaulted: every caller has to say where a
+  /// failure is reported and where the answer will be offered, because getting
+  /// either wrong is invisible until a countdown expires against nobody. The
+  /// settings callers decide `surface` from their own window's key state at the
+  /// click (SO6); everything else passes `.floatingPanel`.
+  func select(
+    _ mode: DisplayMode, on displayID: CGDirectDisplayID,
+    from origin: PreviewOrigin, surface: PreviewSurface
+  ) {
     // Raised HERE, synchronously, not inside the queued operation: the whole
     // point is that the banner's buttons are already disabled by the time the
     // reconfiguration starts, so nobody can confirm a mode they are not
@@ -641,7 +666,7 @@ final class DisplayModeCoordinator {
     inFlightSelects += 1
     isApplying = true
     enqueue {
-      await self.performSelect(mode, on: displayID, from: origin)
+      await self.performSelect(mode, on: displayID, from: origin, surface: surface)
       self.inFlightSelects -= 1
       if self.inFlightSelects == 0 { self.isApplying = false }
     }
@@ -659,10 +684,10 @@ final class DisplayModeCoordinator {
   /// only that surface has.
   func selectFromList(
     _ mode: DisplayMode, on displayID: CGDirectDisplayID,
-    from origin: PreviewOrigin, currentModeID: Int32?
+    from origin: PreviewOrigin, surface: PreviewSurface, currentModeID: Int32?
   ) {
     guard mode.ioModeID != currentModeID else { return }
-    select(mode, on: displayID, from: origin)
+    select(mode, on: displayID, from: origin, surface: surface)
   }
 
   /// `answered` is the preview the caller was LOOKING AT when it answered. It
@@ -722,6 +747,7 @@ final class DisplayModeCoordinator {
       let answered = Preview(
         displayID: outstanding.displayID,
         mode: outstanding.mode,
+        surface: self.surfaces[outstanding.displayID] ?? .floatingPanel,
         secondsRemaining: 0,
         failure: nil,
         isCountingDown: false
@@ -766,13 +792,17 @@ final class DisplayModeCoordinator {
   // MARK: - Operations (always inside the queue)
 
   private func performSelect(
-    _ mode: DisplayMode, on displayID: CGDirectDisplayID, from origin: PreviewOrigin
+    _ mode: DisplayMode, on displayID: CGDirectDisplayID,
+    from origin: PreviewOrigin, surface: PreviewSurface
   ) async {
-    // Recorded here rather than in `select` so it names the preview that is
+    // Recorded here rather than in `select` so they name the preview that is
     // about to become outstanding, not whichever click was most recent: two
     // queued selects from different surfaces each get their own surface as they
-    // land, in the order they land.
+    // land, in the order they land. (`surface` was still DECIDED at the click —
+    // the caller sampled its window's key state synchronously — this is only
+    // where the decision is filed.)
     origins[displayID] = origin
+    surfaces[displayID] = surface
     // Through `dismissStartFailure`, never a bare `startFailure = nil`: the
     // standalone window renders the failure, so clearing it without syncing
     // leaves an EMPTY floating panel on the display for the whole duration of
@@ -894,6 +924,7 @@ final class DisplayModeCoordinator {
     preview = Preview(
       displayID: outstanding.displayID,
       mode: outstanding.mode,
+      surface: surfaces[outstanding.displayID] ?? .floatingPanel,
       secondsRemaining: await session.secondsRemaining,
       failure: carried,
       isCountingDown: counting
@@ -923,23 +954,29 @@ final class DisplayModeCoordinator {
     // (They can only coexist on DIFFERENT displays — `performSelect` clears the
     // failure before it begins.)
     //
-    // **Origin does not decide this surface.** It used to: a settings-origin
-    // preview was answered by the banner in the settings pane and got no window
-    // at all. That made the safety question easy to miss — it was a few lines
-    // of text partway down a scrolling pane, on whichever display the settings
-    // window happened to be, while the display that actually changed showed
-    // nothing. macOS puts this question in a dialog on the display it is about,
-    // and so do we now, for every preview whatever started it.
+    // **The preview's own `surface` decides this window (SO6), fixed at
+    // start.** The floating window is the default owner — macOS puts this
+    // question in a dialog on the display it is about, and so do we for the
+    // panel and every other origin. The settings banner owns the answer only
+    // when the change came from a key settings window: the user is already
+    // reading that window, and two button rows asking one question is the
+    // two-surfaces defect #54 exists to prevent. When the banner owns, this
+    // window does not show — the banner region renders the buttons and the
+    // hub's other renderings are passive text.
     //
-    // It also closes a hole the origin gate left open. Nothing keeps the
-    // settings window on screen: ⌘W, or switching the sidebar to another
-    // display, takes the banner away. While the countdown is armed that is
-    // survivable — expiry reverts on its own. A failed EXPIRY is not: the
-    // countdown is disarmed, nothing auto-retries, and the display is left on a
-    // mode the user never approved with no surface anywhere to revert it from,
-    // short of quitting the app.
+    // Known residue, accepted with SO6: nothing keeps the settings window on
+    // screen, and ownership does not migrate mid-preview. An armed countdown
+    // survives that — expiry reverts unattended. A failed EXPIRY after the
+    // owning window closed leaves the answer only on that window's banner until
+    // it is reopened; reachable only by closing the very window the change was
+    // started from seconds earlier.
     if let preview {
-      confirmation?.presentConfirmation(.preview(preview.displayID))
+      switch preview.surface {
+      case .floatingPanel:
+        confirmation?.presentConfirmation(.preview(preview.displayID))
+      case .settingsBanner:
+        confirmation?.dismissConfirmation()
+      }
       return
     }
     // A failed `begin()` produces no preview, so without this a panel selection
