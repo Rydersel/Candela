@@ -131,11 +131,13 @@ keys on this page, and keeps its saved levels.
 
 Holding Shift during launch is *Safe Mode*, which is unrelated and changes no
 settings at all. For that session Candela does not restore your saved values at
-startup or on wake, does not read brightness back from the display, and does
-not write values out when it quits. The sliders and the keyboard keys keep
-working normally and still send DDC — Safe Mode is for a display that a
-*restore* wedges, not a way to silence the app. Relaunch without Shift to
-leave it.
+startup or on wake, does not read brightness back from the display, does not
+write values out when it quits, and does not run OLED care — no display is
+dimmed and no panel hours are counted. The sliders and the keyboard keys keep
+working normally and still send DDC, and the OLED Care pane's two screen-chrome
+switches still work, because those write a system setting when you flip them
+rather than acting on their own — Safe Mode is for a display that a *restore*
+wedges, not a way to silence the app. Relaunch without Shift to leave it.
 
 One exception, and the safe-mode notice names it when it applies: with
 "Match other displays to the built-in display" turned on, brightness changes on
