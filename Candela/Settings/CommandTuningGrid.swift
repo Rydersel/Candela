@@ -1,15 +1,41 @@
 import CandelaKit
 import SwiftUI
 
-// No call sites since Task 13 — the hub dropped the Tuning section. Kept
-// deliberately: Task 15's Advanced sub-page re-homes this grid (with visible
-// column headers as an addition), and its per-control accessibility labels are
-// load-bearing.
+/// Display names for the three DDC commands, in ONE place: the grid's row
+/// labels, its accessibility labels and the Advanced page's VCP Overrides group
+/// all name the same three things.
+///
+/// Never `DDCCommand.rawValue` — those raws are shipped on-disk schema (D22)
+/// that happens to read as English by coincidence (lens-2 m-2).
+enum DDCCommandCopy {
+  /// Mid-sentence form, for accessibility labels and captions.
+  static func name(_ command: DDCCommand) -> String {
+    switch command {
+    case .brightness: "brightness"
+    case .volume: "volume"
+    case .contrast: "contrast"
+    }
+  }
+
+  /// Phrase-initial form, for a row label or a control label.
+  static func title(_ command: DDCCommand) -> String {
+    switch command {
+    case .brightness: "Brightness"
+    case .volume: "Volume"
+    case .contrast: "Contrast"
+    }
+  }
+}
 
 /// Per-command DDC tuning for one display: Enabled / Min / Max / Invert, for
 /// brightness, volume and contrast. D26 shrank the fork's six columns to these
-/// four — the 9-step response curve and the hex control-code remap are cut from
-/// the UI and remain `defaults write` keys with unchanged engine behavior.
+/// four; A1 then promoted the response curve and the hex control-code remap
+/// into the Advanced page's VCP Overrides sub-group, which renders directly
+/// below this grid in the same section.
+///
+/// Rendered inside `AdvancedPage`'s Command Tuning section, which owns the
+/// section header and the SO12 traffic-block explanation — so neither is drawn
+/// here.
 ///
 /// Every edit is a read-modify-write of ONE command's tuning, and the
 /// modify half is `DDCOverrideValidation.applied` in CandelaKit, under test.
@@ -70,9 +96,10 @@ struct CommandTuningGrid: View {
   /// Both now come off `BrightnessPath`, so the page gives one answer.
   ///
   /// Disable, don't hide (panel §5.4). The mute recovery affordance that D29
-  /// rule 3 requires for this state lives in
-  /// `DisplayDetailView.recoverFromHardwareMute`, above the grid and never
-  /// disabled.
+  /// rule 3 requires for this state lives on the hub
+  /// (`DisplayHubView.recoverFromHardwareMute`) and is never disabled; the
+  /// Advanced page's DDC toggle, which is the other way out, is gated only by
+  /// live HDR for the same reason.
   private var trafficBlock: DDCTrafficBlock? {
     DisplayCardPolicy.ddcTrafficBlock(for: state.controller.brightnessPath)
   }
@@ -81,9 +108,11 @@ struct CommandTuningGrid: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text("Command tuning")
-        .font(.callout.weight(.semibold))
       Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+        // Visible column headers are an ADDITION (spec §6). The per-control
+        // accessibility labels below stay exactly as they were — a11y contract
+        // 9 makes them load-bearing, and a visible header does not reach
+        // VoiceOver from inside a `Grid` cell.
         GridRow {
           Color.clear.frame(width: 1, height: 1)
           columnHeader("On")
@@ -93,7 +122,7 @@ struct CommandTuningGrid: View {
         }
         ForEach(DDCCommand.allCases, id: \.self) { command in
           GridRow {
-            Text(rowLabel(command))
+            Text(verbatim: DDCCommandCopy.title(command))
             Toggle("", isOn: enabledBinding(command))
               .labelsHidden()
               .accessibilityLabel(Text("\(rowName(command)) enabled"))
@@ -103,8 +132,16 @@ struct CommandTuningGrid: View {
               .labelsHidden()
               .accessibilityLabel(Text("Invert \(rowName(command))"))
           }
+          // a11y contract 9's second clause: each command row is additionally a
+          // labeled group. `.contain`, never `.combine` — combining would
+          // collapse four operable controls into one unreachable element.
+          .accessibilityElement(children: .contain)
+          .accessibilityLabel(Text(verbatim: DDCCommandCopy.title(command)))
         }
       }
+      // Belt to the section-level disable `AdvancedPage` applies (SO12): this
+      // grid is the thing a traffic block actually voids, so it states the
+      // condition itself rather than trusting its container.
       .disabled(isInert)
       captions
     }
@@ -122,27 +159,12 @@ struct CommandTuningGrid: View {
       .foregroundStyle(.secondary)
   }
 
-  private func rowLabel(_ command: DDCCommand) -> LocalizedStringKey {
-    switch command {
-    case .brightness: "Brightness"
-    case .volume: "Volume"
-    case .contrast: "Contrast"
-    }
-  }
-
-  /// The `String` sibling of `rowLabel`. Interpolating a `LocalizedStringKey`
-  /// INTO a `LocalizedStringKey` literal has no matching interpolation
-  /// overload — the accessibility labels above would not compile (lens-1 M4) —
-  /// and the same names are needed mid-sentence in the captions. Never
-  /// `DDCCommand.rawValue`: those raws are shipped on-disk schema (D22) that
-  /// happens to read as English by coincidence (lens-2 m-2).
-  private func rowName(_ command: DDCCommand) -> String {
-    switch command {
-    case .brightness: "brightness"
-    case .volume: "volume"
-    case .contrast: "contrast"
-    }
-  }
+  /// A `String`, not a `LocalizedStringKey`: interpolating a
+  /// `LocalizedStringKey` INTO a `LocalizedStringKey` literal has no matching
+  /// interpolation overload, so the accessibility labels above would not
+  /// compile (lens-1 M4), and the same names are needed mid-sentence in the
+  /// captions.
+  private func rowName(_ command: DDCCommand) -> String { DDCCommandCopy.name(command) }
 
   private func overrideField(_ target: FocusTarget) -> some View {
     TextField("", text: Binding(
@@ -229,18 +251,13 @@ struct CommandTuningGrid: View {
   // MARK: - Captions
 
   @ViewBuilder private var captions: some View {
-    if let trafficBlock {
-      switch trafficBlock {
-      // This grid renders only under an EXTERNAL display (`DisplayDetailView`),
-      // and `BrightnessPathPolicy.usesNative` has exactly one way to answer yes
-      // for an external: HDR is live, whoever engaged it (#52). So the sentence
-      // can name HDR rather than shrugging at "macOS is doing it".
-      case .macOSDrivesBrightness:
-        SettingsCaption("This display is in HDR mode. macOS is setting its brightness directly and no hardware commands are reaching it, so these settings have no effect until HDR turns off.")
-      case .hardwareControlOff:
-        SettingsCaption("Hardware (DDC) control is off for this display, so these settings have no effect.")
-      }
-    } else {
+    // SO12: the block's explanation is stated ONCE for the page, by
+    // `AdvancedPage` at the foot of Control Method — the section above the
+    // first section a block greys out. It used to be repeated here, which is
+    // the duplication SO12 exists to remove; what stays is the silence, because
+    // the captions below describe controls that are not currently doing
+    // anything.
+    if trafficBlock == nil {
       SettingsCaption("Most displays need none of this. Use it when a display bottoms out or tops out early, or runs backwards. Leave a box empty to use the display's own range.")
       brightnessLegCaption
       let ignored = ignoredMaxCommands

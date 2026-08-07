@@ -279,8 +279,10 @@ struct SettingsRootView: View {
     .id(key)
   }
 
-  /// One case per sub-page. Tasks 14 and 15 replace the two placeholders; each
-  /// owns its own case, so the shell never has to be reopened for a new page.
+  /// One case per sub-page; Task 14 replaces the last placeholder. Each real
+  /// page owns its own `Form` (a grouped `Form` only reliably sizes structure
+  /// declared in its own builder — see `DisplayHubView.body`), so this switch
+  /// names a view and nothing else.
   @ViewBuilder
   private func subPage(_ page: DisplaySubPage, key: String, state: AppModel.DisplayState) -> some View {
     // Rename dependency, registered HERE because `switcherDisplays` is read at
@@ -290,8 +292,14 @@ struct SettingsRootView: View {
     // INTO it.
     let _ = model.prefsRevision
     switch page {
-    case .allModes, .advanced:
+    case .allModes:
       placeholderSubPage(page, key: key)
+    case .advanced:
+      AdvancedPage(
+        state: state,
+        displays: switcherDisplays,
+        onSwitch: { newKey in switchDisplay(from: key, to: newKey) }
+      )
     case .diagnostics:
       DiagnosticsPage(
         state: state,
@@ -302,7 +310,7 @@ struct SettingsRootView: View {
     }
   }
 
-  /// Placeholder sub-pages (Tasks 14–15 replace them). The header is the real
+  /// Placeholder sub-page (Task 14 replaces it). The header is the real
   /// contract — title focus on push, and the display switcher that carries
   /// THIS sub-page onto another display (SO23).
   private func placeholderSubPage(_ page: DisplaySubPage, key: String) -> some View {
