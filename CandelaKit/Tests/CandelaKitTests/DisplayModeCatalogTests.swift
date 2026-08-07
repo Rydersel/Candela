@@ -213,6 +213,39 @@ struct SizeSelectionOutcomeTests {
     }
   }
 
+  /// The `currentHz` contract, both halves, as executable fact rather than
+  /// prose a caller has to trust.
+  ///
+  /// Passing the row's own rate is what the applier does when the display has
+  /// no current mode (`current?.refreshHz ?? row.mode.refreshHz`), and it must
+  /// come back silent — there is no drop when the comparison point IS the
+  /// destination.
+  @Test func theRowsOwnRateIsTheAppliersFallbackAndNeverWarns() {
+    let ladder = DisplayModeFixtures.magRateLadder
+    for row in DisplayModeCatalog.curated(ladder, nativePixelWidth: 3440,
+                                          nativePixelHeight: 1440) {
+      let outcome = DisplayModeCatalog.outcome(
+        selectingWidth: row.mode.logicalWidth, selectingHeight: row.mode.logicalHeight,
+        currentHz: row.mode.refreshHz, in: ladder
+      )
+      #expect(outcome?.appliedHz == DisplayMode.quantizedRefresh(row.mode.refreshHz))
+      #expect(outcome?.lowersCurrentRate == false)
+    }
+  }
+
+  /// The trap the parameter documentation warns about, pinned so the warning
+  /// cannot drift from the behavior: a `0` placeholder makes every gap equal
+  /// to the rate itself, so the SLOWEST rate wins — and nothing is below zero,
+  /// so the caps warning goes quiet exactly where it is needed. Callers with
+  /// no current mode must suppress the outcome, not substitute a number.
+  @Test func aZeroPlaceholderSilentlyPredictsTheSlowestRateWithNoWarning() {
+    let outcome = DisplayModeCatalog.outcome(selectingWidth: 3440, selectingHeight: 1440,
+                                             currentHz: 0,
+                                             in: DisplayModeFixtures.magRateLadder)
+    #expect(outcome?.appliedHz == 60)
+    #expect(outcome?.lowersCurrentRate == false)
+  }
+
   /// Float noise must not read as a rate change: 59.9998 is 60.
   @Test func outcomeQuantizesBeforeJudgingWhetherTheRateDropped() {
     let modes = [DisplayModeFixtures.mode(1, logical: (1600, 900), pixels: (1600, 900),

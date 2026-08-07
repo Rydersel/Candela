@@ -138,6 +138,26 @@ public enum DisplayModeCatalog {
   ///
   /// nil when the display has no mode at that size — there is no outcome to
   /// state about a row that cannot exist.
+  ///
+  /// - Parameter currentHz: exactly what the applier reads —
+  ///   `current?.refreshHz ?? row.mode.refreshHz`. This is a contract, not a
+  ///   hint: `currentHz` is the point the nearest-rate search measures from, so
+  ///   a wrong value produces a confident wrong prediction, which is the exact
+  ///   SO18 defect this function exists to prevent. Two ways to get it wrong:
+  ///   - `0` as a stand-in for "unknown" makes every gap equal to the rate
+  ///     itself, so the search returns the size's SLOWEST — and since no rate
+  ///     is below zero, `lowersCurrentRate` comes back `false`. The row then
+  ///     names the wrong rate AND the caps warning is silently disabled.
+  ///   - any other placeholder judges the drop against a rate the display is
+  ///     not running: a warning on rows that will not change, and none on rows
+  ///     that will.
+  ///
+  ///   **When the display has no current mode, suppress the caps warning
+  ///   rather than substitute a placeholder.** The applier falls back to the
+  ///   row's own rate in that state, so there is nothing to compare against and
+  ///   nothing honest to warn about. A caller that can reach the row's mode may
+  ///   pass `row.mode.refreshHz` and get the applier's answer with
+  ///   `lowersCurrentRate == false`; a caller that cannot must show no outcome.
   public static func outcome(
     selectingWidth: Int, selectingHeight: Int, currentHz: Double, in modes: [DisplayMode]
   ) -> SizeSelectionOutcome? {
