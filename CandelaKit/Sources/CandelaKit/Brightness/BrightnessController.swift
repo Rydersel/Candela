@@ -346,7 +346,14 @@ public final class BrightnessController {
 
   // MARK: - Hardware readback
 
+  /// A read while WE hold a temporary dim reads our own write, not the user's
+  /// value: the dim is a multiplier on the way to the hardware and never
+  /// touches `brightness` or the store, so adopting the register back would
+  /// fold it in permanently and `endTemporaryDim` would then "restore" to the
+  /// corrupted number. Reached on every reconfiguration
+  /// (`AppModel.performRefresh`'s kept branch), which a lock dim can outlast.
   public func refreshFromHardware() async {
+    guard temporaryDimFactor == nil else { return }
     if role == .builtIn {
       // The built-in panel has no DDC wire — the native read is the only
       // truth (fork: `AppleDisplay.getAppleBrightness`). Publish only; no
@@ -1068,10 +1075,14 @@ public final class BrightnessController {
   ///
   /// Scope of the "a process that dies while dimmed still reopens correctly"
   /// claim: it is unconditional for a write-only panel, where the store IS the
-  /// truth. On a panel that answers DDC reads (the Dell here), a launch that
-  /// reads brightness back from the hardware can still adopt the dim the dead
-  /// process left in the register. The store is right either way; the readback
-  /// is what would overwrite it.
+  /// truth. On a panel that answers DDC reads (the Dell here), the hazard is a
+  /// readback of a register we dimmed, and it is not confined to launch:
+  /// `refreshFromHardware` also runs on every reconfiguration, which a lock dim
+  /// outlasts. THIS process is covered, because that function returns early
+  /// while a dim is outstanding. What is left is a readback by a process that
+  /// did not set the dim: the next launch after a crash or force-quit, which
+  /// finds the register still down with no factor recorded anywhere. The store
+  /// is right either way; the readback is what would overwrite it.
   public private(set) var temporaryDimFactor: Double?
 
   /// The ONE place the temporary dim is folded in. Everything that computes a
@@ -1139,9 +1150,11 @@ public final class BrightnessController {
   /// in flight. Deliberately NOT ramped: someone who has just unlocked wants
   /// their screen back now, and only the dim-in fades.
   ///
-  /// Safe to call when nothing is dimmed (a no-op), which is what lets every
-  /// teardown path call it unconditionally: unlock, display departure, settings
-  /// reset and quit.
+  /// Safe to call when nothing is dimmed (a no-op), which is what lets the
+  /// teardown paths call it unconditionally: unlock, losing enrollment,
+  /// settings reset and quit. Departure is NOT one of them: a departed
+  /// display's controller is gone, so `endAllLockDims` skips it and the next
+  /// arrival's restore pass is what puts the panel back.
   public func endTemporaryDim() {
     dimToken &+= 1
     guard temporaryDimFactor != nil else { return }

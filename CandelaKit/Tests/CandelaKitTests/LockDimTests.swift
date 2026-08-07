@@ -189,6 +189,31 @@ struct LockDimTests {
     #expect(rig.store.values[Self.storageKey] == 0.8)
   }
 
+  /// A readback that lands mid-dim reads OUR OWN write. Adopting it folds the
+  /// dim into the user's value and persists it, so the corruption survives the
+  /// quit and `endTemporaryDim` "restores" to the corrupted number. The path is
+  /// not hypothetical: `AppModel.performRefresh`'s kept branch calls
+  /// `refreshFromHardware` on every reconfiguration, and a lock dim outlasts
+  /// one. Only a panel that ANSWERS reads can be hit (the Dell here; the MAG
+  /// answers nothing), which is why this is pinned rather than left to the
+  /// hardware pass.
+  @Test func aReadbackDuringTheDimAdoptsNothing() async {
+    let rig = makeHardwareRig()
+    rig.controller.setBrightness(0.8)
+    await rig.controller.waitForPendingWrites()
+    rig.controller.beginTemporaryDim(factor: 0.5)
+    await rig.controller.waitForPendingWrites()
+    // What the panel would now answer: the register carries the dimmed value.
+    await rig.ddc.setReadResult((current: 40, max: 100))
+    await rig.controller.refreshFromHardware()
+    #expect(rig.controller.brightness == 0.8)
+    #expect(rig.store.values[Self.storageKey] == 0.8)
+    // And the restore is still the user's value, not the read one.
+    rig.controller.endTemporaryDim()
+    await rig.controller.waitForPendingWrites()
+    #expect(await rig.ddc.recordedWrites().map(\.value) == [80, 40, 80])
+  }
+
   /// A slider moved while the screen is locked composes with the dim instead of
   /// fighting it: the wire follows the new value scaled, and the unlock
   /// restores the NEW value. Nothing has to notice the collision, because the
