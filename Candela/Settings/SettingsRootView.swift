@@ -30,8 +30,9 @@ struct SettingsRootView: View {
   /// settings window squeezed it, the sidebar collapsed, and the stored frames
   /// came back `"0, 0, 208, 568, YES, NO"` — collapsed — on every subsequent
   /// launch. Recovery took a `defaults delete`, which is not a thing to ask of
-  /// anyone. Re-asserting `.all` on appearance is what makes the state
-  /// unstickable.
+  /// anyone. Re-asserting `.all` on appearance (and whenever the value moves
+  /// off it — see the two modifiers in `body`) is what makes the state
+  /// unstickable (#66).
   @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
   @Environment(AppModel.self) private var model
@@ -117,6 +118,18 @@ struct SettingsRootView: View {
       if SettingsSelectionPolicy.resolve(selectedDisplayKey: key, connectedKeys: connected) == nil {
         selection = .pane(.general)
       }
+    }
+    // The anti-collapse defence the `columnVisibility` doc records (#66).
+    // This window has no sidebar-toggle item, so a collapsed sidebar removes
+    // every pane from navigation with no way back from inside the app — and
+    // AppKit autosaves the collapsed frames, so it sticks across launches.
+    // Two layers: re-assert on appearance (the relaunch-restored case), and
+    // spring back the moment the bound value moves off `.all` (the mid-session
+    // squeeze the 2026-08-04 incident measured). The spring-back terminates:
+    // its own write lands as `.all` and takes the guard's other branch.
+    .onAppear { columnVisibility = .all }
+    .onChange(of: columnVisibility) { _, visibility in
+      if visibility != .all { columnVisibility = .all }
     }
   }
 
