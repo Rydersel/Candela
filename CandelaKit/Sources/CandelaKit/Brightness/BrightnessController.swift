@@ -665,7 +665,20 @@ public final class BrightnessController {
     // here would persist a meaningless mode under the builtIn prefs key.
     guard role == .external else { return }
     let previous = hdrMode
-    guard mode != previous else { return }
+    // #83: `.off` is actionable whenever HDR is LIVE, not only when Candela's
+    // own mode says Candela engaged it. HDR turned on in System Settings leaves
+    // `hdrMode` at `.off`, so a plain inequality guard returned early and left
+    // the app with no path at all to drop HDR — while the reset paths that call
+    // this were relying on it to unlock the DDC register before writing.
+    //
+    // The engage arm has handled the mirror-image case since backlog #8; this
+    // is the exit catching up. Ruling: Candela's mode and the system's HDR state
+    // stay in sync, so `.off` means the display leaves HDR whoever put it there.
+    //
+    // The inequality still guards the case it exists for — `.off` on a display
+    // genuinely out of HDR is still a no-op, so a reset does not drive a
+    // pointless re-mode across every attached panel.
+    guard mode != previous || (mode == .off && cachedHDRActive) else { return }
     prefs.hdrMode = mode
     hdrMode = mode
     pathLog.log("hdrMode \(previous.rawValue) -> \(mode.rawValue) display=\(self.displayID)")

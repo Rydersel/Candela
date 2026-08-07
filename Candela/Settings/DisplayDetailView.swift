@@ -421,9 +421,13 @@ struct DisplayDetailView: View {
       // 1. D22: HDR goes through the controller's state machine — settle
       //    window, poller gating, rollback — never through `prefs.hdrMode`.
       //    Done first so the DDC register is unlocked for everything below.
-      if state.controller.hdrMode != .off {
-        await state.controller.setHDRMode(.off)
-      }
+      //
+      //    UNCONDITIONAL (#83). Gating this on `hdrMode != .off` skipped the
+      //    disengage for HDR engaged in System Settings, and then everything
+      //    below — including the D29 unmute — ran against a register the
+      //    monitor still had locked. `setHDRMode` owns the "is there anything
+      //    to do" question now, so the condition cannot drift from it here.
+      await state.controller.setHDRMode(.off)
 
       // 2. Every pref except the mute strategy, in ONE batch whose fan-out is
       //    the UNION of its rows. Never collapse it onto a single
