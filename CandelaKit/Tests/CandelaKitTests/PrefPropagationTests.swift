@@ -47,7 +47,13 @@ struct PrefPropagationTests {
     // #13 added the two arrangement keys: 35 -> 37.
     #expect(PrefName.restoreArrangement.rawValue == "restoreArrangement")
     #expect(PrefName.savedArrangements.rawValue == "savedArrangements")
-    #expect(PrefName.allCases.count == 37)
+    // The settings overhaul promoted three read-at-use prefs: 37 -> 40. Their
+    // raw values are the keys `DisplayPrefs` already writes, so a typo here
+    // would strand every value a user has already set.
+    #expect(PrefName.pollingMode.rawValue == "pollingMode")
+    #expect(PrefName.pollingCount.rawValue == "pollingCount")
+    #expect(PrefName.separateCombinedScale.rawValue == "separateCombinedScale")
+    #expect(PrefName.allCases.count == 40)
   }
 
   // MARK: - Rows
@@ -153,5 +159,14 @@ struct PrefPropagationTests {
     #expect(union == [.refreshUI, .rearmTap, .reapplyDimming, .rebuildPanel, .updateStatusItem])
     #expect(union != PrefPropagation.effects(forChange: .forceSw))
     #expect(PrefPropagation.effects(forChanges: []).isEmpty)
+  }
+
+  @Test func promotedReadAtUsePrefsAreCasesWithUIOnlyRows() {
+    // Settings overhaul SO/A1: these gained real UI, so D27 requires cases.
+    // They are read at use (DDC-read time / key time), so their row is
+    // refreshUI alone — a deliberate answer, matching enableMuteUnmute.
+    for name in [PrefName.pollingMode, .pollingCount, .separateCombinedScale] {
+      #expect(PrefPropagation.effects(forChange: name) == [.refreshUI])
+    }
   }
 }
