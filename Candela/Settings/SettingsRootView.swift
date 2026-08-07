@@ -59,7 +59,7 @@ struct SettingsRootView: View {
 
   var body: some View {
     NavigationSplitView(columnVisibility: $columnVisibility) {
-      SettingsSidebar(selection: $selection)
+      SettingsSidebar(selection: $selection, onReselect: returnToHub)
         .navigationSplitViewColumnWidth(min: 190, ideal: 200, max: 240)
     } detail: {
       // The content keeps its own opaque surface: this window carries a lot of
@@ -402,6 +402,26 @@ struct SettingsRootView: View {
   private var orderedDestinations: [SettingsDestination] {
     SettingsRegistry.panes.map { .pane($0.id) }
       + model.allControlledStates.map { .display($0.display.persistenceKey) }
+  }
+
+  /// Clicking the sidebar row of the display you are already on returns that
+  /// display to its hub root. Without it the click does nothing, because the
+  /// row writes a selection that is already the selection.
+  ///
+  /// SO23 retention is untouched: this clears only the display being
+  /// re-clicked, never a path held for another display, so A to B to A still
+  /// lands where the user was. Panes have no stack and are left alone.
+  ///
+  /// The write goes through `currentPathBinding` rather than `subPagePaths`
+  /// directly, so the destination's shrink-detecting `onChange` sees a pop and
+  /// restores focus to the row that pushed. The binding's key is resolved from
+  /// the selection this guard has just matched, so its stale-write check
+  /// compares a key against itself and passes.
+  private func returnToHub(_ destination: SettingsDestination) {
+    guard case let .display(key) = selection, destination == selection,
+          !(subPagePaths[key] ?? []).isEmpty
+    else { return }
+    currentPathBinding.wrappedValue = []
   }
 
   private func popCurrentSubPage() {

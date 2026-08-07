@@ -28,6 +28,11 @@ struct SettingsSymbolTile: View {
 @MainActor
 struct SettingsSidebar: View {
   @Binding var selection: SettingsDestination?
+  /// Clicking the row that is ALREADY selected. Writing the same value to
+  /// `selection` changes nothing, so without this hook the click is a no-op and
+  /// a user sitting in a sub-page has no way back from the sidebar. What the
+  /// re-click means is the root view's to decide.
+  var onReselect: (SettingsDestination) -> Void = { _ in }
 
   @Environment(AppModel.self) private var model
 
@@ -122,7 +127,11 @@ struct SettingsSidebar: View {
   private func row(_ destination: SettingsDestination, @ViewBuilder _ content: () -> some View) -> some View {
     let isSelected = selection == destination
     Button {
-      selection = destination
+      if isSelected {
+        onReselect(destination)
+      } else {
+        selection = destination
+      }
     } label: {
       content()
         .frame(maxWidth: .infinity, alignment: .leading)

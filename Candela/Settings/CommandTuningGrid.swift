@@ -133,11 +133,16 @@ struct CommandTuningGrid: View {
             Text(verbatim: DDCCommandCopy.title(command))
             Toggle("", isOn: enabledBinding(command))
               .labelsHidden()
+              // Without it the toggle takes the column's full width and draws
+              // its switch at the trailing edge, which no header placement can
+              // sit above. Fixed size makes the cell the switch.
+              .fixedSize()
               .accessibilityLabel(Text("\(rowName(command)) enabled"))
             overrideField(.minimum(command))
             overrideField(.maximum(command))
             Toggle("", isOn: invertBinding(command))
               .labelsHidden()
+              .fixedSize()
               .accessibilityLabel(Text("Invert \(rowName(command))"))
           }
         }
@@ -156,10 +161,17 @@ struct CommandTuningGrid: View {
 
   // MARK: - Cells
 
+  /// The `Grid` is built `.leading`, which put every header at the left edge of
+  /// a column wider than the header itself: "On" sat left of its switch and
+  /// "Min"/"Max" left of their fields. `gridColumnAlignment` set on a cell
+  /// governs the whole COLUMN, so declaring it here centers header and control
+  /// on one axis. The command-name column is not a header cell and keeps the
+  /// grid's leading alignment.
   private func columnHeader(_ title: LocalizedStringKey) -> some View {
     Text(title)
       .font(.caption)
       .foregroundStyle(.secondary)
+      .gridColumnAlignment(.center)
   }
 
   /// A `String`, not a `LocalizedStringKey`: interpolating a
@@ -179,6 +191,11 @@ struct CommandTuningGrid: View {
     // a field is there (combined pass D4), under a caption inviting people to
     // leave the boxes empty. The explicit border is what makes the box a box.
     .textFieldStyle(.roundedBorder)
+    // The grid sits inside a `Form`, which splits a `TextField` into a label
+    // column and a field: the empty label still took its share of the 60pt
+    // cell, so the bezel drew at the trailing edge and no column header could
+    // sit over it. Hiding the label gives the bezel the whole cell.
+    .labelsHidden()
     .focused($focus, equals: target)
     .onSubmit { commit(target) }
     .frame(width: 60)
