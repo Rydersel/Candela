@@ -20,12 +20,36 @@ final class OledOverlay {
 
   private var windows: [CGDirectDisplayID: NSPanel] = [:]
 
-  /// The window number of the last overlay closed on each display, kept until
-  /// the window server confirms it is gone. Without it the removal half of
-  /// `verifyPresence` is a tautology — "no window cached" would answer "not
-  /// present" for a window we asked to close and the server never dropped,
-  /// which is the exact stranded-overlay case OC12 exists to catch.
-  private var lastRemoved: [CGDirectDisplayID: CGWindowID] = [:]
+  /// An overlay we closed, kept until the window server confirms it is gone.
+  ///
+  /// Two reasons it holds the panel and not just its number. Detection: without
+  /// it the removal half of `verifyPresence` is a tautology — "no window
+  /// cached" would answer "not present" for a window we asked to close and the
+  /// server never dropped, which is the exact stranded-overlay case OC12 exists
+  /// to catch. Recovery: a detected strand needs a lever, and only the window
+  /// itself can be closed again.
+  ///
+  /// The number is captured at close time rather than read back from the panel:
+  /// `windowNumber` is only meaningful while the window has a device, so a
+  /// closed panel cannot be asked what it used to be.
+  private struct ClosedOverlay {
+    let panel: NSPanel
+    let number: CGWindowID
+  }
+
+  private var lastRemoved: [CGDirectDisplayID: ClosedOverlay] = [:]
+
+  /// The state each display's overlay is currently carrying, so an unchanged
+  /// `apply` can be a no-op. At the overlay-up cadence an unconditional
+  /// re-order would be ~10 window-server round trips per second per display,
+  /// and each one re-stacks the overlay above whatever else is at shielding
+  /// level (the lock shield, the screen saver) ten times a second.
+  private struct AppliedState: Equatable {
+    let alpha: Double
+    let blackout: Bool
+  }
+
+  private var lastApplied: [CGDirectDisplayID: AppliedState] = [:]
 
   /// Displays already warned about for a missing `NSScreen`. A care overlay is
   /// re-driven on every state tick, so an unrated warning would be a per-tick
@@ -40,44 +64,73 @@ final class OledOverlay {
   /// Returns false when the requested state could not be produced — no
   /// `NSScreen` matches the display, so no overlay exists to carry the dim.
   /// DT17's lesson, and the reason this is not a `Void` call: a caller that
-  /// cannot tell will memoise a dimming that never happened.
+  /// cannot tell will memoise a dimming that never happened. **Removal always
+  /// returns true**; a removal the window server did not honour is reported by
+  /// `verifyPresence`, not here — this call knows only what it asked for.
+  ///
+  /// Ordering: the overlay is ordered front when it is created and whenever the
+  /// applied state changes, and NOT on an unchanged re-apply, which is a
+  /// no-op. Re-asserting a state the window already carries is
+  /// `reassert(on:)`'s job — that is the OC12 reconcile's lever, and keeping it
+  /// separate is what keeps the steady-state cadence off the window server.
   @discardableResult
   func apply(alpha: Double?, blackout: Bool, on displayID: CGDirectDisplayID) -> Bool {
     guard let alpha else {
       self.remove(for: displayID)
       return true
     }
+    let existed = self.windows[displayID] != nil
     guard let window = self.window(for: displayID) else {
       if self.warnedMissingScreen.insert(displayID).inserted {
         Self.log.warning("No screen matches display \(displayID, privacy: .public); OLED care overlay not applied")
       }
       return false
     }
+    let state = AppliedState(alpha: min(max(alpha, 0), 1), blackout: blackout)
+    guard !existed || self.lastApplied[displayID] != state else {
+      return true
+    }
+    self.lastApplied[displayID] = state
+    self.write(state, to: window)
+    return true
+  }
+
+  /// Re-asserts the overlay's last applied state: the recovery lever for an
+  /// OC12 mismatch (`verifyPresence` false while an overlay is wanted), where
+  /// the window server dropped a window we still hold — a space transition,
+  /// another shielding window, a reconfiguration. `apply` deliberately will not
+  /// do this, since the state it is asked for is the state it already has.
+  ///
+  /// A no-op when the display has no overlay: there is nothing to re-assert,
+  /// and creating one here would invent a dim level this class does not own.
+  func reassert(on displayID: CGDirectDisplayID) {
+    guard let window = self.windows[displayID], let state = self.lastApplied[displayID] else {
+      return
+    }
+    self.write(state, to: window)
+  }
+
+  private func write(_ state: AppliedState, to window: NSPanel) {
     // OC15: blackout swallows mouse input (at full black a click-through click
     // is a blind click on live UI); every other level stays click-through so
     // the waking click lands where the user aimed.
-    window.ignoresMouseEvents = !blackout
-    window.contentView?.alphaValue = CGFloat(min(max(alpha, 0), 1))
-    // Re-assert on EVERY apply, not only at creation. The one state in which
-    // `verifyPresence` says false while a window is cached is a window the
-    // server dropped (space transition, another shielding window, a
-    // reconfiguration) — so if this did not re-order, the OC12 reconcile would
-    // have no lever and would report the same failure forever. Idempotent for
-    // a window already on screen.
+    window.ignoresMouseEvents = !state.blackout
+    window.contentView?.alphaValue = CGFloat(state.alpha)
     window.orderFrontRegardless()
-    return true
   }
 
   func remove(for displayID: CGDirectDisplayID) {
     guard let window = self.windows.removeValue(forKey: displayID) else {
       return
     }
-    // Retained for the stranded-overlay check; cleared once the server confirms
-    // the window is gone, or when a new overlay supersedes it. A window that
-    // never reached the screen has no number to watch (0 is `kCGNullWindowID`,
-    // which would make the query meaningless rather than negative).
+    self.lastApplied.removeValue(forKey: displayID)
+    // Retained for the stranded-overlay check and its recovery; cleared once
+    // the server confirms the window is gone, or when a new overlay supersedes
+    // it. A window that never reached the screen has no number to watch (0 is
+    // `kCGNullWindowID`, which would make the query meaningless rather than
+    // negative), and nothing to strand.
     if window.windowNumber > 0 {
-      self.lastRemoved[displayID] = CGWindowID(window.windowNumber)
+      self.lastRemoved[displayID] = ClosedOverlay(panel: window, number: CGWindowID(window.windowNumber))
     }
     // Safe for the same reason `ShadeOverlay.removeShade` is: the window is
     // borderless and `isReleasedWhenClosed` is false at creation, so ARC owns
@@ -117,11 +170,17 @@ final class OledOverlay {
     guard let closed = self.lastRemoved[displayID] else {
       return false
     }
-    guard Self.isOnScreen(closed) else {
+    guard Self.isOnScreen(closed.number) else {
       self.lastRemoved.removeValue(forKey: displayID)
       return false
     }
-    Self.log.error("OLED care overlay still on screen after close on display \(displayID, privacy: .public)")
+    // Detecting a strand is only half of it: this window is black over the
+    // user's screen and nothing else can close it. Ask again — the entry stays
+    // until a later check sees it gone, so a close that keeps failing keeps
+    // being retried rather than reported forever.
+    Self.log.error("OLED care overlay still on screen after close on display \(displayID, privacy: .public); closing again")
+    closed.panel.orderOut(nil)
+    closed.panel.close()
     return true
   }
 
@@ -129,6 +188,12 @@ final class OledOverlay {
     guard let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], number) as? [[String: Any]],
           let info = list.first
     else {
+      return false
+    }
+    // Window numbers are recycled. Without the owner check, a number reissued
+    // to another process's window would read as a strand of ours that no close
+    // can ever clear.
+    guard (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == getpid() else {
       return false
     }
     // The key is present only while the window is on screen; an entry can
@@ -182,8 +247,13 @@ final class OledOverlay {
     panel.contentView?.layer?.backgroundColor = .black
     self.windows[displayID] = panel
     // A live overlay supersedes the closed one this display may still be
-    // watched for; `apply` orders it front.
-    self.lastRemoved.removeValue(forKey: displayID)
+    // watched for — `verifyPresence` answers from the live window from here on,
+    // so the old entry would be a strand nothing is watching. Give it one more
+    // close on the way out (a no-op if it really did go).
+    if let closed = self.lastRemoved.removeValue(forKey: displayID) {
+      closed.panel.orderOut(nil)
+      closed.panel.close()
+    }
     self.warnedMissingScreen.remove(displayID)
     Self.log.info("OLED care overlay created for display \(displayID, privacy: .public)")
     return panel
