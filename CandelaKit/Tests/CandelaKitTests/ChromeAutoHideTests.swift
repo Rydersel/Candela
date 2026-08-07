@@ -256,6 +256,86 @@ struct MenuBarAutoHidePolicyTests {
     }
   }
 
+  /// THE broadcast invariant. A preference write alone changes nothing on
+  /// screen: MEASURED 2026-08-07, both directions, against a screenshot of the
+  /// real menu bar. Every branch must therefore end by telling the system to
+  /// reconcile, and the one that did not is exactly how turning the switch OFF
+  /// left the menu bar gone. Exhaustive over version and record, not over the
+  /// two cases someone remembered.
+  @Test func everyWriteEndsByBroadcastingTheChange() {
+    for major in supportedMajorVersions {
+      for record in everyRecord {
+        for desktopHides in [true, false] {
+          for fullScreenHides in [true, false] {
+            let effects = MenuBarAutoHidePolicy.writeEffects(
+              desktopHides: desktopHides, fullScreenHides: fullScreenHides,
+              record: record, osMajorVersion: major)
+            #expect(effects.last == .broadcastChange)
+            #expect(effects.filter { $0 == .broadcastChange }.count == 1)
+          }
+        }
+      }
+    }
+  }
+
+  /// The legacy-only leg is the one the early return used to skip past. It is
+  /// also the only leg macOS 14 and 15 ever take, so a broadcast attached to
+  /// the Control Center write instead would have shipped a dead switch there.
+  @Test func theLegacyOnlyLegStillWritesAndBroadcasts() {
+    for major in [14, 15] {
+      #expect(MenuBarAutoHidePolicy.writeEffects(
+        desktopHides: true, fullScreenHides: true, record: .absent, osMajorVersion: major)
+        == [.setEffectiveBit(hidden: true), .broadcastChange])
+      #expect(MenuBarAutoHidePolicy.writeEffects(
+        desktopHides: false, fullScreenHides: true, record: .unreadable, osMajorVersion: major)
+        == [.setEffectiveBit(hidden: false), .broadcastChange])
+    }
+  }
+
+  /// Order is the claim, not membership: a reconcile that ran before the record
+  /// write would adopt the value being replaced, so the broadcast comes after
+  /// BOTH writes.
+  @Test func theRecordIsWrittenBeforeTheBroadcast() {
+    #expect(MenuBarAutoHidePolicy.writeEffects(
+      desktopHides: true, fullScreenHides: true, record: .option(3), osMajorVersion: 26)
+      == [.setEffectiveBit(hidden: true), .setControlCenterRecord(option: 0), .broadcastChange])
+    #expect(MenuBarAutoHidePolicy.writeEffects(
+      desktopHides: false, fullScreenHides: true, record: .option(0), osMajorVersion: 26)
+      == [.setEffectiveBit(hidden: false), .setControlCenterRecord(option: 2), .broadcastChange])
+  }
+
+  /// The sequence must carry the REQUESTED desktop value and the user's
+  /// existing full-screen half, or the branch would be right and the values
+  /// wrong.
+  @Test func theEffectsCarryTheRequestedValues() {
+    for desktopHides in [true, false] {
+      for fullScreenHides in [true, false] {
+        let effects = MenuBarAutoHidePolicy.writeEffects(
+          desktopHides: desktopHides, fullScreenHides: fullScreenHides,
+          record: .option(1), osMajorVersion: 26)
+        #expect(effects.first == .setEffectiveBit(hidden: desktopHides))
+        #expect(effects.contains(.setControlCenterRecord(
+          option: MenuBarAutoHidePolicy.option(
+            desktopHides: desktopHides, fullScreenHides: fullScreenHides))))
+      }
+    }
+  }
+
+  /// One question, both legs, now including the write sequence: a record the
+  /// read declines to consult must not be written either, or the switch strands
+  /// again one version down.
+  @Test func theSequenceWritesTheRecordExactlyWhenTheReadConsultsIt() {
+    for major in supportedMajorVersions {
+      for record in everyRecord {
+        let effects = MenuBarAutoHidePolicy.writeEffects(
+          desktopHides: true, fullScreenHides: true, record: record, osMajorVersion: major)
+        let writesRecord = effects.contains { if case .setControlCenterRecord = $0 { return true }; return false }
+        #expect(writesRecord == MenuBarAutoHidePolicy.controlCenterRecordParticipates(
+          record, osMajorVersion: major))
+      }
+    }
+  }
+
   /// A record we cannot decode must not be allowed to answer the read even
   /// where it participates, or an unrecognised value would silently mean
   /// "hidden" and pin the switch ON.

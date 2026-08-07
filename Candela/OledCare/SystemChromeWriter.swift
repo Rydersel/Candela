@@ -25,8 +25,10 @@ import os
 /// running Dock leaves the pref right and the screen unchanged. That gap is
 /// logged here (the `killall` exit status) and is a hardware-checklist item
 /// (spike §6a verified the Dock through System Events, and only *named* this
-/// pref+killall fallback — it was never measured). The menu-bar leg needs no
-/// such item: §6a proved live apply through this exact CFPreferences triple.
+/// pref+killall fallback: it was never measured). The menu-bar leg has the
+/// same gap and closes it the same way: its preferences are inert until the
+/// change is broadcast, so that post is part of the write rather than an
+/// optional extra. See `broadcastMenuBarHidingChanged`.
 @MainActor
 final class SystemChromeWriter: ChromeWriting {
   private static let log = Logger(subsystem: "com.rydersel.Candela", category: "oledcare")
@@ -102,15 +104,17 @@ final class SystemChromeWriter: ChromeWriting {
   ///   other repos agree with the measurement. Sources disagree about this
   ///   mapping, which is its own argument for never inventing a value.
   /// - Another claims `_HIHideMenuBar` is "silently ignored on Ventura and
-  ///   later". Measured false here (spike §6a moved the live `NSScreen` inset
-  ///   with it), and both version sources above contradict it too.
+  ///   later". Measured false here: the bar follows it in both directions, as
+  ///   long as the change is broadcast. Both version sources above contradict
+  ///   the claim too.
   ///
-  /// One documented alternative is deliberately NOT adopted: AnyDoor posts an
-  /// `AppleInterfaceMenuBarHidingChangedNotification` distributed notification
-  /// and reports that defaults alone get reverted without it. Spike §6a measured
-  /// this CFPreferences triple applying live on this machine with no such post,
-  /// so adding one would be an unmeasured change to a working path. Worth
-  /// trying FIRST if the menu-bar leg ever fails to apply on 14 or 15.
+  /// AnyDoor's `AppleInterfaceMenuBarHidingChangedNotification` was recorded
+  /// here as a documented alternative deliberately NOT adopted, on the strength
+  /// of spike §6a's "applies live". That was wrong, and it is now the write's
+  /// third step: AnyDoor's report that defaults alone get reverted matches what
+  /// this machine does. The version caveats above cover only WHICH KEYS get
+  /// written; the broadcast is unconditional, because no evidence anywhere
+  /// suggests a version where the preferences apply on their own.
   ///
   /// Owed and impossible here: a pass on a macOS 14 or 15 machine or VM. The
   /// branches themselves are covered by `MenuBarAutoHidePolicy`'s Kit tests.
@@ -149,31 +153,62 @@ final class SystemChromeWriter: ChromeWriting {
       effectiveBit: effective, record: Self.controlCenterRecord(), osMajorVersion: Self.osMajorVersion)
   }
 
+  /// The system does not watch these preferences. It reconciles when it is
+  /// told to, and this is what tells it.
+  ///
+  /// [MEASURED 2026-08-07, both directions, against a screenshot of the real
+  /// menu bar on an external display.] Writing both keys and stopping there
+  /// changed NOTHING on screen: the bar stayed visible over `hide=true` and
+  /// stayed gone over `hide=false`, and it snapped to the written value the
+  /// instant this notification was posted, with no other action. Posting it
+  /// when nothing changed is a no-op, so it is safe to send unconditionally.
+  ///
+  /// The name follows the HIToolbox convention shared with
+  /// `AppleInterfaceThemeChangedNotification`. It is undocumented, like
+  /// `AutoHideMenuBarOption` itself (#104): if a macOS update ever breaks the
+  /// menu bar switch, check this first.
+  private static let menuBarHidingChangedNotification =
+    Notification.Name("AppleInterfaceMenuBarHidingChangedNotification")
+
+  /// Why the S3 spike missed it: §6a's only oracle was `NSScreen`'s menu-bar
+  /// inset, read by a freshly launched process after a `defaults write`. That
+  /// oracle no longer moves at all on a secondary display (measured 0.0 with
+  /// the bar plainly visible), and the spike never looked at the screen, so
+  /// "applies live" was a conclusion about a number rather than about the menu
+  /// bar. Screenshot the bar; do not trust the inset.
+  private static func broadcastMenuBarHidingChanged() {
+    DistributedNotificationCenter.default().postNotificationName(
+      menuBarHidingChangedNotification, object: nil, userInfo: nil, deliverImmediately: true)
+  }
+
+  /// Interprets the policy's effect sequence. The branch and the ordering live
+  /// in `MenuBarAutoHidePolicy.writeEffects`, so the broadcast cannot be
+  /// stranded on a leg that returned early: the loop has no legs to return from.
   func writeMenuBarAutoHide(_ on: Bool) {
-    // The legacy key is written on every version: it is the effective bit
-    // everywhere the evidence reaches, and it is the only half macOS 14 and 15
-    // are sourced to use at all.
-    CFPreferencesSetValue(Self.menuBarKey, on ? kCFBooleanTrue : kCFBooleanFalse,
-                          kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
-    CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
-    // No restart and no notification for this half: spike §6a measured this
-    // exact triple applying live (MAG menu-bar inset 0 -> 30 -> 0).
     let record = Self.controlCenterRecord()
-    guard MenuBarAutoHidePolicy.writesControlCenterRecord(record, osMajorVersion: Self.osMajorVersion)
-    else {
-      // Nothing skipped here can strand the switch: the read declines this same
-      // record, so the legacy key alone decides what the pane shows.
-      Self.log.debug("control centre menu bar record not in use on this macOS; wrote the global key only")
-      return
+    if !MenuBarAutoHidePolicy.writesControlCenterRecord(record, osMajorVersion: Self.osMajorVersion) {
+      Self.log.debug("control centre menu bar record not in use on this macOS; writing the global key only")
     }
     // The full-screen half is never ours to choose, so it is read and
     // preserved. Unset means the macOS default, which hides the bar in full
     // screen.
-    let option = MenuBarAutoHidePolicy.option(
-      desktopHides: on, fullScreenHides: Self.fullScreenHidesMenuBar())
-    CFPreferencesSetValue(Self.autoHideOptionKey, option as CFNumber,
-                          Self.controlCenterDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
-    CFPreferencesSynchronize(Self.controlCenterDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+    let effects = MenuBarAutoHidePolicy.writeEffects(
+      desktopHides: on, fullScreenHides: Self.fullScreenHidesMenuBar(),
+      record: record, osMajorVersion: Self.osMajorVersion)
+    for effect in effects {
+      switch effect {
+      case .setEffectiveBit(let hidden):
+        CFPreferencesSetValue(Self.menuBarKey, hidden ? kCFBooleanTrue : kCFBooleanFalse,
+                              kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+      case .setControlCenterRecord(let option):
+        CFPreferencesSetValue(Self.autoHideOptionKey, option as CFNumber,
+                              Self.controlCenterDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        CFPreferencesSynchronize(Self.controlCenterDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+      case .broadcastChange:
+        Self.broadcastMenuBarHidingChanged()
+      }
+    }
   }
 
   func readDockAutoHide() -> Bool {

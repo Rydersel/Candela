@@ -98,4 +98,41 @@ public enum MenuBarAutoHidePolicy {
     if desktopHides { return fullScreenHides ? optionAlways : optionOnDesktopOnly }
     return fullScreenHides ? optionInFullScreenOnly : optionNever
   }
+
+  /// Everything one menu bar auto-hide write does to the machine, in order.
+  ///
+  /// The broadcast is the reason this is a sequence rather than two booleans.
+  /// Preference writes alone change NOTHING on screen (see `SystemChromeWriter`
+  /// for the measurement); the system adopts them only when it is told to
+  /// reconcile. Branching over that in the writer put the broadcast on one path
+  /// and not the other, which is how a write can land and do nothing. Here the
+  /// branch is chosen once, in a pure function, and the broadcast is appended
+  /// unconditionally, so no future leg can be added without it.
+  public static func writeEffects(
+    desktopHides: Bool, fullScreenHides: Bool,
+    record: ControlCenterMenuBarRecord, osMajorVersion: Int
+  ) -> [MenuBarWriteEffect] {
+    var effects: [MenuBarWriteEffect] = [.setEffectiveBit(hidden: desktopHides)]
+    if writesControlCenterRecord(record, osMajorVersion: osMajorVersion) {
+      effects.append(.setControlCenterRecord(
+        option: option(desktopHides: desktopHides, fullScreenHides: fullScreenHides)))
+    }
+    // Last, always: a reconcile that ran before the record write would adopt
+    // the value being replaced.
+    effects.append(.broadcastChange)
+    return effects
+  }
+}
+
+/// One step of a menu bar auto-hide write. `SystemChromeWriter` interprets these
+/// against the live system; the ordering and the branch live in
+/// `MenuBarAutoHidePolicy.writeEffects`, where they can be tested on the
+/// versions this machine cannot boot.
+public enum MenuBarWriteEffect: Equatable, Sendable {
+  /// `NSGlobalDomain _HIHideMenuBar`.
+  case setEffectiveBit(hidden: Bool)
+  /// `com.apple.controlcenter AutoHideMenuBarOption`.
+  case setControlCenterRecord(option: Int)
+  /// Tell the system to adopt what was just written.
+  case broadcastChange
 }
