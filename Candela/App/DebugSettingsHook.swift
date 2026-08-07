@@ -86,14 +86,14 @@
     static func resolve(_ value: String, externalKeys: [String]) -> Resolution {
       let parts = value.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
       guard parts.count == 2 else {
-        return .rejected("\(quoted(value)) is not <kind>:<id> — expected pane:<id> or display:<key>")
+        return .rejected("\(quoted(value)) is not <kind>:<id>; expected pane:<id> or display:<key>")
       }
       let body = String(parts[1])
       switch parts[0] {
       case "pane":
         guard let id = PaneID(rawValue: body) else {
           let known = PaneID.allCases.map(\.rawValue).joined(separator: ", ")
-          return .rejected("unknown pane \(quoted(body)) — ids are case-sensitive: \(known)")
+          return .rejected("unknown pane \(quoted(body)); ids are case-sensitive: \(known)")
         }
         return .resolved(.pane(id), subPage: nil)
       case "display":
@@ -106,7 +106,7 @@
         if segments.count == 2 {
           guard let page = DisplaySubPage(rawValue: String(segments[1])) else {
             let known = DisplaySubPage.allCases.map(\.rawValue).joined(separator: ", ")
-            return .rejected("unknown sub-page \(quoted(String(segments[1]))) — ids are case-sensitive: \(known)")
+            return .rejected("unknown sub-page \(quoted(String(segments[1]))); ids are case-sensitive: \(known)")
           }
           subPage = page
         }
@@ -116,17 +116,17 @@
         let known = ["builtIn"] + externalKeys
         if keyBody == "first" {
           guard let key = externalKeys.first else {
-            return .rejected("display:first — no external display connected; try display:builtIn")
+            return .rejected("display:first found no external display connected; try display:builtIn")
           }
           return .resolved(.display(key), subPage: subPage)
         }
         guard known.contains(keyBody) else {
           let list = known.map(quoted).joined(separator: ", ")
-          return .rejected("unknown display key \(quoted(keyBody)) — connected: \(list)")
+          return .rejected("unknown display key \(quoted(keyBody)); connected: \(list)")
         }
         return .resolved(.display(keyBody), subPage: subPage)
       default:
-        return .rejected("unknown kind \(quoted(String(parts[0]))) — expected pane or display")
+        return .rejected("unknown kind \(quoted(String(parts[0]))); expected pane or display")
       }
     }
 
