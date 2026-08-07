@@ -67,8 +67,16 @@ public class Arm64DDC: NSObject {
     var send: [UInt8] = [command]
     var reply = [UInt8](repeating: 0, count: 11)
     if Self.performDDCCommunication(service: service, send: &send, reply: &reply, writeSleepTime: writeSleepTime, numOfWriteCycles: numOfWriteCycles, readSleepTime: readSleepTime, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime) {
-      let max = UInt16(reply[6]) * 256 + UInt16(reply[7])
-      let current = UInt16(reply[8]) * 256 + UInt16(reply[9])
+      // The checksum alone is a 1-in-256 guard, and until now it was the ONLY
+      // guard on this path. The Intel transport has always checked the op code
+      // and result code; this one did not — so a display answering with stale
+      // bytes, or answering a DIFFERENT VCP code than the one asked for,
+      // produced a plausible `max` that silently compressed the whole range.
+      if DDCReplyFrame.rejection(for: reply, command: command) != nil {
+        return nil
+      }
+      let max = DDCReplyFrame.value(high: reply[6], low: reply[7])
+      let current = DDCReplyFrame.value(high: reply[8], low: reply[9])
       values = (current, max)
     } else {
       values = nil
