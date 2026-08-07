@@ -37,15 +37,38 @@ struct AllModesPage: View {
     case all = "All"
   }
 
-  @State private var listMode: ListMode = .recommended
+  /// nil until `seedListMode` decides, once, which list this display should
+  /// open on; the user's own choice overwrites it and is never re-decided.
+  ///
+  /// The default cannot be a stored initial value, because it depends on a
+  /// catalog that does not exist when this state is created: a display whose
+  /// every size is under the usability floor has an EMPTY curated list and a
+  /// full one with hundreds of entries, and it is exactly the display the hub
+  /// sends here ("All Sizes & Refresh Rates lists them anyway"). `.recommended`
+  /// would open this page blank on the one display it exists for.
+  ///
+  /// It cannot be recomputed per body either. **Measured 2026-08-06:** with 22
+  /// curated rows present, repeated launches of the same build opened
+  /// alternately on Recommended and All — a body-time read of
+  /// `catalog.rows.isEmpty` samples a catalog that is not yet settled at first
+  /// layout, and the segmented picker can write whatever it sampled back.
+  /// Seeding once, from the catalog this page's own `.task` has just
+  /// enumerated, is what makes the answer the same every time.
+  @State private var chosenListMode: ListMode?
   /// nil is "Any". Quantized rates only — `distinctRates` is the source, never
   /// `refreshRates(in:)`, which dedupes raw doubles and would offer 60 twice
   /// the day float noise reached it.
   @State private var rateFilter: Double?
-  /// Arrow-key movement within the list (accessibility contract 6). Keyed by
-  /// `ioModeID`, which is also the row `.id`, so focus and `scrollTo` speak the
-  /// same language.
-  @FocusState private var focusedRow: Int32?
+  /// Which sizes are open, by `SizeGroup.header`. Seeded once with the current
+  /// mode's size (`seedListMode`) and owned by the user after that. Keyed by
+  /// the size and not by `ioModeID`, so an expansion survives the
+  /// re-enumeration that reassigns mode ids.
+  @State private var expandedSizes: Set<String> = []
+  /// Arrow-key movement within the list (accessibility contract 6), and
+  /// `scrollTo`'s target. One id space for both kinds of row — a size row and a
+  /// mode row can share a display, so `ioModeID` alone could not name them
+  /// both.
+  @FocusState private var focusedRow: String?
 
   @Environment(AppModel.self) private var model
   /// SO6's "key settings window" test, read at the click that starts a
@@ -55,6 +78,11 @@ struct AllModesPage: View {
   private var displayID: CGDirectDisplayID { state.display.id }
   private var coordinator: DisplayModeCoordinator { model.displayModes }
   private var catalog: DisplayModeCoordinator.Catalog? { coordinator.catalogs[displayID] }
+
+  /// What the list is showing. `.recommended` only stands in for the moment
+  /// before the seed lands, during which the page has no catalog and renders no
+  /// list at all.
+  private var listMode: ListMode { chosenListMode ?? .recommended }
 
   var body: some View {
     ScrollViewReader { proxy in
@@ -79,16 +107,16 @@ struct AllModesPage: View {
       // on the hub because a push is exactly when the modes are worth
       // re-reading, and because the debug screenshot hook can open this page
       // with the hub's own `.task` never having appeared.
-      .task(id: state.id) { coordinator.refreshCatalog(for: state.id) }
+      .task(id: state.id) {
+        coordinator.refreshCatalog(for: state.id)
+        seedListMode()
+      }
       .onAppear { scrollToCurrent(proxy) }
       // Switching to All lands on 332 rows, and the row worth landing on is the
       // one the display is running. Focus stays on the segmented control (Ana
-      // #5) — scrolling does not move it, and the announcement is what tells a
-      // VoiceOver user the list underneath changed size.
-      .onChange(of: listMode) { _, _ in
-        scrollToCurrent(proxy)
-        announceListMode()
-      }
+      // #5) — scrolling does not move it. Keyed on the RESOLVED mode, so the
+      // catalog arriving and flipping the default scrolls too.
+      .onChange(of: listMode) { _, _ in scrollToCurrent(proxy) }
       // A filter naming a rate the display no longer offers would render an
       // empty list under a pop-up showing a blank value. Re-enumeration is the
       // one thing that can take a rate away.
@@ -108,7 +136,22 @@ struct AllModesPage: View {
 
   @ViewBuilder private func listControls(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
     Section {
-      Picker("Show", selection: $listMode) {
+      // The announcement rides on the SETTER, not on a change of `listMode`:
+      // the resolved value can also change when the catalog arrives, and a page
+      // that announced its own opening default would talk over the title
+      // `SubPageHeader` just took the cursor to (a11y contract 1).
+      Picker("Show", selection: Binding(
+        get: { listMode },
+        set: { mode in
+          // A write-back equal to what `get` just returned is not a choice, and
+          // a segmented control cannot send one from a real click. Ignoring it
+          // keeps a picker's own initial-selection write from being recorded as
+          // the user having answered.
+          guard mode != listMode else { return }
+          chosenListMode = mode
+          announce(mode, in: catalog)
+        }
+      )) {
         ForEach(ListMode.allCases, id: \.self) { mode in
           Text(verbatim: mode.rawValue).tag(mode)
         }
@@ -132,14 +175,57 @@ struct AllModesPage: View {
     catalog.map { DisplayModeCatalog.distinctRates($0.all) } ?? []
   }
 
+  /// Decides the opening list once, from the catalog `refreshCatalog` has just
+  /// written — never from a body-time read (see `chosenListMode`).
+  ///
+  /// Silent when the catalog is missing or holds no modes at all: that is a
+  /// display mid-reconfiguration, and a default taken from it would be a guess
+  /// this page then has to live with. `.task(id:)` runs again on the next
+  /// identity, and the seed is still unmade.
+  private func seedListMode() {
+    guard chosenListMode == nil,
+          let catalog = coordinator.catalogs[displayID],
+          !catalog.all.isEmpty
+    else { return }
+    chosenListMode = catalog.rows.isEmpty ? .all : .recommended
+    // The size in use opens with the page — it is the one group somebody
+    // arriving here is looking for, and leaving it shut would put the
+    // checkmark's own row behind a click.
+    if let current = catalog.current {
+      expandedSizes.insert(RowID.size(width: current.logicalWidth, height: current.logicalHeight))
+    }
+  }
+
+  /// A size is open when the user opened it — or when the rate filter is on.
+  ///
+  /// **Filtered means expanded, and that is a choice.** A filter answers "which
+  /// sizes give me 120 Hz", and leaving the matches shut answers it with thirty
+  /// closed doors and a click each to confirm what the filter already
+  /// established. Filtering also cuts most groups to one or two rows, so the
+  /// expanded list stays about as long as the collapsed one.
+  private func isExpanded(_ group: DisplayModeCatalog.SizeGroup) -> Bool {
+    rateFilter != nil || expandedSizes.contains(group.header)
+  }
+
   // MARK: - List
 
-  /// One `Section` per logical size in `All`, one flat section in
-  /// `Recommended`. The sections sit directly in the `Form`'s builder — a
-  /// grouped `Form` only reliably handles structure declared there (measured;
-  /// see `DisplayHubView.body`).
+  /// One flat section in `Recommended`; in `All`, one row per SIZE that opens
+  /// to its rates.
+  ///
+  /// **Sizes are collapsed by default (§5, amended 2026-08-06).** Grouping 332
+  /// rows under headers still leaves 332 rows to scroll; a display offers about
+  /// thirty sizes, and that is the list a person is actually reading. The rates
+  /// are the second question, asked one size at a time.
+  ///
+  /// The size row is a BUTTON, not a `DisclosureGroup`: a disclosure toggles
+  /// only from its chevron glyph and never from its label (measured on this
+  /// window), and that trap is exactly what the old full-list disclosure died
+  /// of. The chevron here is decoration on a row that is entirely hit-target.
+  ///
+  /// The sections sit directly in the `Form`'s builder — a grouped `Form` only
+  /// reliably handles structure declared there (measured; see
+  /// `DisplayHubView.body`).
   @ViewBuilder private func modeList(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
-    let lowResolution = DisplayModeCatalog.lowResolutionDuplicates(catalog.all)
     // A11y 6 asks for the rows to read as one radio group. `.contain` names the
     // group without collapsing its children, which is the whole point — it must
     // never become `.combine`, or 332 rows would announce as one element.
@@ -148,25 +234,39 @@ struct AllModesPage: View {
       case .recommended:
         Section {
           ForEach(catalog.rows) { row in
-            recommendedRow(row, in: catalog, lowResolution: lowResolution)
+            recommendedRow(row, in: catalog)
           }
         } header: {
           Text("Recommended Sizes").settingsHeading()
         }
       case .all:
-        // The size headers feed the heading rotor, which is the only way to
-        // cross 300 rows without arrowing through every one of them.
-        ForEach(filteredGroups(catalog), id: \.header) { group in
-          Section {
-            ForEach(group.modes) { mode in
-              fullRow(mode, in: catalog, lowResolution: lowResolution)
+        // Computed here, not per row: the answer depends on a mode's siblings
+        // at the same logical size, and an expanded group renders every one.
+        let lowResolution = DisplayModeCatalog.lowResolutionDuplicates(catalog.all)
+        // ONE section, not one per size: the size rows are now content rather
+        // than headers, and a header repeating the row directly under it is the
+        // same words twice.
+        Section {
+          ForEach(filteredGroups(catalog), id: \.header) { group in
+            sizeRow(group, in: catalog)
+            if isExpanded(group) {
+              ForEach(group.modes) { mode in
+                fullRow(mode, in: catalog, lowResolution: lowResolution)
+                  .padding(.leading, 18)
+              }
             }
-          } header: {
-            Text(verbatim: group.header).settingsHeading()
           }
+        } header: {
+          Text("Sizes").settingsHeading()
         }
       }
     }
+    // `.focusSection()` belongs here on paper — it is the primitive for a11y
+    // 6's "arrows within" — and it is deliberately ABSENT. Applied to this
+    // Group inside the grouped `Form` it took the form styling with it
+    // (measured 2026-08-06: the size header centred and the rows lost their
+    // card and separators). A focus affordance that cannot be verified is not
+    // worth a visibly broken list; see `move(_:)` for what is implemented.
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Sizes")
   }
@@ -179,9 +279,18 @@ struct AllModesPage: View {
   /// `currentHz` is `outcome`'s contract, not a hint — and with no current mode
   /// the caps warning is suppressed entirely rather than judged against a
   /// placeholder.
+  ///
+  /// **No "low resolution" tag here, and that is not an oversight.** SO14
+  /// scopes the tag to the full mode list, and the curated list is where it
+  /// would lie: `representativeRanking` ranks native first, so on a panel that
+  /// offers its native framebuffer at both 1x and 2x the representative for
+  /// that size IS the 1x half — and its sharp twin has been deduplicated away.
+  /// The row would then read "Native · low resolution" with no better option in
+  /// sight, which is a complaint about a choice the user cannot act on from
+  /// this list. In All, where the twin is one row away, the tag is a
+  /// distinction; here it would only be an insult.
   private func recommendedRow(
-    _ row: DisplayModeRow, in catalog: DisplayModeCoordinator.Catalog,
-    lowResolution: Set<Int32>
+    _ row: DisplayModeRow, in catalog: DisplayModeCoordinator.Catalog
   ) -> some View {
     let outcome = DisplayModeCatalog.outcome(
       selectingWidth: row.mode.logicalWidth,
@@ -191,25 +300,26 @@ struct AllModesPage: View {
     )
     let caps = catalog.current != nil && outcome?.lowersCurrentRate == true
     let hz = outcome?.appliedHz ?? DisplayMode.quantizedRefresh(row.mode.refreshHz)
-    let tags = catalog.fullListTags(
-      for: row.mode, isLowResolutionDuplicate: lowResolution.contains(row.id)
-    )
-    let rate = caps ? "caps at \(DisplayModeCopy.refresh(hz))" : DisplayModeCopy.refresh(hz)
-    let spokenRate = caps
-      ? "caps at \(ModeSpeech.spokenRate(hz))"
-      : ModeSpeech.spokenRate(hz)
+    let tags = catalog.fullListTags(for: row.mode, isLowResolutionDuplicate: false)
+    // A mode with no rate has no rate: nil, never 0, because "at 0 hertz" is a
+    // claim and "0 Hz" is a value nobody can act on. The row then names the
+    // size alone, which is all it knows.
+    let rate = hz > 0 ? (caps ? "caps at \(DisplayModeCopy.refresh(hz))" : DisplayModeCopy.refresh(hz)) : nil
+    let spokenRate = hz > 0
+      ? (caps ? "caps at \(ModeSpeech.spokenRate(hz))" : ModeSpeech.spokenRate(hz))
+      : nil
 
     return modeRow(
-      id: row.id,
+      id: RowID.mode(row.id),
       title: DisplayModeCopy.size(row.mode),
-      detail: ([rate] + tags).joined(separator: " · "),
+      detail: ([rate].compactMap { $0 } + tags).joined(separator: " · "),
       spoken: ([
         ModeSpeech.spoken(
           logicalWidth: row.mode.logicalWidth, logicalHeight: row.mode.logicalHeight,
           refreshHz: nil
         ),
         spokenRate,
-      ] + tags).joined(separator: ", "),
+      ].compactMap { $0 } + tags).joined(separator: ", "),
       // By SIZE, like the hub's pop-up: a curated row's representative mode is
       // its size's fastest, so an ID comparison would drop the checkmark
       // whenever the user is at that size's slower rate.
@@ -226,12 +336,16 @@ struct AllModesPage: View {
     let tags = catalog.fullListTags(
       for: mode, isLowResolutionDuplicate: lowResolution.contains(mode.ioModeID)
     )
-    let hz = DisplayMode.quantizedRefresh(mode.refreshHz)
+    // nil, never 0 — see `recommendedRow`.
+    let hz: Double? = DisplayMode.quantizedRefresh(mode.refreshHz) > 0
+      ? DisplayMode.quantizedRefresh(mode.refreshHz)
+      : nil
 
     return modeRow(
-      id: mode.ioModeID,
+      id: RowID.mode(mode.ioModeID),
       title: DisplayModeCopy.size(mode),
-      detail: ([DisplayModeCopy.refresh(hz)] + tags).joined(separator: " · "),
+      detail: ([hz.map(DisplayModeCopy.refresh)].compactMap { $0 } + tags)
+        .joined(separator: " · "),
       spoken: ([
         ModeSpeech.spoken(
           logicalWidth: mode.logicalWidth, logicalHeight: mode.logicalHeight, refreshHz: hz
@@ -245,8 +359,43 @@ struct AllModesPage: View {
     }
   }
 
+  /// One size, closed. Says how fast the size goes rather than how many entries
+  /// it holds: the rate is what the next click is about, and a count of modes
+  /// counts duplicates the platform publishes.
+  private func sizeRow(
+    _ group: DisplayModeCatalog.SizeGroup, in catalog: DisplayModeCoordinator.Catalog
+  ) -> some View {
+    let expanded = isExpanded(group)
+    let holdsCurrent = catalog.current.map {
+      $0.logicalWidth == group.logicalWidth && $0.logicalHeight == group.logicalHeight
+    } ?? false
+    let top = group.modes.map(\.refreshHz).max().map(DisplayMode.quantizedRefresh)
+    let id = RowID.size(width: group.logicalWidth, height: group.logicalHeight)
+
+    return ModeChoice(
+      title: group.header,
+      detail: top.map { $0 > 0 ? "up to \(DisplayModeCopy.refresh($0))" : "" } ?? "",
+      // Size and state, both spoken: a closed row that does not say it is
+      // closed is a row VoiceOver describes as a dead end.
+      spoken: ModeSpeech.spoken(
+        logicalWidth: group.logicalWidth, logicalHeight: group.logicalHeight, refreshHz: nil
+      ),
+      spokenValue: expanded ? "Expanded" : "Collapsed",
+      isCurrent: holdsCurrent,
+      chevron: expanded ? "chevron.up" : "chevron.down"
+    ) {
+      if expanded {
+        expandedSizes.remove(group.header)
+      } else {
+        expandedSizes.insert(group.header)
+      }
+    }
+    .id(id)
+    .focused($focusedRow, equals: id)
+  }
+
   private func modeRow(
-    id: Int32, title: String, detail: String, spoken: String, isCurrent: Bool,
+    id: String, title: String, detail: String, spoken: String, isCurrent: Bool,
     action: @escaping () -> Void
   ) -> some View {
     ModeChoice(
@@ -254,6 +403,12 @@ struct AllModesPage: View {
     )
     .id(id)
     .focused($focusedRow, equals: id)
+  }
+
+  /// The one id space the list, its focus and `scrollTo` all speak.
+  enum RowID {
+    static func size(width: Int, height: Int) -> String { "\(width) × \(height)" }
+    static func mode(_ id: Int32) -> String { "mode-\(id)" }
   }
 
   /// The full list, grouped, with the rate filter applied. Groups that the
@@ -317,22 +472,40 @@ struct AllModesPage: View {
 
   private static let rowsVisibleFromTheTop = 8
 
-  /// The row the checkmark is on, which differs by list mode: `All` holds the
-  /// exact current mode, while `Recommended` holds one row for its SIZE.
-  private var currentRowID: Int32? {
-    guard let catalog else { return nil }
+  /// The row the checkmark is on, which differs by list mode: `Recommended`
+  /// holds one row per SIZE, and `All` holds the exact mode — behind a size row
+  /// that may be shut, in which case the size row is the thing to land on.
+  private var currentRowID: String? {
+    guard let catalog, let current = catalog.current else { return nil }
     switch listMode {
-    case .recommended: return catalog.rows.first { catalog.isCurrentSize($0.mode) }?.id
-    case .all: return catalog.current?.ioModeID
+    case .recommended:
+      return catalog.rows.first { catalog.isCurrentSize($0.mode) }.map { RowID.mode($0.id) }
+    case .all:
+      return rowID(forModeAt: current, in: catalog)
     }
   }
 
-  private var nativeRowID: Int32? {
+  private var nativeRowID: String? {
     guard let catalog else { return nil }
     switch listMode {
-    case .recommended: return catalog.rows.first { $0.mode.isNative }?.id
-    case .all: return catalog.all.first { $0.isNative }?.ioModeID
+    case .recommended:
+      return catalog.rows.first { $0.mode.isNative }.map { RowID.mode($0.id) }
+    case .all:
+      return catalog.all.first { $0.isNative }.flatMap { rowID(forModeAt: $0, in: catalog) }
     }
+  }
+
+  /// A mode's row in the collapsible list — itself when its size is open, its
+  /// size row when it is not. nil when the rate filter has removed it entirely.
+  private func rowID(
+    forModeAt mode: DisplayMode, in catalog: DisplayModeCoordinator.Catalog
+  ) -> String? {
+    let sizeID = RowID.size(width: mode.logicalWidth, height: mode.logicalHeight)
+    guard let group = filteredGroups(catalog).first(where: { $0.header == sizeID })
+    else { return nil }
+    guard isExpanded(group), group.modes.contains(where: { $0.ioModeID == mode.ioModeID })
+    else { return sizeID }
+    return RowID.mode(mode.ioModeID)
   }
 
   /// A11y 6's rotor: the two rows anyone actually navigates to directly. Both
@@ -351,25 +524,50 @@ struct AllModesPage: View {
   }
 
   private struct RotorEntry: Identifiable {
-    let id: Int32
+    let id: String
     let label: String
   }
 
-  /// Every row on screen, in render order. The arrow keys walk this, and the
-  /// rotor checks membership against it.
-  private var visibleRowIDs: [Int32] {
+  /// Every row on screen, in render order — size rows included, and the modes
+  /// of a shut size excluded. The arrow keys walk this, the rotor checks
+  /// membership against it, and `scrollToCurrent` measures the fold against it,
+  /// so all three follow the collapse for free.
+  private var visibleRowIDs: [String] { rowIDs(for: listMode, in: catalog) }
+
+  private func rowIDs(
+    for mode: ListMode, in catalog: DisplayModeCoordinator.Catalog?
+  ) -> [String] {
     guard let catalog else { return [] }
-    switch listMode {
-    case .recommended: return catalog.rows.map(\.id)
-    case .all: return filteredGroups(catalog).flatMap { $0.modes.map(\.ioModeID) }
+    switch mode {
+    case .recommended:
+      return catalog.rows.map { RowID.mode($0.id) }
+    case .all:
+      return filteredGroups(catalog).flatMap { group in
+        [group.header] + (isExpanded(group) ? group.modes.map { RowID.mode($0.ioModeID) } : [])
+      }
     }
   }
 
-  /// A11y 6: arrows move within the list, so Tab does not have to walk 332
-  /// rows to leave it. Whether the enclosing `List` swallows the arrow keys
-  /// before this sees them is UNVERIFIED — synthetic keystrokes cannot be
-  /// delivered to an `LSUIElement` app from the shell, so this is a hardware
-  /// checklist item, not a measured behaviour.
+  /// Maps arrow keys onto row focus.
+  ///
+  /// **This is HALF of accessibility contract 6, and the comment says so
+  /// because the code cannot.** The contract is "one Tab stop, arrows within".
+  /// What is implemented is the arrows: every row is its own focusable button,
+  /// so Tab still visits each one. SwiftUI offers no supported way to keep a
+  /// control focusable while taking it out of the Tab loop, and the one
+  /// primitive that would have helped with directional movement,
+  /// `.focusSection()`, breaks the grouped form's styling here (see
+  /// `modeList`).
+  ///
+  /// Neither half is verified either: synthetic keystrokes cannot be delivered
+  /// to an `LSUIElement` app from the shell (they go to the terminal), so
+  /// whether the enclosing `List` consumes the arrows before `onMoveCommand`
+  /// sees them is unknown. Both are hardware-checklist items, filed with the
+  /// task report — not measured behaviour.
+  ///
+  /// Collapsing the sizes is what makes the shortfall survivable rather than
+  /// disqualifying: Tab now walks about thirty size rows instead of 332 mode
+  /// rows, and only an opened size adds to that.
   private func move(_ direction: MoveCommandDirection) {
     let ids = visibleRowIDs
     guard !ids.isEmpty else { return }
@@ -384,11 +582,20 @@ struct AllModesPage: View {
     }
   }
 
-  private func announceListMode() {
-    let count = visibleRowIDs.count
-    let message = switch listMode {
-    case .all: "Showing all \(count) modes"
-    case .recommended: "Showing \(count) recommended sizes"
+  /// Takes the mode it is announcing rather than reading `listMode` back: the
+  /// caller is the picker's setter, and an announcement about "whatever the
+  /// state says now" is exactly the kind of thing that ends up one toggle
+  /// behind.
+  private func announce(_ mode: ListMode, in catalog: DisplayModeCoordinator.Catalog?) {
+    // Counted from the CONTENT, not from `rowIDs` — with sizes collapsed a row
+    // count is neither the number of modes nor the number of sizes, and saying
+    // "32 modes" about 32 shut size rows would be a plain lie.
+    let groups = catalog.map { filteredGroups($0) } ?? []
+    let message = switch mode {
+    case .all:
+      "Showing all \(groups.reduce(0) { $0 + $1.modes.count }) modes in \(groups.count) sizes"
+    case .recommended:
+      "Showing \(catalog?.rows.count ?? 0) recommended sizes"
     }
     NSAccessibility.post(
       element: NSApp as Any,
@@ -404,16 +611,19 @@ struct AllModesPage: View {
 private extension DisplayModeCatalog.SizeGroup {
   /// Title Case is not a question for a pair of numbers, but `ForEach` needs an
   /// identity for the section and the size is it — two groups cannot share one.
-  var header: String { "\(logicalWidth) × \(logicalHeight)" }
+  var header: String { AllModesPage.RowID.size(width: logicalWidth, height: logicalHeight) }
 }
 
-/// One selectable mode. A row-shaped button: the whole row is the hit region (a
-/// bare `.plain` button is only as clickable as its text is wide), and it
-/// carries hover and pressed states, without which it reads as static text.
+/// One row in either list — a selectable mode, or a size that opens to its
+/// rates. A row-shaped button: the whole row is the hit region (a bare `.plain`
+/// button is only as clickable as its text is wide), and it carries hover and
+/// pressed states, without which it reads as static text.
 ///
-/// Moved here from the resolution section it used to serve, which is gone —
-/// this page is now the only surface in the settings window that lists modes
-/// one per row.
+/// The size rows use the SAME component deliberately. They are a
+/// `DisclosureGroup`'s job on paper, and a disclosure toggles only from its
+/// chevron glyph (measured on this window) — the trap the old full-list
+/// disclosure died of. Here the chevron is drawn by a row that is entirely
+/// clickable.
 private struct ModeChoice: View {
   let title: String
   let detail: String
@@ -421,7 +631,15 @@ private struct ModeChoice: View {
   /// one: "×" is read inconsistently at most verbosities and digit groups are
   /// read digit by digit without it.
   let spoken: String
+  /// Announced after the label — "Expanded" / "Collapsed" on a size row. A
+  /// closed row that does not say it is closed is one VoiceOver describes as a
+  /// dead end.
+  var spokenValue: String?
   let isCurrent: Bool
+  /// An SF Symbol drawn at the trailing edge, or nothing. Hidden from
+  /// accessibility: `spokenValue` already says what it means, and a glyph name
+  /// read aloud says nothing.
+  var chevron: String?
   let action: () -> Void
 
   @State private var isHovering = false
@@ -437,6 +655,12 @@ private struct ModeChoice: View {
         Text(verbatim: detail)
           .foregroundStyle(.secondary)
         Spacer(minLength: 8)
+        if let chevron {
+          Image(systemName: chevron)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
+        }
       }
       .padding(.vertical, 3)
       .padding(.horizontal, 4)
@@ -446,6 +670,7 @@ private struct ModeChoice: View {
     .buttonStyle(ModeChoiceButtonStyle(isHovering: isHovering))
     .onHover { isHovering = $0 }
     .accessibilityLabel(Text(verbatim: spoken))
+    .accessibilityValue(Text(verbatim: spokenValue ?? ""))
     .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
   }
 }
