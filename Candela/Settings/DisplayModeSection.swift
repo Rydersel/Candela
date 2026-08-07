@@ -121,9 +121,9 @@ struct DisplayModeSection: View {
           // Both answers carry the preview THIS banner is rendering, so a
           // selection landing between the click and the queued operation is
           // refused as stale rather than resolved by an answer given about
-          // something else. The stored-mode fan-out is NOT done here:
-          // `DisplayModeCoordinator` owns it (`didStoreMode`), so the panel's
-          // confirmation surface cannot forget it.
+          // something else. Keeping writes NO stored mode (SO19) — the pin is
+          // set from the Remember row, never as a side effect of an answer
+          // given about the screen in front of you.
           Button("Keep") { Task { await coordinator.confirm(preview) } }
             .buttonStyle(.borderedProminent)
           Button("Revert Now") { Task { await coordinator.revert(preview) } }

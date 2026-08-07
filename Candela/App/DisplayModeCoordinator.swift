@@ -540,23 +540,38 @@ final class DisplayModeCoordinator {
     return persistence.isEnabled(for: identity)
   }
 
-  /// Turning it ON also stores what is on screen now. Without that, the toggle
-  /// does nothing until the next resolution change — a control that reads as
+  /// Turning it ON also pins what is on screen now. Without that, the toggle
+  /// does nothing until the next `Set to Current` — a control that reads as
   /// broken on the very reconnect it was turned on for. Turning it OFF leaves
   /// the stored mode alone, matching `ModePersistence.clear`'s ruling that
-  /// "forget my choice" and "stop remembering" are separate answers.
+  /// "forget my choice" and "stop remembering" are separate answers, and
+  /// keeping the pin intact if the toggle comes back on.
   func setRemembering(_ remembering: Bool, for displayID: CGDirectDisplayID) {
     guard let identity = identity(for: displayID) else { return }
     persistence.setEnabled(remembering, for: identity)
     guard remembering else { return }
-    if let current = catalogs[displayID]?.current ?? configurator.currentMode(for: displayID) {
-      // Through `store(_:on:)`, not `persistence.store` directly: this is the
-      // second place `storedDisplayMode` is written, and it announced nothing.
-      // Its caller happened to fan out the same name by hand, which is exactly
-      // the arrangement that broke the first time — the moment a second surface
-      // offers this toggle, a stored mode is written with no propagation.
-      store(current, on: displayID, for: identity)
-    }
+    pinCurrentMode(on: displayID)
+  }
+
+  /// SO19/A6: the stored mode is an explicit PIN. Kept previews do not write
+  /// it; this is the only route to `store`, reached from the Remember toggle's
+  /// turn-on seeding and from the hub's `Set to Current`.
+  ///
+  /// Silent when the display cannot report the mode it is running — leaving an
+  /// existing pin alone beats replacing it with a guess.
+  func pinCurrentMode(on displayID: CGDirectDisplayID) {
+    guard let identity = identity(for: displayID),
+          let current = catalogs[displayID]?.current ?? configurator.currentMode(for: displayID)
+    else { return }
+    store(current, on: displayID, for: identity)
+  }
+
+  /// The pin as stored, for the row that shows it and for `Set to Current`'s
+  /// enabled state. Read-only by design: `pinCurrentMode` is the write, and it
+  /// is the write BECAUSE it announces itself (`didStoreMode`).
+  func storedDescriptor(for displayID: CGDirectDisplayID) -> DisplayModeDescriptor? {
+    guard let identity = identity(for: displayID) else { return nil }
+    return persistence.storedMode(for: identity)
   }
 
   // MARK: - Preview
@@ -747,16 +762,11 @@ final class DisplayModeCoordinator {
     let outcome = keeping ? await session.confirm(intent) : await session.revert(intent)
     switch outcome {
     case .committed:
-      // Reached only via the session's match check, so the mode committed is
-      // exactly the one the user was reading — and therefore the one to store.
-      //
-      // Not quite structural: `confirm()` returns `lastOutcome ?? .reverted`
-      // when nothing is outstanding, and `lastOutcome` can be `.committed` from
-      // an earlier commit, so that early return precedes the match check. It is
-      // unreachable in practice — a commit clears `preview`, which is what
-      // renders the buttons — and re-storing the same mode would be harmless if
-      // it were not. The guarantee is the flow, not the type.
-      storeIfRemembering(answered.mode, on: answered.displayID)
+      // SO19/A6: keeping a preview does NOT write the stored mode. The pin
+      // answers "what should come back on reconnect", and an afternoon of
+      // trying sizes out would otherwise rewrite it from whichever one was
+      // kept last — a change nobody asked for and nothing showed. The only
+      // route to a stored mode is `pinCurrentMode`.
       await adopt(.clear)
     case .reverted:
       await adopt(.clear)
@@ -918,15 +928,9 @@ final class DisplayModeCoordinator {
     countdown = nil
   }
 
-  private func storeIfRemembering(_ mode: DisplayMode, on displayID: CGDirectDisplayID) {
-    guard let identity = identity(for: displayID), persistence.isEnabled(for: identity) else {
-      return
-    }
-    store(mode, on: displayID, for: identity)
-  }
-
   /// THE only writer of `storedDisplayMode`. Announcing the write is part of
   /// making it, so no caller can perform one and forget the propagation.
+  /// Private, and `pinCurrentMode` is its only caller (SO19).
   private func store(
     _ mode: DisplayMode, on displayID: CGDirectDisplayID, for identity: DisplayConfigIdentity
   ) {
