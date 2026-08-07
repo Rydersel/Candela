@@ -4,6 +4,13 @@ import SwiftUI
 /// The panel-flavored opening of an external display's page (A2/A4): a
 /// functional tile, the identity block, and the two live sliders.
 ///
+/// **Centered header, full-width sliders.** The tile is the page's opening
+/// image, so it sits centered with the name and mode directly under it rather
+/// than off to one side — a tile beside the text pushed every slider's left
+/// edge past it, which read as an indent nothing else on the page had. The
+/// sliders and the consequence caption below run the hub row's full content
+/// width and stay leading-aligned with every other caption in the window.
+///
 /// **The tile earns its place by being functional** (A4). It carries the
 /// display's real shape — aspect ratio straight off the current mode, which is
 /// why a display mounted at 270° renders TALL with no rotation transform
@@ -36,10 +43,14 @@ struct DisplayHeroView: View {
   /// ultrawide off the page, and a fixed width would flatten a portrait
   /// display to a sliver.
   ///
-  /// Scaled, because it sits beside scalable text (a11y contract 10): at large
-  /// text sizes a fixed 56 pt tile would be dwarfed by the name beside it.
-  @ScaledMetric(relativeTo: .headline) private var tileBoxWidth: CGFloat = 120
-  @ScaledMetric(relativeTo: .headline) private var tileBoxHeight: CGFloat = 56
+  /// Bigger than the beside-the-text version it replaced (120×56): centered
+  /// above the name it is the page's opening image and a tile the height of two
+  /// lines of text reads as a bullet, not as the display.
+  ///
+  /// Scaled, because it sits directly above scalable text (a11y contract 10):
+  /// at large text sizes a fixed box would be dwarfed by the name under it.
+  @ScaledMetric(relativeTo: .headline) private var tileBoxWidth: CGFloat = 180
+  @ScaledMetric(relativeTo: .headline) private var tileBoxHeight: CGFloat = 80
 
   /// Keyboard/VoiceOver floor for brightness when the software leg can reach
   /// black (a11y contract 7). Low enough to still be "as dark as it goes",
@@ -67,10 +78,16 @@ struct DisplayHeroView: View {
     // is plain `UserDefaults` and is not observable, so without this read a
     // rename in the section below would leave the old name standing here.
     let _ = model.prefsRevision
-    HStack(alignment: .top, spacing: 14) {
-      tile
-      VStack(alignment: .leading, spacing: 8) {
+    VStack(alignment: .leading, spacing: 14) {
+      // Tile and identity are one centered header. The tile is decorative to
+      // VoiceOver, so the reading order this produces is still identity-then-
+      // sliders.
+      VStack(spacing: 6) {
+        tile
         identity
+      }
+      .frame(maxWidth: .infinity)
+      VStack(alignment: .leading, spacing: 8) {
         brightnessSlider
         volumeSlider
         if let consequenceSentence {
@@ -81,8 +98,8 @@ struct DisplayHeroView: View {
             .accessibilityHidden(true)
         }
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
     .accessibilityElement(children: .contain)
   }
 
@@ -109,11 +126,12 @@ struct DisplayHeroView: View {
         }
       }
       .frame(width: box.width, height: box.height)
-      // The full BOX is reserved, not just the tile's own size, so the identity
-      // column's left edge stays put whatever shape the display is — a portrait
-      // Dell must not shift every label 90 pt left of where the MAG puts them
-      // (T12 review).
-      .frame(width: tileBoxWidth, height: tileBoxHeight, alignment: .top)
+      // The box's full HEIGHT is reserved, not just the tile's own, so the hero
+      // is the same height whatever shape the display is — a portrait Dell must
+      // not push the brightness slider 30 pt further down the page than the MAG
+      // does. Width is not reserved: nothing sits beside the tile now, and the
+      // centered header would center the reserved box rather than the tile.
+      .frame(height: tileBoxHeight)
       .accessibilityHidden(true)
   }
 
@@ -146,7 +164,7 @@ struct DisplayHeroView: View {
   /// the mode are one fact about one display, and reading them as two elements
   /// makes the top of every display page twice as long to get past.
   private var identity: some View {
-    VStack(alignment: .leading, spacing: 2) {
+    VStack(spacing: 2) {
       Text(verbatim: name)
         .font(.headline)
         .lineLimit(1)
@@ -157,6 +175,7 @@ struct DisplayHeroView: View {
           .foregroundStyle(.secondary)
       }
     }
+    .multilineTextAlignment(.center)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(spokenIdentity)
     .accessibilityAddTraits(.isHeader)
