@@ -400,23 +400,32 @@ struct OledDimmingTests {
     #expect(e.tick(signals(idle: 305)) == .idleDim)  // measured from it, not the wake
   }
 
-  /// RULING D: locking never brightens. Dropping a blacked-out display to lock
-  /// dim's lighter alpha is a brightness increase nobody asked for.
-  @Test func lockingNeverBrightensABlackout() {
+  /// RULING D, restated for the delivery A-16 measured (final review,
+  /// 2026-08-07): a blacked-out display that gets locked drops to `.lockDim`.
+  ///
+  /// The old hold kept `.blackout` so the panel would not rise to lock dim's
+  /// lighter level, but `.blackout` is delivered only by an overlay and no
+  /// overlay of ours renders above the lock screen. The hold therefore
+  /// delivered the FULL-BRIGHT lock screen while every surface said "Screen
+  /// off". `.lockDim` goes on the wire, so it is strictly darker than the hold
+  /// ever actually was, and ruling D holds in light off the panel rather than
+  /// in the name of a state.
+  @Test func lockingABlackoutDimsTheWireInsteadOfHoldingAnInvisibleOverlay() {
     var e = IdleDimmingEngine(config: config(blackout: true, blackoutAt: 1200))
     #expect(e.tick(signals(idle: 1300)) == .blackout)
     e.noteLock(idleSeconds: 1300)
-    #expect(e.tick(signals(idle: 1301, locked: true)) == .blackout)
+    #expect(e.tick(signals(idle: 1301, locked: true)) == .lockDim)
     #expect(e.tick(signals(idle: 2, locked: true)) == .active)  // input still lifts
   }
 
-  /// Round 2: the hold re-checks its own condition, so a wake escapes it with no
-  /// HID event at all — "wake always lands `.active`" outranks "never brightens".
-  @Test func wakeEscapesAHeldBlackoutWhileLocked() {
+  /// Wake always lands `.active`, from a lock reached through a blackout as much
+  /// as from any other, and re-arms on the idle threshold measured from the
+  /// wake.
+  @Test func wakeFromALockedBlackoutLandsActiveAndReArms() {
     var e = IdleDimmingEngine(config: config(idle: 300, blackout: true, blackoutAt: 1200))
     #expect(e.tick(signals(idle: 1300)) == .blackout)
     e.noteLock(idleSeconds: 1300)
-    #expect(e.tick(signals(idle: 1301, locked: true)) == .blackout)
+    #expect(e.tick(signals(idle: 1301, locked: true)) == .lockDim)
     e.noteWake()
     // The counter still reads hours — sleep does not reset it — but none of it
     // was spent awake, so the lock screen comes up lit.
@@ -425,14 +434,16 @@ struct OledDimmingTests {
     #expect(e.tick(signals(idle: 7200 + 300, locked: true)) == .lockDim)
   }
 
-  /// Round 2: the same re-check is what lets the toggle reach a locked screen.
-  @Test func disablingBlackoutWhileLockedExitsTheHold() {
-    var e = IdleDimmingEngine(config: config(blackout: true, blackoutAt: 1200))
-    #expect(e.tick(signals(idle: 1300)) == .blackout)
-    e.noteLock(idleSeconds: 1300)
-    #expect(e.tick(signals(idle: 1301, locked: true)) == .blackout)
-    e.updateConfig(config(blackout: false))
-    #expect(e.tick(signals(idle: 1302, locked: true)) == .lockDim)
+  /// The lock branch never ENTERS a blackout, however long the screen stays
+  /// locked: an overlay nobody can see is not a state this machine may report,
+  /// and the wire dim is the whole of what lock dim delivers.
+  @Test func aBlackoutThresholdElapsingWhileLockedStillYieldsLockDim() {
+    var e = IdleDimmingEngine(config: config(idle: 300, blackout: true, blackoutAt: 1200))
+    e.noteLock(idleSeconds: 10)
+    #expect(e.tick(signals(idle: 11, locked: true)) == .lockDim)
+    #expect(e.tick(signals(idle: 301, locked: true)) == .lockDim)
+    #expect(e.tick(signals(idle: 1201, locked: true)) == .lockDim)
+    #expect(e.tick(signals(idle: 9000, locked: true)) == .lockDim)
   }
 
   /// RULING F: lock dim is exempt from the HDR-settle deferral — a full-bright

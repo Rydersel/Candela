@@ -179,16 +179,18 @@ public struct IdleDimmingEngine: Sendable {
     if signals.isLocked && config.lockDim {
       if inputOccurred { lockDimArmed = false }
       if idleSinceWake >= config.idleDimSeconds { lockDimArmed = true }
-      // Locking never brightens: a display already blacked out stays black
-      // rather than rising to lock dim's lighter alpha. The hold re-checks the
-      // condition it holds FOR, so it cannot outlive it — an unconditional hold
-      // swallows both the wake floor (wake must always land `.active`) and a
-      // blackout switched off while the screen is locked.
-      if current == .blackout, !inputOccurred, config.blackoutEnabled,
-         idleSinceWake >= config.blackoutSeconds {
-        state = .blackout
-        return state
-      }
+      // A blacked-out display that gets locked drops to `.lockDim`, and that IS
+      // ruling D (locking never brightens) rather than a violation of it.
+      //
+      // The hold this replaces (amendment A-3) kept `.blackout` so the panel
+      // would not rise to lock dim's lighter level. It could not: `.blackout`
+      // is delivered ONLY by an overlay, and A-16 measured that no overlay of
+      // ours renders above the lock screen. So the held blackout put the panel
+      // at the FULL-BRIGHT lock screen while every surface said "Screen off".
+      // `.lockDim` goes on the wire, which the lock screen cannot cover, so it
+      // is strictly darker than the hold ever actually was. Ruling D is kept in
+      // the only terms that are observable, which is light coming off the
+      // panel, not the name of a state.
       state = lockDimArmed ? .lockDim : .active
       return state
     }
