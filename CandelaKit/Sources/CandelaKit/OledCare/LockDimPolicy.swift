@@ -34,12 +34,19 @@ public enum LockDimDecision: Equatable, Sendable {
 /// then a property of the arithmetic instead of a comparison someone has to
 /// remember to write.
 public enum LockDimPolicy {
-  /// `level` is the OLED care dim level, the same 0.1...0.9 the idle dim uses.
-  /// As an overlay it was an opacity; on the wire it is how much brightness to
-  /// take away, which is the same sentence about the same number.
-  public static func factor(forLevel level: Double) -> Double {
-    1 - min(max(level, OledDimConfig.levelRange.lowerBound),
-            OledDimConfig.levelRange.upperBound)
+  /// The multiplier for a given dim brightness, which is the IDENTITY by
+  /// construction: the setting is "how bright to leave the display" and the
+  /// multiplier is the fraction of the user's brightness to keep, so they are
+  /// the same number.
+  ///
+  /// Kept as a named seam rather than inlined. It is where the range clamp
+  /// lives, and it was NOT the identity before the setting was inverted on
+  /// 2026-08-07 (it returned `1 - level`, when the number meant overlay
+  /// opacity), so a reader who meets the old meaning in some stale comment
+  /// needs one place where the current one is stated.
+  public static func factor(forBrightness brightness: Double) -> Double {
+    min(max(brightness, OledDimConfig.brightnessRange.lowerBound),
+        OledDimConfig.brightnessRange.upperBound)
   }
 
   public static func decide(

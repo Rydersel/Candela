@@ -67,7 +67,13 @@ public enum DiagnosticsPrefSummary {
     // at 60 s" is the line that explains everything.
     if prefs.oledCareEnrolled { note(.oledCareEnrolled, "true") }
     if prefs.oledIdleDimSeconds != 300 { note(.oledIdleDimSeconds, "\(prefs.oledIdleDimSeconds)") }
-    if prefs.oledIdleDimLevel != 0.5 { note(.oledIdleDimLevel, "\(prefs.oledIdleDimLevel)") }
+    // Reported as the BRIGHTNESS-while-dimmed the user set (0.1 darkest), not
+    // as the overlay opacity the key stores, which is its complement. A report
+    // read next to `defaults read` will disagree with it by design; the number
+    // here is the one the pane showed, which is what a bug report is about.
+    if prefs.oledIdleDimBrightness != 0.5 {
+      note(.oledIdleDimLevel, "\(prefs.oledIdleDimBrightness) brightness")
+    }
     if !prefs.oledLockDim { note(.oledLockDim, "false") }
     if prefs.oledBlackoutEnabled { note(.oledBlackoutEnabled, "true") }
     if prefs.oledBlackoutSeconds != 1200 { note(.oledBlackoutSeconds, "\(prefs.oledBlackoutSeconds)") }
@@ -75,8 +81,8 @@ public enum DiagnosticsPrefSummary {
     if prefs.oledUnfocusedDimSeconds != 600 {
       note(.oledUnfocusedDimSeconds, "\(prefs.oledUnfocusedDimSeconds)")
     }
-    if prefs.oledUnfocusedDimLevel != 0.3 {
-      note(.oledUnfocusedDimLevel, "\(prefs.oledUnfocusedDimLevel)")
+    if prefs.oledUnfocusedDimBrightness != 0.7 {
+      note(.oledUnfocusedDimLevel, "\(prefs.oledUnfocusedDimBrightness) brightness")
     }
     if !prefs.oledHoursTracking { note(.oledHoursTracking, "false") }
 

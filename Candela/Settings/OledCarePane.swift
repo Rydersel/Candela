@@ -400,20 +400,20 @@ private struct OledCareDisplaySection: View {
     }
 
     levelRow(
-      label: "Dim by",
-      caption: "\(AppInfo.productName) draws a dark overlay over the display; the display's own brightness setting is untouched, and any key or click restores the picture immediately.",
+      label: "Dim to",
+      caption: "How bright the display is while dimmed: \(AppInfo.productName) draws a dark overlay over it, the display's own brightness setting is untouched, and any key or click restores the picture immediately.",
       draft: $idleLevelDraft,
-      value: prefs.oledIdleDimLevel,
-      accessibilityName: "Idle dim amount"
-    ) { level in
-      writer.write(.oledIdleDimLevel) { $0.oledIdleDimLevel = level }
+      value: prefs.oledIdleDimBrightness,
+      accessibilityName: "Idle dim brightness"
+    ) { brightness in
+      writer.write(.oledIdleDimLevel) { $0.oledIdleDimBrightness = brightness }
     }
   }
 
   // MARK: - Lock dim
 
   private var lockControls: some View {
-    SettingRow("Uses the same amount as the idle dim; any key or click lifts it while the screen stays locked, and it comes back after the idle time above.") {
+    SettingRow("Dims the display to the same brightness as the idle dim; any key or click lifts it while the screen stays locked, and it comes back after the idle time above.") {
       Toggle("Dim while the screen is locked", isOn: Binding(
         get: { prefs.oledLockDim },
         set: { on in writer.write(.oledLockDim) { $0.oledLockDim = on } }
@@ -464,13 +464,13 @@ private struct OledCareDisplaySection: View {
         Text(verbatim: "Dim after \(Self.minutesPhrase(minutes(prefs.oledUnfocusedDimSeconds))) without focus")
       }
       levelRow(
-        label: "Dim by",
-        caption: "Usually lighter than the idle dim: the display is still in view.",
+        label: "Dim to",
+        caption: "How bright an unfocused display is while dimmed. Usually higher than the idle dim, because the display is still in view.",
         draft: $unfocusedLevelDraft,
-        value: prefs.oledUnfocusedDimLevel,
-        accessibilityName: "Unfocused dim amount"
-      ) { level in
-        writer.write(.oledUnfocusedDimLevel) { $0.oledUnfocusedDimLevel = level }
+        value: prefs.oledUnfocusedDimBrightness,
+        accessibilityName: "Unfocused dim brightness"
+      ) { brightness in
+        writer.write(.oledUnfocusedDimLevel) { $0.oledUnfocusedDimBrightness = brightness }
       }
     }
   }
@@ -632,10 +632,11 @@ private struct OledCareDisplaySection: View {
 
   // MARK: - Levels
 
-  /// The dim-amount row, shared by the idle and unfocused levels so the two
-  /// cannot drift into different shapes. The range comes from
-  /// `OledDimConfig.levelRange` — the config sanitises to exactly that, and a
-  /// slider that could express more would be a slider that lies.
+  /// The dim-brightness row, shared by the idle and unfocused settings so the
+  /// two cannot drift into different shapes. The number is HOW BRIGHT the
+  /// display is left, so lower is darker; the range comes from
+  /// `OledDimConfig.brightnessRange`: the config sanitises to exactly that,
+  /// and a slider that could express more would be a slider that lies.
   private func levelRow(
     label: LocalizedStringKey,
     caption: LocalizedStringKey,
@@ -656,10 +657,10 @@ private struct OledCareDisplaySection: View {
         }
         Slider(
           value: Binding(get: { live }, set: { draft.wrappedValue = $0 }),
-          in: OledDimConfig.levelRange,
+          in: OledDimConfig.brightnessRange,
           // 10% steps: SwiftUI draws a tick per step on macOS, and a finer
           // step turned the row into a comb of seventeen marks. Ten percent is
-          // also the smallest change anyone can see on a dim overlay.
+          // also the smallest change anyone can see in a dim.
           step: 0.1,
           onEditingChanged: { editing in
             guard !editing else { return }
@@ -691,8 +692,8 @@ private struct OledCareDisplaySection: View {
 
   // MARK: - Formatting
 
-  private static func percent(_ level: Double) -> String {
-    "\(Int((level * 100).rounded()))%"
+  private static func percent(_ brightness: Double) -> String {
+    "\(Int((brightness * 100).rounded()))%"
   }
 
   /// English only (D25), and singular matters: the idle threshold's floor is

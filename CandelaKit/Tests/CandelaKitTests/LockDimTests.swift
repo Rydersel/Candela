@@ -134,15 +134,20 @@ struct LockDimTests {
   /// comparison someone has to remember: the dim is a fraction of whatever the
   /// user set, so a dark display gets darker and never lighter.
   @Test func theDimIsAFractionOfTheUsersValueSoItCannotBrighten() {
-    let factor = LockDimPolicy.factor(forLevel: 0.5)
+    let factor = LockDimPolicy.factor(forBrightness: 0.5)
     for brightness in stride(from: 0.05, through: 1.0, by: 0.05) {
       #expect(brightness * factor <= brightness)
     }
-    #expect(abs(LockDimPolicy.factor(forLevel: 0.9) - 0.1) < 1e-9)
-    // Out-of-range levels are clamped to the same window the config accepts,
+    // The setting is HOW BRIGHT to leave the display (2026-08-07), so the
+    // number and the multiplier are the same: 10% is DARKEST, 90% is mildest.
+    // Before the flip this returned the complement, and the two directions are
+    // pinned here so a regression cannot pass by reading plausibly.
+    #expect(abs(LockDimPolicy.factor(forBrightness: 0.1) - 0.1) < 1e-9)
+    #expect(abs(LockDimPolicy.factor(forBrightness: 0.9) - 0.9) < 1e-9)
+    // Out-of-range values are clamped to the same window the config accepts,
     // so no caller can produce a factor of 0 (a display turned off) or 1.
-    #expect(abs(LockDimPolicy.factor(forLevel: 5) - 0.1) < 1e-9)
-    #expect(abs(LockDimPolicy.factor(forLevel: -5) - 0.9) < 1e-9)
+    #expect(abs(LockDimPolicy.factor(forBrightness: 5) - 0.9) < 1e-9)
+    #expect(abs(LockDimPolicy.factor(forBrightness: -5) - 0.1) < 1e-9)
   }
 
   // MARK: - The mechanism
@@ -363,12 +368,15 @@ struct LockDimTests {
   /// ruling is structural rather than a convention the coordinator honours.
   @Test func theOverlayLayerCannotProduceALockDim() {
     let engine = IdleDimmingEngine(config: OledDimConfig(
-      idleDimSeconds: 300, idleDimLevel: 0.5, lockDim: true,
+      idleDimSeconds: 300, idleDimBrightness: 0.2, lockDim: true,
       blackoutEnabled: false, blackoutSeconds: 1200,
-      unfocusedDimEnabled: false, unfocusedDimSeconds: 600, unfocusedDimLevel: 0.7
+      unfocusedDimEnabled: false, unfocusedDimSeconds: 600, unfocusedDimBrightness: 0.7
     ))
     #expect(engine.alpha(for: .lockDim) == nil)
-    #expect(engine.alpha(for: .idleDim) == 0.5)
-    #expect(engine.lockDimFactor == 0.5)
+    // Asymmetric on purpose: at 0.5 the flip is invisible because the value is
+    // its own complement, which is exactly how an inverted mapping ships. A
+    // dim TO 20% brightness is an 80% opaque overlay.
+    #expect(abs(engine.alpha(for: .idleDim)! - 0.8) < 1e-9)
+    #expect(abs(engine.lockDimFactor - 0.2) < 1e-9)
   }
 }

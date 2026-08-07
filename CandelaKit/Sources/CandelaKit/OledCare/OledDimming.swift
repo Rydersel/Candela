@@ -12,27 +12,31 @@ public enum OledDimState: Equatable, Sendable {
 /// from prefs and hands the whole value to `updateConfig`, so nothing needs to
 /// mutate a field in place.
 ///
-/// Both `…DimLevel`s are the black overlay's OPACITY — higher is darker, and
-/// blackout is the same scale at 1.0. They are not a fraction of the user's
-/// brightness, and nothing here writes the display's brightness.
+/// Both `…DimBrightness` values are HOW BRIGHT the display is left while
+/// dimmed: 0.1 is darkest, 0.9 is barely dimmed. The overlay's opacity is their
+/// complement, computed by `alpha(for:)`, and blackout is opacity 1.0. The
+/// overlay path never writes the display's own brightness; the lock dim, which
+/// does, uses this number directly as the fraction of the user's brightness to
+/// keep.
 public struct OledDimConfig: Equatable, Sendable {
   public private(set) var idleDimSeconds: Double
-  public private(set) var idleDimLevel: Double
+  public private(set) var idleDimBrightness: Double
   public private(set) var lockDim: Bool
   public private(set) var blackoutEnabled: Bool
   public private(set) var blackoutSeconds: Double
   public private(set) var unfocusedDimEnabled: Bool
   public private(set) var unfocusedDimSeconds: Double
-  public private(set) var unfocusedDimLevel: Double
+  public private(set) var unfocusedDimBrightness: Double
 
-  /// A dim of 0 does nothing and a dim of 1 is a silent blackout — one that
-  /// would stay click-through, unlike the real thing (OC15). Neither is a
-  /// setting anyone means, so both are config errors.
+  /// A brightness of 1 dims nothing and a brightness of 0 is a silent
+  /// blackout, one that would stay click-through unlike the real thing (OC15).
+  /// Neither is a setting anyone means, so both are config errors. The window
+  /// is symmetric, so it is the same window the opacity used.
   ///
   /// Public so the pane's sliders offer exactly the range the config accepts;
   /// a control that can express a value this type will silently rewrite is a
   /// control that lies about what it did.
-  public static let levelRange: ClosedRange<Double> = 0.1...0.9
+  public static let brightnessRange: ClosedRange<Double> = 0.1...0.9
 
   /// Floor for every idle-driven threshold. Below this a "timeout" is
   /// indistinguishable from "always on", and the blackout row derives its own
@@ -46,17 +50,17 @@ public struct OledDimConfig: Equatable, Sendable {
   /// this type would silently rewrite.
   public static let blackoutGapSeconds: Double = 60
 
-  public init(idleDimSeconds: Double, idleDimLevel: Double, lockDim: Bool,
+  public init(idleDimSeconds: Double, idleDimBrightness: Double, lockDim: Bool,
               blackoutEnabled: Bool, blackoutSeconds: Double,
               unfocusedDimEnabled: Bool, unfocusedDimSeconds: Double,
-              unfocusedDimLevel: Double) {
+              unfocusedDimBrightness: Double) {
     // Floored FIRST, so the blackout clamp below compounds off a sane idle
     // threshold: a zero or negative threshold means "dimmed always", and a
     // negative blackout derived from it would black the display out at zero
     // idle — unrecoverable from inside the app.
     self.idleDimSeconds = Self.sanitizedSeconds(idleDimSeconds,
                                                 floor: Self.minimumThresholdSeconds)
-    self.idleDimLevel = Self.sanitizedLevel(idleDimLevel)
+    self.idleDimBrightness = Self.sanitizedBrightness(idleDimBrightness)
     self.lockDim = lockDim
     self.blackoutEnabled = blackoutEnabled
     // A blackout that fires at or below the idle threshold is a config error;
@@ -67,25 +71,25 @@ public struct OledDimConfig: Equatable, Sendable {
     self.unfocusedDimEnabled = unfocusedDimEnabled
     self.unfocusedDimSeconds = Self.sanitizedSeconds(unfocusedDimSeconds,
                                                      floor: Self.minimumThresholdSeconds)
-    self.unfocusedDimLevel = Self.sanitizedLevel(unfocusedDimLevel)
+    self.unfocusedDimBrightness = Self.sanitizedBrightness(unfocusedDimBrightness)
   }
 
   public init(prefs: DisplayPrefs) {
     self.init(idleDimSeconds: Double(prefs.oledIdleDimSeconds),
-              idleDimLevel: prefs.oledIdleDimLevel,
+              idleDimBrightness: prefs.oledIdleDimBrightness,
               lockDim: prefs.oledLockDim,
               blackoutEnabled: prefs.oledBlackoutEnabled,
               blackoutSeconds: Double(prefs.oledBlackoutSeconds),
               unfocusedDimEnabled: prefs.oledUnfocusedDimEnabled,
               unfocusedDimSeconds: Double(prefs.oledUnfocusedDimSeconds),
-              unfocusedDimLevel: prefs.oledUnfocusedDimLevel)
+              unfocusedDimBrightness: prefs.oledUnfocusedDimBrightness)
   }
 
   /// NaN survives `min(max(…))` untouched, and a NaN alpha is an undefined
   /// overlay rather than a visible error — so it lands mid-range instead.
-  private static func sanitizedLevel(_ level: Double) -> Double {
-    guard !level.isNaN else { return 0.5 }
-    return min(max(level, levelRange.lowerBound), levelRange.upperBound)
+  private static func sanitizedBrightness(_ brightness: Double) -> Double {
+    guard !brightness.isNaN else { return 0.5 }
+    return min(max(brightness, brightnessRange.lowerBound), brightnessRange.upperBound)
   }
 
   /// `max(NaN, floor)` returns NaN — every comparison against it is false, so a
@@ -227,9 +231,11 @@ public struct IdleDimmingEngine: Sendable {
   /// could see.
   public func alpha(for state: OledDimState) -> Double? {
     switch state {
-    case .idleDim: config.idleDimLevel
+    // The COMPLEMENT: the config carries how bright the display is left, the
+    // overlay needs how much to cover it with.
+    case .idleDim: 1 - config.idleDimBrightness
     case .blackout: 1.0
-    case .unfocusedDim: config.unfocusedDimLevel
+    case .unfocusedDim: 1 - config.unfocusedDimBrightness
     case .lockDim, .active, .suspended: nil
     }
   }
@@ -237,6 +243,6 @@ public struct IdleDimmingEngine: Sendable {
   /// How far down the wire-level lock dim takes this display's brightness,
   /// derived from the same level the idle dim uses.
   public var lockDimFactor: Double {
-    LockDimPolicy.factor(forLevel: config.idleDimLevel)
+    LockDimPolicy.factor(forBrightness: config.idleDimBrightness)
   }
 }
