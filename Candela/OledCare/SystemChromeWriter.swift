@@ -59,27 +59,32 @@ final class SystemChromeWriter: ChromeWriting {
     CFPreferencesSetValue(Self.dockKey, on ? kCFBooleanTrue : kCFBooleanFalse,
                           Self.dockDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
     CFPreferencesSynchronize(Self.dockDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
-    // The Dock restarts visibly; the pane copy says so. Waited on rather than
-    // fired and forgotten, because the exit status is the only evidence the
-    // restart was even requested of a running Dock — nonzero means the pref
-    // landed and nothing adopted it. The wait costs [MEASURED 2026-08-06:
-    // 66 ms] of main actor, once, on an explicit toggle whose whole point is a
-    // Dock that visibly restarts. Deliberately not surfaced as a return value:
-    // `ChromeWriting` reports state by read-back, and a killall that failed to
-    // launch does not make the pref wrong.
+    // The Dock restarts visibly; the pane copy says so. The exit status is the
+    // only evidence the restart was even requested of a running Dock — nonzero
+    // means the pref landed and nothing adopted it — but it is collected in a
+    // `terminationHandler`, NOT by waiting: `waitUntilExit()` here measured
+    // [MEASURED 2026-08-06: 66 ms] of blocked main actor per toggle, and a
+    // blocking child-process wait on the main actor is the shape behind #59.
+    // Nothing needs the wait to have finished — the read-back that follows
+    // verifies the PREF, written above, and never the Dock's adoption of it.
+    //
+    // The handler runs off the main actor, so it touches nothing isolated: it
+    // captures one `Logger` (Sendable) and reads the status off the `Process`
+    // it is handed.
+    let log = Self.log
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
     process.arguments = ["Dock"]
+    process.terminationHandler = { finished in
+      guard finished.terminationStatus != 0 else { return }
+      log.warning(
+        "killall Dock exited \(finished.terminationStatus, privacy: .public) — autohide pref written but the Dock may not have adopted it"
+      )
+    }
     do {
       try process.run()
-      process.waitUntilExit()
-      if process.terminationStatus != 0 {
-        Self.log.warning(
-          "killall Dock exited \(process.terminationStatus, privacy: .public) — autohide pref written but the Dock may not have adopted it"
-        )
-      }
     } catch {
-      Self.log.warning(
+      log.warning(
         "killall Dock could not launch: \(error.localizedDescription, privacy: .public) — autohide pref written but the Dock has not adopted it"
       )
     }
