@@ -342,6 +342,15 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       else { return }
       self.settingsActions.prefDidChange(.storedDisplayMode, persistenceKey: key)
     }
+    // Spec §7: a failed resolution restore joins the diagnostics event ring.
+    // Wired here for the reason above — a reapply runs unattended at reconnect,
+    // with no view on screen to notice it.
+    model.displayModes.didReportReapply = { [weak self] displayID, notice in
+      guard let self else { return }
+      let name = self.model.allControlledStates
+        .first { $0.id == displayID }?.display.name ?? "a display"
+      self.model.noteDisplayEvent("\(name): \(DiagnosticsCopy.reapplyEvent(notice))")
+    }
 
     // Mirroring's own surface. Same argument as the resolution window, plus one
     // this one has on its own: a mirror change can be started from a HOTKEY,

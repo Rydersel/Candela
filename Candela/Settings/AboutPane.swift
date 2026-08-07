@@ -44,6 +44,15 @@ struct AboutPane: View {
         Button("Run Setup Again…") { actions.showOnboarding() }
         SettingsCaption("Walks through Open at Login, the keyboard keys and the Accessibility permission again.")
       }
+      // The report's second entry point (spec §7). The first is on a display's
+      // Diagnostics page, which disappears with the display — and the report a
+      // person most wants is the one about the monitor that just stopped
+      // working. This one is always reachable.
+      Section("Support") {
+        SettingRow("Covers every display. The report doesn't include serial numbers.") {
+          DiagnosticsReportActions()
+        }
+      }
       Section("Acknowledgements") {
         LabeledContent("MonitorControl") {
           Text("MIT — DDC/CI transport and the behavior this app is measured against")

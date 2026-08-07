@@ -182,6 +182,13 @@ final class DisplayModeCoordinator {
   /// is the one that forgets.
   @ObservationIgnored var didStoreMode: (CGDirectDisplayID) -> Void = { _ in }
 
+  /// Called when a stored-mode reapply could not be honoured, so the diagnostics
+  /// report's event ring carries it (spec §7). Wired for `didStoreMode`'s
+  /// reason: this happens unattended, at reconnect, with no view on screen — and
+  /// the notice a surface can still render is `report(for:)`, which holds only
+  /// the LATEST one per display and is cleared when the user dismisses it.
+  @ObservationIgnored var didReportReapply: (CGDirectDisplayID, ModeReapplyNotice) -> Void = { _, _ in }
+
   @ObservationIgnored private let session: ModePreviewSession
   /// Per display, not one value for the coordinator. A settings-select on B
   /// whose `begin()` fails leaves A's preview outstanding and reports the error
@@ -526,6 +533,7 @@ final class DisplayModeCoordinator {
         reapplyReports[identity.key] = ReapplyReport(
           key: identity.key, requested: requested, notice: notice
         )
+        didReportReapply(display.id, notice)
         log.error("could not restore stored mode on display \(display.id): \(String(describing: notice), privacy: .public)")
       } else {
         // Replacement, not a clear-on-departure: this pass has a newer answer

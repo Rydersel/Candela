@@ -266,7 +266,7 @@ struct SettingsRootView: View {
       .navigationDestination(for: DisplaySubPage.self) { page in
         VStack(spacing: 0) {
           BannerRegion(persistenceKey: key)
-          subPage(page, key: key)
+          subPage(page, key: key, state: state)
         }
         // The root's principal title does NOT survive a push (measured in the
         // Task 9 spike — the toolbar came up empty but for Back), so every
@@ -279,10 +279,33 @@ struct SettingsRootView: View {
     .id(key)
   }
 
-  /// Placeholder sub-pages (Tasks 14–16 replace them). The header is the real
+  /// One case per sub-page. Tasks 14 and 15 replace the two placeholders; each
+  /// owns its own case, so the shell never has to be reopened for a new page.
+  @ViewBuilder
+  private func subPage(_ page: DisplaySubPage, key: String, state: AppModel.DisplayState) -> some View {
+    // Rename dependency, registered HERE because `switcherDisplays` is read at
+    // this point: the switcher's names come from `friendlyName`, and
+    // `DisplayPrefs` is plain UserDefaults with no observation of its own. A
+    // page's own body reading `prefsRevision` does not cover the values passed
+    // INTO it.
+    let _ = model.prefsRevision
+    switch page {
+    case .allModes, .advanced:
+      placeholderSubPage(page, key: key)
+    case .diagnostics:
+      DiagnosticsPage(
+        state: state,
+        path: pathBinding(for: key),
+        displays: switcherDisplays,
+        onSwitch: { newKey in switchDisplay(from: key, to: newKey) }
+      )
+    }
+  }
+
+  /// Placeholder sub-pages (Tasks 14–15 replace them). The header is the real
   /// contract — title focus on push, and the display switcher that carries
   /// THIS sub-page onto another display (SO23).
-  private func subPage(_ page: DisplaySubPage, key: String) -> some View {
+  private func placeholderSubPage(_ page: DisplaySubPage, key: String) -> some View {
     // Rename dependency: switcher names must track `friendlyName` writes, and
     // `DisplayPrefs` is plain UserDefaults with no observation of its own.
     let _ = model.prefsRevision
