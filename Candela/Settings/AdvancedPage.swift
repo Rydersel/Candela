@@ -40,6 +40,24 @@ struct AdvancedPage: View {
     DisplayPrefWriter(persistenceKey: persistenceKey, actions: actions)
   }
 
+  /// The same test `DiagnosticsPage` uses, so the two sub-pages cannot disagree
+  /// about which display is the built-in.
+  private var isBuiltIn: Bool { model.builtIn?.id == state.id }
+
+  /// SO23's switcher, minus the built-in — this page has no built-in content at
+  /// all, so offering it would push someone onto the empty fallback below
+  /// rather than onto a comparison. `SubPageHeader` does not filter, and
+  /// `switcherDisplays` includes the built-in, so the filter has to happen here.
+  ///
+  /// The built-in's own entry is kept when it IS the display being shown: a
+  /// `Picker` whose selection matches no tag renders blank, and on the fallback
+  /// page the switcher is the only way off it.
+  private var switcherDisplays: [(key: String, name: String)] {
+    guard !isBuiltIn, let builtInKey = model.builtIn?.display.persistenceKey
+    else { return displays }
+    return displays.filter { $0.key != builtInKey }
+  }
+
   var body: some View {
     // `DisplayPrefs` is plain UserDefaults and not observable, so this is what
     // re-evaluates the page after any write — including the hub's Advanced
@@ -49,14 +67,27 @@ struct AdvancedPage: View {
       SubPageHeader(
         title: DisplaySubPage.advanced.title,
         currentKey: persistenceKey,
-        displays: displays,
+        displays: switcherDisplays,
         onSwitch: onSwitch
       )
-      controlMethodSection
-      commandTuningSection
-      combinedDimmingSection
-      readingValuesSection
-      restoreSection
+      // `BuiltInDisplayPane` never pushes `.advanced`, but the switcher above
+      // and the debug sub-page hook can both land here with the built-in
+      // selected — and every section below is about a DDC wire the built-in
+      // does not have. It used to render them anyway, greyed, under
+      // "This display is in HDR mode…", which is a false sentence about a panel
+      // that is constitutively native. This guard is what makes the
+      // external-only claim in `blockExplanation` true rather than asserted.
+      if isBuiltIn {
+        Section {
+          SettingsCaption("This display has no hardware-control settings.")
+        }
+      } else {
+        controlMethodSection
+        commandTuningSection
+        combinedDimmingSection
+        readingValuesSection
+        restoreSection
+      }
     }
     .formStyle(.grouped)
     // On the `Form`, not on a row: a lifecycle modifier attached to a `Section`
@@ -80,14 +111,14 @@ struct AdvancedPage: View {
 
   private var isBlocked: Bool { trafficBlock != nil }
 
-  /// Stated ONCE, at the foot of Control Method — the section above the first
-  /// section the block greys out (SO12). Both sentences are the two-sentence
-  /// safety allowance SO15 grants the HDR block.
+  /// Stated ONCE, at the foot of Control Method — the section above the three
+  /// the block greys out (SO12). Both sentences are the two-sentence safety
+  /// allowance SO15 grants the HDR block.
   private func blockExplanation(_ block: DDCTrafficBlock) -> LocalizedStringKey {
     switch block {
-    // This page renders only for a display with a DDC wire, and
-    // `BrightnessPathPolicy.usesNative` has exactly one way to answer yes for
-    // an external: HDR is live, whoever engaged it (#52).
+    // The `isBuiltIn` guard in `body` is what makes this branch external-only,
+    // and `BrightnessPathPolicy.usesNative` has exactly one way to answer yes
+    // for an external: HDR is live, whoever engaged it (#52).
     case .macOSDrivesBrightness:
       "This display is in HDR mode. macOS is setting its brightness directly, so the settings below have no effect until HDR turns off."
     case .hardwareControlOff:
@@ -202,6 +233,13 @@ struct AdvancedPage: View {
           Text(verbatim: "Custom (\(custom))").tag(custom)
         }
       }
+      // Belt, per control. The Section-level `.disabled` above is the
+      // documented spelling, but a modifier on a `Section` inside a grouped
+      // `Form` is the construct this repo has measured as unreliable — and the
+      // grid beside these fields carries its own belt for the same reason. A
+      // promoted control that stayed live under a traffic block would take a
+      // write that reaches nothing (SO12).
+      .disabled(isBlocked)
 
       LabeledContent("\(DDCCommandCopy.title(command)) control code") {
         TextField("Standard", text: remapBinding(command))
@@ -212,12 +250,25 @@ struct AdvancedPage: View {
           // six controls, and repeating it under three fields would read as
           // three separate settings.
           .accessibilityHint(Text("Hex control codes this display uses instead of the standard one."))
+          .disabled(isBlocked)
       }
     }
   }
 
   // MARK: - Combined Dimming
 
+  /// SO12, as amended by the controller 2026-08-06: this section greys WITH the
+  /// other three, and there is no carve-out why-line.
+  ///
+  /// The spec's original carve-out ("combined dimming works in software, so it
+  /// stays available") rested on a premise that is false in both blocked
+  /// states. `.hardwareControlOff` routes `BrightnessPath.software`, which
+  /// covers the whole range and never consults the switching point at all;
+  /// `.macOSDrivesBrightness` routes `.native`, which does no software dimming
+  /// whatsoever. The handoff point is reachable only from `.combined` and
+  /// `.softwareOnly`, and a traffic block excludes both — so a live control
+  /// here would be the "looks functional while `ddcTrafficBlock` voids it" case
+  /// SO12 exists to forbid, wearing SO12's own exemption.
   @ViewBuilder private var combinedDimmingSection: some View {
     Section {
       if appPrefs.combinedBrightness {
@@ -241,9 +292,10 @@ struct AdvancedPage: View {
               Button("Reset") {
                 writer.write(.combinedSwitchingPoint) { $0.combinedSwitchingPoint = 0 }
               }
-              .disabled(prefs.combinedSwitchingPoint == 0)
+              .disabled(prefs.combinedSwitchingPoint == 0 || isBlocked)
             }
           }
+          .disabled(isBlocked) // belt, as on the VCP fields
         }
       } else {
         // SO11: the effective state read-only, with an inline enabler that does
@@ -260,14 +312,13 @@ struct AdvancedPage: View {
             appPrefs.combinedBrightness = true
             actions.prefDidChange(.disableCombinedBrightness)
           }
+          .disabled(isBlocked)
         }
-      }
-      if isBlocked {
-        SettingsCaption("Combined dimming works in software, so it stays available.")
       }
     } header: {
       Text("Combined Dimming").settingsHeading()
     }
+    .disabled(isBlocked)
   }
 
   /// The engine's own range, never a literal pair — `DisplayPrefs` clamps
@@ -325,6 +376,8 @@ struct AdvancedPage: View {
             Text("Heavy").tag(PollingMode.heavy)
             Text("Custom").tag(PollingMode.custom)
           }
+          // Belt, per control — same reason as the VCP fields above.
+          .disabled(isBlocked)
         }
         // D11: safe mode suppresses the startup readback outright, so a retry
         // policy shown as live here would describe behavior that is not
@@ -341,6 +394,7 @@ struct AdvancedPage: View {
           ), in: 0...99) {
             Text(verbatim: "Attempts: \(prefs.pollingCount)")
           }
+          .disabled(isBlocked)
         }
       } else {
         // SO11 again — the same shape as Combined Dimming above.
@@ -350,6 +404,7 @@ struct AdvancedPage: View {
             appPrefs.startupAction = .read
             actions.prefDidChange(.startupAction)
           }
+          .disabled(isBlocked)
         }
       }
     } header: {
@@ -393,7 +448,7 @@ struct AdvancedPage: View {
           Button("Cancel", role: .cancel) {}
         } message: {
           // SO20: names the scope in plain terms, including the unmute.
-          Text("This turns hardware control and the volume indicator back on for \(state.display.name), clears its command tuning, control codes and response curves, and returns the dimming handoff and readback retries to their defaults. A display left muted in hardware is unmuted too, unless it is in HDR mode. Nothing else about this display changes.")
+          Text("This turns hardware control and the volume indicator back on for \(state.display.name), switches software dimming back from a screen overlay to the color profile, clears its command tuning, control codes and response curves, and returns the dimming handoff and readback retries to their defaults. A display left muted in hardware is unmuted too, unless it is in HDR mode. Nothing else about this display changes.")
         }
     }
   }
