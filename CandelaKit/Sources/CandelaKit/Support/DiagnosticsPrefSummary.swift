@@ -10,7 +10,15 @@ import Foundation
 /// the display's serial into every pasted report, straight past the `hasSerial`
 /// flag on `DiagnosticsReportSnapshot` that exists to keep it out of public
 /// issues. `noEmittedLineCarriesAComposedStorageKey` pins that over every line
-/// the summary produces, so a setting added here is covered the day it is added.
+/// the summary produces, for both real key shapes.
+///
+/// That covers every line the FIXTURE provokes, which is not the same as every
+/// pref — a setting added below emits nothing unless someone also sets it in the
+/// fixture, and for a while this comment claimed otherwise. What closes the gap
+/// is `theFixtureCoversEveryPerDisplayPrefName`, which derives both sides from
+/// `PrefName.allCases`: a new case is neither reported nor explicitly excluded,
+/// so it fails until someone classifies it. Add a pref here and the suite tells
+/// you what else to do.
 ///
 /// It lives in the Kit, not beside the page that calls it, for the same reason:
 /// a contract held by review alone is a contract until someone is in a hurry.
