@@ -38,6 +38,23 @@ struct SettingsRootView: View {
   /// the `NSSplitView` is `SettingsWindowConfigurator`, not this state.
   @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
+  /// Each display destination's pushed-sub-page stack, keyed by persistence key
+  /// (SO23). Retained for the life of the window so leaving a display and
+  /// coming back lands where the user was; cleared ONLY on that display's
+  /// departure — which is also what guarantees SO9's "returns to the hub, not
+  /// a sub-page" on reconnection. `@State`, so closing the window clears all.
+  @State private var subPagePaths: [String: [DisplaySubPage]] = [:]
+  /// The display whose departure evicted the user, remembered so its return
+  /// can restore the selection (SO9). Only the SELECTED display's departure is
+  /// remembered — an unrelated monitor unplugging must not hijack a later
+  /// arrival.
+  @State private var lastDisplayKey: String?
+  /// Accessibility contract 2: selecting a sidebar destination moves focus
+  /// into the detail column. Anchored on the detail root; hand-verified only
+  /// (no app test target, and synthetic keys go to the terminal, not an
+  /// LSUIElement app).
+  @FocusState private var detailFocusAnchor: Bool
+
   @Environment(AppModel.self) private var model
 
   var body: some View {
@@ -64,21 +81,27 @@ struct SettingsRootView: View {
       // Window menu and accessibility without drawing a second copy.
       detail
         .background(.background)
-        .toolbar {
-          // macOS 26 gives toolbar items the Liquid Glass capsule it gives
-          // CONTROLS, which drew a pill around the title. A title is not a
-          // control, so on 26 it opts out of the shared background. Earlier
-          // versions have no such background and need no opt-out.
-          if #available(macOS 26.0, *) {
-            ToolbarItem(placement: .principal) {
-              Text(currentTitle).font(.headline)
-            }
-            .sharedBackgroundVisibility(.hidden)
-          } else {
-            ToolbarItem(placement: .principal) {
-              Text(currentTitle).font(.headline)
+        .focused($detailFocusAnchor)
+        .toolbar { SettingsPrincipalTitle(title: currentTitle) }
+        // Keyboard contract (accessibility contract 2): ⌘[ pops the current
+        // display's sub-page; ⌘1–⌘9 select the first nine sidebar destinations
+        // in sidebar render order. Hidden buttons rather than `.commands`: the
+        // `Settings` scene's menu bar is not this view's to edit, and a
+        // shortcut on a button in the key window's hierarchy fires without
+        // being visible. Not tab-reachable at zero size; VoiceOver skips them
+        // via `accessibilityHidden`.
+        .background {
+          Group {
+            Button("") { popCurrentSubPage() }
+              .keyboardShortcut("[", modifiers: .command)
+            ForEach(Array(orderedDestinations.prefix(9).enumerated()), id: \.offset) { index, destination in
+              Button("") { selection = destination }
+                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
             }
           }
+          .frame(width: 0, height: 0)
+          .opacity(0)
+          .accessibilityHidden(true)
         }
     }
     // Replaces the fork-era fixed `.frame(width: 620)`.
@@ -94,7 +117,13 @@ struct SettingsRootView: View {
       minWidth: 720, idealWidth: 900, maxWidth: .infinity,
       minHeight: 480, idealHeight: 560, maxHeight: .infinity
     )
-    .background(SettingsWindowConfigurator(title: currentTitle))
+    // `navigationToken` re-runs the configurator on every push and pop.
+    // Measured in the Task 9 spike: a push flips `titleVisibility` back to
+    // visible and AppKit draws the scene's own "Candela Settings" at the
+    // LEADING edge next to the Back button — and it LINGERS after the pop,
+    // beside the principal title. Without a dependency that changes with the
+    // path, `updateNSView` never fires for a push/pop and cannot re-hide it.
+    .background(SettingsWindowConfigurator(title: currentTitle, navigationToken: currentPathDepth))
     // Debug-only screenshot hook: the window has no URL scheme and cannot be
     // driven by clicking without an Accessibility grant, so a capture run says
     // which destination it wants through an env var and this adopts it once,
@@ -109,18 +138,64 @@ struct SettingsRootView: View {
         if let pending = DebugSettingsHook.pendingSelection {
           DebugSettingsHook.pendingSelection = nil
           selection = pending
+          if case let .display(key) = pending, let page = DebugSettingsHook.pendingSubPage {
+            DebugSettingsHook.pendingSubPage = nil
+            subPagePaths[key] = [page]
+          }
         }
       }
     #endif
-    // A destination for an absent display must never render, so a display that
-    // is unplugged while selected drops the selection back to a pane. Keyed on
-    // persistence keys, not display IDs: an ID changes across a replug and
-    // would evict the user from a pane every time a link renegotiated.
-    .onChange(of: model.displays.map(\.display.persistenceKey)) { _, connected in
-      guard case let .display(key) = selection, key != "builtIn" else { return }
-      if SettingsSelectionPolicy.resolve(selectedDisplayKey: key, connectedKeys: connected) == nil {
-        selection = .pane(.general)
+    // A destination for an absent display must never render, so an unplug
+    // while selected falls back — to a surviving sibling display first, then
+    // to General (SO9). Keyed on persistence keys, not display IDs: an ID
+    // changes across a replug and would evict the user from a pane every time
+    // a link renegotiated.
+    //
+    // The keys are `allControlledStates` — built-in first, then externals —
+    // which is exactly sidebar render order, INCLUDING the built-in. Feeding
+    // externals only (the pre-Task-9 shape) made sibling fallback unable to
+    // land on the built-in row: unplugging the only external on an open laptop
+    // dropped to General even though a display destination survived. The
+    // built-in is a real departure source too — clamshell removes it.
+    .onChange(of: model.allControlledStates.map(\.display.persistenceKey)) { previous, connected in
+      // SO23's clearing rule: a departed display's sub-page stack dies with
+      // it, whether or not it was selected — its return lands on the hub.
+      for departed in Set(previous).subtracting(connected) {
+        subPagePaths[departed] = nil
       }
+
+      if case let .display(key) = selection {
+        switch SettingsSelectionPolicy.resolveDestination(selectedDisplayKey: key, connectedKeys: connected) {
+        case .keep, nil:
+          break
+        case let .fallbackToSibling(sibling):
+          lastDisplayKey = key
+          selection = .display(sibling)
+        case .fallbackToPane:
+          lastDisplayKey = key
+          selection = .pane(.general)
+        }
+      }
+
+      // A remembered display returning takes back the selection — unless the
+      // user is on a display destination they chose in the meantime (SO9).
+      // `currentIsDisplay` reads the possibly-just-updated selection: a
+      // sibling fallback above counts as "on a display" and blocks this.
+      let arrived = Array(Set(connected).subtracting(previous))
+      var currentIsDisplay = false
+      if case .display = selection { currentIsDisplay = true }
+      if let restored = SettingsSelectionPolicy.restoration(
+        lastDisplayKey: lastDisplayKey, arrivedKeys: arrived, currentIsDisplay: currentIsDisplay
+      ) {
+        lastDisplayKey = nil
+        selection = .display(restored)
+      }
+    }
+    // Contract 2's second clause: selecting a destination moves focus into the
+    // detail column, so Tab starts on the page the user just chose rather than
+    // back at the sidebar.
+    .onChange(of: selection) { _, _ in
+      detailFocusAnchor = true
     }
     // Best-effort anti-collapse defence (#66): this window has no
     // sidebar-toggle item, so a hidden sidebar removes every pane from
@@ -161,11 +236,7 @@ struct SettingsRootView: View {
       SettingsRegistry.descriptor(for: id).content()
     case let .display(key):
       if let state = model.allControlledStates.first(where: { $0.display.persistenceKey == key }) {
-        if key == "builtIn" {
-          BuiltInDisplayPane(selection: $selection)
-        } else {
-          DisplayDetailView(state: state)
-        }
+        displayStack(key: key, state: state)
       } else {
         generalFallback
       }
@@ -174,10 +245,152 @@ struct SettingsRootView: View {
     }
   }
 
+  /// One display destination: a `NavigationStack` whose path is that display's
+  /// retained sub-page stack (SO23). The banner region sits above the root AND
+  /// above every pushed page from these two placements alone (SO7) — pages
+  /// never own banners, so a new sub-page cannot forget one.
+  ///
+  /// `.id(key)` gives each display its OWN stack identity: switching displays
+  /// replaces the stack outright instead of animating one display's path into
+  /// another's, and stale per-stack state (scroll, focus) cannot leak across.
+  private func displayStack(key: String, state: AppModel.DisplayState) -> some View {
+    NavigationStack(path: pathBinding(for: key)) {
+      VStack(spacing: 0) {
+        BannerRegion(persistenceKey: key)
+        if key == "builtIn" {
+          BuiltInDisplayPane(selection: $selection)
+        } else {
+          DisplayDetailView(state: state)
+        }
+      }
+      .navigationDestination(for: DisplaySubPage.self) { page in
+        VStack(spacing: 0) {
+          BannerRegion(persistenceKey: key)
+          subPage(page, key: key)
+        }
+        // The root's principal title does NOT survive a push (measured in the
+        // Task 9 spike — the toolbar came up empty but for Back), so every
+        // pushed page re-declares it. Still the DISPLAY's name: the sub-page
+        // names itself in its header, and the toolbar keeps answering "which
+        // display am I configuring".
+        .toolbar { SettingsPrincipalTitle(title: currentTitle) }
+      }
+    }
+    .id(key)
+  }
+
+  /// Placeholder sub-pages (Tasks 14–16 replace them). The header is the real
+  /// contract — title focus on push, and the display switcher that carries
+  /// THIS sub-page onto another display (SO23).
+  private func subPage(_ page: DisplaySubPage, key: String) -> some View {
+    // Rename dependency: switcher names must track `friendlyName` writes, and
+    // `DisplayPrefs` is plain UserDefaults with no observation of its own.
+    let _ = model.prefsRevision
+    return Form {
+      SubPageHeader(
+        title: page.title,
+        currentKey: key,
+        displays: switcherDisplays,
+        onSwitch: { newKey in switchDisplay(from: key, to: newKey) }
+      )
+      Text("This page arrives with a later task.")
+        .foregroundStyle(.secondary)
+    }
+    .formStyle(.grouped)
+  }
+
+  /// Pop-pause on the pushing row (accessibility contract 1's pop half) is
+  /// deliberately absent here: no row pushes yet. `DisplayHubView` (Task 13)
+  /// owns `@FocusState focusedRow: DisplaySubPage?` and restores it when its
+  /// path binding shrinks.
+  private func pathBinding(for key: String) -> Binding<[DisplaySubPage]> {
+    Binding(
+      get: { subPagePaths[key] ?? [] },
+      set: { subPagePaths[key] = $0 }
+    )
+  }
+
+  /// Feeds the window configurator's `navigationToken`: any push or pop must
+  /// re-run it (see the call site). Panes have no stack and sit at depth 0.
+  private var currentPathDepth: Int {
+    guard case let .display(key) = selection else { return 0 }
+    return subPagePaths[key]?.count ?? 0
+  }
+
+  /// Sidebar render order — registry panes, then built-in, then externals
+  /// (`allControlledStates` is exactly that order). ⌘1–⌘9 index into this.
+  private var orderedDestinations: [SettingsDestination] {
+    SettingsRegistry.panes.map { .pane($0.id) }
+      + model.allControlledStates.map { .display($0.display.persistenceKey) }
+  }
+
+  private func popCurrentSubPage() {
+    guard case let .display(key) = selection,
+          var path = subPagePaths[key], !path.isEmpty else { return }
+    path.removeLast()
+    subPagePaths[key] = path
+  }
+
+  /// Every connected display, named the way the sidebar names it, so the
+  /// switcher menu and the sidebar can never disagree about what a display is
+  /// called.
+  private var switcherDisplays: [(key: String, name: String)] {
+    model.allControlledStates.map { state in
+      let key = state.display.persistenceKey
+      return (
+        key: key,
+        name: DisplayOrdering.title(
+          friendlyName: DisplayPrefs(persistenceKey: key).friendlyName,
+          hardwareName: state.display.name
+        )
+      )
+    }
+  }
+
+  /// SO23's comparison workflow: the sub-page carries over, THEN the sidebar
+  /// selection moves. Copying the whole path (not just the visible page) keeps
+  /// any deeper future stack intact.
+  private func switchDisplay(from currentKey: String, to newKey: String) {
+    subPagePaths[newKey] = subPagePaths[currentKey] ?? []
+    selection = .display(newKey)
+  }
+
   /// The detail column is never empty: an unresolvable selection shows General
   /// rather than a blank pane, which reads as a broken window.
   private var generalFallback: some View {
     SettingsRegistry.descriptor(for: .general).content()
+  }
+}
+
+/// SO7's single banner placement. Empty until Task 17 — it exists now so the
+/// two call sites in `displayStack` are already the ONLY places a banner can
+/// render, and pages never grow their own.
+struct BannerRegion: View {
+  let persistenceKey: String
+
+  var body: some View {
+    EmptyView()
+  }
+}
+
+/// The one visible title, centred. macOS 26 gives toolbar items the Liquid
+/// Glass capsule it gives CONTROLS, which drew a pill around the title; a
+/// title is not a control, so on 26 it opts out of the shared background.
+/// Earlier versions have no such background and need no opt-out.
+private struct SettingsPrincipalTitle: ToolbarContent {
+  let title: String
+
+  var body: some ToolbarContent {
+    if #available(macOS 26.0, *) {
+      ToolbarItem(placement: .principal) {
+        Text(title).font(.headline)
+      }
+      .sharedBackgroundVisibility(.hidden)
+    } else {
+      ToolbarItem(placement: .principal) {
+        Text(title).font(.headline)
+      }
+    }
   }
 }
 
@@ -202,6 +415,11 @@ struct SettingsRootView: View {
 /// window with a sidebar, giving a second, misaligned copy.
 private struct SettingsWindowConfigurator: NSViewRepresentable {
   let title: String
+  /// Unused in `configure` — its whole job is being a dependency that changes
+  /// on push/pop so `updateNSView` fires then. A push flips `titleVisibility`
+  /// back to visible and draws the scene title leading (measured, Task 9
+  /// spike); this is what re-hides it.
+  let navigationToken: Int
 
   func makeNSView(context _: Context) -> NSView {
     let view = NSView(frame: .zero)

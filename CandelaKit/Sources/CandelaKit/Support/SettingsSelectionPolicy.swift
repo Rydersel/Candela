@@ -1,12 +1,12 @@
 /// Where the settings sidebar should land after a display arrives or departs.
-///
-/// Distinguishing the three outcomes is the point: the old `String?` shape
-/// collapsed "still there" and "gone" into one answer and left the caller to
-/// guess, so a departure could only ever fall back to a pane.
+/// Three outcomes on purpose: a caller told only "keep or not" could never
+/// distinguish "another display survives" from "none does".
 public enum SettingsSelectionResolution: Equatable, Sendable {
+  /// The selected display is still connected — do not move.
   case keep(String)
   /// The selected display left, but another survives — stay in display settings.
   case fallbackToSibling(String)
+  /// No display remains; the caller falls back to a pane.
   case fallbackToPane
 }
 
@@ -47,13 +47,5 @@ public enum SettingsSelectionPolicy {
   ) -> String? {
     guard let lastDisplayKey, !currentIsDisplay, arrivedKeys.contains(lastDisplayKey) else { return nil }
     return lastDisplayKey
-  }
-
-  @available(*, deprecated, message: "Task 9 migrates SettingsRootView to SettingsSelectionResolution")
-  public static func resolve(selectedDisplayKey: String?, connectedKeys: [String]) -> String? {
-    if case .keep(let key) = resolveDestination(selectedDisplayKey: selectedDisplayKey, connectedKeys: connectedKeys) {
-      return key
-    }
-    return nil
   }
 }

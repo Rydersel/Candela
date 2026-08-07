@@ -27,6 +27,13 @@
   ///   CANDELA_DEBUG_SETTINGS=display:builtIn
   ///   CANDELA_DEBUG_SETTINGS=display:first
   ///   CANDELA_DEBUG_SETTINGS=display:<persistenceKey>
+  ///   CANDELA_DEBUG_SETTINGS=display:first/allModes   (also: /advanced,
+  ///                                           /diagnostics — opens the display
+  ///                                           destination with that sub-page
+  ///                                           already pushed; Task 9's stack
+  ///                                           has no pushing rows until the
+  ///                                           hub lands, and later capture
+  ///                                           runs want sub-pages directly)
   ///
   /// Both id spaces are CASE-SENSITIVE and camelCase: `pane:menuBar`, not
   /// `pane:menubar`; `display:builtIn`, not `display:builtin`. The valid pane
@@ -53,13 +60,16 @@
     /// The root view owns its selection as `@State`, so there is nothing to
     /// write to from outside until the view exists.
     static var pendingSelection: SettingsDestination?
+    /// Only ever set alongside a `.display` `pendingSelection`; the root view
+    /// seeds that display's navigation path with it.
+    static var pendingSubPage: DisplaySubPage?
 
     /// A parse that carries its own reason for failing. The reason is the whole
     /// point: `SettingsDestination?` cannot distinguish "you typo'd the pane
     /// id" from "the display you asked for is not plugged in", and those want
     /// opposite responses from whoever is driving the capture.
     enum Resolution {
-      case resolved(SettingsDestination)
+      case resolved(SettingsDestination, subPage: DisplaySubPage?)
       case rejected(String)
     }
 
@@ -85,23 +95,36 @@
           let known = PaneID.allCases.map(\.rawValue).joined(separator: ", ")
           return .rejected("unknown pane \(quoted(body)) — ids are case-sensitive: \(known)")
         }
-        return .resolved(.pane(id))
+        return .resolved(.pane(id), subPage: nil)
       case "display":
+        // Optional `/subPage` suffix pushes that sub-page onto the display's
+        // navigation stack. Validated like everything else here: a typo'd
+        // sub-page must not silently capture the hub.
+        let segments = body.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+        let keyBody = String(segments[0])
+        var subPage: DisplaySubPage?
+        if segments.count == 2 {
+          guard let page = DisplaySubPage(rawValue: String(segments[1])) else {
+            let known = DisplaySubPage.allCases.map(\.rawValue).joined(separator: ", ")
+            return .rejected("unknown sub-page \(quoted(String(segments[1]))) — ids are case-sensitive: \(known)")
+          }
+          subPage = page
+        }
         // The built-in is not in `externalKeys` (AppModel keeps it in its own
         // slot), but it IS a real destination — `SettingsRootView` routes the
         // literal key "builtIn" to `BuiltInDisplayPane`.
         let known = ["builtIn"] + externalKeys
-        if body == "first" {
+        if keyBody == "first" {
           guard let key = externalKeys.first else {
             return .rejected("display:first — no external display connected; try display:builtIn")
           }
-          return .resolved(.display(key))
+          return .resolved(.display(key), subPage: subPage)
         }
-        guard known.contains(body) else {
+        guard known.contains(keyBody) else {
           let list = known.map(quoted).joined(separator: ", ")
-          return .rejected("unknown display key \(quoted(body)) — connected: \(list)")
+          return .rejected("unknown display key \(quoted(keyBody)) — connected: \(list)")
         }
-        return .resolved(.display(body))
+        return .resolved(.display(keyBody), subPage: subPage)
       default:
         return .rejected("unknown kind \(quoted(String(parts[0]))) — expected pane or display")
       }
@@ -110,7 +133,7 @@
     /// Kept as the brief's named interface, and as the shape most callers want.
     /// `resolve` is the one that can say why.
     static func destination(from value: String, externalKeys: [String]) -> SettingsDestination? {
-      guard case let .resolved(destination) = resolve(value, externalKeys: externalKeys) else {
+      guard case let .resolved(destination, _) = resolve(value, externalKeys: externalKeys) else {
         return nil
       }
       return destination
@@ -125,21 +148,23 @@
         return
       }
       switch resolve(value, externalKeys: externalKeys) {
-      case let .resolved(destination):
-        log("opening \(describe(destination))")
+      case let .resolved(destination, subPage):
+        log("opening \(describe(destination, subPage: subPage))")
         // Set BEFORE opening: `SettingsRootView.onAppear` runs as part of the
         // window coming up, so a later assignment would miss it entirely.
         pendingSelection = destination
+        pendingSubPage = subPage
         SettingsOpener.open()
       case let .rejected(reason):
         log("ignored: \(reason)")
       }
     }
 
-    private static func describe(_ destination: SettingsDestination) -> String {
+    private static func describe(_ destination: SettingsDestination, subPage: DisplaySubPage?) -> String {
       switch destination {
       case let .pane(id): "pane \(quoted(id.rawValue))"
-      case let .display(key): "display \(quoted(key))"
+      case let .display(key):
+        "display \(quoted(key))" + (subPage.map { ", sub-page \(quoted($0.rawValue))" } ?? "")
       }
     }
 
