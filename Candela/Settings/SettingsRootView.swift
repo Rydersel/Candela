@@ -289,7 +289,11 @@ struct SettingsRootView: View {
   /// documents.
   private func displayRoot(key: String, state: AppModel.DisplayState) -> some View {
     VStack(spacing: 0) {
-      BannerRegion(state: state)
+      // The root stays in the stack behind a pushed page and keeps rendering,
+      // so both placements would draw the SAME answerable countdown. The pushed
+      // page is the one the reader is looking at, so it owns the answer; this
+      // one yields while the path is non-empty and keeps every passive banner.
+      BannerRegion(state: state, ownsAnswerableCountdown: (subPagePaths[key] ?? []).isEmpty)
       if key == "builtIn" {
         BuiltInDisplayPane(selection: $selection, path: pathBinding(for: key))
       } else {

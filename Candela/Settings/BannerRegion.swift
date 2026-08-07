@@ -20,6 +20,16 @@ import SwiftUI
 @MainActor
 struct BannerRegion: View {
   let state: AppModel.DisplayState
+  /// SO6 is ONE answerable surface, and this region has two placements: while a
+  /// sub-page is pushed, the hub root behind it is still in the stack and still
+  /// rendering. Both matched the same `displayID`, so a settings-owned preview
+  /// started from a sub-page drew two answerable banners at once: two Return
+  /// and Escape equivalents for one question, and two appearance announcements
+  /// (accessibility contract 8). The pushed page owns the answer whenever there
+  /// is one, so the root placement gives it up while the stack is non-empty.
+  /// Passive content is unaffected: a notice or a recovery block on both is
+  /// what SO7 asks for.
+  var ownsAnswerableCountdown = true
 
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
@@ -72,7 +82,9 @@ struct BannerRegion: View {
     if let preview = coordinator.preview, preview.displayID == displayID {
       switch preview.surface {
       case .settingsBanner:
-        card { AnswerableModeBanner(coordinator: coordinator, preview: preview) }
+        if ownsAnswerableCountdown {
+          card { AnswerableModeBanner(coordinator: coordinator, preview: preview) }
+        }
       case .floatingPanel:
         // Status only while the countdown is armed. Once it is spent (a failed
         // expiry) the floating window is the whole story, and a passive line
