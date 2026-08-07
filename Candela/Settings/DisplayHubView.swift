@@ -555,7 +555,11 @@ struct DisplayHubView: View {
     if model.isSafeMode { return "Paused" }
     switch model.oledCare.dimStates[persistenceKey] {
     case .active: return "On"
-    case .idleDim, .lockDim, .unfocusedDim: return "Dimmed"
+    case .idleDim, .unfocusedDim: return "Dimmed"
+    // OC7 sub-ruling 4: a refused lock dim is recorded and must not be
+    // reported as dimmed. `lockDimSkips` is observed, so this preview re-reads
+    // when the refusal appears or clears.
+    case .lockDim: return OledCareCopy.lockDimPreview(model.oledCare.lockDimSkips[persistenceKey])
     case .blackout: return "Screen off"
     case .suspended: return "Paused"
     case nil: return "Starting"
@@ -570,7 +574,8 @@ struct DisplayHubView: View {
     switch model.oledCare.dimStates[persistenceKey] {
     case .active: return "On, not dimming"
     case .idleDim: return "Dimmed, the display has been idle"
-    case .lockDim: return "Dimmed, the screen is locked"
+    case .lockDim:
+      return OledCareCopy.lockDimSpokenPreview(model.oledCare.lockDimSkips[persistenceKey])
     case .unfocusedDim: return "Dimmed, no window in focus on this display"
     case .blackout: return "Screen off, the display has been idle"
     case .suspended: return "Paused while this display is mirrored"

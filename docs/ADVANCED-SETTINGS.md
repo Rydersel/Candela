@@ -58,7 +58,7 @@ than a caveat.
 
 | Key | Type | Default | Effect |
 |---|---|---|---|
-| `separateCombinedScale` | Bool | `NO` | Changes how far one press of a **brightness key** moves the slider while combined hardware+software dimming is active: 32 steps across the whole range instead of the usual 16. Fine steps are unaffected — a fine press is a flat ±0.01 on both scales, so this does nothing while "Fine steps for brightness and contrast" is on or Shift+Option is held. Sliders are unaffected. Ignored unless the display is actually on the combined path — no effect with "Dim past the display's minimum" off, with hardware control off for that display, or on the built-in display. **Has a control:** Keyboard → Precision → *Extra-fine steps while combined dimming is active*. |
+| `separateCombinedScale` | Bool | `NO` | Changes how far one press of a **brightness key** moves the slider while combined hardware+software dimming is active: 32 steps across the whole range instead of the usual 16. Fine steps are unaffected: a fine press is a flat ±0.01 on both scales, so this does nothing on a fine press. Fine is the EXCLUSIVE OR of the setting and the modifier (`KeyRouter`: holding Shift+Option toggles whatever "Fine steps for brightness and contrast" says), so this key applies whenever neither or BOTH of them are in play, and does nothing when exactly one is. The on-and-held case is a coarse press and this key governs it. Sliders are unaffected. Ignored unless the display is actually on the combined path — no effect with "Dim past the display's minimum" off, with hardware control off for that display, or on the built-in display. **Has a control:** Keyboard → Precision → *Extra-fine steps while combined dimming is active*. |
 
 ## Per-display (`<key>.<persistenceKey>`)
 

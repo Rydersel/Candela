@@ -137,14 +137,21 @@ struct OnboardingView: View {
     }
   }
 
-  /// The display-configuration pitch. Copy constraint (RM11): resolutions are
-  /// "hidden by macOS", never "true native HiDPI" — every revealed mode except
-  /// one renders oversized and downsamples, and the app must not claim
-  /// otherwise here and then be honest in the mode picker.
+  /// The display-configuration pitch, under two copy constraints that pull the
+  /// same way.
+  ///
+  /// RM11: never imply true native HiDPI — every revealed mode except one
+  /// renders oversized and downsamples, so the app must not claim otherwise
+  /// here and then be honest in the mode picker.
+  ///
+  /// And the measured rule that no API reports what Displays settings shows:
+  /// "sizes macOS hides" was a claim about macOS we cannot check. State what
+  /// our own list does instead. SO14 also retires "panel" from visible copy,
+  /// which is why this says display throughout.
   private var displayControl: some View {
     VStack(alignment: .leading, spacing: 8) {
       heading("Your displays, on your terms", symbol: "display", tint: .teal)
-      keyRow(symbol: "squares.leading.rectangle", label: "Every resolution your display supports (including HiDPI sizes macOS hides, made for 4K and 5K screens)")
+      keyRow(symbol: "squares.leading.rectangle", label: "The full list of sizes and scaled options your display reports, not the short list you are usually offered")
       keyRow(symbol: "arrow.triangle.2.circlepath", label: "Refresh rate, rotation and mirroring")
       keyRow(symbol: "rectangle.3.group", label: "Arrange displays and save the layout for later")
       SettingsCaption("All of it lives in Settings, per display. A resolution change always previews first and reverts itself if you don't confirm.")

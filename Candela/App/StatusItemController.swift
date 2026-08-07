@@ -147,7 +147,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       displays, and will not write to them when you quit.
 
       Your sliders and keyboard shortcuts still work, and they still send commands to your displays. \
-      Nothing about your settings has changed — relaunch without holding Shift to leave Safe Mode.
+      Nothing about your settings has changed: relaunch without holding Shift to leave Safe Mode.
       """
       // The one piece of traffic the paragraph above does not cover. Brightness
       // sync is off by default, but when it is on, `BrightnessSync.fanOut`
@@ -164,7 +164,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
 
         "Match other displays to the built-in display" is on, so changes to the built-in display's \
-        brightness — including ones macOS makes by itself, such as the ambient light sensor's — are \
+        brightness (including ones macOS makes by itself, such as the ambient light sensor's) are \
         still mirrored out to your other displays. Turn it off in Settings if you need those \
         displays left completely alone.
         """
@@ -903,9 +903,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   }
 
   /// D12: full-domain wipe, explicitly confirmed by the caller (the General
-  /// pane owns the confirmation and its copy names everything destroyed —
-  /// including the login item and the stored brightness/volume/contrast, which
-  /// on a write-only panel are the only record of where the display is).
+  /// pane owns the confirmation, and SO20 binds its copy to this function: it
+  /// names the hardware effects below — HDR off, unmute, OLED care torn down
+  /// with the hour counters cleared — as well as what is destroyed, including
+  /// the login item and the stored brightness/volume/contrast, which on a
+  /// write-only panel are the only record of where the display is).
   func performSettingsReset() {
     Task { @MainActor in await runSettingsReset() }
   }

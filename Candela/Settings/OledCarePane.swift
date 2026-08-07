@@ -375,7 +375,11 @@ private struct OledCareDisplaySection: View {
     case .active: return "Not dimming"
     case .idleDim: return "Dimmed: the display has been idle"
     case .blackout: return "Screen off: the display has been idle"
-    case .lockDim: return "Dimmed: the screen is locked"
+    // OC7 sub-ruling 4: a lock dim the policy refused is RECORDED and must
+    // never be reported as dimmed. `lockDimSkips` carries only live refusals
+    // (the coordinator clears the entry the moment the dim engages), so
+    // reading it here cannot outlive the state it describes.
+    case .lockDim: return OledCareCopy.lockDimStatus(model.oledCare.lockDimSkips[persistenceKey])
     case .unfocusedDim: return "Dimmed: no window in focus on this display"
     case .suspended: return "Paused while this display is mirrored"
     // Between enrolling and the first tick, and for a display the coordinator

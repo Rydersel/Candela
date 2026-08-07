@@ -81,6 +81,12 @@ struct CommandTuningGrid: View {
   @State private var drafts: [FocusTarget: String] = [:]
   @FocusState private var focus: FocusTarget?
 
+  /// A hard 60 pt clipped the value at larger text sizes: three digits plus the
+  /// caret do not fit a fixed box once the font grows (accessibility contract
+  /// 10). The base stays 60 so the grid's columns are unchanged at the default
+  /// size.
+  @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 60
+
   private var prefs: DisplayPrefs { writer.prefs }
 
   /// Why no DDC command is reaching this display, if none is — read from the
@@ -192,13 +198,13 @@ struct CommandTuningGrid: View {
     // leave the boxes empty. The explicit border is what makes the box a box.
     .textFieldStyle(.roundedBorder)
     // The grid sits inside a `Form`, which splits a `TextField` into a label
-    // column and a field: the empty label still took its share of the 60pt
+    // column and a field: the empty label still took its share of the
     // cell, so the bezel drew at the trailing edge and no column header could
     // sit over it. Hiding the label gives the bezel the whole cell.
     .labelsHidden()
     .focused($focus, equals: target)
     .onSubmit { commit(target) }
-    .frame(width: 60)
+    .frame(width: fieldWidth)
     .accessibilityLabel(Text(accessibilityLabel(for: target)))
   }
 

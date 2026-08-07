@@ -63,10 +63,15 @@ struct GeneralPane: View {
         .keyboardShortcut(.defaultAction)
       Button("Reset All Settings", role: .destructive) { actions.performReset() }
     } message: {
-      // D12(a): name what is destroyed — including the stored levels, which on
-      // a write-only panel are the only record of where the display is, and
-      // the login-item registration, which the wipe also removes.
-      Text("This removes every setting: per-display tuning and names, custom keyboard shortcuts, saved brightness, volume and contrast levels, and the Open at Login registration. Setup will run again afterwards.")
+      // D12(a) and SO20: name what is destroyed, and name what the reset DOES
+      // to the hardware on its way there. `runSettingsReset` turns HDR off,
+      // unmutes, ends every lock dim and clears the hour counters before the
+      // wipe (its own D29 ordering); copy that mentioned only the prefs left a
+      // person surprised by a display coming out of HDR. The stored levels are
+      // called out because on a write-only panel they are the only record of
+      // where the display is, and the login item because the wipe removes a
+      // registration that lives outside the prefs domain.
+      Text("Your displays are put into a known state first: HDR off, any display muted by \(AppInfo.productName) unmuted, and OLED care stopped with the panel hour counters cleared.\n\nThen every setting is removed: per-display tuning and names, custom keyboard shortcuts, saved brightness, volume and contrast levels, remembered resolutions and rotation, saved arrangements, OLED care enrollment, and the Open at Login registration. Setup will run again afterwards.")
     }
   }
 

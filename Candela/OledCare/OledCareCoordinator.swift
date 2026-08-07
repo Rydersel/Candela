@@ -48,10 +48,14 @@ final class OledCareCoordinator {
   /// launch wiring runs.
   private(set) var chrome: ChromeAutoHideController?
 
-  /// Why a locked display was not dimmed, by persistenceKey, for whatever
-  /// surface reports it. Present ONLY while the display is locked and the dim
-  /// was refused: a stale entry would be a sentence about a state the machine
-  /// is no longer in.
+  /// Why a locked display was not dimmed, by persistenceKey. Present ONLY while
+  /// the display is locked and the dim was refused: a stale entry would be a
+  /// sentence about a state the machine is no longer in.
+  ///
+  /// Read by both surfaces that report lock dim, through `OledCareCopy` (the
+  /// OLED Care pane's status row and the display hub's care preview). OC7
+  /// sub-ruling 4 is "recorded, never reported as dimmed", and a record no
+  /// surface reads satisfies only the first half.
   private(set) var lockDimSkips: [String: LockDimSkip] = [:]
 
   private struct PerDisplay {
