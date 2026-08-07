@@ -228,9 +228,9 @@ private struct OledCareDisplaySection: View {
   @State private var idleLevelDraft: Double?
   @State private var unfocusedLevelDraft: Double?
   /// `PanelHoursTracker` is a plain class with no observation, so nothing
-  /// re-renders this section when the hours line changes. Bumped by the two
-  /// actions that change it from here; the numbers otherwise refresh whenever
-  /// anything else re-renders the pane.
+  /// re-renders this section when the hours line changes. Bumped by the one
+  /// action that changes it from here (Dismiss); the numbers otherwise refresh
+  /// whenever anything else re-renders the pane.
   @State private var hoursRevision = 0
 
   private var persistenceKey: String { state.display.persistenceKey }
@@ -401,8 +401,11 @@ private struct OledCareDisplaySection: View {
 
     // The second sentence is the honest limit of the number (#94): macOS reports
     // a DPMS-blanked panel as awake, at full resolution, with no reconfiguration,
-    // so a display switched off at the monitor is indistinguishable from a lit
-    // one. Display sleep, system sleep and mirroring are all handled correctly —
+    // so a panel held in soft standby is indistinguishable from a lit one.
+    // "can still be counted" is deliberately hedged — whether the monitor's own
+    // power button reaches soft standby or instead deasserts hot-plug detect
+    // (a real departure, handled correctly) is untested per monitor (#23).
+    // Display sleep, system sleep and mirroring are all handled correctly —
     // don't let the caption imply otherwise in either direction.
     SettingRow("Counted while the display is awake and not mirrored, and kept per display even when it is unplugged. A display switched off at the monitor itself can still be counted — macOS reports a blanked panel as awake.") {
       Toggle("Count panel-on hours", isOn: Binding(

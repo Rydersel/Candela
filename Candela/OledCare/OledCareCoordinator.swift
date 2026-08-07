@@ -467,11 +467,16 @@ final class OledCareCoordinator {
       // nothing (OC13: suspended means suspended).
       //
       // Known over-count, documented in the pane's caption rather than fixed
-      // (#94): a panel blanked by DPMS — the monitor's own power button — keeps
-      // reporting `CGDisplayIsAsleep == false`, at full resolution, with no
-      // reconfiguration, so hours accrue while it is dark. macOS exposes no
-      // signal that distinguishes it, and the one signal Candela used to have
-      // (its own 0xD6 write) went with the power-off action.
+      // (#94): a panel blanked by DPMS keeps reporting
+      // `CGDisplayIsAsleep == false`, at full resolution, with no
+      // reconfiguration, so hours accrue while it is dark. MEASURED for a DDC
+      // `D6 set 4` write. That the monitor's OWN power button reaches that same
+      // state is REASONED FROM that measurement, not measured — a press may
+      // instead deassert hot-plug detect, which is a real departure and is
+      // already handled (reconcileEnrollment -> noteStandby). Monitor-dependent
+      // and untested; #23 carries the item. macOS exposes no signal that
+      // distinguishes a soft-standby panel, and the one signal Candela used to
+      // have (its own 0xD6 write) went with the power-off action.
       let awake = CGDisplayIsAsleep(id) == 0
       if state.hoursTracking {
         if state.wasAwake, !awake { hoursTracker(for: key).noteStandby() }
