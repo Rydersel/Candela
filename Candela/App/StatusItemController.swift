@@ -880,6 +880,15 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //         live tracker's debounced write-through would re-persist the
     //         hours the user just cleared.
     model.oledCare.prepareForReset()
+    // The other half of the contract, bound to scope exit rather than to the
+    // last statement: `prepareForReset()` raised a latch that swallows every
+    // topology event and pref reapply for the duration (an HDR-off below IS a
+    // reconfiguration, and a mid-reset reconcile would re-arm overlays from
+    // still-unwiped enrollment prefs). Only this call clears it and re-derives
+    // membership from the wiped domain — nothing else re-reconciles after the
+    // wipe, so an early exit added here later must not be able to skip it or
+    // OLED care is silently dead for the rest of the session.
+    defer { model.oledCare.resetDidComplete() }
 
     // ---- 1. Drive the hardware to a known state through the engine's own
     //         doors, while the prefs that describe that state still exist.
@@ -957,13 +966,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // Post-reset state IS first-run state: prefsSchemaVersion is gone, so
     // onboarding re-runs (wired by Task 15; default no-op until then).
     settingsActions.postReset()
-    // The other half of the OLED-care reset contract: `prepareForReset()`
-    // raised a latch that swallows every topology event and pref reapply for
-    // the duration (an HDR-off above IS a reconfiguration, and a mid-reset
-    // reconcile would re-arm overlays from still-unwiped enrollment prefs).
-    // Only this call clears it and re-derives membership from the wiped
-    // domain — nothing else re-reconciles after the wipe.
-    model.oledCare.resetDidComplete()
+    // OLED care's latch is cleared by the `defer` at the top of this function,
+    // which runs here — after every statement above.
   }
 
   /// Hands every display's controller a pre-gamma-apply hook that runs the
