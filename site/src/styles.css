@@ -32,7 +32,7 @@ a{color:var(--accent);text-decoration:none}
 #hero h1{font-size:clamp(38px,4.8vw,60px);font-weight:700;letter-spacing:-.025em;line-height:1.05}
 #hero .sub{max-width:560px;margin:20px 0 0;font-size:18px;color:var(--text-2)}
 #hero .cta{display:flex;gap:12px;justify-content:flex-start;margin-top:32px;flex-wrap:wrap}
-.stage{flex:0 0 283px}
+.stage{flex:0 0 300px}
 #hero .stage{animation:rise .7s cubic-bezier(.22,1,.36,1) both;animation-delay:.32s}
 @media (max-width:900px){
   .hero-inner{flex-direction:column;gap:44px}
@@ -55,10 +55,13 @@ a{color:var(--accent);text-decoration:none}
 @media (prefers-reduced-motion:reduce){#hero h1,#hero .sub,#hero .cta,#hero .fineprint,#hero .stage{animation:none}}
 
 /* panel screenshot */
-.stage{position:relative;width:min(283px,86vw)}
+.stage{position:relative;width:min(324px,86vw)}
 .glowbed{position:absolute;top:-70px;bottom:-70px;left:50%;transform:translateX(-50%);width:min(100vw,560px);background:radial-gradient(closest-side,rgba(255,179,64,.2),transparent);pointer-events:none}
-.shot{position:relative;display:block;width:100%;height:auto;border-radius:var(--radius);border:1px solid var(--line);
-  box-shadow:0 30px 60px rgba(0,0,0,.5),0 8px 20px rgba(0,0,0,.4)}
+.mb-strip{position:relative;display:block;width:100%;height:auto;
+  -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 16%,#000 84%,transparent 100%);
+  mask-image:linear-gradient(90deg,transparent 0,#000 16%,#000 84%,transparent 100%)}
+.shot{position:relative;display:block;width:86.4%;height:auto;margin:9px auto 0;
+  filter:drop-shadow(0 24px 48px rgba(0,0,0,.45)) drop-shadow(0 6px 16px rgba(0,0,0,.35))}
 
 /* slider anatomy (used by the bento control fragment) */
 .row{padding:6px 10px;font-size:13px}

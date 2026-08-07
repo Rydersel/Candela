@@ -1,5 +1,6 @@
 import candelaC from '../assets/candela-c.svg'
-import panelShot from '../assets/widget-black.png'
+import menubarStrip from '../assets/menubar-strip.png'
+import panelWindow from '../assets/panel-window.png'
 
 export default function Hero() {
   return (
@@ -23,11 +24,12 @@ export default function Hero() {
         </div>
         <div className="stage">
           <div className="glowbed" aria-hidden="true" />
+          <img className="mb-strip" src={menubarStrip} width={324} height={24} alt="" aria-hidden="true" />
           <img
             className="shot"
-            src={panelShot}
-            width={283}
-            height={456}
+            src={panelWindow}
+            width={280}
+            height={459}
             alt="The Candela menu bar panel controlling three displays, with brightness and volume sliders and per-display resolution and mirroring controls"
           />
         </div>
