@@ -98,6 +98,88 @@ struct PanelHoursTrackerTests {
     #expect(t.shouldShowStandbyNote == true)   // a fresh run earns a fresh note
   }
 
+  @Test func dismissalSurvivesInstanceRecreation() {
+    // The counter is persisted, so an in-memory-only dismissal re-shows the
+    // note on every relaunch — the recurring reminder the spec forbids.
+    let defaults = InMemoryDefaults()
+    let t = PanelHoursTracker(defaults: defaults, persistenceKey: "pk")
+    t.noteTick(displayAwake: true, secondsSinceLastTick: 9 * 3600)
+    t.dismissStandbyNote()
+    let relaunched = PanelHoursTracker(defaults: defaults, persistenceKey: "pk")
+    #expect(relaunched.hoursSinceStandby == 9.0)  // still over the threshold
+    #expect(relaunched.shouldShowStandbyNote == false)
+  }
+
+  @Test func aDismissalIsScopedToItsDisplay() {
+    let defaults = InMemoryDefaults()
+    let a = PanelHoursTracker(defaults: defaults, persistenceKey: "a")
+    let b = PanelHoursTracker(defaults: defaults, persistenceKey: "b")
+    a.noteTick(displayAwake: true, secondsSinceLastTick: 9 * 3600)
+    b.noteTick(displayAwake: true, secondsSinceLastTick: 9 * 3600)
+    a.dismissStandbyNote()
+    #expect(a.shouldShowStandbyNote == false)
+    #expect(b.shouldShowStandbyNote == true)
+  }
+
+  @Test func standbyClearsThePersistedDismissalSoTheNextCrossingShows() {
+    let defaults = InMemoryDefaults()
+    let t = PanelHoursTracker(defaults: defaults, persistenceKey: "pk")
+    t.noteTick(displayAwake: true, secondsSinceLastTick: 9 * 3600)
+    t.dismissStandbyNote()
+    t.noteStandby()
+    #expect(defaults.object(forKey: "oledStandbyNoteDismissed.pk") == nil)
+    let relaunched = PanelHoursTracker(defaults: defaults, persistenceKey: "pk")
+    relaunched.noteTick(displayAwake: true, secondsSinceLastTick: 9 * 3600)
+    #expect(relaunched.shouldShowStandbyNote == true)
+  }
+
+  @Test func resetClearsThePersistedDismissal() {
+    let defaults = InMemoryDefaults()
+    let t = PanelHoursTracker(defaults: defaults, persistenceKey: "pk")
+    t.noteTick(displayAwake: true, secondsSinceLastTick: 9 * 3600)
+    t.dismissStandbyNote()
+    t.reset()
+    let relaunched = PanelHoursTracker(defaults: defaults, persistenceKey: "pk")
+    relaunched.noteTick(displayAwake: true, secondsSinceLastTick: 9 * 3600)
+    #expect(relaunched.shouldShowStandbyNote == true)
+  }
+
+  @Test func resetRemovesKeysRatherThanZeroingThem() {
+    // A settings reset should leave no key behind; zeroed keys resurrect the
+    // display's entry in the domain for a display that may never return.
+    let defaults = InMemoryDefaults()
+    let t = PanelHoursTracker(defaults: defaults, persistenceKey: "pk")
+    t.noteTick(displayAwake: true, secondsSinceLastTick: 9 * 3600)
+    t.dismissStandbyNote()
+    t.reset()
+    #expect(defaults.object(forKey: "oledPanelSeconds.pk") == nil)
+    #expect(defaults.object(forKey: "oledStandbySeconds.pk") == nil)
+    #expect(defaults.object(forKey: "oledStandbyNoteDismissed.pk") == nil)
+  }
+
+  @Test func sleepWakeWalkKeepsTheTotalContinuous() {
+    // Spec §9: the total is lifetime panel-on time and must survive a standby
+    // untouched, while the since-counter restarts from it. Asleep ticks add to
+    // neither — that is the whole point of `displayAwake`.
+    let defaults = InMemoryDefaults()
+    let t = PanelHoursTracker(defaults: defaults, persistenceKey: "pk")
+    for _ in 0..<3 { t.noteTick(displayAwake: true, secondsSinceLastTick: 3600) }
+    #expect(t.totalHours == 3.0)
+    #expect(t.hoursSinceStandby == 3.0)
+
+    t.noteStandby()
+    #expect(t.totalHours == 3.0)         // standby does not spend the lifetime total
+    #expect(t.hoursSinceStandby == 0.0)
+
+    for _ in 0..<5 { t.noteTick(displayAwake: false, secondsSinceLastTick: 3600) }
+    #expect(t.totalHours == 3.0)         // five hours asleep count for nothing
+    #expect(t.hoursSinceStandby == 0.0)
+
+    for _ in 0..<2 { t.noteTick(displayAwake: true, secondsSinceLastTick: 3600) }
+    #expect(t.totalHours == 5.0)         // continuous across the whole walk
+    #expect(t.hoursSinceStandby == 2.0)  // restarted at the standby
+  }
+
   @Test func resetClearsBoth() {
     let defaults = InMemoryDefaults()
     let t = PanelHoursTracker(defaults: defaults, persistenceKey: "pk")

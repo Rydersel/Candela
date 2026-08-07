@@ -40,6 +40,9 @@ struct PrefPropagationTests {
     // setting a pane may route through (same rule as `muted`).
     #expect(PrefName(rawValue: "oledPanelSeconds") == nil)
     #expect(PrefName(rawValue: "oledStandbySeconds") == nil)
+    // Same rule for the note's dismissal: the tracker persists it, no pane
+    // writes it, so it must never become a case a pane could route through.
+    #expect(PrefName(rawValue: "oledStandbyNoteDismissed") == nil)
     // The two inverted storage keys are keys, not propagation identifiers.
     #expect(PrefName(rawValue: "oledLockDimOff") == nil)
     #expect(PrefName(rawValue: "oledHoursTrackingOff") == nil)

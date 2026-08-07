@@ -18,17 +18,20 @@ public final class PanelHoursTracker {
   private let defaults: UserDefaults
   private let totalKey: String
   private let standbyKey: String
+  private let dismissedKey: String
   private var totalSeconds: Double
   private var sinceStandbySeconds: Double
   private var unwrittenSeconds: Double = 0
-  private var noteDismissed = false
+  private var noteDismissed: Bool
 
   public init(defaults: UserDefaults = .standard, persistenceKey: String) {
     self.defaults = defaults
     self.totalKey = "oledPanelSeconds.\(persistenceKey)"
     self.standbyKey = "oledStandbySeconds.\(persistenceKey)"
+    self.dismissedKey = "oledStandbyNoteDismissed.\(persistenceKey)"
     self.totalSeconds = defaults.double(forKey: totalKey)
     self.sinceStandbySeconds = defaults.double(forKey: standbyKey)
+    self.noteDismissed = defaults.bool(forKey: dismissedKey)
   }
 
   public var totalHours: Double { totalSeconds / 3600 }
@@ -37,8 +40,10 @@ public final class PanelHoursTracker {
     !noteDismissed && hoursSinceStandby >= Self.standbyNoteThresholdHours
   }
 
-  /// Suppresses the note for the current run only; the next standby re-arms it.
-  public func dismissStandbyNote() { noteDismissed = true }
+  /// Suppresses the note until the next standby. Persisted: an in-memory-only
+  /// dismissal comes back on every relaunch while the counter is still over the
+  /// threshold, which is exactly the recurring reminder the spec forbids.
+  public func dismissStandbyNote() { setDismissed(true) }
 
   public func noteTick(displayAwake: Bool, secondsSinceLastTick: Double) {
     // The caller derives the delta from wall-clock timestamps, so a clock step
@@ -56,17 +61,32 @@ public final class PanelHoursTracker {
   /// Display slept, departed, or answered a DDC power-mode (0xD6) standby.
   public func noteStandby() {
     sinceStandbySeconds = 0
-    noteDismissed = false
+    // The panel got its rest, so the next crossing has earned a fresh note.
+    setDismissed(false)
     writeThrough()
   }
 
   public func reset() {
     totalSeconds = 0
     sinceStandbySeconds = 0
+    unwrittenSeconds = 0
     // A wiped counter that can never speak again is worse than one that never
     // counted: without this, a dismissal taken before the reset outlives it.
     noteDismissed = false
-    writeThrough()
+    // Removed rather than zeroed: a settings reset should leave no key behind,
+    // and every read here already treats absence as zero/false.
+    defaults.removeObject(forKey: totalKey)
+    defaults.removeObject(forKey: standbyKey)
+    defaults.removeObject(forKey: dismissedKey)
+  }
+
+  private func setDismissed(_ dismissed: Bool) {
+    noteDismissed = dismissed
+    if dismissed {
+      defaults.set(true, forKey: dismissedKey)
+    } else {
+      defaults.removeObject(forKey: dismissedKey)  // absence IS "not dismissed"
+    }
   }
 
   private func writeThrough() {

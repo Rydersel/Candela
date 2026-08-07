@@ -14,8 +14,9 @@
 ///   reader anywhere in Candela (D32). A row for them would be a lie.
 /// - `pollingMode`, `pollingCount`: read at DDC-read time; nothing to fan out.
 /// - `separateCombinedScale`: read only inside `step()`, at key time.
-/// - `oledPanelSeconds`, `oledStandbySeconds`: accumulated usage written by the
-///   hours tracker — engine state, not a setting (same rule as `muted`).
+/// - `oledPanelSeconds`, `oledStandbySeconds`, `oledStandbyNoteDismissed`:
+///   accumulated usage and the note's dismissal, written by the hours tracker —
+///   engine state, not settings (same rule as `muted`).
 public enum PrefName: String, Sendable, CaseIterable {
   // App-level — panel and menu-bar presentation
   case menuIcon, hideBuiltInDisplay, showContrast
