@@ -299,6 +299,14 @@ struct SettingsRootView: View {
         BannerRegion(state: state)
         subPage(page, key: key, state: state)
       }
+      // `.id(key)` on the pushed CONTENT, mirroring `displayRoot`, and never on
+      // the stack (that re-keying is the orphaned-page defect `detail`
+      // documents). The switcher keeps this page presented while `state`
+      // re-resolves to the new display, so without the re-key the sub-page's
+      // `@State` (drafts, focus, list filters) survived the switch and rendered
+      // against the new display's prefs; a draft typed on one display could
+      // then commit into another's tuning (SO10).
+      .id(key)
       // The root's principal title does NOT survive a push (measured in the
       // Task 9 spike: the toolbar came up empty but for Back), so every
       // pushed page re-declares it. Still the DISPLAY's name: the sub-page
@@ -311,17 +319,25 @@ struct SettingsRootView: View {
   /// The persistent stack's path: the selected display's retained sub-page
   /// stack, or empty for a pane. Selecting a pane changes this binding's VALUE
   /// to `[]`, which is what pops the outgoing display's sub-page while the
-  /// stack survives. The setter drops writes while a pane is selected so the
-  /// pop transition cannot clear a display's retained path (SO23).
+  /// stack survives.
+  ///
+  /// The key is resolved ONCE, when the binding is built, and the setter drops
+  /// any write made after the selection stops matching it. The stack can flush
+  /// a transition's write-back through a binding built before the selection
+  /// moved; a setter that re-read the selection at write time landed that
+  /// write under whatever was selected by then, which on a display-to-display
+  /// switch cleared the NEW display's retained path (SO23). The pane branch
+  /// keeps the old rule as its degenerate case: reads are empty and every
+  /// write is dropped.
   private var currentPathBinding: Binding<[DisplaySubPage]> {
-    Binding(
-      get: {
-        guard case let .display(key) = selection else { return [] }
-        return subPagePaths[key] ?? []
-      },
+    guard case let .display(boundKey) = selection else {
+      return Binding(get: { [] }, set: { _ in })
+    }
+    return Binding(
+      get: { subPagePaths[boundKey] ?? [] },
       set: { newPath in
-        guard case let .display(key) = selection else { return }
-        subPagePaths[key] = newPath
+        guard case let .display(current) = selection, current == boundKey else { return }
+        subPagePaths[boundKey] = newPath
       }
     )
   }
