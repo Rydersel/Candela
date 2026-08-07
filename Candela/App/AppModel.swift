@@ -323,7 +323,10 @@ final class AppModel {
       connection: isBuiltIn ? "None: built-in display" : DiagnosticsCopy.transport(facts),
       manufacturer: isBuiltIn ? nil : facts?.manufacturerID,
       hasSerial: facts?.numericSerialNumber != nil || facts?.alphanumericSerialNumber != nil,
-      currentMode: displayModes.catalogs[state.id]?.current.map(DiagnosticsCopy.mode),
+      // Never `catalogs[...]?.current` directly: the catalog exists only for
+      // displays something has already shown, so the built-in's entry depends
+      // on which pages were visited this session (combined pass D8).
+      currentMode: displayModes.currentMode(for: state.id).map(DiagnosticsCopy.mode),
       controlMethod: DiagnosticsCopy.brightnessPath(state.controller.brightnessPath),
       readbackVerdict: isBuiltIn
         ? "Not applicable: no data cable"

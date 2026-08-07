@@ -289,6 +289,17 @@ final class DisplayModeCoordinator {
 
   // MARK: - Enumeration
 
+  /// The display's current mode: the cached catalog when one exists, else a
+  /// live query. A catalog is populated only when something has SHOWN this
+  /// display (its own pane, or the panel's warm pass, which walks externals
+  /// only), so a reader treating `catalogs` as the answer reported the
+  /// built-in's mode as "not reported" exactly when the report was copied from
+  /// another display's page (combined pass D8). Diagnostics reads this
+  /// instead; it never enumerates and never caches.
+  func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
+    catalogs[displayID]?.current ?? configurator.currentMode(for: displayID)
+  }
+
   /// Re-enumerates one display. Called when a pane appears, when the screen
   /// configuration changes, and after any mode this app applies — never on a
   /// timer (DM7).
