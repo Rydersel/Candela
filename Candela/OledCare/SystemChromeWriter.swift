@@ -32,21 +32,73 @@ final class SystemChromeWriter: ChromeWriting {
   private static let log = Logger(subsystem: "com.rydersel.Candela", category: "oledcare")
 
   private static let menuBarKey = "_HIHideMenuBar" as CFString
+  private static let fullScreenVisibleKey = "AppleMenuBarVisibleInFullscreen" as CFString
+  private static let controlCenterDomain = "com.apple.controlcenter" as CFString
+  private static let autoHideOptionKey = "AutoHideMenuBarOption" as CFString
   private static let dockDomain = "com.apple.dock" as CFString
   private static let dockKey = "autohide" as CFString
 
+  /// macOS 26 stores menu-bar auto-hiding in TWO places and the spec's premise
+  /// that `_HIHideMenuBar` alone IS the setting is wrong.
+  /// [MEASURED 2026-08-07, driving System Settings by accessibility and diffing
+  /// every domain it touched.]
+  ///
+  /// - `_HIHideMenuBar` (global domain, Bool) is the EFFECTIVE bit: apps see it
+  ///   immediately as `NSScreen.visibleFrame` gaining or losing the bar's 30 pt,
+  ///   which is the only oracle the S3 spike ever checked.
+  /// - `com.apple.controlcenter AutoHideMenuBarOption` (Int) is macOS's own
+  ///   RECORD of the four-way choice, and it is what the Control Center settings
+  ///   pane reads and writes: 0 Always, 1 On Desktop Only, 2 In Full Screen
+  ///   Only, 3 Never.
+  ///
+  /// Writing only the first leaves the two disagreeing: System Settings went on
+  /// showing "Always" over a menu bar Candela had just restored, and any later
+  /// macOS path that re-derives the effective bit from its own record hides the
+  /// bar again with Candela's switch reading OFF. Two records of one setting
+  /// kept in agreement by nothing is the strand; the writer owns both halves so
+  /// they cannot drift.
+  ///
+  /// The full-screen half is never ours to choose, so it is read and preserved:
+  /// the option is picked from the requested desktop value AND the user's
+  /// existing full-screen preference. Unset means the macOS default, which
+  /// hides the bar in full screen.
+  private static func fullScreenHidesMenuBar() -> Bool {
+    !((CFPreferencesCopyValue(fullScreenVisibleKey, kCFPreferencesAnyApplication,
+                              kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? Bool) ?? false)
+  }
+
+  /// True when the RECORD says the bar hides on the desktop. Nil when macOS has
+  /// never written one, in which case there is nothing to reconcile against.
+  private static func recordedMenuBarAutoHide() -> Bool? {
+    CFPreferencesAppSynchronize(controlCenterDomain)
+    guard let option = CFPreferencesCopyValue(autoHideOptionKey, controlCenterDomain,
+                                              kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? Int
+    else { return nil }
+    return option == 0 || option == 1
+  }
+
+  /// Hidden if EITHER half says hidden. Deliberately the pessimistic read: the
+  /// switch must be ON whenever anything is hiding the bar, because turning it
+  /// off is the only in-app route back and a control that reads OFF over a
+  /// hidden menu bar cannot be used to recover (D29 rule 3).
   func readMenuBarAutoHide() -> Bool {
     CFPreferencesAppSynchronize(kCFPreferencesAnyApplication)
-    return (CFPreferencesCopyValue(Self.menuBarKey, kCFPreferencesAnyApplication,
-                                   kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? Bool) ?? false
+    let effective = (CFPreferencesCopyValue(Self.menuBarKey, kCFPreferencesAnyApplication,
+                                            kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? Bool) ?? false
+    return effective || (Self.recordedMenuBarAutoHide() ?? false)
   }
 
   func writeMenuBarAutoHide(_ on: Bool) {
     CFPreferencesSetValue(Self.menuBarKey, on ? kCFBooleanTrue : kCFBooleanFalse,
                           kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
     CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
-    // No restart and no notification: spike §6a measured this exact triple
-    // applying live (MAG menu-bar inset 0 → 30 → 0).
+    // No restart and no notification for this half: spike §6a measured this
+    // exact triple applying live (MAG menu-bar inset 0 -> 30 -> 0).
+    let fullScreenHides = Self.fullScreenHidesMenuBar()
+    let option: Int = on ? (fullScreenHides ? 0 : 1) : (fullScreenHides ? 2 : 3)
+    CFPreferencesSetValue(Self.autoHideOptionKey, option as CFNumber,
+                          Self.controlCenterDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+    CFPreferencesSynchronize(Self.controlCenterDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
   }
 
   func readDockAutoHide() -> Bool {

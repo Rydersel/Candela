@@ -106,4 +106,41 @@ struct ChromeAutoHideTests {
     #expect(fake.dock == false)
     #expect(fake.writes == 1)
   }
+
+  /// D29 rule 1 for chrome: turning auto-hiding OFF must reach the system even
+  /// when nobody refreshed first. The cache moves only while the OLED Care pane
+  /// is on screen, so a change made anywhere else leaves it stale, and a guard
+  /// that trusted it swallowed the click that was supposed to bring the menu
+  /// bar back. No `refresh()` here on purpose: that IS the case being pinned.
+  @Test func disableReachesTheSystemOverAStaleCache() {
+    let fake = FakeChrome()
+    let c = ChromeAutoHideController(writer: fake)
+    #expect(c.menuBarAutoHide == false)
+    fake.menuBar = true            // hidden by something outside this app
+    c.setMenuBarAutoHide(false)
+    #expect(fake.menuBar == false) // the restore actually happened
+    #expect(fake.writes == 1)
+    #expect(c.menuBarAutoHide == false)
+  }
+
+  /// Both setters, or wiring only the menu bar one to a live read passes.
+  @Test func dockDisableAlsoReachesTheSystemOverAStaleCache() {
+    let fake = FakeChrome()
+    let c = ChromeAutoHideController(writer: fake)
+    fake.dock = true
+    c.setDockAutoHide(false)
+    #expect(fake.dock == false)
+    #expect(fake.writes == 1)
+  }
+
+  /// The live read must also be allowed to SUPPRESS a write, or the fix would
+  /// have traded a swallowed disable for a redundant write on every click.
+  @Test func aSetMatchingLiveStateStillWritesNothing() {
+    let fake = FakeChrome()
+    let c = ChromeAutoHideController(writer: fake)
+    fake.menuBar = true            // external change, cache still false
+    c.setMenuBarAutoHide(true)
+    #expect(fake.writes == 0)
+    #expect(c.menuBarAutoHide == true)  // and the cache caught up regardless
+  }
 }

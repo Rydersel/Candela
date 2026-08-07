@@ -47,14 +47,26 @@ import Observation
   // restart is fire-and-forget — and caching the request would leave the pane's
   // switch ON over a system that never moved. Assuming a write landed is the
   // defect class behind #53/#65.
+  //
+  // Both setters decide against a LIVE read, never against the cached value.
+  // The cache is only refreshed while the OLED Care pane is on screen, so any
+  // change made while it is not (System Settings, a login, another tool) leaves
+  // the cache behind the system, and a guard on the cache turns the user's
+  // click into a silent no-op with nothing on screen to say so. That is the
+  // D29 rule 1 shape applied to chrome: the control that disables a mechanism
+  // must be able to restore the state, in every state it can be reached from.
   public func setMenuBarAutoHide(_ on: Bool) {
-    guard on != menuBarAutoHide else { return }
+    let current = writer.readMenuBarAutoHide()
+    if current != menuBarAutoHide { menuBarAutoHide = current }
+    guard on != current else { return }
     writer.writeMenuBarAutoHide(on)
     menuBarAutoHide = writer.readMenuBarAutoHide()
   }
 
   public func setDockAutoHide(_ on: Bool) {
-    guard on != dockAutoHide else { return }
+    let current = writer.readDockAutoHide()
+    if current != dockAutoHide { dockAutoHide = current }
+    guard on != current else { return }
     writer.writeDockAutoHide(on)
     dockAutoHide = writer.readDockAutoHide()
   }
