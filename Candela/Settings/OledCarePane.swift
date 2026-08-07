@@ -433,21 +433,39 @@ private struct OledCareDisplaySection: View {
       }
     }
 
-    SettingRow(caption: SettingsCaption("Sends the display's own power-off command over the data cable. Nothing is closed or logged out.")) {
+    // Named for its PURPOSE, not its mechanism (#94). "Turn Off This Display"
+    // framed a multi-minute unresponsive blackout as a malfunction; the panel is
+    // in fact doing the one thing this action exists to let it do. The label is
+    // still honest about the mechanism — it powers the display off, and the
+    // cycle is the panel's to run, not ours to start (S5 cut direct triggering).
+    SettingRow(caption: SettingsCaption("Sends the display's own power-off command over the data cable, so a panel holding a queued compensation cycle can run it. Nothing is closed or logged out.")) {
       VStack(alignment: .leading, spacing: 6) {
-        Button("Turn Off This Display…") {
+        Button("Power Off for Panel Maintenance…") {
           powerOffFailed = false
           confirmingPowerOff = true
         }
         .confirmationDialog(
-          Text(verbatim: "Turn off \(name)?"),
+          Text(verbatim: "Power off \(name) for panel maintenance?"),
           isPresented: $confirmingPowerOff,
           titleVisibility: .visible
         ) {
-          Button("Turn Off Display") { powerOff() }
+          // No `.destructive` role: nothing is destroyed, and red would tell the
+          // user something is being deleted. The weight of the action is carried
+          // by the message, which is where the actual risk is.
+          Button("Power Off Display") { powerOff() }
           Button("Cancel", role: .cancel) {}
         } message: {
-          Text("The display goes dark, and anything on it may move to another display until it comes back. The keyboard or mouse usually wakes it; if it stays dark, use the display's own power button.")
+          // Every claim the previous copy made was disproved on hardware
+          // (#94, 2026-08-07): nothing moves to another display, because macOS
+          // never sees the display leave; the keyboard and mouse do not wake it
+          // during a maintenance cycle; and the display's own power button does
+          // not either — nor does unplugging it from the wall. Naming the power
+          // button was the worst of the three: it is the first thing anyone
+          // tries, and finding it dead is what turns "wait a few minutes" into
+          // "the app killed my monitor". The two routes below are the ones
+          // OBSERVED to bring a panel back, and both work the same way — they
+          // force hot-plug detect to re-assert.
+          Text("The display goes dark. On a panel with a queued maintenance cycle it can stay dark for several minutes and ignore the keyboard and mouse while the cycle runs — that is the panel working correctly, and it is the point of this. If it does not come back on its own, replug its video cable or switch the monitor's input away and back.")
         }
         // In the button's own row: a failure notice one divider below the
         // button reads as an unrelated setting rather than as this button's
