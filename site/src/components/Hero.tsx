@@ -1,9 +1,9 @@
-import candelaCBg from '../assets/candela-c-bg.svg'
+import candelaC from '../assets/candela-c.svg'
 
 export default function Hero() {
   return (
     <section id="hero" className="wrap">
-      <img src={candelaCBg} alt="" aria-hidden="true" className="hero-bgc" />
+      <img src={candelaC} alt="" aria-hidden="true" className="hero-bgc" />
       <h1>
         The display control<br className="h1br" /> macOS forgot to ship.
       </h1>
