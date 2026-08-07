@@ -214,7 +214,7 @@ struct GeneralPane: View {
         // safe-mode note) — so this must NEVER claim "no DDC commands" or that
         // OLED care is entirely off, which is the same class of false copy D11
         // exists to fix.
-        SettingsCaption("Shift was held at launch, so \(AppInfo.productName) won't restore your saved values at startup or wake, won't read values back from your displays, won't write anything when it quits, and won't dim any display or count panel hours for OLED care. The sliders and keys still work, your settings are unchanged, and relaunching without Shift restores normal behavior.")
+        SettingsCaption("Shift was held at launch, so \(AppInfo.productName) won't restore your saved values at startup or wake, won't read values back from your displays, won't write anything when it quits, and won't dim any display or count hours of use for OLED care. The sliders and keys still work, your settings are unchanged, and relaunching without Shift restores normal behavior.")
       }
       // `startupCaption` is NOT repeated here: `SettingRow` above already
       // renders it beneath the picker. Rendering it a second time printed the

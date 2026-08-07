@@ -93,6 +93,7 @@ struct DisplayHubView: View {
       identitySection
       displaySection
       soundSection
+      oledCareSection
       navigationSection
       resetSection
     }
@@ -496,6 +497,69 @@ struct DisplayHubView: View {
       : "Volume control is off for this display, so mute is unavailable."
   }
 
+  // MARK: - OLED Care
+
+  /// The SO2 split of W3a's per-display care controls, sitting between Sound
+  /// and the navigation section: the hub holds the decision you change
+  /// (enrollment — OC2's explicit opt-in, so it must be reachable where the
+  /// display's other everyday controls are) and the state you consult (what
+  /// the care engine is doing right now, as the chevron's value). The
+  /// thresholds, levels, hours and the global chrome switches are set-once and
+  /// stay on the OLED Care pane, which OC3 keeps as their dedicated home.
+  ///
+  /// The chevron is a sidebar-selection change, NOT a push: SO1 closes the
+  /// pushed set at three sub-pages, and OLED Care is already a top-level
+  /// destination — same route as the Sound section's Keyboard Settings link.
+  private var oledCareSection: some View {
+    Section {
+      SettingRow("Enrolling applies the recommended settings; nothing changes until this display has been idle for a while.") {
+        Toggle("Enroll this display in OLED care", isOn: Binding(
+          get: { prefs.oledCareEnrolled },
+          set: { on in writer.write(.oledCareEnrolled) { $0.oledCareEnrolled = on } }
+        ))
+      }
+      NavigationRow(
+        title: "All OLED Care Settings",
+        value: oledCarePreview,
+        spokenValue: oledCareSpokenPreview
+      ) { selection = .pane(.oledCare) }
+    } header: {
+      Text("OLED Care").settingsHeading()
+    }
+  }
+
+  /// SO3's value preview, from the coordinator's OWN published state — never a
+  /// second opinion computed here. Short forms of the OLED Care pane's status
+  /// row; the exhaustive switch makes a new engine state a compile error
+  /// rather than a stale preview.
+  private var oledCarePreview: String {
+    guard prefs.oledCareEnrolled else { return "Off" }
+    if model.isSafeMode { return "Paused" }
+    switch model.oledCare.dimStates[persistenceKey] {
+    case .active: return "On"
+    case .idleDim, .lockDim, .unfocusedDim: return "Dimmed"
+    case .blackout: return "Screen off"
+    case .suspended: return "Paused"
+    case nil: return "Starting"
+    }
+  }
+
+  /// "Paused" alone would leave VoiceOver users guessing at the reason the
+  /// sighted preview defers to the pane for.
+  private var oledCareSpokenPreview: String {
+    guard prefs.oledCareEnrolled else { return "Off" }
+    if model.isSafeMode { return "Paused for this session, Safe Mode" }
+    switch model.oledCare.dimStates[persistenceKey] {
+    case .active: return "On, not dimming"
+    case .idleDim: return "Dimmed, the display has been idle"
+    case .lockDim: return "Dimmed, the screen is locked"
+    case .unfocusedDim: return "Dimmed, no window in focus on this display"
+    case .blackout: return "Screen off, the display has been idle"
+    case .suspended: return "Paused while this display is mirrored"
+    case nil: return "Starting"
+    }
+  }
+
   // MARK: - Navigation
 
   private var navigationSection: some View {
@@ -571,7 +635,9 @@ struct DisplayHubView: View {
           // write-only panel, so a reset that took them would leave the display
           // at an unknown brightness — and the pinned resolution and rotation
           // are macOS-visible state this button deliberately leaves alone.
-          Text("This unmutes \(state.display.name), turns HDR off, and clears its \(AppInfo.productName) settings — name, menu bar visibility, keyboard, sound, and everything under Advanced, including control-code remaps and response curves. Saved brightness, volume and contrast levels are kept. Resolution and rotation are not changed.")
+          // Counted panel hours are wear data, kept for the same reason the
+          // levels are.
+          Text("This unmutes \(state.display.name), turns HDR off, and clears its \(AppInfo.productName) settings — name, menu bar visibility, keyboard, sound, OLED care, and everything under Advanced, including control-code remaps and response curves. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. Resolution and rotation are not changed.")
         }
     }
   }
@@ -615,11 +681,24 @@ struct DisplayHubView: View {
       //    that un-hid the display would leave the status item missing.
       //    Clearing `forceSoftware` and every command's `unavailableDDC` here
       //    is also what makes step 3 able to work at all (D29 rule 2).
+      //    NOT everything keyed to this display: the mute strategy is step 4
+      //    (ordering), and the remembered display mode is deliberately outside
+      //    — a resolution the user is currently looking at is not a setting
+      //    this button promises to change.
       writer.writeAll([
         .friendlyName, .hideDisplay, .isDisabled, .hideOsd, .forceSw, .avoidGamma,
         .audioDeviceNameOverride, .audioSinkOverride, .hideVolumeSlider,
         .combinedSwitchingPoint, .pollingMode, .pollingCount,
         .unavailableDDC, .minDDCOverride, .maxDDCOverride, .curveDDC, .invertDDC, .remapDDC,
+        // OLED care's ten, all carrying `.reapplyOledCare`: un-enrolling is
+        // what takes this display's care overlay down, and the fan-out is what
+        // makes it happen now rather than on the next topology event. The
+        // direction is safe by construction — a reset can only remove an
+        // overlay, never leave one up.
+        .oledCareEnrolled, .oledIdleDimSeconds, .oledIdleDimLevel, .oledLockDim,
+        .oledBlackoutEnabled, .oledBlackoutSeconds,
+        .oledUnfocusedDimEnabled, .oledUnfocusedDimSeconds, .oledUnfocusedDimLevel,
+        .oledHoursTracking,
       ]) { prefs in
         prefs.friendlyName = ""
         prefs.hideDisplay = false
@@ -645,6 +724,12 @@ struct DisplayHubView: View {
         for command in DDCCommand.allCases {
           prefs.setTuning(.unset, for: command)
         }
+        // REMOVES the ten OLED keys rather than writing today's numbers back:
+        // the accessors' defaults ARE the Recommended preset, so a reset that
+        // wrote them would pin this display to the preset as it stands today.
+        // Panel hours are not prefs and are deliberately kept (wear data, like
+        // the saved levels above).
+        prefs.resetOledCare()
       }
 
       // 3. `isAvailable` is true again, and `enableMuteUnmute` still holds the
