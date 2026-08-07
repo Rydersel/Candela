@@ -21,6 +21,55 @@ struct DisplayPrefsTests {
     }
   }
 
+  /// #110's escape hatch defaults ON, so absence must read as guarded — the
+  /// one bug that would make the hatch a hazard rather than a hatch.
+  @Test func theWireTimingGuardIsOnUntilExplicitlyTurnedOff() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "app")
+      #expect(prefs.wireTimingGuard)
+
+      prefs.wireTimingGuard = false
+      #expect(prefs.wireTimingGuard == false)
+      // App-level: stored unsuffixed, so every display sees the same answer.
+      #expect(defaults.object(forKey: "wireTimingGuard") as? Bool == false)
+
+      prefs.wireTimingGuard = true
+      #expect(prefs.wireTimingGuard)
+    }
+  }
+
+  /// A `defaults write` is the only way in, and it has to reach the same
+  /// accessor the engine reads.
+  @Test func theWireTimingGuardHonoursAnExternallyWrittenKey() {
+    withSuite { defaults in
+      defaults.set(false, forKey: "wireTimingGuard")
+      #expect(DisplayPrefs(defaults: defaults, persistenceKey: "app").wireTimingGuard == false)
+      // Read through a per-display instance too: it is not display-scoped.
+      #expect(DisplayPrefs(defaults: defaults, persistenceKey: "AAAA").wireTimingGuard == false)
+    }
+  }
+
+  /// The forms a person actually types. `defaults write … NO` stores a STRING,
+  /// and an escape hatch that ignores the commonest spelling of itself is worse
+  /// than none — the user believes the guard is off while it is still on.
+  @Test func theWireTimingGuardAcceptsEveryFalseSpellingDefaultsWriteProduces() {
+    for stored in ["NO", "no", "false", "0"] as [Any] + [0, false] {
+      withSuite { defaults in
+        defaults.set(stored, forKey: "wireTimingGuard")
+        #expect(
+          DisplayPrefs(defaults: defaults, persistenceKey: "app").wireTimingGuard == false,
+          "\(stored) should read as guard-off")
+      }
+    }
+    // And the true spellings stay guarded.
+    for stored in ["YES", "1"] as [Any] + [1, true] {
+      withSuite { defaults in
+        defaults.set(stored, forKey: "wireTimingGuard")
+        #expect(DisplayPrefs(defaults: defaults, persistenceKey: "app").wireTimingGuard)
+      }
+    }
+  }
+
   @Test func hdrModeRoundTrips() {
     withSuite { defaults in
       let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")

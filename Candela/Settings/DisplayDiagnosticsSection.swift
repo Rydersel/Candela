@@ -156,6 +156,35 @@ struct DisplayDiagnosticsSection: View {
         Text(verbatim: additionalResolutionsText(revealed: revealedCount))
           .foregroundStyle(.secondary)
       }
+
+      wireTimingRow(withheld: catalog.withheldForWireTiming)
+    }
+  }
+
+  /// #110. Says what WE did and why, never what the display or macOS did — the
+  /// same DT30 rule (d) the two rows above follow. Silent when the guard is on
+  /// and had nothing to withhold, which is the ordinary case on most panels.
+  @ViewBuilder private func wireTimingRow(withheld: Int) -> some View {
+    if !model.displayModes.guardsWireTiming {
+      LabeledContent("Unsupported-timing check") {
+        Text(verbatim: "Off").foregroundStyle(.secondary)
+      }
+      .help(
+        """
+        Turned off by the wireTimingGuard setting. Resolutions the display has \
+        no matching timing for are offered again, and some displays scan those \
+        out letterboxed or cropped.
+        """)
+    } else if withheld > 0 {
+      LabeledContent("Not offered — no matching timing") {
+        Text(verbatim: "\(withheld)").foregroundStyle(.secondary)
+      }
+      .help(
+        """
+        These resolutions run at refresh rates this display advertises no \
+        full-width timing for. Displays bind them to a different timing \
+        instead, which can letterbox or crop the desktop.
+        """)
     }
   }
 

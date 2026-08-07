@@ -33,6 +33,9 @@ struct PrefPropagationTests {
     #expect(PrefName(rawValue: "menuItemStyle") == nil)
     #expect(PrefName(rawValue: "showTickMarks") == nil)
     #expect(PrefName(rawValue: "longerDelay") == nil)
+    // #110's escape hatch is read at enumeration time and has no UI (D26), so
+    // no pane can write it and it gets no propagation row.
+    #expect(PrefName(rawValue: "wireTimingGuard") == nil)
   }
 
   @Test func oledEngineStateIsNotAPrefName() {

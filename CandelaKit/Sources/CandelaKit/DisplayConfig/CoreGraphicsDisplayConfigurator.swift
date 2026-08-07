@@ -70,10 +70,27 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// therefore computed nothing but `!isHiDPI`, which `DisplayMode` already
   /// derives. Neither list corresponds to what Displays settings shows.
   public func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] {
+    let (published, revealed) = enumerate(displayID)
+    return published + (revealed?.modes ?? [])
+  }
+
+  public func modesWithheldByWireTimingGuard(for displayID: CGDirectDisplayID) -> Int {
+    enumerate(displayID).revealed?.dropped.noNativeParentTiming ?? 0
+  }
+
+  /// The CoreGraphics list, and the revelation pass over it when one ran.
+  ///
+  /// Split out from `modes(for:)` so the drop counts survive the call. They are
+  /// the only account of what the wire-timing guard withheld, and a filter that
+  /// can only be observed by noticing an absence is the kind we criticise
+  /// elsewhere (CR11).
+  private func enumerate(
+    _ displayID: CGDirectDisplayID
+  ) -> (published: [DisplayMode], revealed: CGSModeRevelation.RevelationResult?) {
     let published = copyModes(displayID).map { ioID, mode in
       Self.displayMode(ioModeID: ioID, mode: mode)
     }
-    guard revealsHiddenModes else { return published }
+    guard revealsHiddenModes else { return (published, nil) }
 
     // The native mode MUST be found in the CoreGraphics list alone.
     //
@@ -82,15 +99,27 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     // this function and recurse without bound. CoreGraphics always publishes
     // the panel's own timing — it is the mode carrying kDisplayModeNativeFlag —
     // so taking it from `published` is both correct and terminating.
-    guard let native = published.first(where: \.isNative) else { return published }
+    //
+    // It is also what makes the wire-timing guard's evidence non-empty: the
+    // native-parent refresh set is drawn from `published`, and this mode is a
+    // member of it by construction.
+    guard let native = published.first(where: \.isNative) else { return (published, nil) }
 
     let revealed = CGSModeRevelation.reveal(
       cgs: Self.cgsDescriptors(for: displayID),
       existing: published,
       nativePixelWidth: native.pixelWidth,
-      nativePixelHeight: native.pixelHeight
+      nativePixelHeight: native.pixelHeight,
+      guardsWireTiming: guardsWireTiming
     )
-    return published + revealed.modes
+    return (published, revealed)
+  }
+
+  /// #110. Read live rather than captured at construction, so the documented
+  /// `defaults write` takes effect on the next enumeration instead of needing
+  /// a relaunch — which is also what makes it testable by hand on hardware.
+  public var guardsWireTiming: Bool {
+    DisplayPrefs(persistenceKey: "app").wireTimingGuard
   }
 
   /// Resolved by LOOKUP into `modes(for:)` rather than constructed fresh from
