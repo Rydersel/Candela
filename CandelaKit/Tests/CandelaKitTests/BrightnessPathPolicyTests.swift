@@ -34,14 +34,53 @@ struct BrightnessPathPolicyTests {
     ) == .native)
   }
 
-  /// Both halves are load-bearing. With HDR OFF the MAG341C answers
-  /// `DisplayServicesSetBrightness` with SUCCESS and changes nothing, so an
-  /// HDR *mode* alone must never route native.
-  @Test func nativeNeedsAnHDRModeAndLiveHDRTogether() {
+  /// Live HDR is the whole condition on an external display. A *mode* alone is
+  /// never enough — with HDR off the MAG341C answers
+  /// `DisplayServicesSetBrightness` with SUCCESS and changes nothing — and since
+  /// #52 the mode is not required either, because the monitor locks its DDC
+  /// brightness register under HDR whoever engaged it.
+  @Test func onAnExternalDisplayNativeIsLiveHDRAloneAndAModeNeverSuffices() {
     #expect(BrightnessPathPolicy.usesNative(role: .external, hdrMode: .alwaysOn, isHDRActive: true))
     #expect(!BrightnessPathPolicy.usesNative(role: .external, hdrMode: .alwaysOn, isHDRActive: false))
-    #expect(!BrightnessPathPolicy.usesNative(role: .external, hdrMode: .off, isHDRActive: true))
+    #expect(!BrightnessPathPolicy.usesNative(role: .external, hdrMode: .off, isHDRActive: false))
     #expect(BrightnessPathPolicy.usesNative(role: .builtIn, hdrMode: .off, isHDRActive: false))
+  }
+
+  /// The predicate must not read `hdrMode` at all now: for every role and HDR
+  /// state, the answer is identical across all three modes. A future edit that
+  /// reintroduces a mode condition fails here rather than only in the one
+  /// externally-engaged case that #52 happened to catch.
+  @Test func theModeNeverChangesTheNativeAnswer() {
+    for role in [DisplayRole.builtIn, .external] {
+      for isHDRActive in [true, false] {
+        let answers = HDRMode.allCases.map {
+          BrightnessPathPolicy.usesNative(role: role, hdrMode: $0, isHDRActive: isHDRActive)
+        }
+        #expect(Set(answers).count == 1, "role \(role), HDR active \(isHDRActive)")
+      }
+    }
+  }
+
+  /// #52. HDR engaged in System Settings leaves `hdrMode` at `.off` while HDR is
+  /// live, and DDC is locked by the monitor regardless of who engaged it. Gating
+  /// native on Candela's own mode assumes Candela is the only thing that can
+  /// enable HDR, and routes writes down a wire that cannot carry them.
+  @Test func hdrEngagedOutsideCandelaIsStillTheNativePath() {
+    #expect(BrightnessPathPolicy.usesNative(
+      role: .external, hdrMode: .off, isHDRActive: true
+    ))
+    #expect(BrightnessPathPolicy.path(
+      inputs(hdrMode: .off, isHDRActive: true)
+    ) == .native)
+  }
+
+  /// The corollary: an externally engaged HDR must not leave the tuning grid
+  /// live. `DisplayCardPolicy` projects `.combined` and `.hardware` to
+  /// "Hardware (DDC) control", so either answer captions a dead wire.
+  @Test func hdrEngagedOutsideCandelaNeverReportsAHardwareLeg() {
+    #expect(BrightnessPathPolicy.path(
+      inputs(hdrMode: .off, isHDRActive: true, disableCombinedBrightness: true)
+    ) == .native)
   }
 
   @Test func liveHDROnAnExternalDisplayIsTheNativePath() {

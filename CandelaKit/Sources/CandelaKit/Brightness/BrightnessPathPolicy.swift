@@ -164,13 +164,24 @@ public enum BrightnessPathPolicy {
   /// The native predicate on its own, for the hot paths that need it without
   /// building an `Inputs`.
   ///
-  /// `&& isHDRActive` is empirically load-bearing: with HDR off the MAG341C
-  /// answers `DisplayServicesSetBrightness` with SUCCESS and changes nothing,
-  /// so native must never be routed on the MODE alone. Role `.builtIn` is
-  /// constitutively native — no DDC wire, no combined/software routing.
+  /// `isHDRActive` is empirically load-bearing: with HDR off the MAG341C answers
+  /// `DisplayServicesSetBrightness` with SUCCESS and changes nothing, so native
+  /// must never be routed on the MODE alone. Role `.builtIn` is constitutively
+  /// native — no DDC wire, no combined/software routing.
+  ///
+  /// It is the ONLY HDR condition, deliberately (#52). `hdrMode` is Candela's
+  /// policy; the monitor locks its DDC brightness register under HDR whoever
+  /// engaged it, so requiring `hdrMode != .off` assumed Candela was the only
+  /// thing that could — and answered `.combined`/`.hardware` for a display
+  /// engaged from System Settings, routing writes down a wire that cannot carry
+  /// them and captioning it "Hardware (DDC) control".
+  ///
+  /// `hdrMode` is therefore no longer read here. It stays in the signature
+  /// because `Inputs` carries it for the exhaustiveness sweeps, and dropping the
+  /// parameter would silently rewrite every call site's meaning.
   public static func usesNative(
-    role: DisplayRole, hdrMode: HDRMode, isHDRActive: Bool
+    role: DisplayRole, hdrMode _: HDRMode, isHDRActive: Bool
   ) -> Bool {
-    role == .builtIn || (hdrMode != .off && isHDRActive)
+    role == .builtIn || isHDRActive
   }
 }
