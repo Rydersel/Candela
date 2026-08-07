@@ -15,6 +15,17 @@ private final class FakeChrome: ChromeWriting {
   func writeDockAutoHide(_ on: Bool) { dock = on; writes += 1 }
 }
 
+/// Accepts every write and honours none — the platform behaviour #53 recorded,
+/// where a configuration call reports success without achieving anything.
+@MainActor
+private final class StubbornChrome: ChromeWriting {
+  var writes = 0
+  func readMenuBarAutoHide() -> Bool { false }
+  func writeMenuBarAutoHide(_ on: Bool) { writes += 1 }
+  func readDockAutoHide() -> Bool { false }
+  func writeDockAutoHide(_ on: Bool) { writes += 1 }
+}
+
 @MainActor
 @Suite("Chrome auto-hide controller")
 struct ChromeAutoHideTests {
@@ -26,12 +37,15 @@ struct ChromeAutoHideTests {
     #expect(fake.writes == 0)   // OC10: reading never writes
   }
 
+  /// Both legs, or deleting either re-read passes the suite.
   @Test func refreshFollowsExternalChangesWithoutWriting() {
     let fake = FakeChrome()
     let c = ChromeAutoHideController(writer: fake)
     fake.dock = true            // flipped in System Settings
+    fake.menuBar = true
     c.refresh()
     #expect(c.dockAutoHide == true)
+    #expect(c.menuBarAutoHide == true)
     #expect(fake.writes == 0)
   }
 
@@ -63,6 +77,19 @@ struct ChromeAutoHideTests {
     #expect(c.dockAutoHide == true)
     #expect(c.menuBarAutoHide == false)
     #expect(fake.writes == 1)
+  }
+
+  /// A set records what the system reports afterwards, not what was asked for:
+  /// a switch that sticks ON over a write that never landed is the pane lying
+  /// about the machine.
+  @Test func aFailedSetLeavesTheTrueSystemState() {
+    let stubborn = StubbornChrome()
+    let c = ChromeAutoHideController(writer: stubborn)
+    c.setMenuBarAutoHide(true)
+    c.setDockAutoHide(true)
+    #expect(stubborn.writes == 2)   // it tried
+    #expect(c.menuBarAutoHide == false)
+    #expect(c.dockAutoHide == false)
   }
 
   /// The no-op guard compares against the controller's cached value, so a

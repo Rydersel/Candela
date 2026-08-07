@@ -17,7 +17,8 @@ import Observation
 /// toggle the dev machine's real menu bar.
 ///
 /// `@Observable` so the pane's toggles re-render when `refresh()` picks up a
-/// change made in System Settings, and so a rejected set snaps the switch back.
+/// change made in System Settings — a `Toggle` bound to these properties needs
+/// property-level observation to follow anything it did not itself cause.
 @MainActor @Observable public final class ChromeAutoHideController {
   public private(set) var menuBarAutoHide: Bool
   public private(set) var dockAutoHide: Bool
@@ -41,15 +42,20 @@ import Observation
     if dock != dockAutoHide { dockAutoHide = dock }
   }
 
+  // Both setters record what the system reports, never what was asked for. A
+  // chrome write can fail silently — CFPreferences takes any value and the Dock
+  // restart is fire-and-forget — and caching the request would leave the pane's
+  // switch ON over a system that never moved. Assuming a write landed is the
+  // defect class behind #53/#65.
   public func setMenuBarAutoHide(_ on: Bool) {
     guard on != menuBarAutoHide else { return }
     writer.writeMenuBarAutoHide(on)
-    menuBarAutoHide = on
+    menuBarAutoHide = writer.readMenuBarAutoHide()
   }
 
   public func setDockAutoHide(_ on: Bool) {
     guard on != dockAutoHide else { return }
     writer.writeDockAutoHide(on)
-    dockAutoHide = on
+    dockAutoHide = writer.readDockAutoHide()
   }
 }
