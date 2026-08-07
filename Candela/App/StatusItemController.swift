@@ -957,6 +957,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // Post-reset state IS first-run state: prefsSchemaVersion is gone, so
     // onboarding re-runs (wired by Task 15; default no-op until then).
     settingsActions.postReset()
+    // The other half of the OLED-care reset contract: `prepareForReset()`
+    // raised a latch that swallows every topology event and pref reapply for
+    // the duration (an HDR-off above IS a reconfiguration, and a mid-reset
+    // reconcile would re-arm overlays from still-unwiped enrollment prefs).
+    // Only this call clears it and re-derives membership from the wiped
+    // domain — nothing else re-reconciles after the wipe.
+    model.oledCare.resetDidComplete()
   }
 
   /// Hands every display's controller a pre-gamma-apply hook that runs the

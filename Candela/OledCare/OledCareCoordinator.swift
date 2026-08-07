@@ -64,6 +64,9 @@ final class OledCareCoordinator {
     /// OC12: the last render mutated window-server state; verify it on a
     /// LATER tick than the one that mutated.
     var needsVerify = false
+    /// Reconcile attempts against the CURRENT mismatch; zeroed on every new
+    /// mutation and on success. Bounds the OC12 loop — see `maxVerifyAttempts`.
+    var verifyAttempts = 0
     var wasAwake = true
     var hoursLastTick: SuspendingClock.Instant?
     /// When this display lost focus (nil = focused, or no focus data yet).
@@ -85,6 +88,12 @@ final class OledCareCoordinator {
   /// exists for a transition window measured in seconds, not for a latch that
   /// never cleared.
   private static let hdrSettleDeferralBound: Duration = .seconds(10)
+  /// OC12 reconcile bound ("log, don't loop" needs an actual number): at the
+  /// fast cadence five attempts is ~500 ms — dozens of run-loop turns against
+  /// a measured 6–9 ms server lag — so a mismatch still standing is structural
+  /// (a departing display, a shield above us), and retrying forever would pin
+  /// the fast cadence and put an error in the log ten times a second.
+  private static let maxVerifyAttempts = 5
 
   @ObservationIgnored private weak var model: AppModel?
   @ObservationIgnored private let overlay = OledOverlay()
@@ -97,13 +106,33 @@ final class OledCareCoordinator {
   @ObservationIgnored private var states: [String: PerDisplay] = [:]
   @ObservationIgnored private var driver: Task<Void, Never>?
   @ObservationIgnored private var sleepWakeObservers: [any NSObjectProtocol] = []
+  /// C1 latch. `runSettingsReset` suspends several times between
+  /// `prepareForReset()` and the domain wipe, and an HDR-off IS a display
+  /// reconfiguration — so the topology loop can fire mid-reset and would
+  /// re-read still-unwiped enrollment prefs and re-arm the very overlays the
+  /// reset just tore down. While this is up, `tick()`, `displaysReconfigured()`
+  /// and `reapplyAfterPrefChange()` are all no-ops; only `resetDidComplete()`
+  /// clears it.
+  @ObservationIgnored private var resetting = false
+  /// OC12 for removals issued OUTSIDE the per-display tick (reset,
+  /// un-enrollment), whose per-display state — the thing that would carry the
+  /// marker — is deleted in the same breath. Keyed by the ID the window was
+  /// closed under (current at issue time); value = attempts so far. Drained by
+  /// the tick independently of `states`, so a close the server ignored still
+  /// gets re-closed on a later turn instead of becoming an unwatched
+  /// full-black window whose prefs were just wiped.
+  @ObservationIgnored private var pendingRemovalVerifications: [CGDirectDisplayID: Int] = [:]
   @ObservationIgnored private let log = Logger(
     subsystem: "com.rydersel.Candela", category: "oledcare"
   )
 
-  /// The notification tokens are not unregistered here (not `Sendable`, so a
-  /// nonisolated deinit cannot touch them) — sibling-coordinator precedent:
-  /// this object lives as long as the app and the blocks capture weakly.
+  /// Reachable: the driver binds `self` strongly only inside the
+  /// non-suspending half of each iteration, so the task never retains this
+  /// object across a sleep and cannot keep it alive. The cancel ends the loop
+  /// at its next check rather than leaving it waking every cadence to find a
+  /// nil weak self. The notification tokens are not unregistered here (not
+  /// `Sendable`, so a nonisolated deinit cannot touch them) —
+  /// sibling-coordinator precedent: the blocks capture weakly.
   deinit {
     driver?.cancel()
   }
@@ -131,25 +160,43 @@ final class OledCareCoordinator {
     }
     lockObserver.start()
 
+    // queue: nil, matching the app's own sleep observers at the wiring site
+    // (StatusItemController.swift:265): the block then runs SYNCHRONOUSLY at
+    // post time, inside AppKit's bounded pre-sleep window. A `.main`-queued
+    // operation is merely ENQUEUED, and can land after the wake — tearing
+    // overlays down into a machine that already slept and booking the standby
+    // edge on the wrong side of it. AppKit posts these on the main thread;
+    // `assumeIsolated` asserts (and would trap on) exactly that — the same
+    // documented trade as the KVO observer at StatusItemController.swift:225.
     let center = NSWorkspace.shared.notificationCenter
     sleepWakeObservers.append(center.addObserver(
-      forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+      forName: NSWorkspace.willSleepNotification, object: nil, queue: nil
     ) { [weak self] _ in
       MainActor.assumeIsolated { self?.systemWillSleep() }
     })
     sleepWakeObservers.append(center.addObserver(
-      forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+      forName: NSWorkspace.didWakeNotification, object: nil, queue: nil
     ) { [weak self] _ in
       MainActor.assumeIsolated { self?.systemDidWake() }
     })
 
     reconcileEnrollment()
-    driver?.cancel()
+    // start() is single-shot (the chrome guard above), so there is never a
+    // previous driver to cancel here.
     driver = Task { @MainActor [weak self] in
       while !Task.isCancelled {
-        guard let self else { return }
-        self.tick()
-        try? await Task.sleep(for: self.cadence())
+        // Strong self is confined to the non-suspending half of the
+        // iteration and dropped BEFORE the sleep: a guard binding whose scope
+        // covered the await would have the task retain self across every
+        // suspension — a cycle that defeats [weak self], makes deinit
+        // unreachable and turns its cancel into dead code.
+        let interval: Duration
+        do {
+          guard let self else { return }
+          self.tick()
+          interval = self.cadence()
+        }
+        try? await Task.sleep(for: interval)
       }
     }
   }
@@ -172,7 +219,7 @@ final class OledCareCoordinator {
   /// deliberately not exploited — the reconcile walks the whole (small)
   /// display list either way, and `updateConfig` from prefs is idempotent.
   func reapplyAfterPrefChange(persistenceKey _: String?) {
-    guard let model, !model.isSafeMode else { return }
+    guard let model, !model.isSafeMode, !resetting else { return }
     reconcileEnrollment()
     if driver != nil { tick() }
   }
@@ -182,8 +229,12 @@ final class OledCareCoordinator {
   /// state under freshly resolved IDs — never `repinFrames()` alone, which
   /// would pin an overlay to the wrong panel.
   func displaysReconfigured() {
-    guard let model, !model.isSafeMode else { return }
+    guard let model, !model.isSafeMode, !resetting else { return }
     clearAllOverlays()
+    // Old IDs may already name different panels, so pending removal checks
+    // keyed on them would ask the wrong question (the verifyRemoval rationale
+    // below); the removeAll above re-closed every window we hold anyway.
+    pendingRemovalVerifications = [:]
     // The sampler's held resolution is a raw ID and a reassigned ID is still
     // online, so liveness checks can't save it — drop it and let the next
     // resolve re-seed.
@@ -196,12 +247,36 @@ final class OledCareCoordinator {
   /// counters reset while their objects are alive. The domain wipe never
   /// reaches the trackers (rebuildControllers doesn't touch this object), so
   /// a live tracker's debounced write-through would otherwise re-persist the
-  /// hours the user just cleared.
+  /// hours the user just cleared. Raises the `resetting` latch; the caller
+  /// MUST pair this with `resetDidComplete()` after the wipe.
   func prepareForReset() {
+    resetting = true
+    // These removals delete the per-display state that would carry their OC12
+    // marker, so verification rides the pending list instead: a blackout
+    // window whose close the server ignores must not become unwatched at the
+    // exact moment the prefs describing it are wiped (spec §7's prohibition).
+    // IDs are current — no reconfiguration has occurred.
+    for state in states.values {
+      if let id = state.lastDisplayID, state.lastAppliedAlpha != nil {
+        pendingRemovalVerifications[id] = 0
+      }
+    }
     clearAllOverlays()
     states = [:]
     dimStates = [:]
     for tracker in trackers.values { tracker.reset() }
+  }
+
+  /// The post-wipe half of the reset contract (paired with
+  /// `prepareForReset()`): clears the latch and re-derives membership from the
+  /// wiped domain. Without this, OLED care after a reset was only correct by
+  /// the accident of no topology event landing mid-reset — the latch swallows
+  /// those events, so somebody must reconcile once the wipe is real.
+  func resetDidComplete() {
+    resetting = false
+    guard let model, !model.isSafeMode else { return }
+    reconcileEnrollment()
+    if driver != nil { tick() }
   }
 
   /// VCP 0xD6 power-off (spec §3): the wave's only DDC write. Standby is
@@ -210,6 +285,10 @@ final class OledCareCoordinator {
   /// `displaysReconfigured` like any other (state kept, hours persisted, a
   /// fresh `.active` engine on return).
   func powerOffDisplay(_ state: AppModel.DisplayState) async -> Bool {
+    // Deliberately UNGATED on `oledHoursTracking` — the one standby edge that
+    // is: this is an explicit user action whose whole point is a standby
+    // cycle, and recording it keeps the 8-hour note honest even for a display
+    // whose passive accumulation is switched off.
     hoursTracker(for: state.display.persistenceKey).noteStandby()
     return await state.writer.write(command: VCP.powerMode, value: 0x04)
   }
@@ -221,7 +300,12 @@ final class OledCareCoordinator {
     // (first post-wake ticks re-check); contrast displaysReconfigured, where
     // the old IDs may already name different panels.
     clearAllOverlays(verifyRemoval: true)
-    for key in states.keys { hoursTracker(for: key).noteStandby() }
+    // Gated per display like every passive standby edge: an opted-out display
+    // must not have hours keys written — or its note dismissal cleared — by a
+    // standby it never accumulated toward.
+    for (key, state) in states where state.hoursTracking {
+      hoursTracker(for: key).noteStandby()
+    }
   }
 
   private func systemDidWake() {
@@ -253,7 +337,18 @@ final class OledCareCoordinator {
       if var existing = states[key] {
         existing.engine.updateConfig(config)
         existing.unfocusedDimEnabled = prefs.oledUnfocusedDimEnabled
-        existing.hoursTracking = prefs.oledHoursTracking
+        let tracking = prefs.oledHoursTracking
+        if tracking, !existing.hoursTracking {
+          // Tracking turned back ON: the since-standby counter froze during
+          // the untracked period, and the 8-hour note must not later believe
+          // it. noteStandby(), deliberately NOT reset(): reset would also
+          // destroy the lifetime total — persistent wear data the user did
+          // not ask to clear — while noteStandby zeroes exactly the counter
+          // the note reads (and re-arms the note, which a fresh baseline has
+          // earned).
+          hoursTracker(for: key).noteStandby()
+        }
+        existing.hoursTracking = tracking
         states[key] = existing
       } else {
         states[key] = PerDisplay(
@@ -265,21 +360,41 @@ final class OledCareCoordinator {
       }
     }
     for key in Array(states.keys) where !seen.contains(key) {
-      hoursTracker(for: key).noteStandby()
+      // Standby gated on the pref like every passive edge (a lazily created
+      // tracker writing zeros for an opted-out display is exactly the key
+      // pollution the gate exists to stop).
+      if states[key]?.hoursTracking == true {
+        hoursTracker(for: key).noteStandby()
+      }
       dropState(for: key)
     }
   }
 
   private func dropState(for key: String) {
     guard let state = states.removeValue(forKey: key) else { return }
-    if let id = state.lastDisplayID { overlay.remove(for: id) }
+    if let id = state.lastDisplayID {
+      overlay.remove(for: id)
+      // This removal deletes the state that would carry its OC12 marker, so
+      // the verification rides the pending list — queued only when an overlay
+      // was actually up, under an ID that was current when the window was
+      // driven (un-enrollment is not a reconfiguration; the reconfiguration
+      // path clears its overlays and this list BEFORE reconciling).
+      if state.lastAppliedAlpha != nil {
+        pendingRemovalVerifications[id] = 0
+      }
+    }
     dimStates.removeValue(forKey: key)
   }
 
   // MARK: - The tick
 
   private func tick() {
-    guard let model else { return }
+    guard let model, !resetting else { return }
+    // Drained independently of `states` — these entries outlive the state
+    // that issued them by design (I-2), including across a reset.
+    drainPendingRemovalVerifications()
+    // Users who never enroll pay nothing past this line.
+    guard !states.isEmpty else { return }
     let idleSeconds = OledCareSignalSources.systemIdleSeconds()
     let assertionHeld = OledCareSignalSources.displaySleepAssertionHeld()
     let isLocked = lockObserver.isLocked
@@ -306,6 +421,9 @@ final class OledCareCoordinator {
       guard let displayState = live[key] else {
         // Departed but not yet reconciled (the topology loop debounces ~1 s).
         // Nothing to render against; reconcileEnrollment owns the teardown.
+        // The published entry goes NOW — the pane must not keep reading a
+        // stale .idleDim/.blackout for a display that is gone.
+        published.removeValue(forKey: key)
         continue
       }
       let id = displayState.id
@@ -323,18 +441,21 @@ final class OledCareCoordinator {
         state.hdrSettlingSince = nil
       }
 
-      // The unfocused clock: reset to nil the moment this display holds
-      // focus; started when some OTHER display does. A nil sample means
-      // "no focus data" (before the first resolve, or just invalidated) and
-      // deliberately stops the clock — "unfocused everywhere" is the failure
-      // the sampler's hold-last rule exists to prevent, and this is its
-      // consumer-side half.
+      // The unfocused clock: cleared ONLY by a focus visit to THIS display;
+      // started when some other display holds focus. A nil sample (before the
+      // first resolve, or right after invalidate()) HOLDS the clock unchanged
+      // — the consumer half of FocusSampler's hold-last contract. Zeroing it
+      // on nil would drop a live unfocused dim on a transient resolve failure
+      // (Spotlight frontmost, a Space transition — exactly the cases
+      // hold-last exists for) and not bring it back for a full threshold.
       var unfocusedSeconds: Double?
-      if state.unfocusedDimEnabled, let focusedDisplay {
-        if focusedDisplay == id {
-          state.unfocusedSince = nil
-        } else if state.unfocusedSince == nil {
-          state.unfocusedSince = now
+      if state.unfocusedDimEnabled {
+        if let focusedDisplay {
+          if focusedDisplay == id {
+            state.unfocusedSince = nil
+          } else if state.unfocusedSince == nil {
+            state.unfocusedSince = now
+          }
         }
         if let since = state.unfocusedSince {
           unfocusedSeconds = Self.seconds(now - since)
@@ -373,9 +494,24 @@ final class OledCareCoordinator {
       // OC12 ordering: last tick's mutation is verified BEFORE this tick's
       // render, so the check always runs a full tick after the change it is
       // checking — never inline against a window server that lags AppKit by a
-      // run-loop turn in both directions.
+      // run-loop turn in both directions. Bounded (I-1): one nudge per
+      // detected mismatch, and after maxVerifyAttempts of them the marker is
+      // dropped with ONE summary log — a mismatch that survives ~500 ms of
+      // retries is structural, and the next state change re-arms the check.
       if state.needsVerify {
-        state.needsVerify = !verifyLastRender(of: state, on: id)
+        if verifyLastRender(of: state, on: id) {
+          state.needsVerify = false
+          state.verifyAttempts = 0
+        } else if state.verifyAttempts + 1 >= Self.maxVerifyAttempts {
+          state.needsVerify = false
+          state.verifyAttempts = 0
+          log.error("""
+          OLED care overlay for display \(id, privacy: .public) still mismatched after \
+          \(Self.maxVerifyAttempts, privacy: .public) reconcile attempts; giving up until the next state change
+          """)
+        } else {
+          state.verifyAttempts += 1
+        }
       }
       render(newState, into: &state, on: id)
 
@@ -388,8 +524,14 @@ final class OledCareCoordinator {
   }
 
   private func cadence() -> Duration {
+    // `overlayUp` reads the WANT, not the verified presence, on purpose: the
+    // 100 ms gate is about input lifting a dim the engine believes is up, and
+    // that belief is what needs fast ticks to be corrected. A given-up verify
+    // therefore drops the fast cadence only when nothing is wanted (the
+    // strand case); a wanted overlay keeps it, as any dim does.
     let overlayUp = states.values.contains { $0.lastAppliedAlpha != nil }
     let verifying = states.values.contains(where: \.needsVerify)
+      || !pendingRemovalVerifications.isEmpty
     return overlayUp || verifying ? Self.fastCadence : Self.slowCadence
   }
 
@@ -410,6 +552,7 @@ final class OledCareCoordinator {
     if alpha != state.lastAppliedAlpha || blackout != state.lastAppliedBlackout {
       // The window server actually moved (or will, a run-loop turn from now).
       state.needsVerify = true
+      state.verifyAttempts = 0
       state.lastAppliedAlpha = alpha
       state.lastAppliedBlackout = blackout
     }
@@ -446,6 +589,27 @@ final class OledCareCoordinator {
       states[key]?.lastAppliedAlpha = nil
       states[key]?.lastAppliedBlackout = false
       states[key]?.needsVerify = verifyRemoval
+      states[key]?.verifyAttempts = 0
+    }
+  }
+
+  /// I-2: verifies removals whose issuing state is already gone (reset,
+  /// un-enrollment). `verifyPresence` re-closes a strand itself; this just
+  /// keeps asking on later turns until the server agrees, with the same
+  /// attempt bound the in-state check has.
+  private func drainPendingRemovalVerifications() {
+    for (id, attempts) in pendingRemovalVerifications {
+      if !overlay.verifyPresence(on: id) {
+        pendingRemovalVerifications.removeValue(forKey: id)
+      } else if attempts + 1 >= Self.maxVerifyAttempts {
+        pendingRemovalVerifications.removeValue(forKey: id)
+        log.error("""
+        OLED care overlay for display \(id, privacy: .public) still on screen after \
+        \(Self.maxVerifyAttempts, privacy: .public) removal checks; giving up
+        """)
+      } else {
+        pendingRemovalVerifications[id] = attempts + 1
+      }
     }
   }
 

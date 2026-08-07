@@ -145,6 +145,12 @@ final class OledOverlay {
     }
   }
 
+  /// Deliberately uncalled (W3a ruling): the reconfiguration response is
+  /// removeAll + re-render, never a repin — display IDs REASSIGN across a dock
+  /// cycle with every panel still present, so repinning alone can pin an
+  /// overlay to the WRONG panel. Kept for a future geometry-only path (spec §8
+  /// names mode/rotation changes); never call it as the reconfiguration
+  /// response.
   func repinFrames() {
     for (displayID, window) in self.windows {
       guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
