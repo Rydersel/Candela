@@ -35,6 +35,8 @@ struct DisplayHubView: View {
   /// SO6's "key settings window" test, read at the click that starts a
   /// preview: `.key` exactly when this view's window is the key window.
   @Environment(\.controlActiveState) private var controlActiveState
+  /// Written by the OLED Care link so the pane opens on THIS display's section.
+  @Environment(\.oledCareScrollTarget) private var oledCareScrollTarget
 
   /// Drafts, not direct pref bindings: a `TextField` bound straight to a pref
   /// would write (and fan out, and bump `prefsRevision`) on every keystroke,
@@ -527,8 +529,16 @@ struct DisplayHubView: View {
           Text(verbatim: oledCarePreview)
             .foregroundStyle(.secondary)
             .accessibilityLabel(Text(oledCareSpokenPreview))
-          Button("All OLED Care Settings…") { selection = .pane(.oledCare) }
-            .buttonStyle(.link)
+          // Carries this display with the jump: the OLED Care pane holds one
+          // section per connected display, and a link from a display's own hub
+          // that lands at the top of a multi-display page makes the reader
+          // find their way back to where they already were. The pane consumes
+          // the target once, so a plain sidebar visit still opens at the top.
+          Button("All OLED Care Settings…") {
+            oledCareScrollTarget.wrappedValue = persistenceKey
+            selection = .pane(.oledCare)
+          }
+          .buttonStyle(.link)
         }
       }
     } header: {

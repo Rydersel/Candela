@@ -49,6 +49,12 @@ struct SettingsRootView: View {
   /// remembered — an unrelated monitor unplugging must not hijack a later
   /// arrival.
   @State private var lastDisplayKey: String?
+  /// The display a jump into the OLED Care pane came from, as a persistence
+  /// key. Lives here because it travels with `selection`, which lives here;
+  /// the pane clears it as soon as it has scrolled, so it is never state
+  /// anyone has to keep in agreement with anything (see `oledCareScrollTarget`
+  /// in `OledCarePane`).
+  @State private var oledCareScrollTarget: String?
   /// Accessibility contract 2: selecting a sidebar destination moves focus
   /// into the detail column. Anchored on the detail root; hand-verified only
   /// (no app test target, and synthetic keys go to the terminal, not an
@@ -81,6 +87,7 @@ struct SettingsRootView: View {
       // Window menu and accessibility without drawing a second copy.
       detail
         .background(.background)
+        .environment(\.oledCareScrollTarget, $oledCareScrollTarget)
         .focused($detailFocusAnchor)
         // Keyboard contract (accessibility contract 2): ⌘[ pops the current
         // display's sub-page; ⌘1–⌘9 select the first nine sidebar destinations
@@ -140,6 +147,10 @@ struct SettingsRootView: View {
           if case let .display(key) = pending, let page = DebugSettingsHook.pendingSubPage {
             DebugSettingsHook.pendingSubPage = nil
             subPagePaths[key] = [page]
+          }
+          if let target = DebugSettingsHook.pendingScrollTarget {
+            DebugSettingsHook.pendingScrollTarget = nil
+            oledCareScrollTarget = target
           }
         }
       }

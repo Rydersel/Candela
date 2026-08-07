@@ -1,6 +1,26 @@
 import CandelaKit
 import SwiftUI
 
+/// The display a jump into this pane came from, carried as a persistence key
+/// and consumed ONCE: the hub's "All OLED Care Settings…" link sets it, this
+/// pane scrolls to that display's section on appear and clears it there, so an
+/// ordinary sidebar visit still opens at the top.
+///
+/// A `Binding` rather than a value so the consumer can do the clearing. The
+/// value lives as `@State` on `SettingsRootView`, which is where the selection
+/// it travels with lives; the default is `.constant(nil)`, whose setter is a
+/// no-op, so any view rendered outside that injection simply never scrolls.
+private struct OledCareScrollTargetKey: EnvironmentKey {
+  static let defaultValue: Binding<String?> = .constant(nil)
+}
+
+extension EnvironmentValues {
+  var oledCareScrollTarget: Binding<String?> {
+    get { self[OledCareScrollTargetKey.self] }
+    set { self[OledCareScrollTargetKey.self] = newValue }
+  }
+}
+
 /// OLED care: the two global screen-chrome switches, then one section per
 /// connected external display (spec §5).
 ///
@@ -33,12 +53,24 @@ struct OledCarePane: View {
   @State private var menuBarRefused: Bool?
   @State private var dockRefused: Bool?
 
+  /// Set by the hub's link, cleared by this pane the first time it appears.
+  @Environment(\.oledCareScrollTarget) private var scrollTarget
+
   var body: some View {
+    ScrollViewReader { proxy in
+      pane(proxy: proxy)
+    }
+  }
+
+  /// The pane's own content. Split out of `body` only because the whole thing
+  /// now hangs off a `ScrollViewReader`'s proxy; the sections still sit
+  /// directly in this `Form`'s builder, which a grouped `Form` needs.
+  private func pane(proxy: ScrollViewProxy) -> some View {
     // Prefs are plain `UserDefaults` and not observable, so this is the only
     // thing that re-reads them after a write from anywhere — including the
     // per-display sections below, which write through `DisplayPrefWriter`.
     let _ = model.prefsRevision
-    Form {
+    return Form {
       Section {
         // One row, not two: a `SettingsCaption` placed as its own `Form` row
         // gets a divider above it, so two paragraphs of the same introduction
@@ -63,6 +95,12 @@ struct OledCarePane: View {
       // dock cycle — and `ForEach` keyed on a reused id hands the OLD view
       // instance, with its `@State`, to the OTHER panel: an in-progress slider
       // drag would then write its draft level to the wrong display's prefs.
+      // The `id:` here is also the scroll anchor `scrollToTarget` aims at.
+      // A `ForEach`'s element identity is what `ScrollViewProxy.scrollTo`
+      // resolves against, inside a grouped `Form` as well [MEASURED
+      // 2026-08-07: an explicit `.id()` on a row of the section was tried
+      // first and is not needed], so the anchor and the identity cannot drift
+      // apart.
       ForEach(model.displays, id: \.display.persistenceKey) { state in
         OledCareDisplaySection(state: state, displaySleepMinutes: displaySleepMinutes)
       }
@@ -83,6 +121,7 @@ struct OledCarePane: View {
     // nobody is looking at. (The same poll covers the menu bar, so it needs no
     // screen-parameters observer of its own.)
     .task {
+      await scrollToTarget(proxy)
       displaySleepMinutes = OledCareSignalSources.displaySleepMinutes()
       while !Task.isCancelled {
         // Resolved inside the loop, never captured before it: the coordinator
@@ -171,6 +210,33 @@ struct OledCarePane: View {
     } header: {
       Text("Screen Chrome").settingsHeading()
     }
+  }
+
+  /// Consumes the jump's scroll target: land on the section for the display
+  /// the user came from, once, then forget it so the next sidebar visit opens
+  /// at the top.
+  private func scrollToTarget(_ proxy: ScrollViewProxy) async {
+    guard let key = scrollTarget.wrappedValue else { return }
+    // A display named by a jump but absent from this pane (unplugged between
+    // the click and the appear) consumes the target and leaves the page at the
+    // top: no error, and nothing left over for the next visit to inherit.
+    guard model.displays.contains(where: { $0.display.persistenceKey == key }) else {
+      scrollTarget.wrappedValue = nil
+      return
+    }
+    // The delay is load-bearing, not defensive [MEASURED 2026-08-07]: a
+    // `scrollTo` issued on the first tick of this `.task` is accepted and does
+    // nothing, and the pane stays at the top. The grouped `Form` has not
+    // finished sizing its rows by then.
+    try? await Task.sleep(for: .milliseconds(100))
+    guard !Task.isCancelled else { return }
+    // No animation: this is where the page opens, not a move the user made.
+    proxy.scrollTo(key, anchor: .top)
+    // Cleared only once a scroll has actually gone out, never before the
+    // sleep. This task is cancelled and restarted during launch (measured), so
+    // clearing up front spent the target on the run that never reached the
+    // scroll and the surviving run found nothing to do.
+    scrollTarget.wrappedValue = nil
   }
 
   /// Clears a recorded refusal once the system reports the value that was
