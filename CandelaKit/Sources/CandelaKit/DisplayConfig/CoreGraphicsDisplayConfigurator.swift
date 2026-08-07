@@ -70,9 +70,27 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// therefore computed nothing but `!isHiDPI`, which `DisplayMode` already
   /// derives. Neither list corresponds to what Displays settings shows.
   public func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] {
-    copyModes(displayID).map { ioID, mode in
+    let published = copyModes(displayID).map { ioID, mode in
       Self.displayMode(ioModeID: ioID, mode: mode)
     }
+    guard revealsHiddenModes else { return published }
+
+    // The native mode MUST be found in the CoreGraphics list alone.
+    //
+    // `nativePixels(for:)` is implemented as a lookup into `modes(for:)`, so
+    // deriving the aspect reference from the MERGED list would call back into
+    // this function and recurse without bound. CoreGraphics always publishes
+    // the panel's own timing — it is the mode carrying kDisplayModeNativeFlag —
+    // so taking it from `published` is both correct and terminating.
+    guard let native = published.first(where: \.isNative) else { return published }
+
+    let revealed = CGSModeRevelation.reveal(
+      cgs: Self.cgsDescriptors(for: displayID),
+      existing: published,
+      nativePixelWidth: native.pixelWidth,
+      nativePixelHeight: native.pixelHeight
+    )
+    return published + revealed.modes
   }
 
   /// Resolved by LOOKUP into `modes(for:)` rather than constructed fresh from
@@ -97,6 +115,62 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   }
 
   public func apply(
+    _ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope
+  ) throws {
+    switch mode.provenance {
+    case .coreGraphics:
+      try applyPublishedMode(mode, to: displayID, scope: scope)
+    case .coreGraphicsServices:
+      try applyRevealedMode(mode, to: displayID, scope: scope)
+    }
+  }
+
+  /// The revealed path.
+  ///
+  /// There is no `CGDisplayMode` object to cross-check against before staging,
+  /// so the pre-commit descriptor guard `applyPublishedMode` uses has no
+  /// analogue here. The post-commit readback below is this path's guard
+  /// instead — a deliberate asymmetry, recorded so it is not read as an
+  /// omission (CR9). It is sound because CoreGraphics and CGS share one
+  /// mode-ID space (S6 §4).
+  private func applyRevealedMode(
+    _ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope
+  ) throws {
+    guard let configureMode = SkyLight.configureDisplayMode else {
+      throw DisplayConfigError(cgErrorCode: CGError.cannotComplete.rawValue)
+    }
+
+    let config = try beginDisplayConfiguration()
+    let staged = configureMode(
+      unsafeBitCast(config, to: UnsafeMutableRawPointer.self), displayID, mode.ioModeID)
+    guard staged == CGError.success.rawValue else {
+      CGCancelDisplayConfiguration(config)
+      throw DisplayConfigError(cgErrorCode: staged)
+    }
+    let result = CGCompleteDisplayConfiguration(config, scope.configureOption)
+    guard result == .success else {
+      throw DisplayConfigError(cgErrorCode: result.rawValue)
+    }
+
+    // THE RETURN CODE IS NOT THE EVIDENCE — the achieved mode is.
+    let achieved = CGDisplayCopyDisplayMode(displayID)?.ioDisplayModeID
+    guard achieved == mode.ioModeID else {
+      Logger(subsystem: "com.rydersel.Candela", category: "topology").error(
+        """
+        CoreGraphics reported success for a revealed mode it did not apply: \
+        display \(displayID, privacy: .public) asked for mode \
+        \(mode.ioModeID, privacy: .public), reports \(achieved ?? -1, privacy: .public)
+        """
+      )
+      // Deliberately not a platform error code — the platform did not report
+      // one, which is the entire point of this check.
+      throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
+    }
+  }
+
+  /// The public path: resolve the `CGDisplayMode`, cross-check the geometry it
+  /// actually denotes, then stage and commit.
+  private func applyPublishedMode(
     _ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope
   ) throws {
     guard let cgMode = copyModes(displayID)
@@ -243,6 +317,52 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     )
   }
 
+  // MARK: - Hidden-mode revelation
+
+  public var revealsHiddenModes: Bool {
+    SkyLight.getDisplayModeCount != nil
+      && SkyLight.getDisplayModeDescription != nil
+      && SkyLight.configureDisplayMode != nil
+  }
+
+  /// Reads the raw CGS list. Makes NO decisions — every gate lives in
+  /// `CGSModeRevelation`, which is Foundation-only and fixture-tested (CR8).
+  static func cgsDescriptors(for displayID: CGDirectDisplayID) -> [CGSModeDescriptor] {
+    guard let getCount = SkyLight.getDisplayModeCount,
+      let getDescription = SkyLight.getDisplayModeDescription
+    else { return [] }
+
+    var count: Int32 = 0
+    guard getCount(displayID, &count) == 0, count > 0 else { return [] }
+
+    // Over-allocated on purpose: the DECLARED length is what bounds the write
+    // (verified — the callee touches nothing past 212 on any panel tested), and
+    // a larger buffer means a future layout growth corrupts nothing of ours.
+    let byteCount = 1024
+    let buffer = UnsafeMutableRawPointer.allocate(byteCount: byteCount, alignment: 16)
+    defer { buffer.deallocate() }
+
+    var descriptors: [CGSModeDescriptor] = []
+    descriptors.reserveCapacity(Int(count))
+    for index in 0 ..< Int(count) {
+      memset(buffer, 0, byteCount)
+      guard getDescription(displayID, Int32(index), buffer, SkyLight.descriptorLength) == 0
+      else { continue }
+      descriptors.append(
+        CGSModeDescriptor(
+          modeNumber: Int32(bitPattern: buffer.loadUnaligned(fromByteOffset: 0, as: UInt32.self)),
+          flags: buffer.loadUnaligned(fromByteOffset: 4, as: UInt32.self),
+          logicalWidth: Int(buffer.loadUnaligned(fromByteOffset: 8, as: UInt32.self)),
+          logicalHeight: Int(buffer.loadUnaligned(fromByteOffset: 12, as: UInt32.self)),
+          pixelWidth: Int(buffer.loadUnaligned(fromByteOffset: 200, as: UInt32.self)),
+          pixelHeight: Int(buffer.loadUnaligned(fromByteOffset: 204, as: UInt32.self)),
+          refreshHz: Int(buffer.loadUnaligned(fromByteOffset: 190, as: UInt16.self)),
+          density: Double(buffer.loadUnaligned(fromByteOffset: 208, as: Float.self))
+        ))
+    }
+    return descriptors
+  }
+
   // MARK: - Rotation
 
   public var canRotate: Bool { SkyLight.setDisplayRotation != nil }
@@ -296,4 +416,56 @@ private enum SkyLight {
     ), let symbol = dlsym(handle, "SLSSetDisplayRotation") else { return nil }
     return unsafeBitCast(symbol, to: SetDisplayRotation.self)
   }()
+
+  // MARK: - CGS mode list
+  //
+  // Enumeration and application of the modes CoreGraphics computes but never
+  // publishes. Layout and behaviour verified on macOS 26.6.1 (25G76) across
+  // three panels — docs/spikes/2026-08-06-cgs-mode-revelation.md.
+  //
+  // RE-RUN THAT SPIKE AFTER EVERY MACOS MINOR RELEASE. The 212-byte descriptor
+  // is the fragile part; `CGSModeRevelation.isPlausible` is what turns a
+  // shifted layout into "nothing revealed" rather than garbage modes.
+
+  typealias GetDisplayModeCount =
+    @convention(c) (CGDirectDisplayID, UnsafeMutablePointer<Int32>) -> Int32
+  typealias GetDisplayModeDescription =
+    @convention(c) (CGDirectDisplayID, Int32, UnsafeMutableRawPointer, Int32) -> Int32
+  /// Argument 1 is the `CGDisplayConfigRef` from `CGBeginDisplayConfiguration`,
+  /// **not** a connection id — the call must sit inside a real transaction.
+  typealias ConfigureDisplayMode =
+    @convention(c) (UnsafeMutableRawPointer?, CGDirectDisplayID, Int32) -> Int32
+
+  /// The declared descriptor length. Verified: the callee writes nothing past
+  /// this on any panel tested.
+  static let descriptorLength: Int32 = 212
+
+  static let getDisplayModeCount: GetDisplayModeCount? =
+    symbol("CGSGetNumberOfDisplayModes").map {
+      unsafeBitCast($0, to: GetDisplayModeCount.self)
+    }
+  static let getDisplayModeDescription: GetDisplayModeDescription? =
+    symbol("CGSGetDisplayModeDescriptionOfLength").map {
+      unsafeBitCast($0, to: GetDisplayModeDescription.self)
+    }
+  static let configureDisplayMode: ConfigureDisplayMode? =
+    symbol("CGSConfigureDisplayMode").map {
+      unsafeBitCast($0, to: ConfigureDisplayMode.self)
+    }
+
+  private static func symbol(_ name: String) -> UnsafeMutableRawPointer? {
+    guard let handle = dlopen(
+      "/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY
+    ) else { return nil }
+    guard let symbol = dlsym(handle, name) else {
+      Logger(subsystem: "com.rydersel.Candela", category: "topology").error(
+        """
+        SkyLight symbol \(name, privacy: .public) missing; hidden-mode \
+        revelation disabled, mode list degrades to CoreGraphics only
+        """
+      )
+      return nil
+    }
+    return symbol
+  }
 }
