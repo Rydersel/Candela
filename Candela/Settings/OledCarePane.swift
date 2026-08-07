@@ -347,7 +347,7 @@ private struct OledCareDisplaySection: View {
   // MARK: - Blackout
 
   @ViewBuilder private var blackoutControls: some View {
-    SettingRow("Goes fully black after a longer idle period. The key or click that wakes it is discarded, so nothing is clicked by accident.") {
+    SettingRow("Goes fully black after a longer idle period. The click that wakes it is discarded, so nothing is clicked by accident. A key press wakes it too, but reaches whichever app you were using.") {
       Toggle("Turn the screen black after longer", isOn: Binding(
         get: { prefs.oledBlackoutEnabled },
         set: { on in writer.write(.oledBlackoutEnabled) { $0.oledBlackoutEnabled = on } }
@@ -561,7 +561,6 @@ private struct OledCareDisplaySection: View {
   /// The system `displaysleep` setting makes a longer threshold dead
   /// configuration: the panel blanks before the dim would ever engage. Stated
   /// with both numbers, because the fix is to change one of them.
-  ///
   @ViewBuilder
   private func displaySleepWarning(forThresholdSeconds seconds: Int) -> some View {
     if let displaySleepMinutes, displaySleepMinutes > 0, seconds >= displaySleepMinutes * 60 {

@@ -171,6 +171,10 @@ final class OledOverlay {
   /// No TCC grant needed: only `kCGWindowName` is gated by Screen Recording.
   func verifyPresence(on displayID: CGDirectDisplayID) -> Bool {
     if let window = self.windows[displayID] {
+      // Same reason `remove(for:)` screens the number: `windowNumber` is <= 0
+      // for a window with no device, and `CGWindowID(_:)` TRAPS on a negative
+      // Int. A window that never reached the screen is not on screen.
+      guard window.windowNumber > 0 else { return false }
       return Self.isOnScreen(CGWindowID(window.windowNumber))
     }
     guard let closed = self.lastRemoved[displayID] else {
