@@ -175,9 +175,9 @@ final class DisplayModeCoordinator {
   /// for panel selections" rather than to a crash.
   @ObservationIgnored weak var confirmation: (any ModeConfirmationPresenting)?
 
-  /// Called after a commit actually wrote `storedDisplayMode`, so the
-  /// propagation seam hears about it (D27) no matter which surface answered.
-  /// Owned here because it used to be the answering view's job, and two views
+  /// Called after a pin actually wrote `storedDisplayMode` (SO19), so the
+  /// propagation seam hears about it (D27) no matter which surface asked.
+  /// Owned here because it used to be the asking view's job, and two views
   /// answering the same question is one too many — the second one to be written
   /// is the one that forgets.
   @ObservationIgnored var didStoreMode: (CGDirectDisplayID) -> Void = { _ in }
@@ -552,6 +552,12 @@ final class DisplayModeCoordinator {
   /// the stored mode alone, matching `ModePersistence.clear`'s ruling that
   /// "forget my choice" and "stop remembering" are separate answers, and
   /// keeping the pin intact if the toggle comes back on.
+  ///
+  /// The seeding is queued and can decline (a preview outstanding on this
+  /// display — see `pinCurrentMode`), so turning it on mid-countdown enables
+  /// the flag and pins nothing. That is the intended order: the flag is the
+  /// user's answer, the pin is a mode, and there is no mode they have accepted
+  /// yet.
   func setRemembering(_ remembering: Bool, for displayID: CGDirectDisplayID) {
     guard let identity = identity(for: displayID) else { return }
     persistence.setEnabled(remembering, for: identity)
@@ -563,13 +569,30 @@ final class DisplayModeCoordinator {
   /// it; this is the only route to `store`, reached from the Remember toggle's
   /// turn-on seeding and from the hub's `Set to Current`.
   ///
-  /// Silent when the display cannot report the mode it is running — leaving an
-  /// existing pin alone beats replacing it with a guess.
+  /// Queued, and it asks the SESSION whether that display is mid-preview, for
+  /// `dropPreviewOnDepartedDisplay`'s reason: `preview` is nil for several
+  /// awaits after a `begin()` succeeds, so the main-actor copy would answer
+  /// "nothing outstanding" during exactly the window a pin must not be taken
+  /// in. A mode still under a countdown is one the user has not accepted — the
+  /// countdown may revert it — and pinning it records a choice they never made.
+  ///
+  /// Silently skipped rather than reported. The UI is expected to disable its
+  /// pin control while a preview stands, which leaves a click racing the
+  /// countdown as the only way to reach the guard — and a failure notice for a
+  /// pin the user can simply take again a second later is noise. The guard does
+  /// not depend on that expectation holding; it is what makes it optional.
+  ///
+  /// Also silent when the display cannot report the mode it is running —
+  /// leaving an existing pin alone beats replacing it with a guess.
   func pinCurrentMode(on displayID: CGDirectDisplayID) {
-    guard let identity = identity(for: displayID),
-          let current = catalogs[displayID]?.current ?? configurator.currentMode(for: displayID)
-    else { return }
-    store(current, on: displayID, for: identity)
+    enqueue {
+      guard await self.session.previewedMode?.displayID != displayID else { return }
+      guard let identity = self.identity(for: displayID),
+            let current = self.catalogs[displayID]?.current
+              ?? self.configurator.currentMode(for: displayID)
+      else { return }
+      self.store(current, on: displayID, for: identity)
+    }
   }
 
   /// The pin as stored, for the row that shows it and for `Set to Current`'s
