@@ -30,9 +30,11 @@ struct SettingsRootView: View {
   /// settings window squeezed it, the sidebar collapsed, and the stored frames
   /// came back `"0, 0, 208, 568, YES, NO"` — collapsed — on every subsequent
   /// launch. Recovery took a `defaults delete`, which is not a thing to ask of
-  /// anyone. Re-asserting `.all` on appearance (and whenever the value moves
-  /// off it — see the two modifiers in `body`) is what makes the state
-  /// unstickable (#66).
+  /// anyone. The binding pins the INITIAL state; the `.onChange` in `body`
+  /// springs the value back if a collapse ever reaches the binding. Whether
+  /// AppKit's restored autosave frames reach it is UNMEASURED — that launch
+  /// case is #66's open hardware item, and the lever that can actually touch
+  /// the `NSSplitView` is `SettingsWindowConfigurator`, not this state.
   @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
   @Environment(AppModel.self) private var model
@@ -119,17 +121,18 @@ struct SettingsRootView: View {
         selection = .pane(.general)
       }
     }
-    // The anti-collapse defence the `columnVisibility` doc records (#66).
-    // This window has no sidebar-toggle item, so a collapsed sidebar removes
-    // every pane from navigation with no way back from inside the app — and
-    // AppKit autosaves the collapsed frames, so it sticks across launches.
-    // Two layers: re-assert on appearance (the relaunch-restored case), and
-    // spring back the moment the bound value moves off `.all` (the mid-session
-    // squeeze the 2026-08-04 incident measured). The spring-back terminates:
-    // its own write lands as `.all` and takes the guard's other branch.
-    .onAppear { columnVisibility = .all }
+    // Best-effort anti-collapse defence (#66): this window has no
+    // sidebar-toggle item, so a hidden sidebar removes every pane from
+    // navigation with no way back from inside the app. Guards `.detailOnly`
+    // alone — "the sidebar is hidden" — never `!= .all`: `.automatic` and
+    // `.doubleColumn` are legitimate framework values, and fighting them would
+    // ping-pong writes against SwiftUI's own normalisation. This layer helps
+    // only when a collapse is reflected into the binding; whether AppKit's
+    // restored autosave frames ever are is unmeasured, so the
+    // restored-collapsed launch stays OPEN on #66 — this modifier does not
+    // claim to cover it.
     .onChange(of: columnVisibility) { _, visibility in
-      if visibility != .all { columnVisibility = .all }
+      if visibility == .detailOnly { columnVisibility = .all }
     }
   }
 

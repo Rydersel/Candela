@@ -32,8 +32,8 @@ enum MirroringCopy {
 
   // MARK: - Refusals
   //
-  // `MirrorRefusal` has SEVEN cases and each gets its own sentence here. They
-  // are seven cases precisely because one of them used to carry three meanings,
+  // `MirrorRefusal` has EIGHT cases and each gets its own sentence here. They
+  // are eight cases precisely because one of them used to carry three meanings,
   // one of which was false — telling someone who has just named a perfectly good
   // master that "no display can be the mirror master" is not a rounding error,
   // it is a wrong statement about their machine. A `default:` arm anywhere that
@@ -73,7 +73,7 @@ enum MirroringCopy {
   /// could join it, so the request needed no work — stated outright rather
   /// than staged as the all-no-op transaction macOS fails at commit (#56).
   static var alreadyMirrored: LocalizedStringKey {
-    "The other displays are already mirroring this one."
+    "Every display that can mirror this one already is."
   }
 
   /// The caption for a display that is ITSELF `isAlwaysInMirrorSet`, and for
@@ -135,7 +135,7 @@ enum MirroringCopy {
   /// One sentence for whichever refusal happened, so every surface makes the
   /// same statement about the same refusal.
   ///
-  /// Returns `Text` rather than `LocalizedStringKey` because one of the seven
+  /// Returns `Text` rather than `LocalizedStringKey` because one of the eight
   /// carries a payload and its sentence is built from it; a second function for
   /// that one case would be the two-spellings problem this file exists to
   /// prevent. `Text` is the type both spellings have in common.

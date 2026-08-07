@@ -86,7 +86,7 @@ final class KeyActionExecutor {
       // single display), Cmd+BrightnessDown acts as a normal brightness-down
       // step — and a plain step is `.affected`, same as rule 6.
       //
-      // `.onlyOneDisplay` is the ONE refusal that falls through. The other six
+      // `.onlyOneDisplay` is the ONE refusal that falls through. The other seven
       // become a report on screen rather than a silent `false`, which is what
       // the bare `Bool` this replaced could not express.
       //

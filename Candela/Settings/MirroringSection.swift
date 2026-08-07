@@ -120,10 +120,10 @@ struct MirroringSection: View {
         startControls
       }
 
-      // Every refusal states a reason and there are SEVEN of them, each with its
-      // own sentence — and three of the seven are the only ones this pane can
+      // Every refusal states a reason and there are EIGHT of them, each with its
+      // own sentence — and three of the eight are the only ones this pane can
       // say without asserting something it does not know. See `refusalCaption`,
-      // which switches over all seven with no `default:` arm.
+      // which switches over all eight with no `default:` arm.
       if let refusal = coordinator.lastRefusal {
         refusalCaption(refusal)
       }
@@ -140,7 +140,7 @@ struct MirroringSection: View {
       // silent-success defect this whole feature exists to close, re-created one
       // layer out.
       //
-      // Rendered in EVERY display's pane, unlike the four suppressed refusals
+      // Rendered in EVERY display's pane, unlike the five suppressed refusals
       // above, and that is deliberate rather than an oversight: this sentence
       // NAMES the displays it is about (or falls back to a count), so it makes
       // no claim about the pane it lands in and cannot be false there.
@@ -156,7 +156,7 @@ struct MirroringSection: View {
   ///
   /// `lastRefusal` is ONE property on the coordinator, written by the hotkey and
   /// by every display's pane alike, and nothing on it records which display it
-  /// was about. Four of the seven sentences name a display deictically, and this
+  /// was about. Five of the eight sentences name a display deictically, and this
   /// pane cannot vouch for the referent: a hotkey refusal of `.notInASet` would
   /// otherwise render "This display is not mirroring anything." inside the pane
   /// of a display that IS mirroring, contradicting the Status row two rows above
@@ -191,8 +191,9 @@ struct MirroringSection: View {
     case .masterIsAlwaysMirrored: EmptyView()
     // "…mirrored onto this one" — same problem, same direction.
     case .nothingToMirror: EmptyView()
-    // "…already mirroring this one" — "this one" is the named master, which is
-    // frequently not this pane's display. Same suppression as its neighbours.
+    // "Every display that can mirror this one already is." — "this one" is the
+    // named master, frequently not this pane's display. Same suppression as
+    // its neighbours.
     case .alreadyMirrored: EmptyView()
     // "This display is not mirroring anything." — the one that contradicts the
     // Status row outright.
@@ -291,7 +292,7 @@ struct MirroringSection: View {
   /// Why mirroring cannot be started right now, or nil when it can.
   ///
   /// Four different sentences rather than one, for the same reason
-  /// `MirrorTopologyPolicy.engage` has three refusals rather than one:
+  /// `MirrorTopologyPolicy.engage` has four refusals rather than one:
   /// "mirroring needs a second display" is FALSE on a machine that has two, one
   /// of which macOS keeps locked to a set. The Kit already refuses to conflate
   /// those; a UI that conflated them anyway would put the wrong sentence on

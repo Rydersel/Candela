@@ -277,10 +277,11 @@ public enum MirrorTopologyPolicy {
   /// built-in is an acceptable master here — that is a person asking for it by
   /// name, not a heuristic choosing for them.
   ///
-  /// Its three refusals are three different sentences, never `noEligibleMaster`:
+  /// Its four refusals are four different sentences, never `noEligibleMaster`:
   /// the display is not here (`noSuchDisplay`), the display cannot own a set
-  /// (`masterIsAlwaysMirrored`), or nothing else can join the one it would own
-  /// (`nothingToMirror`). Only the last of those is about the machine.
+  /// (`masterIsAlwaysMirrored`), nothing else can join the one it would own
+  /// (`nothingToMirror`), or everything that could join it already has
+  /// (`alreadyMirrored`). Only the last two of those are about the machine.
   public static func engage(
     _ topology: MirrorTopology, master: CGDirectDisplayID
   ) -> MirrorToggleDecision {
