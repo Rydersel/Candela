@@ -69,6 +69,13 @@ enum MirroringCopy {
     "No other display can be mirrored onto this one — macOS keeps the rest locked to the displays they are already showing."
   }
 
+  /// `.alreadyMirrored`. The named master's set already holds everything that
+  /// could join it, so the request needed no work — stated outright rather
+  /// than staged as the all-no-op transaction macOS fails at commit (#56).
+  static var alreadyMirrored: LocalizedStringKey {
+    "The other displays are already mirroring this one."
+  }
+
   /// The caption for a display that is ITSELF `isAlwaysInMirrorSet`, and for
   /// nothing else. Named, never a bare grey (R8 generalised: no state is carried
   /// by shape alone).
@@ -144,6 +151,7 @@ enum MirroringCopy {
     case .noSuchDisplay: Text(noSuchDisplay)
     case .masterIsAlwaysMirrored: Text(masterIsAlwaysMirrored)
     case .nothingToMirror: Text(nothingToMirror)
+    case .alreadyMirrored: Text(alreadyMirrored)
     case let .setCannotBeBroken(members):
       Text(verbatim: setCannotBeBroken(members: members, name: name))
     case .notInASet: Text(notInASet)

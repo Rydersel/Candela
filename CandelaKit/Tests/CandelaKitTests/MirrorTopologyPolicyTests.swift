@@ -130,6 +130,35 @@ struct MirrorTopologyPolicyTests {
     #expect(MirrorTopologyPolicy.engage(topology, master: 1) == .refused(.nothingToMirror))
   }
 
+  /// #56, measured on macOS 26: `CGCompleteDisplayConfiguration` fails a
+  /// transaction whose changes are ALL no-ops with `1001`, every stage having
+  /// returned success. So asking to build the set the machine is already in
+  /// must never open a transaction — the honest answer is "nothing to do",
+  /// stated as a refusal, not an opaque platform code the UI cannot explain.
+  @Test func rebuildingTheSetTheMachineIsAlreadyInIsRefusedNotStagedAsAllNoOps() {
+    let topology = MirrorTopology([
+      MirrorFixtures.display(1, inSet: true),
+      MirrorFixtures.display(2, mirrors: 1),
+      MirrorFixtures.display(3, mirrors: 1),
+    ])
+    #expect(MirrorTopologyPolicy.engage(topology, master: 1)
+      == .refused(.alreadyMirrored))
+  }
+
+  /// The same platform fact in the mixed case: a change restating what a
+  /// display already does is dropped rather than staged, so only real work
+  /// reaches the transaction.
+  @Test func aDisplayAlreadyMirroringTheChosenMasterIsNotStagedAgain() {
+    let topology = MirrorTopology([
+      MirrorFixtures.display(1, inSet: true),
+      MirrorFixtures.display(2, mirrors: 1),
+      MirrorFixtures.display(3),
+    ])
+    #expect(MirrorTopologyPolicy.engage(topology, master: 1) == .engage(
+      master: 1, changes: [MirrorChange(display: 3, master: 1)]
+    ))
+  }
+
   /// Naming a display that is not in the sample is its own answer. The
   /// alternative — "nothing can be the master" — describes the machine when the
   /// truth is about a display that left it.

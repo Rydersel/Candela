@@ -191,6 +191,9 @@ struct MirroringSection: View {
     case .masterIsAlwaysMirrored: EmptyView()
     // "…mirrored onto this one" — same problem, same direction.
     case .nothingToMirror: EmptyView()
+    // "…already mirroring this one" — "this one" is the named master, which is
+    // frequently not this pane's display. Same suppression as its neighbours.
+    case .alreadyMirrored: EmptyView()
     // "This display is not mirroring anything." — the one that contradicts the
     // Status row outright.
     case .notInASet: EmptyView()
