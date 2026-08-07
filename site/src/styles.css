@@ -47,7 +47,7 @@ a{color:var(--accent);text-decoration:none}
 /* panel screenshot */
 #panel{padding-top:24px;display:flex;justify-content:center}
 .stage{position:relative;width:min(283px,86vw)}
-.glowbed{position:absolute;top:-60px;bottom:-60px;left:50%;transform:translateX(-50%);width:min(100vw,540px);background:radial-gradient(ellipse at 50% 35%,rgba(255,179,64,.22),transparent 70%);pointer-events:none}
+.glowbed{position:absolute;top:-70px;bottom:-70px;left:50%;transform:translateX(-50%);width:min(100vw,560px);background:radial-gradient(closest-side,rgba(255,179,64,.2),transparent);pointer-events:none}
 .shot{position:relative;display:block;width:100%;height:auto;border-radius:var(--radius);border:1px solid var(--line);
   box-shadow:0 30px 60px rgba(0,0,0,.5),0 8px 20px rgba(0,0,0,.4)}
 
