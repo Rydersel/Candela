@@ -17,10 +17,11 @@ import SwiftUI
 @MainActor
 struct SettingsRootView: View {
   @State private var selection: SettingsDestination? = .pane(.general)
-  /// Pinned to `.all`, and it has to be BOUND rather than left `.automatic`.
+  /// Pinned to `.all` and BOUND rather than left `.automatic`, so SwiftUI
+  /// holds an explicit visibility value to defend.
   ///
-  /// Without it, AppKit's `NSSplitView` may collapse the sidebar when the window
-  /// is squeezed — and it autosaves that under
+  /// AppKit's `NSSplitView` may collapse the sidebar when the window is
+  /// squeezed — and it autosaves that under
   /// `"NSSplitView Subview Frames …SidebarNavigationSplitView"`, so the collapse
   /// survives relaunch. There is no sidebar-toggle item in this window's
   /// toolbar, so once collapsed there was **no way back from inside the app**:
@@ -126,11 +127,13 @@ struct SettingsRootView: View {
     // navigation with no way back from inside the app. Guards `.detailOnly`
     // alone — "the sidebar is hidden" — never `!= .all`: `.automatic` and
     // `.doubleColumn` are legitimate framework values, and fighting them would
-    // ping-pong writes against SwiftUI's own normalisation. This layer helps
-    // only when a collapse is reflected into the binding; whether AppKit's
-    // restored autosave frames ever are is unmeasured, so the
-    // restored-collapsed launch stays OPEN on #66 — this modifier does not
-    // claim to cover it.
+    // ping-pong writes against SwiftUI's own normalisation. On a window
+    // genuinely too narrow for both columns, the forced `.all` may itself be
+    // re-collapsed by AppKit — a squeeze-fight #66's hardware item should
+    // watch for. This layer helps only when a collapse is reflected into the
+    // binding; whether AppKit's restored autosave frames ever are is
+    // unmeasured, so the restored-collapsed launch stays OPEN on #66 — this
+    // modifier does not claim to cover it.
     .onChange(of: columnVisibility) { _, visibility in
       if visibility == .detailOnly { columnVisibility = .all }
     }

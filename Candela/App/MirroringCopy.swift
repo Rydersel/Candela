@@ -32,8 +32,8 @@ enum MirroringCopy {
 
   // MARK: - Refusals
   //
-  // `MirrorRefusal` has EIGHT cases and each gets its own sentence here. They
-  // are eight cases precisely because one of them used to carry three meanings,
+  // `MirrorRefusal` has EIGHT cases and each gets its own sentence here.
+  // Several exist precisely because one case used to carry three meanings,
   // one of which was false — telling someone who has just named a perfectly good
   // master that "no display can be the mirror master" is not a rounding error,
   // it is a wrong statement about their machine. A `default:` arm anywhere that

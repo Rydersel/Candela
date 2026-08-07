@@ -188,7 +188,7 @@ public enum MirrorRefusal: Sendable, Equatable {
   /// display is either the built-in (which the hotkey never promotes, fork
   /// parity) or locked into a set it cannot leave.
   ///
-  /// Reachable from `toggle` ONLY. The named-master path has its own three
+  /// Reachable from `toggle` ONLY. The named-master path has its own four
   /// answers below, because "nothing can be the master" is a false statement
   /// when the caller has just named a display that can.
   case noEligibleMaster
