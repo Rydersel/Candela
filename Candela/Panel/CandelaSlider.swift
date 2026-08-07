@@ -106,11 +106,17 @@ struct CandelaSlider: View {
 
   /// THE clamp — arrow keys and the VoiceOver adjustable action are both
   /// callers, so a floor cannot be honoured on one route and missed on the
-  /// other (the D29 shape: make the invariant impossible to violate rather
-  /// than kept by agreement).
+  /// other.
   ///
-  /// Snapping runs first and clamps to 0…1; the floor is applied after, so a
-  /// snap stop below the floor cannot pull the value under it.
+  /// Snapping is kept for PARITY with the stepping the panel's adjustable
+  /// action already does, not as a safety measure. It protects nothing at 0:
+  /// with `stopsWithoutZero` the nearest stop to 0 is 0.25, outside
+  /// `tolerance`, so `snapped` hands 0 straight back exactly as a bare clamp
+  /// would. Dropping it would only change how far one VoiceOver step moves a
+  /// snapping slider.
+  ///
+  /// Order is snap-then-floor: `snapped` clamps to 0…1, then the floor goes on
+  /// top, so a stop below the floor cannot pull the value under it.
   private func adjust(by delta: Double) {
     // The floor is clamped to the slider's own range: it raises the lower
     // bound, it can never push a write past 1 for the controllers downstream.
@@ -163,8 +169,9 @@ struct CandelaSlider: View {
         // ring — inside, it would sit on the white fill and read as part of the
         // value. It cannot disturb layout: the enclosing `GeometryReader` takes
         // its size from the parent's proposal, not from this ZStack's children.
-        // Absent entirely when unfocused, so nothing about the panel's pixels
-        // changes for a control that can never hold focus inside an NSMenu.
+        // Absent entirely when unfocused, so the panel's pixels are unchanged.
+        // Whether a panel slider can take focus at all during NSMenu tracking
+        // is UNVERIFIED — nothing here enforces that it cannot.
         if focused {
           Capsule()
             .strokeBorder(Color(nsColor: .keyboardFocusIndicatorColor), lineWidth: 3)
