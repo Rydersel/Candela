@@ -155,7 +155,10 @@ struct OledDimmingTests {
   @Test func alphaMapping() {
     let e = IdleDimmingEngine(config: config(level: 0.5, unfocusedLevel: 0.7))
     #expect(e.alpha(for: .idleDim) == 0.5)
-    #expect(e.alpha(for: .lockDim) == 0.5)
+    // `.lockDim` is no longer an overlay state: an overlay does not render
+    // above the lock screen (MEASURED 2026-08-07), so lock dim is delivered on
+    // the wire. `LockDimTests` owns the replacement.
+    #expect(e.alpha(for: .lockDim) == nil)
     #expect(e.alpha(for: .blackout) == 1.0)
     #expect(e.alpha(for: .unfocusedDim) == 0.7)
     #expect(e.alpha(for: .active) == nil)

@@ -780,6 +780,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // (no restore ran and no software leg was re-applied on our behalf), so
     // skipping it leaves the monitor exactly where the user last put it.
     guard !isSafeMode else { return }
+    // FIRST, and before the full-range restore below: quitting while a display
+    // is lock-dimmed must hand the panel back to the user's own brightness.
+    // `restoreFullRangeDDC` already writes the undimmed value on the DDC leg,
+    // but it returns early on the native path, which is exactly where an HDR
+    // display's lock dim lives. Safe Mode never starts the dimming loop, so
+    // there is nothing outstanding on the other side of the guard above.
+    model.oledCare.endAllLockDims()
     for state in model.displays {
       // Quitting while DisplayManager is suspended (mid-reconfigure or
       // asleep) silently drops this at the epoch gate — acceptable:

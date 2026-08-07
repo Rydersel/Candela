@@ -482,7 +482,15 @@ public final class BrightnessController {
   /// The order the fork's contract depends on is preserved inside the policy,
   /// where it is pinned by `BrightnessPathPolicyTests`; a `switch` here is
   /// order-free by construction.
-  private func applyPaths(_ value: Double) {
+  private func applyPaths(_ requested: Double) {
+    // The temporary dim is applied HERE and nowhere else, and that placement is
+    // the whole design. Every leg, the echo slot the poller compares against,
+    // and every re-entry into path selection (`reassertHardware`,
+    // `reapplyAfterPrefChange`, a slider moved mid-dim) pick it up for free;
+    // `brightness` and the store keep the value the USER chose, so nothing has
+    // to remember to put it back and a process that dies mid-dim still restores
+    // the right value on its next launch.
+    let value = requested * (temporaryDimFactor ?? 1)
     let tuning = prefs.tuning(for: .brightness)
     switch BrightnessPathPolicy.path(pathInputs(tuning: tuning)) {
     case .native:
@@ -1040,6 +1048,45 @@ public final class BrightnessController {
     return store.savedBrightness(for: storageKey) != nil
   }
 
+  // MARK: - Temporary dim (OLED care lock dim)
+
+  /// A multiplier applied to the published value on its way to the hardware,
+  /// or nil when nothing is dimming. Owned by whoever called
+  /// `beginTemporaryDim`; OLED care's lock dim is the only caller today.
+  ///
+  /// Deliberately NOT expressed as a `setBrightness` to a lower value. That
+  /// would overwrite `brightness` and the persisted store, which are the user's
+  /// value and the only truth a write-only panel has: a crash or a force-quit
+  /// while dimmed would then make the dim permanent, and a slider moved during
+  /// the dim would have nothing to be restored to.
+  public private(set) var temporaryDimFactor: Double?
+
+  /// Applies a temporary dim. Idempotent for an unchanged factor.
+  ///
+  /// The two memos are cleared for the same reason `reapplyAfterPrefChange`
+  /// clears them: this changes what should be on the wire without changing the
+  /// published value, so a duplicate-suppressed write would leave the display
+  /// where it was while the engine believed otherwise.
+  public func beginTemporaryDim(factor: Double) {
+    let clamped = min(max(factor, 0), 1)
+    guard temporaryDimFactor != clamped else { return }
+    temporaryDimFactor = clamped
+    lastAppliedSw = nil
+    coalescer.resetDuplicateState()
+    applyPaths(brightness)
+  }
+
+  /// Restores the published value exactly. Safe to call when nothing is dimmed
+  /// (a no-op), which is what lets every teardown path call it unconditionally:
+  /// unlock, display departure, settings reset and quit.
+  public func endTemporaryDim() {
+    guard temporaryDimFactor != nil else { return }
+    temporaryDimFactor = nil
+    lastAppliedSw = nil
+    coalescer.resetDuplicateState()
+    applyPaths(brightness)
+  }
+
   /// Re-asserts the current value on whatever path is live (the restore
   /// pass's brightness leg). Routed through `applyPaths`, not a bare submit,
   /// so the echo slot stays honest for the poller; the software leg re-apply
@@ -1142,6 +1189,12 @@ public final class BrightnessController {
   /// the coalescer drains off-actor, so the quit path's barrier (Task 10)
   /// only has to keep the process alive until the write lands, never block
   /// the main thread on DDC I/O.
+  ///
+  /// Reads `brightness`, so a quit during a temporary dim writes the UNDIMMED
+  /// value: the register is handed back to the user's setting on the way out.
+  /// That is a backstop, not the contract. The owner of the dim still ends it
+  /// explicitly at teardown, because this call returns early on three paths
+  /// (native included, which is where an HDR display's dim lives).
   public func restoreFullRangeDDC() {
     guard role == .external, !usesNative, !prefs.forceSoftware else { return }
     let tuning = prefs.tuning(for: .brightness)

@@ -213,12 +213,30 @@ public struct IdleDimmingEngine: Sendable {
     return state
   }
 
+  /// The overlay opacity a state calls for, or nil when the state wants no
+  /// overlay.
+  ///
+  /// **`.lockDim` answers nil, and that is the delivery ruling, not an
+  /// omission.** A `CGShieldingWindowLevel()` overlay does not render above the
+  /// macOS lock screen: MEASURED 2026-08-07, with `loginwindow`'s shield taking
+  /// the front of the window list over a window two billion levels above it and
+  /// a capture showing the lock screen at full brightness while the overlay
+  /// still reported itself on screen. Lock dim is delivered on the wire instead
+  /// (`LockDimPolicy` and `BrightnessController.beginTemporaryDim`), so the
+  /// overlay layer is structurally unable to produce a lock dim that nobody
+  /// could see.
   public func alpha(for state: OledDimState) -> Double? {
     switch state {
-    case .idleDim, .lockDim: config.idleDimLevel
+    case .idleDim: config.idleDimLevel
     case .blackout: 1.0
     case .unfocusedDim: config.unfocusedDimLevel
-    case .active, .suspended: nil
+    case .lockDim, .active, .suspended: nil
     }
+  }
+
+  /// How far down the wire-level lock dim takes this display's brightness,
+  /// derived from the same level the idle dim uses.
+  public var lockDimFactor: Double {
+    LockDimPolicy.factor(forLevel: config.idleDimLevel)
   }
 }
