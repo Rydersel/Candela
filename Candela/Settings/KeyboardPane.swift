@@ -154,10 +154,13 @@ struct KeyboardPane: View {
           combination: "⌃⌥⌘ + brightness key",
           spoken: "Control Option Command plus a brightness key adjusts contrast."
         )
+        // "+ brightness key" is accuracy, not column symmetry: `KeyRouter`
+        // rule 2 needs a brightness key, and Option on a VOLUME key opens Sound
+        // settings instead (`routeVolume`).
         ModifierLegendRow(
           title: "Open Displays settings",
-          combination: "⌥",
-          spoken: "Option on its own opens Displays settings."
+          combination: "⌥ + brightness key",
+          spoken: "Option with a brightness key opens Displays settings."
         )
         // Its own row, not a variation on the ones above: it is a different
         // action on a specific key, and `KeyRouter` rule 1 treats it that way.
@@ -274,7 +277,13 @@ struct KeyboardPane: View {
       // press move while a display is dimming past its minimum") is one a
       // person can make. `separateCombinedScale` stays app-level and stays a
       // documented `defaults write` key.
-      SettingRow("Halves how far each press moves on a display that is dimming past its minimum.") {
+      // "A normal press" is load-bearing, not hedging: `DimmingMath.step`
+      // branches on `isFine` BEFORE it reads the chiclet count, so a fine step
+      // is a flat ±0.01 on both scales and this toggle does nothing to it.
+      // With "Fine steps for brightness and contrast" on two rows above, that
+      // is every press — a caption promising otherwise would contradict its
+      // own neighbour (the D11 defect class).
+      SettingRow("Halves how far a normal press moves on a display that is dimming past its minimum; fine steps are unchanged.") {
         Toggle("Extra-fine steps while combined dimming is active", isOn: Binding(
           get: { prefs.separateCombinedScale },
           set: { setSeparateCombinedScale($0) }
@@ -348,12 +357,15 @@ struct KeyboardPane: View {
     actions.prefDidChange(.useFineScaleVolume)
   }
 
-  /// App-level, so the write is explicitly keyed to the `app` domain even
-  /// though the accessor is unsuffixed — the row is `.refreshUI` only, because
-  /// `BrightnessController.step` reads it at key time (D20).
+  /// No `persistenceKey:`, like every other write in this pane. The parameter
+  /// is not a defaults domain — it is a FILTER on which display's controller
+  /// `.reapplyDimming` reaches (`SettingsActions.apply`), and `separateCombinedScale`
+  /// is app-level, so `"app"` would match zero displays and silently swallow a
+  /// future reapply row. The row is `.refreshUI` alone today because
+  /// `BrightnessController.step` reads the pref at key time (D20).
   private func setSeparateCombinedScale(_ separate: Bool) {
     prefs.separateCombinedScale = separate
-    actions.prefDidChange(.separateCombinedScale, persistenceKey: "app")
+    actions.prefDidChange(.separateCombinedScale)
   }
 }
 
