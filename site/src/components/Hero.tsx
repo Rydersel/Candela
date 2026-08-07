@@ -1,6 +1,30 @@
 import candelaC from '../assets/candela-c.svg'
+import { useRef, useState } from 'react'
 import menubarStrip from '../assets/menubar-strip.png'
 import panelWindow from '../assets/panel-window.png'
+
+const BREW_CMD = 'brew install --cask rydersel/tap/candela'
+
+function BrewInstall() {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<number>(undefined)
+  const copy = () => {
+    navigator.clipboard.writeText(BREW_CMD).then(() => {
+      setCopied(true)
+      window.clearTimeout(timer.current)
+      timer.current = window.setTimeout(() => setCopied(false), 2000)
+    })
+  }
+  return (
+    <button className="brew" type="button" onClick={copy} aria-label={`Copy ${BREW_CMD}`}>
+      <span className="brew-cmd">
+        <span className="brew-dollar">$ </span>
+        {BREW_CMD}
+      </span>
+      <span className={`brew-hint${copied ? ' copied' : ''}`}>{copied ? 'copied!' : 'click to copy'}</span>
+    </button>
+  )
+}
 
 export default function Hero() {
   return (
@@ -20,6 +44,7 @@ export default function Hero() {
             <a className="btn btn-primary" href="https://github.com/Rydersel/Candela/releases/latest">Download for macOS</a>
             <a className="btn btn-quiet" href="https://github.com/Rydersel/Candela">View on GitHub</a>
           </div>
+          <BrewInstall />
           <p className="fineprint">Free &amp; open source&ensp;·&ensp;macOS 14+&ensp;·&ensp;Apple Silicon</p>
         </div>
         <div className="stage">

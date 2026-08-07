@@ -42,17 +42,26 @@ a{color:var(--accent);text-decoration:none}
 }
 #hero .cta .btn-primary{font-size:16px;padding:14px 28px;transition:filter .15s ease,transform .15s ease,box-shadow .15s ease}
 #hero .cta .btn-primary:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(232,155,46,.3)}
-#hero .fineprint{margin-top:18px;font-size:13px;color:var(--text-3)}
+#hero .fineprint{margin-top:16px;font-size:13px;color:var(--text-3)}
+.brew{display:inline-flex;align-items:baseline;gap:14px;margin-top:16px;padding:10px 16px;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:10px;cursor:pointer;
+  transition:border-color .15s ease,background .15s ease}
+.brew:hover{border-color:rgba(255,255,255,.16);background:#28282b}
+.brew-cmd{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:13px;color:var(--text-2)}
+.brew-dollar{color:var(--text-3)}
+.brew-hint{font-size:12px;color:var(--text-3);white-space:nowrap}
+.brew-hint.copied{color:#E89B2E}
 @media (max-width:520px){.h1br{display:none}}
 
 /* hero entrance — the page's one authored motion moment */
 @keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
-#hero h1,#hero .sub,#hero .cta,#hero .fineprint{animation:rise .7s cubic-bezier(.22,1,.36,1) both}
+#hero h1,#hero .sub,#hero .cta,#hero .brew,#hero .fineprint{animation:rise .7s cubic-bezier(.22,1,.36,1) both}
+#hero .brew{animation-delay:.25s}
 #hero h1{animation-delay:.06s}
 #hero .sub{animation-delay:.14s}
 #hero .cta{animation-delay:.22s}
 #hero .fineprint{animation-delay:.28s}
-@media (prefers-reduced-motion:reduce){#hero h1,#hero .sub,#hero .cta,#hero .fineprint,#hero .stage{animation:none}}
+@media (prefers-reduced-motion:reduce){#hero h1,#hero .sub,#hero .cta,#hero .brew,#hero .fineprint,#hero .stage{animation:none}}
 
 /* panel screenshot */
 .stage{position:relative;width:min(324px,86vw)}
