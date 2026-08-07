@@ -52,8 +52,8 @@ struct BuiltInDisplayPane: View {
         SettingsCaption("macOS controls the built-in display's brightness directly, so there is nothing to set here. \(AppInfo.productName) reads its level to keep your other displays in step.")
       }
 
-      Section("Menu bar panel") {
-        SettingRow("Whether this display's slider appears in the panel is set under Menu Bar, so it stays reachable when the lid is closed and this display disappears.") {
+      Section("Menu Bar") {
+        SettingRow("Whether this display's slider appears in the menu bar is set under Menu Bar, so it stays reachable when the lid is closed and this display disappears.") {
           Button("Open Menu Bar Settings") { selection = .pane(.menuBar) }
         }
       }

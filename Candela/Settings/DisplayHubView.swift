@@ -4,7 +4,10 @@ import SwiftUI
 
 /// The external display hub (spec §4): everything you change or consult about
 /// one display, on one page, with Advanced / Diagnostics / the full mode list
-/// pushed as sub-pages (SO1/SO2). `DisplayDetailView` hosts it under the hero.
+/// pushed as sub-pages (SO1/SO2). Owns the whole page — hero included —
+/// because the sections must sit directly in the `Form`'s builder (see the
+/// measured note in `body`); `DisplayDetailView` stays as the navigation
+/// shell's thin destination host.
 ///
 /// Section order is the spec's: identity, Display, Sound, navigation, reset.
 ///
@@ -23,9 +26,11 @@ struct DisplayHubView: View {
   let state: AppModel.DisplayState
   @Binding var selection: SettingsDestination?
   @Binding var path: [DisplaySubPage]
-  /// Owned by `DisplayDetailView`, which watches the path shrink and hands
-  /// focus back to the row that pushed (a11y contract 1, pop half).
-  @FocusState.Binding var focusedRow: DisplaySubPage?
+
+  /// A11y contract 1, pop half: when the path shrinks, focus returns to the
+  /// chevron row that pushed. Owned HERE, beside the rows that tag themselves
+  /// with it, and driven by the `onChange` on the `Form` below.
+  @FocusState private var focusedRow: DisplaySubPage?
 
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
@@ -51,13 +56,11 @@ struct DisplayHubView: View {
   init(
     state: AppModel.DisplayState,
     selection: Binding<SettingsDestination?>,
-    path: Binding<[DisplaySubPage]>,
-    focusedRow: FocusState<DisplaySubPage?>.Binding
+    path: Binding<[DisplaySubPage]>
   ) {
     self.state = state
     _selection = selection
     _path = path
-    _focusedRow = focusedRow
     let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
     _nameDraft = State(initialValue: prefs.friendlyName)
     _audioNameDraft = State(initialValue: prefs.audioDeviceNameOverride)
@@ -77,11 +80,40 @@ struct DisplayHubView: View {
     // re-evaluates the hub after a write anywhere else — and what makes the
     // chevron previews re-read (SO3).
     let _ = model.prefsRevision
-    identitySection
-    displaySection
-    soundSection
-    navigationSection
-    resetSection
+    // The hub owns the `Form` and every section sits DIRECTLY in its builder.
+    // Measured 2026-08-06: hosting the same five sections in a child view
+    // placed inside a parent's `Form` mis-sized the List's scrollable extent —
+    // the page pinned ~110 pt short of its end and the reset section was
+    // unreachable by scrolling. Same defect family as the Section-lifecycle
+    // no-op recorded on `DisplayDetailView`: a grouped `Form` only reliably
+    // handles structure declared in its own builder.
+    Form {
+      DisplayHeroView(state: state)
+      identitySection
+      displaySection
+      soundSection
+      navigationSection
+      resetSection
+    }
+    .formStyle(.grouped)
+    // Mode enumeration is several CoreGraphics round-trips, so it runs here
+    // rather than per body evaluation. It hangs off the Form, not off a
+    // section: a modifier applied to a `Section` inside a grouped `Form` is
+    // not reliably applied to the section itself, and a lifecycle hook that
+    // silently never fires would leave the resolution list empty. Any LATER
+    // resolution change — ours, System Settings', or a replug — re-enumerates
+    // through the coordinator's own screen-parameters observer, which must run
+    // whether or not this page is on screen.
+    .task(id: state.id) { model.displayModes.refreshCatalog(for: state.id) }
+    // Pop restoration: the row that pushed the page just popped takes focus
+    // back. Only ever a SHRINK is acted on — a push moves focus forward via
+    // `SubPageHeader`'s own on-appear focus, and fighting it from here would
+    // yank the cursor back to the hub mid-push.
+    .onChange(of: path) { old, new in
+      if new.count < old.count, let popped = old.last {
+        focusedRow = popped
+      }
+    }
   }
 
   // MARK: - Identity
@@ -518,11 +550,17 @@ struct DisplayHubView: View {
     }
   }
 
-  /// Mirrors what the key path actually consults: the display's own volume
-  /// availability, this display's keyboard opt-out, and the app-wide volume key
-  /// mode — so this row cannot say "On" about keys that would skip the display.
+  /// Mirrors what the key path actually consults, so this row cannot say "On"
+  /// about keys that would move nothing. TWO unavailability signals, both
+  /// required: `volume.isAvailable` is the pref side (the command or hardware
+  /// control turned off for this display), `volumeSliderEnabled` is D24's —
+  /// the monitor's own denial, the same verdict that greys the hero's slider.
+  /// The Dell answers its capabilities with no VCP 0x62, and this row saying
+  /// "On" there would contradict the greyed slider two sections up.
   private var volumeKeysStatus: String {
-    if !state.volume.isAvailable { return "Not available on this display" }
+    if !state.volume.isAvailable || !model.volumeSliderEnabled(state) {
+      return "Not available on this display"
+    }
     if prefs.isDisabled { return "Off" }
     let mode = prefs.keyboardVolume
     let active = KeyModePolicy.watchesMediaKeys(mode) || KeyModePolicy.firesCustomShortcuts(mode)
