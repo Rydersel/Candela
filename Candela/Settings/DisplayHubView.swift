@@ -507,9 +507,13 @@ struct DisplayHubView: View {
   /// thresholds, levels, hours and the global chrome switches are set-once and
   /// stay on the OLED Care pane, which OC3 keeps as their dedicated home.
   ///
-  /// The chevron is a sidebar-selection change, NOT a push: SO1 closes the
-  /// pushed set at three sub-pages, and OLED Care is already a top-level
-  /// destination — same route as the Sound section's Keyboard Settings link.
+  /// The route to the rest is a sidebar-selection change, NOT a push: SO1
+  /// closes the pushed set at three sub-pages, and OLED Care is already a
+  /// top-level destination. It therefore wears the app's cross-pane LINK idiom
+  /// (the Sound section's Keyboard Settings link), never `NavigationRow`'s
+  /// chevron: a chevron promises a pushed page with a Back button, and this
+  /// jump keeps neither (combined pass D7). SO3's live preview stays, as the
+  /// row's value text beside the link.
   private var oledCareSection: some View {
     Section {
       SettingRow("Enrolling applies the recommended settings; nothing changes until this display has been idle for a while.") {
@@ -518,11 +522,15 @@ struct DisplayHubView: View {
           set: { on in writer.write(.oledCareEnrolled) { $0.oledCareEnrolled = on } }
         ))
       }
-      NavigationRow(
-        title: "All OLED Care Settings",
-        value: oledCarePreview,
-        spokenValue: oledCareSpokenPreview
-      ) { selection = .pane(.oledCare) }
+      LabeledContent("Care status") {
+        HStack(spacing: 8) {
+          Text(verbatim: oledCarePreview)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel(Text(oledCareSpokenPreview))
+          Button("All OLED Care Settings…") { selection = .pane(.oledCare) }
+            .buttonStyle(.link)
+        }
+      }
     } header: {
       Text("OLED Care").settingsHeading()
     }
