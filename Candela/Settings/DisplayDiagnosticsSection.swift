@@ -5,6 +5,11 @@ import SwiftUI
 /// is, how its brightness is being driven, what it told us, what is
 /// unavailable and why, and what is true right now.
 ///
+/// **No call sites since Task 13** — the hub and the built-in pane link to the
+/// Diagnostics sub-page instead. Kept deliberately: Task 16 rebuilds that page
+/// from these groups and their honesty rules, and deleting them in between
+/// would force their re-derivation.
+///
 /// The feature is the HONESTY RULES (DT30), not the rows:
 /// - every "unavailable" row states a REASON drawn from a typed value;
 /// - an unanswered display is reported as UNANSWERED, never as unsupported;

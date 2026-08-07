@@ -164,7 +164,9 @@ enum MirroringCopy {
   // speaks on three surfaces and a sentence written in one of them is a sentence
   // the other two cannot reuse and cannot be checked against.
 
-  static var statusLabel: LocalizedStringKey { "Status" }
+  /// The row carries the topic word since Task 13: the control sits inline in
+  /// the hub's Display section, where a bare "Status" would not say of what.
+  static var statusLabel: LocalizedStringKey { "Mirroring" }
   static var pickMaster: LocalizedStringKey { "Show the picture from" }
 
   /// What Start does when nothing on the machine is locked into a set.

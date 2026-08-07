@@ -1,6 +1,11 @@
 import CandelaKit
 import SwiftUI
 
+// No call sites since Task 13 — the hub dropped the Tuning section. Kept
+// deliberately: Task 15's Advanced sub-page re-homes this grid (with visible
+// column headers as an addition), and its per-control accessibility labels are
+// load-bearing.
+
 /// Per-command DDC tuning for one display: Enabled / Min / Max / Invert, for
 /// brightness, volume and contrast. D26 shrank the fork's six columns to these
 /// four — the 9-step response curve and the hex control-code remap are cut from

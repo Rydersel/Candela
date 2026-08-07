@@ -437,66 +437,8 @@ private struct HDRModeButtonStyle: ButtonStyle {
   }
 }
 
-/// Bridges the controller (source of truth) to the slider's binding.
-/// setBrightness is synchronous and coalesces hardware writes, so drag
-/// streams are safe to feed directly.
-private struct DisplaySliderRow: View {
-  let controller: BrightnessController
-  let displayName: String
-  let snapsToStops: Bool
-  let showsPercent: Bool
-
-  var body: some View {
-    CandelaSlider(
-      value: Binding(
-        get: { controller.brightness },
-        set: { controller.setBrightness($0) }
-      ),
-      accessibilityLabel: "\(displayName) brightness",
-      snapsToStops: snapsToStops,
-      showsPercent: showsPercent
-    )
-  }
-}
-
-/// Volume/contrast row: the same capsule slider as brightness, one visual
-/// language for every value in the section.
-///
-/// Muted volume renders as 0 with a slashed speaker — `isMuted` and a genuine
-/// value of 0 are distinct states (T10 handoff) and the icon is what tells
-/// them apart, since the knob sits at the leading edge either way. The stored
-/// value survives being muted: dragging up from 0 unmutes and lands on the
-/// dragged value through the controller's mute-companion logic.
-private struct ValueSliderRow: View {
-  let controller: DDCValueController
-  let systemImage: String
-  let accessibilityLabel: String
-  let snapsToStops: Bool
-  let showsPercent: Bool
-  /// Substituted while muted; nil for commands that never mute (contrast).
-  var mutedSystemImage: String?
-
-  /// Volume is the command whose 0 means "mute". Having a muted glyph IS the
-  /// definition of that here — contrast has none and never mutes.
-  private var mutesAtZero: Bool { mutedSystemImage != nil }
-  private var isMuted: Bool { controller.isMuted && mutesAtZero }
-
-  var body: some View {
-    CandelaSlider(
-      value: Binding(
-        get: { isMuted ? 0 : controller.value },
-        set: { controller.setValue($0) }
-      ),
-      systemImage: isMuted ? (mutedSystemImage ?? systemImage) : systemImage,
-      accessibilityLabel: isMuted ? "\(accessibilityLabel), muted" : accessibilityLabel,
-      snapsToStops: snapsToStops,
-      // D29: never let snapping pull a volume drag onto 0, which the engine
-      // treats as a hardware mute (VCP 0x8D). Contrast keeps the 0 stop.
-      snapsToZero: !mutesAtZero,
-      showsPercent: showsPercent
-    )
-  }
-}
+// `DisplaySliderRow` and `ValueSliderRow` live in `SliderRows.swift` — shared
+// with the settings hero so the D29 rule-4 `snapsToZero` derivation exists once.
 
 /// Footer action button: a symbol and a word on a subtle rounded background
 /// that appears on hover, with a distinct pressed state.

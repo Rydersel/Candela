@@ -5,8 +5,9 @@ import SwiftUI
 /// Every sentence the rotation feature says, in one place, so the settings row
 /// and the confirmation window cannot end up spelling one statement two ways.
 enum RotationCopy {
-  static var sectionTitle: LocalizedStringKey { "Rotation" }
-  static var label: LocalizedStringKey { "Orientation:" }
+  /// The hub row's label (spec §4 renamed it from "Orientation:" when the
+  /// control moved into the Display section, where the word carries the topic).
+  static var label: LocalizedStringKey { "Rotation" }
 
   /// The system's own wording. System Settings offers Standard / 90° / 180° /
   /// 270°, and D25 says familiarity beats novelty — "Portrait" and "Landscape"
@@ -26,16 +27,10 @@ enum RotationCopy {
     }
   }
 
-  static var caption: LocalizedStringKey {
-    "Rotates the picture on the display itself. You get thirty seconds to keep it."
-  }
-
-  /// RT11, said plainly. This is the one place the difference from mirroring
-  /// leaks into the user's world, and it must not be papered over: mirroring
-  /// undoes itself if Candela dies, and a rotation does not.
-  static var persistenceCaption: LocalizedStringKey {
-    "macOS remembers a display's orientation, so this outlasts Candela — if the app quits while a display is rotated, it stays rotated. You can always change it back here or in System Settings."
-  }
+  // The old row captions (the thirty-second countdown and the RT11 persistence
+  // note) were retired with the hub restructure (spec §4): the countdown is
+  // runtime feedback the confirmation window states itself, and persistence is
+  // macOS's own behaviour for this control, matching System Settings.
 
   static var unavailable: LocalizedStringKey {
     "This version of macOS does not expose display rotation to Candela."

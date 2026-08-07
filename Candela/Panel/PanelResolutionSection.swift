@@ -20,7 +20,7 @@ import SwiftUI
 /// outside the tracking session, because a `.task` here would be starved while
 /// the menu is open and the section would be missing on the open that wanted it.
 ///
-/// `@MainActor` for the same reason as `DisplayModeSection`: it stores
+/// `@MainActor` for the same reason as `DisplayHubView`: it stores
 /// main-actor types and reads them from computed properties, which are
 /// nonisolated on a plain `View` under complete concurrency checking.
 @MainActor

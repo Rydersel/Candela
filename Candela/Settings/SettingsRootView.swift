@@ -258,9 +258,9 @@ struct SettingsRootView: View {
       VStack(spacing: 0) {
         BannerRegion(persistenceKey: key)
         if key == "builtIn" {
-          BuiltInDisplayPane(selection: $selection)
+          BuiltInDisplayPane(selection: $selection, path: pathBinding(for: key))
         } else {
-          DisplayDetailView(state: state)
+          DisplayDetailView(state: state, selection: $selection, path: pathBinding(for: key))
         }
       }
       .navigationDestination(for: DisplaySubPage.self) { page in
@@ -299,10 +299,10 @@ struct SettingsRootView: View {
     .formStyle(.grouped)
   }
 
-  /// Pop-pause on the pushing row (accessibility contract 1's pop half) is
-  /// deliberately absent here: no row pushes yet. `DisplayHubView` (Task 13)
-  /// owns `@FocusState focusedRow: DisplaySubPage?` and restores it when its
-  /// path binding shrinks.
+  /// Pop focus restoration (accessibility contract 1's pop half) is the
+  /// destination's job, not this view's: `DisplayDetailView` and
+  /// `BuiltInDisplayPane` each own a `@FocusState focusedRow: DisplaySubPage?`
+  /// and hand it back to the pushing row when this binding shrinks.
   private func pathBinding(for key: String) -> Binding<[DisplaySubPage]> {
     Binding(
       get: { subPagePaths[key] ?? [] },

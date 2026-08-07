@@ -74,7 +74,11 @@ struct DisplayHeroView: View {
         brightnessSlider
         volumeSlider
         if let consequenceSentence {
+          // Hidden from VoiceOver because the same sentence already travels in
+          // the brightness slider's LABEL (a11y contract 3) — leaving the
+          // caption readable announced it twice (T12 review).
           SettingsCaption(verbatim: consequenceSentence)
+            .accessibilityHidden(true)
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -105,7 +109,11 @@ struct DisplayHeroView: View {
         }
       }
       .frame(width: box.width, height: box.height)
-      .frame(height: tileBoxHeight, alignment: .top)
+      // The full BOX is reserved, not just the tile's own size, so the identity
+      // column's left edge stays put whatever shape the display is — a portrait
+      // Dell must not shift every label 90 pt left of where the MAG puts them
+      // (T12 review).
+      .frame(width: tileBoxWidth, height: tileBoxHeight, alignment: .top)
       .accessibilityHidden(true)
   }
 
@@ -218,14 +226,14 @@ struct DisplayHeroView: View {
   private var appPrefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
   private var brightnessSlider: some View {
-    CandelaSlider(
-      value: Binding(
-        get: { state.controller.brightness },
-        set: { state.controller.setBrightness($0) }
-      ),
-      accessibilityLabel: brightnessAccessibilityLabel,
+    DisplaySliderRow(
+      controller: state.controller,
+      displayName: name,
       snapsToStops: appPrefs.enableSliderSnap,
       showsPercent: appPrefs.enableSliderPercent,
+      // Contract 3: the safety sentence rides in the LABEL, not only in the
+      // caption beside the slider.
+      accessibilityLabel: brightnessAccessibilityLabel,
       keyboardFloor: brightnessKeyboardFloor
     )
   }
@@ -235,29 +243,22 @@ struct DisplayHeroView: View {
   /// (`DDCValueController.isAvailable`, which `setValue` self-gates on, so a
   /// visible slider is never a silently dead one).
   ///
+  /// The row is the panel's own `ValueSliderRow`, so D29 rule 4 — a muting row
+  /// never snaps to 0 — is DERIVED from the muted glyph in one place rather
+  /// than passed by hand at a second construction site (T12 review).
+  ///
   /// `hideVolumeSlider` is deliberately NOT read: that pref governs the menu
   /// bar's row, and this page is where you go to change it.
   @ViewBuilder private var volumeSlider: some View {
     if state.volume.isAvailable {
       let enabled = model.volumeSliderEnabled(state)
-      let muted = state.volume.isMuted
-      CandelaSlider(
-        value: Binding(
-          // `isMuted` and a genuine 0 are distinct states; the glyph is what
-          // tells them apart, since the knob sits at the leading edge either way.
-          get: { muted ? 0 : state.volume.value },
-          set: { state.volume.setValue($0) }
-        ),
-        systemImage: muted ? "speaker.slash.fill" : "speaker.wave.2.fill",
-        accessibilityLabel: muted ? "\(name) volume, muted" : "\(name) volume",
+      ValueSliderRow(
+        controller: state.volume,
+        systemImage: "speaker.wave.2.fill",
+        accessibilityLabel: "\(name) volume",
         snapsToStops: appPrefs.enableSliderSnap,
-        // D29 rule 4, spelled out at the call site because this is the SECOND
-        // place a volume slider is constructed: snapping onto 0 is a mute event
-        // in `DDCValueController.apply` and, under `enableMuteUnmute`, a
-        // persistent VCP 0x8D hardware mute. A cosmetic convenience must not be
-        // able to strand a display silent from the bottom 3% of a drag.
-        snapsToZero: false,
-        showsPercent: appPrefs.enableSliderPercent
+        showsPercent: appPrefs.enableSliderPercent,
+        mutedSystemImage: "speaker.slash.fill"
       )
       .disabled(!enabled)
       // D24: greyed by the MONITOR's own denial, never by CoreAudio.

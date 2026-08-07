@@ -19,9 +19,14 @@ import SwiftUI
 @MainActor
 struct BuiltInDisplayPane: View {
   @Binding var selection: SettingsDestination?
+  @Binding var path: [DisplaySubPage]
 
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
+
+  /// Pop restoration (a11y contract 1): the Diagnostics row is the only pusher
+  /// here, and it takes focus back when its page pops.
+  @FocusState private var focusedRow: DisplaySubPage?
 
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "builtIn") }
   /// The same seam every per-display write goes through, for the same reason:
@@ -53,17 +58,22 @@ struct BuiltInDisplayPane: View {
         }
       }
 
-      // DT45: the built-in gets the Diagnostics section too. "Why can't
-      // hardware control reach my laptop screen?" is one of the questions this
-      // feature exists to answer, and the answer belongs on the page for the
-      // display it is about — not only on the pages of displays that do not
-      // have the problem. The section omits every row that describes a cable,
-      // an EDID or a DDC answer.
-      if let state = model.builtIn {
-        DisplayDiagnosticsSection(state: state)
+      // DT45: the built-in gets Diagnostics too. "Why can't hardware control
+      // reach my laptop screen?" is one of the questions that feature exists
+      // to answer, and the route belongs on the page for the display it is
+      // about. A chevron to the sub-page since Task 13 (spec §8); no readback
+      // preview — the built-in has no wire for a read verdict to be about.
+      Section {
+        NavigationRow(title: "Diagnostics", value: nil) { path.append(.diagnostics) }
+          .focused($focusedRow, equals: .diagnostics)
       }
     }
     .formStyle(.grouped)
+    .onChange(of: path) { old, new in
+      if new.count < old.count, let popped = old.last {
+        focusedRow = popped
+      }
+    }
     // The built-in never passes through the launch warm-up (that walks
     // `model.displays`, which is external-only), so without this its catalog
     // stays absent and the Diagnostics "Current mode" row has nothing to

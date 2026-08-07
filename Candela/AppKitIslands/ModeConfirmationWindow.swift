@@ -11,7 +11,7 @@ import SwiftUI
 /// specific to a resolution change: where the question goes, and what it says.
 ///
 /// The pane's banner survives only as the recovery surface for when this window
-/// is on screen but unusable (see `DisplayModeSection.previewBanner`). The commit
+/// is on screen but unusable (see `DisplayHubView.previewBanner`). The commit
 /// is still explicit — nothing is committed at session scope without someone
 /// pressing Keep, and doing nothing still reverts.
 @MainActor

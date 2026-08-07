@@ -60,8 +60,12 @@ struct SettingsSidebar: View {
         if let builtIn = model.builtIn {
           displayRow(display: builtIn.display, controller: builtIn.controller)
         }
-        ForEach(model.displays) { state in
-          displayRow(display: state.display, controller: state.controller)
+        ForEach(Array(model.displays.enumerated()), id: \.element.id) { index, state in
+          displayRow(
+            display: state.display,
+            controller: state.controller,
+            ordinal: sharedIdentityOrdinal(at: index)
+          )
         }
         if model.displays.isEmpty {
           // Preserves what the deleted Displays pane told the user. Without it,
@@ -143,16 +147,28 @@ struct SettingsSidebar: View {
   /// destination carries the real state, and nothing here is conveyed by color
   /// alone. It is hidden from accessibility for the same reason: a percentage
   /// announced on every row is noise, and it is not actionable from here.
+  /// SO21: two identical units share one persistence key, hence one name and
+  /// one destination — an ordinal by model order is the only live fact that
+  /// tells their rows apart. nil (the near-universal case) appends nothing.
+  private func sharedIdentityOrdinal(at index: Int) -> Int? {
+    let key = model.displays[index].display.persistenceKey
+    guard model.isSharedIdentity(key) else { return nil }
+    return model.displays.prefix(index).count { $0.display.persistenceKey == key } + 1
+  }
+
   @ViewBuilder
-  private func displayRow(display: ExternalDisplay, controller: BrightnessController) -> some View {
+  private func displayRow(
+    display: ExternalDisplay, controller: BrightnessController, ordinal: Int? = nil
+  ) -> some View {
     // The SAME resolution the panel uses, so a rename moves the sidebar, the
     // panel header, the slider's accessibility label and the HUD together. The
     // detail pane's title deliberately does NOT follow — it stays the hardware
     // name, so renaming does not relabel the window you are editing it in.
-    let name = DisplayOrdering.title(
+    let resolved = DisplayOrdering.title(
       friendlyName: DisplayPrefs(persistenceKey: display.persistenceKey).friendlyName,
       hardwareName: display.name
     )
+    let name = ordinal.map { "\(resolved) (\($0))" } ?? resolved
     let isSelected = selection == .display(display.persistenceKey)
     row(.display(display.persistenceKey)) {
       Label {

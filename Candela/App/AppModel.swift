@@ -234,6 +234,14 @@ final class AppModel {
     (builtIn.map { [$0] } ?? []) + displays
   }
 
+  /// SO21: two connected displays resolving to ONE persistence key — identical
+  /// units reporting no serial — share every pref, and the surfaces that show
+  /// those prefs say so. Computed from the live display list at every read,
+  /// never persisted: the state exists exactly while both units are attached.
+  func isSharedIdentity(_ persistenceKey: String) -> Bool {
+    displays.count { $0.display.persistenceKey == persistenceKey } > 1
+  }
+
   /// Fork `!display.isDisabled` (per-display "disable keyboard control",
   /// review R1): every key loop skips a disabled display's BODY, but the tap
   /// still swallows the event — fork parity; spec Appendix A's pass-through

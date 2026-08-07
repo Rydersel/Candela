@@ -2,7 +2,8 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// Mirroring for one display.
+/// Mirroring for one display — rows in the hub's Display section (Task 13),
+/// no section of its own.
 ///
 /// The state and every decision come from `MirroringCoordinator`; nothing here
 /// re-derives a topology, because two samples of one machine disagree exactly
@@ -94,9 +95,11 @@ struct MirroringSection: View {
     }
   }
 
+  // Rows, not a `Section`, since Task 13: the hub's Display section hosts
+  // these inline (spec §4 — "status row + the existing three-branch control").
   var body: some View {
     let _ = model.prefsRevision
-    Section(MirroringCopy.sectionTitle) {
+    Group {
       LabeledContent(MirroringCopy.statusLabel) {
         Text(verbatim: MirroringCopy.state(
           topology: topology, displayID: displayID, name: name

@@ -97,7 +97,7 @@ public final class ModePersistence: @unchecked Sendable {
     // That was a visible defect, not a theoretical one: `quantizedRefresh`
     // keeps 59.9 and 60 apart and `DisplayModeCopy` renders them as separate
     // picker rows, so selecting 59.9 could resolve to the 60 mode — whose
-    // `ioModeID` is the one already current, which `DisplayModeSection.apply`
+    // `ioModeID` is the one already current, which `DisplayHubView.apply`
     // then early-returns on. The picker snapped back and nothing happened.
     // Taking the nearest also makes this the only step that does not depend on
     // enumeration order, matching steps 2–4.

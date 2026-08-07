@@ -17,12 +17,15 @@ enum DisplayModeCopy {
   /// WHICH way a mode is inexact, and it reads as evasive next to a picker
   /// labelled Size.
   ///
-  /// RM11 is now carried by the Native / HiDPI / Scaled badges
-  /// (`DisplayModeCoordinator.Catalog.badges(for:)`), which state the same fact
-  /// precisely and per mode. **Every surface that offers a size to choose from
-  /// must show them**; a bare size on such a surface is the regression this
-  /// note exists to prevent. Surfaces that merely NAME the mode already in
-  /// force — the confirmation window's subtitle, the reapply reports, the
+  /// RM11 is carried by the Native / HiDPI / Scaled badges
+  /// (`DisplayModeCoordinator.Catalog.badges(for:)`) on surfaces that offer
+  /// EVERY mode — the menu-bar list today, the All Sizes & Refresh Rates page
+  /// when it lands — because there the size alone says nothing about which
+  /// duplicate is which. The settings hub's curated Size picker is the ruled
+  /// exception (SO14/SO18): it is deduplicated by logical size, "HiDPI" is
+  /// retired from copy, and the row states its OUTCOME (the caps-at marker)
+  /// instead of its catalog entry. Surfaces that merely NAME the mode already
+  /// in force — the confirmation window's subtitle, the reapply reports, the
   /// panel's collapsed Resolution summary — carry the size alone, because there
   /// the claim is "this is the mode", not "this size is what the panel is".
   static func size(_ mode: DisplayMode) -> String {
