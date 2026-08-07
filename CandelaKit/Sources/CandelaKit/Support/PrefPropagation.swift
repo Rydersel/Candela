@@ -43,6 +43,11 @@ public enum PrefName: String, Sendable, CaseIterable {
   case oledBlackoutEnabled, oledBlackoutSeconds
   case oledUnfocusedDimEnabled, oledUnfocusedDimSeconds, oledUnfocusedDimLevel
   case oledHoursTracking
+  // Per-display — OLED care (W3b-1). `oledTelemetry` needs Screen Recording
+  // and so defaults OFF; `oledWindowObservation` needs no permission and is
+  // the degraded mode's only data source, so it defaults TRUE and joins the
+  // inverted-storage exception above (`oledWindowObservationOff`).
+  case oledTelemetry, oledWindowObservation
   // App-level — display arrangement (#13). `savedArrangements` names a FAMILY
   // of keys, one per topology signature, the way `storedDisplayMode` names one
   // per display identity — a layout is a statement about a display SET, not
@@ -135,7 +140,7 @@ public enum PrefPropagation {
     case .oledCareEnrolled, .oledIdleDimSeconds, .oledIdleDimLevel, .oledLockDim,
          .oledBlackoutEnabled, .oledBlackoutSeconds,
          .oledUnfocusedDimEnabled, .oledUnfocusedDimSeconds, .oledUnfocusedDimLevel,
-         .oledHoursTracking:
+         .oledHoursTracking, .oledTelemetry, .oledWindowObservation:
       [.reapplyOledCare]
     }
     return engine.union([.refreshUI])

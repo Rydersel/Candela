@@ -533,6 +533,53 @@ struct DisplayPrefsTests {
     }
   }
 
+  // MARK: - OLED care (W3b-1)
+
+  @Test func oledTelemetryDefaultsOffAndWindowObservationDefaultsOn() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      // Telemetry needs Screen Recording; enrolling must never turn it on.
+      #expect(prefs.oledTelemetry == false)
+      // Observation needs nothing, and is the degraded mode's only source.
+      #expect(prefs.oledWindowObservation == true)
+    }
+  }
+
+  @Test func oledWindowObservationStoresInverted() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      prefs.oledWindowObservation = false
+      #expect(defaults.bool(forKey: "oledWindowObservationOff.pk") == true)
+      #expect(prefs.oledWindowObservation == false)
+      prefs.oledWindowObservation = true
+      #expect(prefs.oledWindowObservation == true)
+    }
+  }
+
+  @Test func resetOledCareRestoresTelemetryDefaults() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      prefs.oledTelemetry = true
+      prefs.oledWindowObservation = false
+      prefs.resetOledCare()
+      #expect(prefs.oledTelemetry == false)
+      // The inverted key is the one that must be cleared; clearing
+      // "oledWindowObservation" would leave this false forever.
+      #expect(prefs.oledWindowObservation == true)
+    }
+  }
+
+  @Test func w3bOledPrefsArePerDisplay() {
+    withSuite { defaults in
+      let a = DisplayPrefs(defaults: defaults, persistenceKey: "a")
+      let b = DisplayPrefs(defaults: defaults, persistenceKey: "b")
+      a.oledTelemetry = true
+      a.oledWindowObservation = false
+      #expect(b.oledTelemetry == false)
+      #expect(b.oledWindowObservation == true)
+    }
+  }
+
   @Test func oledPrefsArePerDisplay() {
     withSuite { defaults in
       let a = DisplayPrefs(defaults: defaults, persistenceKey: "a")
@@ -581,6 +628,8 @@ struct DisplayPrefsTests {
       prefs.oledUnfocusedDimSeconds = 900
       prefs.oledUnfocusedDimLevel = 0.4
       prefs.oledHoursTracking = false
+      prefs.oledTelemetry = true
+      prefs.oledWindowObservation = false
       // Panel hours are NOT prefs — they live under `PanelHoursTracker`'s own
       // keys and the reset must leave them alone. Written directly here
       // because the tracker owns them, and because the sweep below needs them
@@ -601,13 +650,15 @@ struct DisplayPrefsTests {
       #expect(prefs.oledUnfocusedDimSeconds == 600)
       #expect(prefs.oledUnfocusedDimLevel == 0.3)
       #expect(prefs.oledHoursTracking == true)
+      #expect(prefs.oledTelemetry == false)
+      #expect(prefs.oledWindowObservation == true)
 
       // The sweep can only see keys something wrote above, so pin the
-      // population first: an eleventh OLED pref fails HERE, which is the
+      // population first: a thirteenth OLED pref fails HERE, which is the
       // prompt to add its write — and only then can the sweep catch a
       // `resetOledCare` that forgot to remove it.
       let oledPrefNames = PrefName.allCases.filter { $0.rawValue.hasPrefix("oled") }
-      #expect(oledPrefNames.count == 10, "a new OLED pref needs a write above")
+      #expect(oledPrefNames.count == 12, "a new OLED pref needs a write above")
 
       // A SWEEP of the store, not a second hand-written key list. These ten are
       // already enumerated by hand in two other places and in two spellings —
