@@ -386,7 +386,10 @@ final class ArrangementCoordinator {
     // argument" is not a sentence to show someone who dropped a display back
     // where it started. Filtered here rather than reported; Task 6's proposal
     // type will filter it a step earlier, and this stays as the backstop.
-    guard wanted != live else {
+    // Compared on the ANCHORED form, the same one the plan will stage: an
+    // unanchored translation (dragging the only display, say) changes nothing
+    // relative to anything and must land here, not in the error card.
+    guard (wanted.anchored(preservingMainOf: live) ?? wanted) != live else {
       log.debug("arrangement request is a no-op")
       return
     }
