@@ -16,9 +16,15 @@
 /// time out against — the belief has to be ended by positive evidence that the
 /// panel is lit again, and only two such signals exist on every panel:
 ///
-/// 1. **Focus arriving on this display.** If a window is focused there, the user
-///    is looking at a lit panel. Free (the coordinator already samples focus)
-///    and works on write-only panels, which a `0xD6` readback cannot.
+/// 1. **Focus arriving on this display.** The best evidence available that the
+///    user is at a lit panel — not proof of one. Free (the coordinator already
+///    samples focus) and works on write-only panels, which a `0xD6` readback
+///    cannot. It can be wrong: macOS keeps a blanked display active at full
+///    resolution and never migrates its windows, so windows REMAIN on the dark
+///    panel and can take focus. Cmd-Tab to an app whose frontmost window sits
+///    on the dark display and the belief clears while the panel is still off,
+///    and hours accrue until it departs. No better signal exists on a
+///    write-only panel, so this stands as evidence, not as an invariant.
 /// 2. **A departure.** A real power-cycle *does* reconfigure — the MAG departed
 ///    when its compensation cycle finished — and a display that left is a
 ///    display whose next connection starts from a clean belief. Nothing accrues
@@ -49,6 +55,17 @@
 /// sleep/wake does not clear the belief either: whether a DPMS-off panel returns
 /// across a wake has not been measured, and guessing would put the phantom hours
 /// straight back.
+///
+/// **The one residual that goes the other way: a restart.** The belief is
+/// in-memory only — nothing persists it. So if Candela relaunches (update,
+/// crash, logout/login) while a panel is still dark, the belief is gone, the
+/// system still reports that panel awake, and phantom hours accrue again —
+/// the exact defect this type fixes, resurrected by a restart. That is
+/// accepted rather than fixed: a persisted belief could freeze a counter
+/// across sessions with no clearing event in sight (the display is dark, so
+/// no focus arrives, and it need not depart), which is unbounded, while this
+/// is bounded — accrual resumes only until the panel departs or is focused
+/// after the relaunch, which is the same evidence any other clearing uses.
 public struct PanelPowerState: Equatable, Sendable {
   /// True from the moment we issue the power-off until positive evidence
   /// arrives that the panel is lit again.
@@ -95,6 +112,10 @@ public struct PanelPowerState: Equatable, Sendable {
     // Cleared with the belief, not left armed: a stale ratchet would let the
     // NEXT power-off resolve on the first already-here focus sample — exactly
     // the reading `notePoweredOff(focusedElsewhere:)` refuses to trust.
+    // Deliberately redundant with that reseed, which already forecloses it
+    // unconditionally: mutating either site alone survives the tests, only
+    // breaking BOTH is caught. Keep both — the invariant is worth two lines,
+    // and proving one site dead is not grounds to delete it.
     sawFocusElsewhere = false
   }
 
