@@ -1,5 +1,5 @@
 import { useReveal } from '../useReveal.ts'
-import panelShot from '../assets/widget-cropped-in.png'
+import panelShot from '../assets/widget-black.png'
 
 export default function PanelMock() {
   const ref = useReveal<HTMLElement>()
@@ -10,8 +10,8 @@ export default function PanelMock() {
         <img
           className="shot"
           src={panelShot}
-          width={281}
-          height={464}
+          width={283}
+          height={456}
           alt="The Candela menu bar panel controlling three displays, with brightness and volume sliders and per-display resolution and mirroring controls"
         />
       </div>

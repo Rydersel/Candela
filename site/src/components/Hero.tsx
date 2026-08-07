@@ -8,10 +8,12 @@ export default function Hero() {
           <path d="M32 28c2.5 3.5 4.5 5.5 4.5 8.5a4.5 4.5 0 1 1-9 0c0-3 2-5 4.5-8.5z" fill="#ffb340" />
         </svg>
       </div>
-      <h1>Your displays, properly&nbsp;controlled.</h1>
+      <h1>
+        The display control<br className="h1br" /> macOS forgot to ship.
+      </h1>
       <p className="sub">
-        Candela is a free, open-source menu bar app for macOS that gives external monitors everything
-        the built-in display gets — sharp HiDPI scaling, real brightness control, and more.
+        Retina-sharp scaling at any resolution, real hardware brightness and volume, virtual
+        displays — everything your external monitor should have come with. Free and open source.
       </p>
       <div className="cta">
         <a className="btn btn-primary" href="https://github.com/Rydersel/Candela/releases/latest">Download for macOS</a>

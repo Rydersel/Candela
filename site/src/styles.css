@@ -25,16 +25,28 @@ a{color:var(--accent);text-decoration:none}
 @media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
 
 /* hero */
-#hero{padding:96px 24px 24px;text-align:center}
-.app-mark{margin-bottom:28px}
-#hero h1{font-size:clamp(40px,7vw,64px);font-weight:700;letter-spacing:-.02em;line-height:1.05}
-#hero .sub{max-width:620px;margin:20px auto 0;font-size:19px;color:var(--text-2)}
-#hero .cta{display:flex;gap:12px;justify-content:center;margin-top:32px;flex-wrap:wrap}
+#hero{padding:84px 24px 24px;text-align:center}
+.app-mark{margin-bottom:26px}
+#hero h1{font-size:clamp(42px,7.4vw,76px);font-weight:700;letter-spacing:-.025em;line-height:1.03}
+#hero .sub{max-width:640px;margin:22px auto 0;font-size:19px;color:var(--text-2)}
+#hero .cta{display:flex;gap:12px;justify-content:center;margin-top:34px;flex-wrap:wrap}
+#hero .cta .btn-primary{font-size:16px;padding:14px 28px;transition:filter .15s ease,transform .15s ease,box-shadow .15s ease}
+#hero .cta .btn-primary:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(10,132,255,.35)}
 #hero .fineprint{margin-top:18px;font-size:13px;color:var(--text-3)}
+@media (max-width:520px){.h1br{display:none}}
+
+/* hero entrance — the page's one authored motion moment */
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+.app-mark,#hero h1,#hero .sub,#hero .cta,#hero .fineprint{animation:rise .7s cubic-bezier(.22,1,.36,1) both}
+#hero h1{animation-delay:.06s}
+#hero .sub{animation-delay:.14s}
+#hero .cta{animation-delay:.22s}
+#hero .fineprint{animation-delay:.28s}
+@media (prefers-reduced-motion:reduce){.app-mark,#hero h1,#hero .sub,#hero .cta,#hero .fineprint{animation:none}}
 
 /* panel screenshot */
 #panel{padding-top:24px;display:flex;justify-content:center}
-.stage{position:relative;width:min(281px,86vw)}
+.stage{position:relative;width:min(283px,86vw)}
 .glowbed{position:absolute;top:-60px;bottom:-60px;left:50%;transform:translateX(-50%);width:min(100vw,540px);background:radial-gradient(ellipse at 50% 35%,rgba(255,179,64,.22),transparent 70%);pointer-events:none}
 .shot{position:relative;display:block;width:100%;height:auto;border-radius:var(--radius);border:1px solid var(--line);
   box-shadow:0 30px 60px rgba(0,0,0,.5),0 8px 20px rgba(0,0,0,.4)}
