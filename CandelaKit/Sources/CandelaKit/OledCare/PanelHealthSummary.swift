@@ -74,18 +74,7 @@ public struct PanelHealthSummary: Sendable {
       cells: normalized(map.cells),
       hottestRelative: hottestRelative,
       hottestOwner: hottestOwner,
-      topOwnersByHours: topOwners(ownerHours))
-  }
-
-  /// `OwnerHours.topOwners(limit:)` labels its tuple element `hours` but
-  /// returns panel-SECONDS. The conversion belongs here, at the boundary where
-  /// the value stops being an accumulator's internal unit and becomes a number
-  /// a view renders — passing it straight through would put a 3600× overstated
-  /// figure on screen under a label that says "hours".
-  private static func topOwners(_ ownerHours: OwnerHours) -> [(owner: String, hours: Double)] {
-    ownerHours.topOwners(limit: topOwnerLimit).map {
-      (owner: $0.owner, hours: $0.hours / 3600)
-    }
+      topOwnersByHours: ownerHours.topOwners(limit: topOwnerLimit))
   }
 
   private static func confidence(telemetryEnabled: Bool, sampleCount: Int) -> Confidence {

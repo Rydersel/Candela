@@ -82,6 +82,20 @@ struct OwnerHoursAccumulatorTests {
     #expect(top.map(\.owner) == ["Zed", "Alpha", "Beta"])
   }
 
+  /// The tuple label says `hours`; storage is seconds. This shipped briefly
+  /// returning raw seconds under that label — a 3600× overstatement one
+  /// `Text(...)` from the screen, and exactly the kind of number OC11 forbids
+  /// the UI to imply. One full-screen hour must read as 1.0, not 3600.
+  @Test func topOwnersReturnsHoursNotSeconds() {
+    var acc = OwnerHoursAccumulator()
+    let full = observation([String?](repeating: "Slack", count: PanelGrid.cellCount))
+    acc.accumulate(full, elapsed: 3600)
+    let top = acc.hours.topOwners(limit: 1)
+    #expect(abs(top[0].hours - 1.0) < 0.0001)
+    // …and the raw store is still seconds, so nobody "fixes" the wrong side.
+    #expect(abs(acc.hours.secondsByOwner["Slack"]! - 3600) < 0.0001)
+  }
+
   @Test func topOwnersClampsToTheAvailableCount() {
     var acc = OwnerHoursAccumulator()
     acc.accumulate(

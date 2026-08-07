@@ -16,13 +16,17 @@ public struct OwnerHours: Equatable, Sendable, Codable {
 
   /// Descending by seconds, ties broken by owner name so the view does not
   /// reshuffle between frames with equal-weight renders.
+  /// Returns **hours**, as the label says. Storage is seconds; the conversion
+  /// belongs here rather than at each call site — it shipped briefly returning
+  /// raw seconds under this `hours` label, which is a 3600× overstatement one
+  /// `Text(...)` away from the screen.
   public func topOwners(limit: Int) -> [(owner: String, hours: Double)] {
     secondsByOwner
       .sorted { lhs, rhs in
         lhs.value != rhs.value ? lhs.value > rhs.value : lhs.key < rhs.key
       }
       .prefix(max(0, limit))
-      .map { (owner: $0.key, hours: $0.value) }
+      .map { (owner: $0.key, hours: $0.value / 3600) }
   }
 
   fileprivate mutating func add(_ secondsAdded: [String: Double], totalAdded: Double) {
