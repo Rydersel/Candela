@@ -84,21 +84,18 @@ struct DisplayCardPolicyTests {
     var paths: [BrightnessPath] = []
     let flags = [true, false]
     for role in [DisplayRole.builtIn, .external] {
-      for hdrMode in [HDRMode.off, .alwaysOn] {
-        for (isHDRActive, forceSoftware) in flags.flatMap({ a in flags.map { (a, $0) } }) {
-          for (avoidGamma, disableCombined) in flags.flatMap({ a in flags.map { (a, $0) } }) {
-            for (unavailableDDC, switching) in flags.flatMap({ a in [0.0, 0.5].map { (a, $0) } }) {
-              paths.append(BrightnessPathPolicy.path(.init(
-                role: role,
-                hdrMode: hdrMode,
-                isHDRActive: isHDRActive,
-                forceSoftware: forceSoftware,
-                avoidGamma: avoidGamma,
-                disableCombinedBrightness: disableCombined,
-                unavailableDDC: unavailableDDC,
-                switchingValue: switching
-              )))
-            }
+      for (isHDRActive, forceSoftware) in flags.flatMap({ a in flags.map { (a, $0) } }) {
+        for (avoidGamma, disableCombined) in flags.flatMap({ a in flags.map { (a, $0) } }) {
+          for (unavailableDDC, switching) in flags.flatMap({ a in [0.0, 0.5].map { (a, $0) } }) {
+            paths.append(BrightnessPathPolicy.path(.init(
+              role: role,
+              isHDRActive: isHDRActive,
+              forceSoftware: forceSoftware,
+              avoidGamma: avoidGamma,
+              disableCombinedBrightness: disableCombined,
+              unavailableDDC: unavailableDDC,
+              switchingValue: switching
+            )))
           }
         }
       }

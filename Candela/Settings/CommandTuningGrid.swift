@@ -228,7 +228,7 @@ struct CommandTuningGrid: View {
       switch trafficBlock {
       // This grid renders only under an EXTERNAL display (`DisplayDetailView`),
       // and `BrightnessPathPolicy.usesNative` has exactly one way to answer yes
-      // for an external: an HDR mode is set and HDR is live. So the sentence
+      // for an external: HDR is live, whoever engaged it (#52). So the sentence
       // can name HDR rather than shrugging at "macOS is doing it".
       case .macOSDrivesBrightness:
         SettingsCaption("This display is in HDR mode. macOS is setting its brightness directly and no hardware commands are reaching it, so these settings have no effect until HDR turns off.")

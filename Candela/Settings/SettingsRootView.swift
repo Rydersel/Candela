@@ -17,10 +17,11 @@ import SwiftUI
 @MainActor
 struct SettingsRootView: View {
   @State private var selection: SettingsDestination? = .pane(.general)
-  /// Pinned to `.all`, and it has to be BOUND rather than left `.automatic`.
+  /// Pinned to `.all` and BOUND rather than left `.automatic`, so SwiftUI
+  /// holds an explicit visibility value to defend.
   ///
-  /// Without it, AppKit's `NSSplitView` may collapse the sidebar when the window
-  /// is squeezed — and it autosaves that under
+  /// AppKit's `NSSplitView` may collapse the sidebar when the window is
+  /// squeezed — and it autosaves that under
   /// `"NSSplitView Subview Frames …SidebarNavigationSplitView"`, so the collapse
   /// survives relaunch. There is no sidebar-toggle item in this window's
   /// toolbar, so once collapsed there was **no way back from inside the app**:
@@ -30,8 +31,11 @@ struct SettingsRootView: View {
   /// settings window squeezed it, the sidebar collapsed, and the stored frames
   /// came back `"0, 0, 208, 568, YES, NO"` — collapsed — on every subsequent
   /// launch. Recovery took a `defaults delete`, which is not a thing to ask of
-  /// anyone. Re-asserting `.all` on appearance is what makes the state
-  /// unstickable.
+  /// anyone. The binding pins the INITIAL state; the `.onChange` in `body`
+  /// springs the value back if a collapse ever reaches the binding. Whether
+  /// AppKit's restored autosave frames reach it is UNMEASURED — that launch
+  /// case is #66's open hardware item, and the lever that can actually touch
+  /// the `NSSplitView` is `SettingsWindowConfigurator`, not this state.
   @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
   @Environment(AppModel.self) private var model
@@ -117,6 +121,21 @@ struct SettingsRootView: View {
       if SettingsSelectionPolicy.resolve(selectedDisplayKey: key, connectedKeys: connected) == nil {
         selection = .pane(.general)
       }
+    }
+    // Best-effort anti-collapse defence (#66): this window has no
+    // sidebar-toggle item, so a hidden sidebar removes every pane from
+    // navigation with no way back from inside the app. Guards `.detailOnly`
+    // alone — "the sidebar is hidden" — never `!= .all`: `.automatic` and
+    // `.doubleColumn` are legitimate framework values, and fighting them would
+    // ping-pong writes against SwiftUI's own normalisation. On a window
+    // genuinely too narrow for both columns, the forced `.all` may itself be
+    // re-collapsed by AppKit — a squeeze-fight #66's hardware item should
+    // watch for. This layer helps only when a collapse is reflected into the
+    // binding; whether AppKit's restored autosave frames ever are is
+    // unmeasured, so the restored-collapsed launch stays OPEN on #66 — this
+    // modifier does not claim to cover it.
+    .onChange(of: columnVisibility) { _, visibility in
+      if visibility == .detailOnly { columnVisibility = .all }
     }
   }
 

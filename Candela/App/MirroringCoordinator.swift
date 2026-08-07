@@ -61,7 +61,7 @@ final class MirroringCoordinator {
   /// is what is left".
   private(set) var lastPartialBreak: [CGDirectDisplayID] = []
   /// The four-way gate refused this request, and names who is holding it
-  /// (AR12). Its own property rather than an eighth `MirrorRefusal`: that enum
+  /// (AR12). Its own property rather than another `MirrorRefusal` case: that enum
   /// is `MirrorTopologyPolicy`'s answer about the TOPOLOGY, and this is not a
   /// fact about the topology at all.
   private(set) var blockedBy: ReconfigurationClaimant?
@@ -510,7 +510,7 @@ final class MirroringCoordinator {
       case let .refused(reason):
         // Never a silent false. `engageMirror` returned a bare Bool whose two
         // falses meant different things, and the enum it was replaced by has
-        // SEVEN cases — each with its own sentence in `MirroringCopy`, and no
+        // EIGHT cases — each with its own sentence in `MirroringCopy`, and no
         // `default:` arm anywhere that consumes it.
         self.lastRefusal = reason
         self.log.info("Mirror toggle refused: \(String(describing: reason), privacy: .public)")

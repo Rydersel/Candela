@@ -530,7 +530,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // trigger (D13/D14): it is written at Setup *completion*, so an
     // interrupted first run still counts as a first run.
     let isFirstRun = PrefsSchema.storedVersion(in: .standard) == nil
-    if !isFirstRun {
+    // Fork bug 2 (#60): gated on the SAME predicate as every other surface
+    // (panel banner, Keyboard pane warning row, diagnostics), never on the
+    // bare grant. Custom shortcuts are Carbon hotkeys and need no grant, so an
+    // all-custom rig must not be shown a TCC prompt it can only refuse — one
+    // question, answered one way everywhere it is asked.
+    if !isFirstRun, permission.isWarningWarranted {
       permission.promptIfNeeded()
     }
     if permission.isGranted {

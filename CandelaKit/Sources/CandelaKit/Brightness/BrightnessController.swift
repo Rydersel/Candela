@@ -108,10 +108,12 @@ public final class BrightnessController {
   /// plain UserDefaults and not observable). Change it via `setHDRMode`.
   public private(set) var hdrMode: HDRMode
 
-  /// The fork's `usesNativeBrightness` gate (dossier §10): an HDR mode is set
-  /// AND HDR is currently live. The second half is empirically load-bearing:
-  /// with HDR off the MAG341C answers `DisplayServicesSetBrightness` with
-  /// SUCCESS but changes nothing, so native must never be routed on mode alone.
+  /// The fork's `usesNativeBrightness` gate (dossier §10), corrected by #52:
+  /// HDR is currently live, WHOEVER engaged it — System Settings can turn HDR
+  /// on with `hdrMode` still `.off`, and DDC writes cannot land there. The
+  /// live-state half is empirically load-bearing the other way too: with HDR
+  /// off the MAG341C answers `DisplayServicesSetBrightness` with SUCCESS but
+  /// changes nothing, so native must never be routed on mode alone.
   /// Role `.builtIn` is constitutively native (Task 10): the built-in panel
   /// has no DDC wire and no combined/software routing — every path-selection
   /// consumer (applyPaths, step's combined math, handleReconfigure) short-
@@ -122,7 +124,7 @@ public final class BrightnessController {
   /// pinned against the full table by
   /// `theStandalonePredicateAgreesWithTheTableEverywhere`.
   private var usesNative: Bool {
-    BrightnessPathPolicy.usesNative(role: role, hdrMode: hdrMode, isHDRActive: cachedHDRActive)
+    BrightnessPathPolicy.usesNative(role: role, isHDRActive: cachedHDRActive)
   }
 
   /// Whether the display reports HDR capability — a published mirror of the
@@ -157,7 +159,6 @@ public final class BrightnessController {
   private func pathInputs(tuning: CommandTuning) -> BrightnessPathPolicy.Inputs {
     BrightnessPathPolicy.Inputs(
       role: role,
-      hdrMode: hdrMode,
       isHDRActive: cachedHDRActive,
       forceSoftware: prefs.forceSoftware,
       avoidGamma: prefs.avoidGamma,
