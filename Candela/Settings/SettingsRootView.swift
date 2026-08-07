@@ -82,7 +82,6 @@ struct SettingsRootView: View {
       detail
         .background(.background)
         .focused($detailFocusAnchor)
-        .toolbar { SettingsPrincipalTitle(title: currentTitle) }
         // Keyboard contract (accessibility contract 2): ⌘[ pops the current
         // display's sub-page; ⌘1–⌘9 select the first nine sidebar destinations
         // in sidebar render order. Hidden buttons rather than `.commands`: the
@@ -230,13 +229,37 @@ struct SettingsRootView: View {
     }
   }
 
-  @ViewBuilder private var detail: some View {
+  /// ONE `NavigationStack` for the whole detail column, alive for the life of
+  /// the window. It used to be one stack per display destination, created
+  /// inside the selection switch and `.id`-keyed, and that shape shipped a
+  /// defect: destroying a `NavigationStack` while it is PRESENTING a sub-page
+  /// leaves the pushed page hosted by the split view's detail column with
+  /// nothing owning it (measured 2026-08-07: sidebar highlighted Keyboard,
+  /// window title said Keyboard, detail stayed frozen on the orphaned Advanced
+  /// page until Back). A selection change must therefore never remove the
+  /// stack; it changes the stack's ROOT and its PATH instead, so leaving a
+  /// display pops its sub-page through the binding before the root swaps.
+  ///
+  /// SO23 is preserved: `subPagePaths` still retains every display's stack,
+  /// because the binding below reads and writes per-display storage; a pane
+  /// selection just presents none of it.
+  private var detail: some View {
+    NavigationStack(path: currentPathBinding) {
+      detailRoot
+        .toolbar { SettingsPrincipalTitle(title: currentTitle) }
+        .navigationDestination(for: DisplaySubPage.self) { page in
+          pushedPage(page)
+        }
+    }
+  }
+
+  @ViewBuilder private var detailRoot: some View {
     switch selection {
     case let .pane(id):
       SettingsRegistry.descriptor(for: id).content()
     case let .display(key):
       if let state = model.allControlledStates.first(where: { $0.display.persistenceKey == key }) {
-        displayStack(key: key, state: state)
+        displayRoot(key: key, state: state)
       } else {
         generalFallback
       }
@@ -245,38 +268,62 @@ struct SettingsRootView: View {
     }
   }
 
-  /// One display destination: a `NavigationStack` whose path is that display's
-  /// retained sub-page stack (SO23). The banner region sits above the root AND
-  /// above every pushed page from these two placements alone (SO7) — pages
+  /// One display destination's root: the banner region sits above the root AND
+  /// above every pushed page from these two placements alone (SO7); pages
   /// never own banners, so a new sub-page cannot forget one.
   ///
-  /// `.id(key)` gives each display its OWN stack identity: switching displays
-  /// replaces the stack outright instead of animating one display's path into
-  /// another's, and stale per-stack state (scroll, focus) cannot leak across.
-  private func displayStack(key: String, state: AppModel.DisplayState) -> some View {
-    NavigationStack(path: pathBinding(for: key)) {
-      VStack(spacing: 0) {
-        BannerRegion(state: state)
-        if key == "builtIn" {
-          BuiltInDisplayPane(selection: $selection, path: pathBinding(for: key))
-        } else {
-          DisplayDetailView(state: state, selection: $selection, path: pathBinding(for: key))
-        }
-      }
-      .navigationDestination(for: DisplaySubPage.self) { page in
-        VStack(spacing: 0) {
-          BannerRegion(state: state)
-          subPage(page, key: key, state: state)
-        }
-        // The root's principal title does NOT survive a push (measured in the
-        // Task 9 spike — the toolbar came up empty but for Back), so every
-        // pushed page re-declares it. Still the DISPLAY's name: the sub-page
-        // names itself in its header, and the toolbar keeps answering "which
-        // display am I configuring".
-        .toolbar { SettingsPrincipalTitle(title: currentTitle) }
+  /// `.id(key)` on the ROOT CONTENT, never on the stack: it still resets
+  /// per-display root state (scroll, focus) on a switch, without giving each
+  /// display its own stack identity, which is the orphaned-page defect `detail`
+  /// documents.
+  private func displayRoot(key: String, state: AppModel.DisplayState) -> some View {
+    VStack(spacing: 0) {
+      BannerRegion(state: state)
+      if key == "builtIn" {
+        BuiltInDisplayPane(selection: $selection, path: pathBinding(for: key))
+      } else {
+        DisplayDetailView(state: state, selection: $selection, path: pathBinding(for: key))
       }
     }
     .id(key)
+  }
+
+  /// A pushed sub-page, resolved against the CURRENT selection: the stack is
+  /// shared, so a page is only ever presented for the selected display. The
+  /// guard goes empty for the frame in which a pane selection is still popping
+  /// the outgoing display's page.
+  @ViewBuilder private func pushedPage(_ page: DisplaySubPage) -> some View {
+    if case let .display(key) = selection,
+       let state = model.allControlledStates.first(where: { $0.display.persistenceKey == key }) {
+      VStack(spacing: 0) {
+        BannerRegion(state: state)
+        subPage(page, key: key, state: state)
+      }
+      // The root's principal title does NOT survive a push (measured in the
+      // Task 9 spike: the toolbar came up empty but for Back), so every
+      // pushed page re-declares it. Still the DISPLAY's name: the sub-page
+      // names itself in its header, and the toolbar keeps answering "which
+      // display am I configuring".
+      .toolbar { SettingsPrincipalTitle(title: currentTitle) }
+    }
+  }
+
+  /// The persistent stack's path: the selected display's retained sub-page
+  /// stack, or empty for a pane. Selecting a pane changes this binding's VALUE
+  /// to `[]`, which is what pops the outgoing display's sub-page while the
+  /// stack survives. The setter drops writes while a pane is selected so the
+  /// pop transition cannot clear a display's retained path (SO23).
+  private var currentPathBinding: Binding<[DisplaySubPage]> {
+    Binding(
+      get: {
+        guard case let .display(key) = selection else { return [] }
+        return subPagePaths[key] ?? []
+      },
+      set: { newPath in
+        guard case let .display(key) = selection else { return }
+        subPagePaths[key] = newPath
+      }
+    )
   }
 
   /// One case per sub-page — all three pages are real. Each page owns its
@@ -427,19 +474,75 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
   /// spike); this is what re-hides it.
   let navigationToken: Int
 
-  func makeNSView(context _: Context) -> NSView {
+  func makeNSView(context: Context) -> NSView {
     let view = NSView(frame: .zero)
     // The view is not in a window yet during `makeNSView`.
-    DispatchQueue.main.async { configure(view.window) }
+    let coordinator = context.coordinator
+    DispatchQueue.main.async { configure(view.window, coordinator: coordinator) }
     return view
   }
 
-  func updateNSView(_ view: NSView, context _: Context) {
-    DispatchQueue.main.async { configure(view.window) }
+  func updateNSView(_ view: NSView, context: Context) {
+    let coordinator = context.coordinator
+    DispatchQueue.main.async { configure(view.window, coordinator: coordinator) }
   }
 
-  private func configure(_ window: NSWindow?) {
+  func makeCoordinator() -> Coordinator { Coordinator() }
+
+  /// Holds the `didUpdateNotification` observation that re-hides the window
+  /// title whenever AppKit flips `titleVisibility` back to visible.
+  ///
+  /// `navigationToken` catches the flips that ride on a push or a pop, but two
+  /// measured cases flip it with NO dependency of `updateNSView` changing: Back
+  /// out of a pushed page whose selection had already moved (the pop leaves the
+  /// depth-keyed token where a stale render had it), and the banner region
+  /// appearing over the hub. Rather than enumerating flip sources one defect at
+  /// a time, the enforcement rides `NSWindow.didUpdateNotification`, which
+  /// AppKit posts on every window update pass; the check is two loads and a
+  /// compare, and the write happens only when a flip actually occurred, so the
+  /// notification cannot feed back on itself.
+  final class Coordinator {
+    // Nonisolated storage so `deinit` can remove the observer (a `@MainActor`
+    // property is unreachable from a nonisolated deinit under Swift 6).
+    // `removeObserver` is thread-safe; both properties are only ever WRITTEN
+    // from `enforceTitleHidden`, which is main-actor.
+    private var observer: NSObjectProtocol?
+    private weak var observedWindow: NSWindow?
+
+    /// The one way to hand the window into the `@Sendable` notification
+    /// closure. `@unchecked Sendable` is justified by confinement: the box is
+    /// only ever opened inside `MainActor.assumeIsolated`, on the `.main`
+    /// queue, which is where NSWindow lives.
+    private struct WeakWindowBox: @unchecked Sendable {
+      weak var window: NSWindow?
+    }
+
+    @MainActor func enforceTitleHidden(on window: NSWindow) {
+      guard observedWindow !== window else { return }
+      if let observer { NotificationCenter.default.removeObserver(observer) }
+      observedWindow = window
+      let box = WeakWindowBox(window: window)
+      observer = NotificationCenter.default.addObserver(
+        forName: NSWindow.didUpdateNotification, object: window, queue: .main
+      ) { _ in
+        // didUpdateNotification for an NSWindow is posted on the main thread;
+        // the assumeIsolated is the bridge from the nonisolated notification
+        // closure to the AppKit calls below.
+        MainActor.assumeIsolated {
+          guard let window = box.window, window.titleVisibility != .hidden else { return }
+          window.titleVisibility = .hidden
+        }
+      }
+    }
+
+    deinit {
+      if let observer { NotificationCenter.default.removeObserver(observer) }
+    }
+  }
+
+  private func configure(_ window: NSWindow?, coordinator: Coordinator) {
     guard let window else { return }
+    coordinator.enforceTitleHidden(on: window)
     if !window.styleMask.contains(.resizable) {
       window.styleMask.insert(.resizable)
     }
