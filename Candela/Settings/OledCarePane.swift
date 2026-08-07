@@ -58,9 +58,8 @@ struct OledCarePane: View {
       // `CGDirectDisplayID`). IDs reassign across a replug with both displays
       // still attached — measured, the MAG went 3→2 and the Dell 2→3 across one
       // dock cycle — and `ForEach` keyed on a reused id hands the OLD view
-      // instance, with its `@State`, to the OTHER panel. The worst case is not
-      // cosmetic: an open power-off confirmation would retarget, and the DDC
-      // power-off would go to the wrong display.
+      // instance, with its `@State`, to the OTHER panel: an in-progress slider
+      // drag would then write its draft level to the wrong display's prefs.
       ForEach(model.displays, id: \.display.persistenceKey) { state in
         OledCareDisplaySection(state: state, displaySleepMinutes: displaySleepMinutes)
       }
@@ -211,9 +210,8 @@ private struct OledInlineNote: View {
 /// ruling and D29 rule 3's shape as well.
 ///
 /// A separate `View` rather than a builder on the pane so each display owns its
-/// own confirmation and slider-drag state. A `@State` keyed by display inside
-/// one big view is the shape that puts one display's pending power-off on
-/// another display's row.
+/// own slider-drag state. A `@State` keyed by display inside one big view is the
+/// shape that shows one display's in-progress drag on another display's row.
 @MainActor
 private struct OledCareDisplaySection: View {
   let state: AppModel.DisplayState
@@ -223,8 +221,6 @@ private struct OledCareDisplaySection: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
 
-  @State private var confirmingPowerOff = false
-  @State private var powerOffFailed = false
   /// Slider drafts, live only while a drag is in progress. A `Slider` bound
   /// straight to a pref writes — and fans out, and bumps `prefsRevision` — on
   /// every pixel of the drag, re-rendering the pane under the user's pointer.
@@ -232,9 +228,9 @@ private struct OledCareDisplaySection: View {
   @State private var idleLevelDraft: Double?
   @State private var unfocusedLevelDraft: Double?
   /// `PanelHoursTracker` is a plain class with no observation, so nothing
-  /// re-renders this section when the hours line changes. Bumped by the two
-  /// actions that change it from here; the numbers otherwise refresh whenever
-  /// anything else re-renders the pane.
+  /// re-renders this section when the hours line changes. Bumped by the one
+  /// action that changes it from here (Dismiss); the numbers otherwise refresh
+  /// whenever anything else re-renders the pane.
   @State private var hoursRevision = 0
 
   private var persistenceKey: String { state.display.persistenceKey }
@@ -403,7 +399,15 @@ private struct OledCareDisplaySection: View {
     // its next write-through.
     let tracker = model.oledCare.hoursTracker(for: persistenceKey)
 
-    SettingRow("Counted while the display is awake and not mirrored. Kept per display, and kept when the display is unplugged.") {
+    // The second sentence is the honest limit of the number (#94): macOS reports
+    // a DPMS-blanked panel as awake, at full resolution, with no reconfiguration,
+    // so a panel held in soft standby is indistinguishable from a lit one.
+    // "can still be counted" is deliberately hedged — whether the monitor's own
+    // power button reaches soft standby or instead deasserts hot-plug detect
+    // (a real departure, handled correctly) is untested per monitor (#23).
+    // Display sleep, system sleep and mirroring are all handled correctly —
+    // don't let the caption imply otherwise in either direction.
+    SettingRow("Counted while the display is awake and not mirrored, and kept per display even when it is unplugged. A display switched off at the monitor itself can still be counted — macOS reports a blanked panel as awake.") {
       Toggle("Count panel-on hours", isOn: Binding(
         get: { prefs.oledHoursTracking },
         set: { on in writer.write(.oledHoursTracking) { $0.oledHoursTracking = on } }
@@ -421,7 +425,7 @@ private struct OledCareDisplaySection: View {
     }
 
     if tracker.shouldShowStandbyNote {
-      SettingRow(caption: SettingsCaption("Most OLED panels run their own compensation cycle when they go into standby, and skip it while they are in use. Anything that puts the panel to sleep counts — the button below, its own power button, or leaving the Mac idle.")) {
+      SettingRow(caption: SettingsCaption("Most OLED panels run their own compensation cycle when they go into standby, and skip it while they are in use. Anything that puts the panel to sleep counts — the monitor's own power button, or leaving the Mac idle.")) {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
           Text("This display has not been in standby for a while.")
           Spacer(minLength: 0)
@@ -433,48 +437,6 @@ private struct OledCareDisplaySection: View {
       }
     }
 
-    // Named for its PURPOSE, not its mechanism (#94). "Turn Off This Display"
-    // framed a multi-minute unresponsive blackout as a malfunction; the panel is
-    // in fact doing the one thing this action exists to let it do. The label is
-    // still honest about the mechanism — it powers the display off, and the
-    // cycle is the panel's to run, not ours to start (S5 cut direct triggering).
-    SettingRow(caption: SettingsCaption("Sends the display's own power-off command over the data cable, so a panel holding a queued compensation cycle can run it. Nothing is closed or logged out.")) {
-      VStack(alignment: .leading, spacing: 6) {
-        Button("Power Off for Panel Maintenance…") {
-          powerOffFailed = false
-          confirmingPowerOff = true
-        }
-        .confirmationDialog(
-          Text(verbatim: "Power off \(name) for panel maintenance?"),
-          isPresented: $confirmingPowerOff,
-          titleVisibility: .visible
-        ) {
-          // No `.destructive` role: nothing is destroyed, and red would tell the
-          // user something is being deleted. The weight of the action is carried
-          // by the message, which is where the actual risk is.
-          Button("Power Off Display") { powerOff() }
-          Button("Cancel", role: .cancel) {}
-        } message: {
-          // Every claim the previous copy made was disproved on hardware
-          // (#94, 2026-08-07): nothing moves to another display, because macOS
-          // never sees the display leave; the keyboard and mouse do not wake it
-          // during a maintenance cycle; and the display's own power button does
-          // not either — nor does unplugging it from the wall. Naming the power
-          // button was the worst of the three: it is the first thing anyone
-          // tries, and finding it dead is what turns "wait a few minutes" into
-          // "the app killed my monitor". The two routes below are the ones
-          // OBSERVED to bring a panel back, and both work the same way — they
-          // force hot-plug detect to re-assert.
-          Text("The display goes dark. On a panel with a queued maintenance cycle it can stay dark for several minutes and ignore the keyboard and mouse while the cycle runs — that is the panel working correctly, and it is the point of this. If it does not come back on its own, replug its video cable or switch the monitor's input away and back.")
-        }
-        // In the button's own row: a failure notice one divider below the
-        // button reads as an unrelated setting rather than as this button's
-        // result.
-        if powerOffFailed {
-          OledInlineNote(Text("The display did not accept the power-off command. Not every display supports it."))
-        }
-      }
-    }
   }
 
   /// The hours line, with the counter's own state in it. `oledHoursTracking`
@@ -484,16 +446,6 @@ private struct OledCareDisplaySection: View {
     let figures = "\(Self.hoursPhrase(tracker.totalHours)) in total · "
       + "\(Self.hoursPhrase(tracker.hoursSinceStandby)) since the last standby"
     return prefs.oledHoursTracking ? figures : figures + " · counting is paused"
-  }
-
-  private func powerOff() {
-    Task { @MainActor in
-      let sent = await model.oledCare.powerOffDisplay(state)
-      powerOffFailed = !sent
-      // The power-off books a standby, which is exactly what the line above
-      // reports — and nothing else would re-read it.
-      hoursRevision &+= 1
-    }
   }
 
   // MARK: - Thresholds
