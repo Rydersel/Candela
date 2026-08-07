@@ -664,20 +664,17 @@ struct DisplayHubView: View {
     ))
   }
 
-  /// The diagnostics page's own worst-of-three readback verdict, previewed. One
-  /// `allZeros` is never cancelled by a later `notAttempted` — the write-only
-  /// panel is a permanent property, and the preview must not soften it.
+  /// The diagnostics page's own worst-of-three readback verdict, previewed —
+  /// through the page's own vocabulary (`DiagnosticsCopy`), which the report
+  /// also uses, so the three surfaces cannot drift apart. One `allZeros` is
+  /// never cancelled by a later `notAttempted`: a write-only display is a
+  /// permanent property, and the preview must not soften it.
   private var readbackVerdict: String {
-    switch DDCReadEvidence.worst([
+    DiagnosticsCopy.readbackVerdict(DDCReadEvidence.worst([
       state.controller.readEvidence,
       state.volume.readEvidence,
       state.contrast.readEvidence,
-    ]) {
-    case .notAttempted: "Not asked yet"
-    case .answered: "Answers reads"
-    case .allZeros: "Write-only"
-    case .noReply: "Not answering"
-    }
+    ]))
   }
 
   // MARK: - Reset

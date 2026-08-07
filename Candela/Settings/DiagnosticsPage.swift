@@ -200,7 +200,7 @@ struct DiagnosticsPage: View {
       }
 
       if let width = facts?.physicalWidthCm, let height = facts?.physicalHeightCm {
-        LabeledContent("Panel size") {
+        LabeledContent("Display size") {
           Text(verbatim: "\(width) × \(height) cm").foregroundStyle(.secondary)
         }
       }
@@ -348,9 +348,9 @@ struct DiagnosticsPage: View {
     // It is not a failure, a preference, or something a future release fixes,
     // so it is not phrased as any of those.
     if isBuiltIn {
-      SettingRow("macOS drives the built-in panel's backlight itself, so there is nothing for \(AppInfo.productName) to send and nothing that can be turned back on.") {
+      SettingRow("macOS drives the built-in display's backlight itself, so there is nothing for \(AppInfo.productName) to send and nothing that can be turned back on.") {
         LabeledContent("Hardware control") {
-          Text("Does not apply — this panel has no data cable to carry hardware commands")
+          Text("Does not apply — this display has no data cable to carry hardware commands")
             .foregroundStyle(.secondary)
         }
       }
@@ -492,7 +492,7 @@ struct DiagnosticsPage: View {
         Text(verbatim: CapabilityString.tag("model", in: capabilities) ?? "Not stated")
           .foregroundStyle(.secondary)
       }
-      LabeledContent("Panel type") {
+      LabeledContent("Display type") {
         Text(verbatim: CapabilityString.tag("type", in: capabilities) ?? "Not stated")
           .foregroundStyle(.secondary)
       }
@@ -1051,7 +1051,6 @@ struct DiagnosticsReportActions: View {
 /// The report's field values are therefore the page's own words, capitalised
 /// the way the page capitalises them — `readback: Answers reads`, not
 /// `readback: answers reads`. That is the casing ruling this file owns.
-@MainActor
 enum DiagnosticsCopy {
   /// The engine's own answer, put into the user's words. `BrightnessPath` gained
   /// a `.softwareOnly` case after the diagnostics rows were specified, and it is
@@ -1127,70 +1126,5 @@ enum DiagnosticsCopy {
     case let (nil, down?): return down
     case (nil, nil): return nil
     }
-  }
-
-  /// Every per-display setting this display has moved off its default, as
-  /// `name = value` pairs.
-  ///
-  /// The names are `PrefName` raw values — the BARE key names, never the
-  /// composed `UserDefaults` keys. That is the scrub contract documented on
-  /// `DiagnosticsReportSnapshot.nonDefaultPrefs`, and it is not cosmetic: a
-  /// stored key is `"<name>.<persistenceKey>"` and a persistence key is an EDID
-  /// UUID or `name-manufacturer-serial`, so emitting real keys would put the
-  /// serial into a public issue that `hasSerial` exists to keep out.
-  ///
-  /// Per-command tuning carries the command in the middle position the storage
-  /// key uses (`unavailableDDC.volume`) — the command is scope, not identity,
-  /// and dropping it would make three different settings print as one name.
-  static func nonDefaultPrefs(_ prefs: DisplayPrefs, remembersMode: Bool) -> [String] {
-    var lines: [String] = []
-    func note(_ name: PrefName, _ value: String) { lines.append("\(name.rawValue) = \(value)") }
-
-    let friendlyName = DisplayCardPolicy.normalizedFriendlyName(prefs.friendlyName)
-    if !friendlyName.isEmpty { note(.friendlyName, friendlyName) }
-    if prefs.hideDisplay { note(.hideDisplay, "true") }
-    if prefs.isDisabled { note(.isDisabled, "true") }
-    if prefs.hideVolumeSlider { note(.hideVolumeSlider, "true") }
-    if prefs.hideOsd { note(.hideOsd, "true") }
-    if prefs.forceSoftware { note(.forceSw, "true") }
-    if prefs.avoidGamma { note(.avoidGamma, "true") }
-    if prefs.combinedSwitchingPoint != 0 {
-      note(.combinedSwitchingPoint, "\(prefs.combinedSwitchingPoint)")
-    }
-    if prefs.enableMuteUnmute { note(.enableMuteUnmute, "true") }
-    if prefs.audioSinkOverride != .auto {
-      note(.audioSinkOverride, "\(prefs.audioSinkOverride)")
-    }
-    if !prefs.audioDeviceNameOverride.isEmpty {
-      note(.audioDeviceNameOverride, prefs.audioDeviceNameOverride)
-    }
-    if prefs.pollingMode != .normal { note(.pollingMode, "\(prefs.pollingMode)") }
-    if prefs.pollingCount != 0 { note(.pollingCount, "\(prefs.pollingCount)") }
-    if remembersMode { note(.rememberDisplayMode, "true") }
-
-    for command in DDCCommand.allCases {
-      let tuning = prefs.tuning(for: command)
-      guard tuning != .unset else { continue }
-      let scope = command.rawValue
-      if tuning.unavailableDDC { lines.append("\(PrefName.unavailableDDC.rawValue).\(scope) = true") }
-      if tuning.minDDCOverride != DDCOverrideValidation.unset {
-        lines.append("\(PrefName.minDDCOverride.rawValue).\(scope) = \(tuning.minDDCOverride)")
-      }
-      if tuning.maxDDCOverride != DDCOverrideValidation.unset {
-        lines.append("\(PrefName.maxDDCOverride.rawValue).\(scope) = \(tuning.maxDDCOverride)")
-      }
-      // 0 (unset) and 5 are both linear (`DimmingMath.curveMultiplier`), so
-      // neither is a departure from the default.
-      if tuning.curveIndex != 0, tuning.curveIndex != 5 {
-        lines.append("\(PrefName.curveDDC.rawValue).\(scope) = \(tuning.curveIndex)")
-      }
-      if tuning.invert { lines.append("\(PrefName.invertDDC.rawValue).\(scope) = true") }
-      if !tuning.remapCodes.isEmpty {
-        let codes = tuning.remapCodes.map { String(format: "%02x", $0) }.joined(separator: ", ")
-        lines.append("\(PrefName.remapDDC.rawValue).\(scope) = \(codes)")
-      }
-    }
-
-    return lines
   }
 }

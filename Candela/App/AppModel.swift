@@ -275,11 +275,10 @@ final class AppModel {
   /// report is copied into an issue about one display and read by someone who
   /// needs to know what else was attached.
   ///
-  /// No serial VALUE enters it, only `hasSerial`, and `nonDefaultPrefs` carries
-  /// bare pref names — both are the scrub contract documented on
-  /// `DiagnosticsReportSnapshot`, and the second matters because a composed
-  /// `UserDefaults` key embeds the persistence key, which is an EDID UUID or
-  /// `name-manufacturer-serial`.
+  /// No serial VALUE enters it, only `hasSerial`. The other half of the scrub
+  /// contract — bare pref names, never composed `UserDefaults` keys — is
+  /// `DiagnosticsPrefSummary`'s, in CandelaKit, where a test pins it over every
+  /// line it emits.
   func diagnosticsSnapshot() -> DiagnosticsReportSnapshot {
     DiagnosticsReportSnapshot(
       appVersion: "\(AppInfo.version) (\(AppInfo.build))",
@@ -305,7 +304,7 @@ final class AppModel {
       // The built-in never passes through `DisplayDiscovery`, so its facts are
       // permanently absent and "not reported" would read as a failed lookup
       // rather than as a panel with no cable.
-      connection: isBuiltIn ? "None — built-in panel" : DiagnosticsCopy.transport(facts),
+      connection: isBuiltIn ? "None — built-in display" : DiagnosticsCopy.transport(facts),
       manufacturer: isBuiltIn ? nil : facts?.manufacturerID,
       hasSerial: facts?.numericSerialNumber != nil || facts?.alphanumericSerialNumber != nil,
       currentMode: displayModes.catalogs[state.id]?.current.map(DiagnosticsCopy.mode),
@@ -318,7 +317,7 @@ final class AppModel {
           state.contrast.readEvidence,
         ])),
       hdrEngaged: state.controller.isHDREngaged,
-      nonDefaultPrefs: DiagnosticsCopy.nonDefaultPrefs(
+      nonDefaultPrefs: DiagnosticsPrefSummary.nonDefaultPrefs(
         prefs, remembersMode: displayModes.isRemembering(state.id)
       )
     )

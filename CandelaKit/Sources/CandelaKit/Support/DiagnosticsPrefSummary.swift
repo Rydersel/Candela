@@ -1,0 +1,83 @@
+import Foundation
+
+/// The non-default per-display settings that go into a diagnostics report.
+///
+/// This is the code the report's PII contract actually rests on. The names it
+/// emits are `PrefName` raw values — the BARE key names — and never the keys
+/// `DisplayPrefs` composes, because a stored key is `"<name>.<persistenceKey>"`
+/// and `DisplayDiscovery.persistenceKey(from:)` returns an EDID UUID or
+/// `name-manufacturer-serial`. Naming settings by their storage keys would put
+/// the display's serial into every pasted report, straight past the `hasSerial`
+/// flag on `DiagnosticsReportSnapshot` that exists to keep it out of public
+/// issues. `noEmittedLineCarriesAComposedStorageKey` pins that over every line
+/// the summary produces, so a setting added here is covered the day it is added.
+///
+/// It lives in the Kit, not beside the page that calls it, for the same reason:
+/// a contract held by review alone is a contract until someone is in a hurry.
+public enum DiagnosticsPrefSummary {
+  /// `remembersMode` arrives from the caller because the flag lives in
+  /// `ModePersistence`, keyed by display CONFIG identity rather than by the
+  /// persistence key this `DisplayPrefs` is built on — the two are different
+  /// keys and only the caller holds both.
+  public static func nonDefaultPrefs(_ prefs: DisplayPrefs, remembersMode: Bool) -> [String] {
+    var lines: [String] = []
+    func note(_ name: PrefName, _ value: String) { lines.append("\(name.rawValue) = \(value)") }
+    /// The command is SCOPE, not identity: three commands share one pref name,
+    /// so dropping it would print three different settings under one name. It
+    /// is also the one component of a storage key that is safe to keep — a
+    /// fixed vocabulary, nothing display-derived.
+    func noteCommand(_ name: PrefName, _ command: DDCCommand, _ value: String) {
+      lines.append("\(name.rawValue).\(command.rawValue) = \(value)")
+    }
+
+    // Same rule the panel title uses: a name cleared to whitespace is unset,
+    // and reporting it would describe a rename that is not in effect.
+    let friendlyName = DisplayCardPolicy.normalizedFriendlyName(prefs.friendlyName)
+    if !friendlyName.isEmpty { note(.friendlyName, friendlyName) }
+    if prefs.hideDisplay { note(.hideDisplay, "true") }
+    if prefs.isDisabled { note(.isDisabled, "true") }
+    if prefs.hideVolumeSlider { note(.hideVolumeSlider, "true") }
+    if prefs.hideOsd { note(.hideOsd, "true") }
+    if prefs.forceSoftware { note(.forceSw, "true") }
+    if prefs.avoidGamma { note(.avoidGamma, "true") }
+    if prefs.combinedSwitchingPoint != 0 {
+      note(.combinedSwitchingPoint, "\(prefs.combinedSwitchingPoint)")
+    }
+    if prefs.enableMuteUnmute { note(.enableMuteUnmute, "true") }
+    if prefs.audioSinkOverride != .auto { note(.audioSinkOverride, "\(prefs.audioSinkOverride)") }
+    if !prefs.audioDeviceNameOverride.isEmpty {
+      note(.audioDeviceNameOverride, prefs.audioDeviceNameOverride)
+    }
+    if prefs.pollingMode != .normal { note(.pollingMode, "\(prefs.pollingMode)") }
+    if prefs.pollingCount != 0 { note(.pollingCount, "\(prefs.pollingCount)") }
+    if remembersMode { note(.rememberDisplayMode, "true") }
+
+    for command in DDCCommand.allCases {
+      let tuning = prefs.tuning(for: command)
+      guard tuning != .unset else { continue }
+      if tuning.unavailableDDC { noteCommand(.unavailableDDC, command, "true") }
+      if tuning.minDDCOverride != DDCOverrideValidation.unset {
+        noteCommand(.minDDCOverride, command, "\(tuning.minDDCOverride)")
+      }
+      if tuning.maxDDCOverride != DDCOverrideValidation.unset {
+        noteCommand(.maxDDCOverride, command, "\(tuning.maxDDCOverride)")
+      }
+      // `DimmingMath.curveMultiplier` treats 0 (unset) and 5 alike, so neither
+      // is a departure from the default.
+      if tuning.curveIndex != 0, tuning.curveIndex != 5 {
+        noteCommand(.curveDDC, command, "\(tuning.curveIndex)")
+      }
+      if tuning.invert { noteCommand(.invertDDC, command, "true") }
+      if !tuning.remapCodes.isEmpty {
+        // Hex, matching how `setTuning` writes them and how the Advanced page
+        // takes them — a decimal report could not be pasted back.
+        noteCommand(
+          .remapDDC, command,
+          tuning.remapCodes.map { String(format: "%02x", $0) }.joined(separator: ", ")
+        )
+      }
+    }
+
+    return lines
+  }
+}
