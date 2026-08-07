@@ -57,8 +57,10 @@ struct DiagnosticsReportTests {
   }
 
   @Test func rendersTheSameTextEveryTime() {
-    // Purity is the ruling: no Date.now inside, so two renders of one snapshot
-    // are byte-identical and a report diff means the machine changed.
+    // Pins that render carries nothing between calls — no accumulating buffer,
+    // no cached lines. It does NOT prove purity: a minute-granularity timestamp
+    // would survive this. That guarantee is structural (the file imports
+    // nothing, so Date is not reachable), not testable from out here.
     let s = snapshot()
     #expect(DiagnosticsReport.render(s) == DiagnosticsReport.render(s))
   }

@@ -17,6 +17,11 @@ public struct DiagnosticsReportSnapshot: Sendable {
     public let controlMethod: String
     public let readbackVerdict: String
     public let hdrEngaged: Bool
+    /// Free-form, rendered verbatim: the caller scrubs these, not the renderer.
+    /// Must carry the bare pref name and value (`forceSw = true`), never a full
+    /// storage key — `DisplayDiscovery.persistenceKey` is an EDID UUID or
+    /// `name-manufacturer-serial`, so a raw `UserDefaults` key would put the
+    /// serial straight into a public issue that `hasSerial` exists to keep out.
     public let nonDefaultPrefs: [String]
 
     public init(name: String, hardwareName: String, connection: String?,
