@@ -1,27 +1,21 @@
 # Candela app icon
 
+Designer-delivered set (2026-08-06): a gold "C" monogram with a glowing tip
+on a dark rounded square.
+
 ## Contents
 - `Candela.icns` — packaged icon, ready to drop into your Xcode target or app bundle
 - `Candela.iconset/` — the ten PNGs macOS expects, correctly named
-- `candela-full.svg` / `candela-medium.svg` / `candela-small.svg` — editable masters
-
-## Size ladder
-| Rendered size | Master | Content inset |
-|---|---|---|
-| 1024, 512, 256 | full | 80.5% |
-| 128 | medium | 81.3% |
-| 64 | medium | 87.5% |
-| 32, 16 | small | none (full bleed) |
+- `candela-monogram.svg` — the editable master (1024×1024, full art including background)
 
 ## Rebuilding
-With the SVGs edited, regenerate on a Mac with:
+The PNGs and `.icns` come from the designer; if the master changes, re-export
+the ten sizes into `Candela.iconset/`, then on a Mac:
 
     iconutil -c icns Candela.iconset
 
-## Notes
-The 16 and 32 px sizes are drawn full bleed rather than inset, so panel edges land
-on whole pixels. Insetting them would put edges on half pixels and soften the icon
-at the size it is seen most.
-
-The masters are hand-tuned per tier, not one drawing scaled. Editing the full master
-does not propagate to the others.
+Keep `Candela/Assets.xcassets/AppIcon.appiconset/` in sync — it holds the same
+ten PNGs and is what the app actually compiles in
+(`ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon` in `project.yml`).
+The site reuses the master at `site/src/assets/candela-icon.svg` (hero mark)
+and `site/public/favicon.svg`.
