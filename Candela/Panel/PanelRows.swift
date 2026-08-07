@@ -63,6 +63,11 @@ struct PanelRowButtonStyle: ButtonStyle {
 struct PanelDisclosureRow: View {
   let title: LocalizedStringKey
   let detail: String?
+  /// The spoken form of `detail`, when the written one is not sayable — a mode
+  /// summary is "2,560 by 1,440 at 60 hertz", never "2560 × 1440 · 60 Hz".
+  /// Defaults to `detail`, so a row whose value is already words says nothing
+  /// twice.
+  var spokenDetail: String?
   /// Owns the row for VoiceOver. Every other row in the panel announces itself
   /// as "<display> brightness" / "<display> volume"; without the same prefix a
   /// four-display rig reads out "Resolution" — or "Mirroring" — four times with
@@ -106,7 +111,7 @@ struct PanelDisclosureRow: View {
     // status item), which would leave a phantom highlight on the next open.
     .onDisappear { isHovering = false }
     .accessibilityLabel(Text(verbatim: "\(accessibilityName) \(accessibilityRole)"))
-    .accessibilityValue(Text(verbatim: detail ?? ""))
+    .accessibilityValue(Text(verbatim: spokenDetail ?? detail ?? ""))
   }
 }
 

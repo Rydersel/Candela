@@ -110,13 +110,34 @@ struct PanelResolutionSection: View {
       // offer. It reports what the display is running, which is the same kind
       // of statement the confirmation window and the reapply reports make with
       // a bare size; the badges are one click away on the rows this expands to.
-      detail: catalog.current.map(DisplayModeCopy.size),
+      //
+      // The RATE does ride along (#86): "resolution" is a size and a refresh
+      // rate, and this row is the only place the menu bar states either — a
+      // 175 Hz panel quietly running at 60 is exactly what someone opens this
+      // to find out. It costs 50 pt of the row's slack (measured at 12 pt
+      // system: 72.4 → 122.2, against the 161.6 that truncated), so the
+      // badges' verdict is unchanged.
+      detail: catalog.current.map(summary),
+      spokenDetail: catalog.current.map(spokenSummary),
       accessibilityName: displayName,
       accessibilityRole: "resolution",
       isExpanded: isExpanded
     ) {
       expanded = isExpanded ? nil : PanelDisclosureID(displayID, .resolution)
     }
+  }
+
+  private func summary(_ mode: DisplayMode) -> String {
+    "\(DisplayModeCopy.size(mode)) · \(DisplayModeCopy.refresh(mode.refreshHz))"
+  }
+
+  /// The same statement in words. "×" and "·" are read inconsistently at most
+  /// verbosities, and unseparated digits are read one at a time.
+  private func spokenSummary(_ mode: DisplayMode) -> String {
+    ModeSpeech.spoken(
+      logicalWidth: mode.logicalWidth, logicalHeight: mode.logicalHeight,
+      refreshHz: mode.refreshHz
+    )
   }
 
   /// Says where the rest are. The panel shows the top few by design, and a
