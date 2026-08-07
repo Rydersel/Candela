@@ -144,3 +144,128 @@ struct ChromeAutoHideTests {
     #expect(c.menuBarAutoHide == true)  // and the cache caught up regardless
   }
 }
+
+/// The support range is macOS 14, 15 and 26. There is no 16 through 25: Apple
+/// renumbered after Sequoia, so "every version we run on" is three majors.
+private let supportedMajorVersions = [14, 15, 26]
+
+private let everyRecord: [ControlCenterMenuBarRecord] =
+  [.absent, .unreadable, .option(0), .option(1), .option(2), .option(3)]
+
+@Suite("Menu bar auto-hide policy")
+struct MenuBarAutoHidePolicyTests {
+  /// Feature detection comes FIRST, on every version. A key that is really
+  /// there is the strongest evidence available that this macOS uses it, and it
+  /// beats any guess made from the version number.
+  @Test func aPresentRecordParticipatesOnEveryVersion() {
+    for major in supportedMajorVersions {
+      #expect(MenuBarAutoHidePolicy.controlCenterRecordParticipates(.option(0), osMajorVersion: major))
+      #expect(MenuBarAutoHidePolicy.controlCenterRecordParticipates(.option(3), osMajorVersion: major))
+    }
+  }
+
+  /// Sonoma and Sequoia are sourced as backing the picker with the global keys
+  /// alone, so an absent record there is not a gap to fill: it is a domain this
+  /// macOS does not use, and inventing a value in it would be a write into
+  /// undocumented schema on a version nobody has ever measured.
+  @Test func anAbsentRecordIsSkippedBeforeTahoe() {
+    #expect(!MenuBarAutoHidePolicy.controlCenterRecordParticipates(.absent, osMajorVersion: 14))
+    #expect(!MenuBarAutoHidePolicy.controlCenterRecordParticipates(.absent, osMajorVersion: 15))
+  }
+
+  /// On the version sourced to own the key, absence means "never set", not
+  /// "unsupported": a machine whose owner never opened that pane has no value
+  /// yet, and skipping it would leave System Settings disagreeing exactly the
+  /// way #104 describes. Write it defensively.
+  @Test func anAbsentRecordIsStillWrittenOnTahoeAndLater() {
+    #expect(MenuBarAutoHidePolicy.controlCenterRecordParticipates(.absent, osMajorVersion: 26))
+    #expect(MenuBarAutoHidePolicy.controlCenterRecordParticipates(.absent, osMajorVersion: 27))
+  }
+
+  /// A value that is present but not an integer is schema we do not recognise.
+  /// It gets the same treatment as absence: replaced on the version that owns
+  /// the key, left completely alone on versions that do not.
+  @Test func anUnreadableRecordFollowsTheSameVersionRuleAsAbsence() {
+    #expect(!MenuBarAutoHidePolicy.controlCenterRecordParticipates(.unreadable, osMajorVersion: 14))
+    #expect(!MenuBarAutoHidePolicy.controlCenterRecordParticipates(.unreadable, osMajorVersion: 15))
+    #expect(MenuBarAutoHidePolicy.controlCenterRecordParticipates(.unreadable, osMajorVersion: 26))
+  }
+
+  /// THE strand invariant, and the reason one predicate serves both legs.
+  ///
+  /// A pessimistic read (hidden if EITHER half says hidden) plus a write that
+  /// skips the record is an unrecoverable switch: the read reports ON from a
+  /// record the write refuses to clear, so the OFF click writes the legacy key,
+  /// changes nothing the read looks at, and the switch snaps straight back. The
+  /// user cannot get their menu bar back from inside the app, which is exactly
+  /// what D29 rule 3 forbids. Whatever the read consults, the write must be
+  /// willing to write.
+  @Test func theReadNeverConsultsARecordTheWriteWouldSkip() {
+    for major in supportedMajorVersions {
+      for record in everyRecord {
+        guard !MenuBarAutoHidePolicy.controlCenterRecordParticipates(record, osMajorVersion: major)
+        else { continue }
+        for effective in [true, false] {
+          #expect(MenuBarAutoHidePolicy.isMenuBarHidden(
+            effectiveBit: effective, record: record, osMajorVersion: major) == effective)
+        }
+      }
+    }
+  }
+
+  /// The pessimistic read itself, on the version that does consult the record:
+  /// the switch must read ON whenever ANYTHING is hiding the bar.
+  @Test func aParticipatingRecordCanReportHiddenOverAClearEffectiveBit() {
+    #expect(MenuBarAutoHidePolicy.isMenuBarHidden(effectiveBit: false, record: .option(0), osMajorVersion: 26))
+    #expect(MenuBarAutoHidePolicy.isMenuBarHidden(effectiveBit: false, record: .option(1), osMajorVersion: 26))
+    #expect(!MenuBarAutoHidePolicy.isMenuBarHidden(effectiveBit: false, record: .option(2), osMajorVersion: 26))
+    #expect(!MenuBarAutoHidePolicy.isMenuBarHidden(effectiveBit: false, record: .option(3), osMajorVersion: 26))
+  }
+
+  /// And the effective bit alone is always enough, whatever the record says.
+  @Test func theEffectiveBitAloneStillReportsHidden() {
+    for major in supportedMajorVersions {
+      for record in everyRecord {
+        #expect(MenuBarAutoHidePolicy.isMenuBarHidden(
+          effectiveBit: true, record: record, osMajorVersion: major))
+      }
+    }
+  }
+
+  /// The four values as MEASURED on macOS 26 (2026-08-07). Public sources
+  /// disagree about this mapping, one of them reversing it end for end, so the
+  /// numbers are pinned here against the machine they were read from rather
+  /// than against anybody's README.
+  @Test func theOptionEncodesBothHalvesOfTheChoice() {
+    #expect(MenuBarAutoHidePolicy.option(desktopHides: true, fullScreenHides: true) == 0)
+    #expect(MenuBarAutoHidePolicy.option(desktopHides: true, fullScreenHides: false) == 1)
+    #expect(MenuBarAutoHidePolicy.option(desktopHides: false, fullScreenHides: true) == 2)
+    #expect(MenuBarAutoHidePolicy.option(desktopHides: false, fullScreenHides: false) == 3)
+  }
+
+  /// Encode then read back: the desktop half survives whatever the user's
+  /// full-screen preference is, which is the half Candela must never choose.
+  @Test func theDesktopHalfRoundTripsThroughTheOption() {
+    for desktopHides in [true, false] {
+      for fullScreenHides in [true, false] {
+        let option = MenuBarAutoHidePolicy.option(
+          desktopHides: desktopHides, fullScreenHides: fullScreenHides)
+        #expect(MenuBarAutoHidePolicy.isMenuBarHidden(
+          effectiveBit: false, record: .option(option), osMajorVersion: 26) == desktopHides)
+      }
+    }
+  }
+
+  /// A record we cannot decode must not be allowed to answer the read even
+  /// where it participates, or an unrecognised value would silently mean
+  /// "hidden" and pin the switch ON.
+  @Test func anUndecodableRecordContributesNothingToTheRead() {
+    #expect(!MenuBarAutoHidePolicy.isMenuBarHidden(
+      effectiveBit: false, record: .unreadable, osMajorVersion: 26))
+    #expect(!MenuBarAutoHidePolicy.isMenuBarHidden(
+      effectiveBit: false, record: .absent, osMajorVersion: 26))
+    // An int outside the measured 0...3 is schema we do not know either.
+    #expect(!MenuBarAutoHidePolicy.isMenuBarHidden(
+      effectiveBit: false, record: .option(99), osMajorVersion: 26))
+  }
+}

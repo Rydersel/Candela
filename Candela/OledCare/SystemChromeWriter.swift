@@ -58,44 +58,119 @@ final class SystemChromeWriter: ChromeWriting {
   /// kept in agreement by nothing is the strand; the writer owns both halves so
   /// they cannot drift.
   ///
-  /// The full-screen half is never ours to choose, so it is read and preserved:
-  /// the option is picked from the requested desktop value AND the user's
-  /// existing full-screen preference. Unset means the macOS default, which
-  /// hides the bar in full screen.
+  /// # What is measured, and what is assumed (#104)
+  ///
+  /// Everything above was measured on macOS 26, on ONE machine. Candela's
+  /// support range is macOS 14, 15 and 26 (there is no 16 through 25: Apple
+  /// renumbered after Sequoia), and the other two cannot be measured here. So
+  /// the version-dependent parts are recorded once, here, and marked. The code
+  /// FEATURE-DETECTS rather than switching on the version, so a wrong boundary
+  /// below degrades to the legacy-only behaviour that every source agrees on
+  /// instead of writing a guess into undocumented schema.
+  ///
+  /// SOURCED, not measured here:
+  /// - macOS 14 (Sonoma): a user diffed a full `defaults read` between the
+  ///   picker's "Always" and "Never" positions on 14.4 and found ONLY
+  ///   `_HIHideMenuBar` and `AppleMenuBarVisibleInFullscreen` changing. No
+  ///   Control Center key appears.
+  ///   (Apple Support Communities thread 255637558.)
+  /// - macOS 15 (Sequoia): a systems-management writeup dated 2025-06-30 says
+  ///   the setting is managed on 15.5 through the `.GlobalPreferences` payload
+  ///   with those same two keys, and never mentions a Control Center domain.
+  ///   (alansiu.net, "Managing hiding the menu bar in macOS".)
+  /// - macOS 26 (Tahoe): `AutoHideMenuBarOption` is in current use and is
+  ///   described by another Swift utility as "the persistent source of truth
+  ///   behind the four-way picker in System Settings" while `_HIHideMenuBar`
+  ///   "drives the actual behavior". A dotfile repo annotates the key as
+  ///   "macOS Tahoe uses AutoHideMenuBarOption in com.apple.controlcenter".
+  ///   (github.com/ZingerLittleBee/AnyDoor, github.com/MyronL/dotfiles.)
+  ///
+  /// ASSUMED, and unverifiable on this machine:
+  /// - That the Control Center key is genuinely ABSENT on 14 and 15 rather than
+  ///   merely undocumented. Both sources above are arguments from absence.
+  /// - That where the key IS present on any version, it carries the macOS 26
+  ///   meaning. Feature detection treats presence as proof of participation, so
+  ///   an older macOS that kept this key with DIFFERENT semantics would be
+  ///   misread. Nothing available here can rule that out.
+  /// - That the legacy key remains the effective bit on 14 and 15. Both sources
+  ///   support it, and it is why that key is written unconditionally.
+  ///
+  /// Two published claims are recorded as CONTRADICTED, so nobody re-imports
+  /// them from the same search:
+  /// - One dotfile repo maps the four values in reverse (0 Never through
+  ///   3 Always). Direct measurement here says 0 Always through 3 Never, and two
+  ///   other repos agree with the measurement. Sources disagree about this
+  ///   mapping, which is its own argument for never inventing a value.
+  /// - Another claims `_HIHideMenuBar` is "silently ignored on Ventura and
+  ///   later". Measured false here (spike §6a moved the live `NSScreen` inset
+  ///   with it), and both version sources above contradict it too.
+  ///
+  /// One documented alternative is deliberately NOT adopted: AnyDoor posts an
+  /// `AppleInterfaceMenuBarHidingChangedNotification` distributed notification
+  /// and reports that defaults alone get reverted without it. Spike §6a measured
+  /// this CFPreferences triple applying live on this machine with no such post,
+  /// so adding one would be an unmeasured change to a working path. Worth
+  /// trying FIRST if the menu-bar leg ever fails to apply on 14 or 15.
+  ///
+  /// Owed and impossible here: a pass on a macOS 14 or 15 machine or VM. The
+  /// branches themselves are covered by `MenuBarAutoHidePolicy`'s Kit tests.
   private static func fullScreenHidesMenuBar() -> Bool {
     !((CFPreferencesCopyValue(fullScreenVisibleKey, kCFPreferencesAnyApplication,
                               kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? Bool) ?? false)
   }
 
-  /// True when the RECORD says the bar hides on the desktop. Nil when macOS has
-  /// never written one, in which case there is nothing to reconcile against.
-  private static func recordedMenuBarAutoHide() -> Bool? {
+  /// Whatever the Control Center domain currently holds, undecoded. Absent and
+  /// present-but-unrecognised stay distinguishable: the policy needs to tell
+  /// "this macOS does not use the key" from "something wrote a shape we do not
+  /// understand".
+  private static func controlCenterRecord() -> ControlCenterMenuBarRecord {
     CFPreferencesAppSynchronize(controlCenterDomain)
-    guard let option = CFPreferencesCopyValue(autoHideOptionKey, controlCenterDomain,
-                                              kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? Int
-    else { return nil }
-    return option == 0 || option == 1
+    guard let value = CFPreferencesCopyValue(autoHideOptionKey, controlCenterDomain,
+                                             kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+    else { return .absent }
+    guard let option = value as? Int else { return .unreadable }
+    return .option(option)
   }
 
-  /// Hidden if EITHER half says hidden. Deliberately the pessimistic read: the
-  /// switch must be ON whenever anything is hiding the bar, because turning it
-  /// off is the only in-app route back and a control that reads OFF over a
-  /// hidden menu bar cannot be used to recover (D29 rule 3).
+  private static var osMajorVersion: Int {
+    ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+  }
+
+  /// Hidden if EITHER half says hidden, and the record only gets a vote where
+  /// the write leg would also touch it. `MenuBarAutoHidePolicy` owns that
+  /// decision for both legs precisely so they cannot diverge: a read that
+  /// consulted a record the write skips would report ON, refuse to clear it,
+  /// and strand the switch (D29 rule 3).
   func readMenuBarAutoHide() -> Bool {
     CFPreferencesAppSynchronize(kCFPreferencesAnyApplication)
     let effective = (CFPreferencesCopyValue(Self.menuBarKey, kCFPreferencesAnyApplication,
                                             kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? Bool) ?? false
-    return effective || (Self.recordedMenuBarAutoHide() ?? false)
+    return MenuBarAutoHidePolicy.isMenuBarHidden(
+      effectiveBit: effective, record: Self.controlCenterRecord(), osMajorVersion: Self.osMajorVersion)
   }
 
   func writeMenuBarAutoHide(_ on: Bool) {
+    // The legacy key is written on every version: it is the effective bit
+    // everywhere the evidence reaches, and it is the only half macOS 14 and 15
+    // are sourced to use at all.
     CFPreferencesSetValue(Self.menuBarKey, on ? kCFBooleanTrue : kCFBooleanFalse,
                           kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
     CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
     // No restart and no notification for this half: spike §6a measured this
     // exact triple applying live (MAG menu-bar inset 0 -> 30 -> 0).
-    let fullScreenHides = Self.fullScreenHidesMenuBar()
-    let option: Int = on ? (fullScreenHides ? 0 : 1) : (fullScreenHides ? 2 : 3)
+    let record = Self.controlCenterRecord()
+    guard MenuBarAutoHidePolicy.writesControlCenterRecord(record, osMajorVersion: Self.osMajorVersion)
+    else {
+      // Nothing skipped here can strand the switch: the read declines this same
+      // record, so the legacy key alone decides what the pane shows.
+      Self.log.debug("control centre menu bar record not in use on this macOS; wrote the global key only")
+      return
+    }
+    // The full-screen half is never ours to choose, so it is read and
+    // preserved. Unset means the macOS default, which hides the bar in full
+    // screen.
+    let option = MenuBarAutoHidePolicy.option(
+      desktopHides: on, fullScreenHides: Self.fullScreenHidesMenuBar())
     CFPreferencesSetValue(Self.autoHideOptionKey, option as CFNumber,
                           Self.controlCenterDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
     CFPreferencesSynchronize(Self.controlCenterDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
