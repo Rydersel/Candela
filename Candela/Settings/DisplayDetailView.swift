@@ -390,7 +390,7 @@ struct DisplayDetailView: View {
         // Name what is lost, and name what is NOT: the saved levels are the
         // only source of truth on a write-only panel (trap 20), so a reset
         // that took them would leave the display at an unknown brightness.
-        Text("This clears the name, visibility, keyboard, audio and DDC tuning settings for \(state.display.name), turns HDR off if it is on, and unmutes it. Your saved brightness, volume and contrast levels are kept.")
+        Text("This clears the name, visibility, keyboard, audio, DDC tuning and OLED care settings for \(state.display.name), turns HDR off if it is on, and unmutes it. Your saved brightness, volume and contrast levels are kept, and so are its counted panel hours.")
         }
     }
   }
@@ -429,18 +429,31 @@ struct DisplayDetailView: View {
       //    to do" question now, so the condition cannot drift from it here.
       await state.controller.setHDRMode(.off)
 
-      // 2. Every pref except the mute strategy, in ONE batch whose fan-out is
-      //    the UNION of its rows. Never collapse it onto a single
+      // 2. This pane's prefs and OLED care's, in ONE batch whose fan-out is the
+      //    UNION of its rows. Never collapse it onto a single
       //    `prefDidChange(.forceSw)`: `hideDisplay` carries `.updateStatusItem`
       //    and `forceSw` does not, so with `menuIcon == .sliderOnly` a reset
       //    that un-hid the display would leave the status item missing.
       //    Clearing `forceSoftware` and every command's `unavailableDDC` here
       //    is also what makes step 3 able to work at all (D29 rule 2).
+      //    NOT everything keyed to this display: the mute strategy is step 4
+      //    (ordering), and the remembered display mode is deliberately outside
+      //    — a resolution the user is currently looking at is not a setting
+      //    this button promises to change.
       writer.writeAll([
         .friendlyName, .hideDisplay, .isDisabled, .hideOsd, .forceSw, .avoidGamma,
         .audioDeviceNameOverride, .audioSinkOverride, .hideVolumeSlider,
         .combinedSwitchingPoint,
         .unavailableDDC, .minDDCOverride, .maxDDCOverride, .curveDDC, .invertDDC, .remapDDC,
+        // OLED care's ten, all carrying `.reapplyOledCare`: un-enrolling is
+        // what takes this display's care overlay down, and the fan-out is what
+        // makes it happen now rather than on the next topology event. The
+        // direction is safe by construction — a reset can only remove an
+        // overlay, never leave one up.
+        .oledCareEnrolled, .oledIdleDimSeconds, .oledIdleDimLevel, .oledLockDim,
+        .oledBlackoutEnabled, .oledBlackoutSeconds,
+        .oledUnfocusedDimEnabled, .oledUnfocusedDimSeconds, .oledUnfocusedDimLevel,
+        .oledHoursTracking,
       ]) { prefs in
         prefs.friendlyName = ""
         prefs.hideDisplay = false
@@ -465,6 +478,12 @@ struct DisplayDetailView: View {
         for command in DDCCommand.allCases {
           prefs.setTuning(.unset, for: command)
         }
+        // REMOVES the ten OLED keys rather than writing today's numbers back:
+        // the accessors' defaults ARE the Recommended preset, so a reset that
+        // wrote them would pin this display to the preset as it stands today.
+        // Panel hours are not prefs and are deliberately kept (wear data, like
+        // the saved levels above).
+        prefs.resetOledCare()
       }
 
       // 3. `isAvailable` is true again, and `enableMuteUnmute` still holds the

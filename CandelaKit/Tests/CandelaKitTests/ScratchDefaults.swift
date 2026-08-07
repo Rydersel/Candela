@@ -46,4 +46,12 @@ class InMemoryDefaults: UserDefaults, @unchecked Sendable {
   /// a silent fall-through to the superclass would read the real defaults
   /// domain rather than this instance's dictionary.
   override func data(forKey key: String) -> Data? { object(forKey: key) as? Data }
+
+  /// This instance's dictionary, not the superclass's merged domains — the
+  /// same reason every accessor above is overridden. It is what lets a test
+  /// ask "what is left in the store?" rather than checking a hand-written list
+  /// of keys, which is the only form that catches a key nobody remembered.
+  override func dictionaryRepresentation() -> [String: Any] {
+    lock.withLock { storage }
+  }
 }

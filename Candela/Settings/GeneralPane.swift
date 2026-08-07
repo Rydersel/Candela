@@ -209,10 +209,14 @@ struct GeneralPane: View {
         SettingsCaption("Some displays never answer DDC reads (write-only panels); values then stay as last saved.")
       }
       // Safe mode's real, final scope (D11): no startup restore, no wake
-      // restore, no brightness readback, no quit-time write. Sliders and keys
-      // still work and still send DDC — so this must NEVER claim "no DDC
-      // commands", which is the same false copy D11 exists to fix.
-      SettingsCaption("Hold Shift while launching for Safe Mode — \(AppInfo.productName) won't restore your saved values at startup or wake, won't read values back from your displays, and won't write anything when it quits. The sliders and keys still work, and your settings are left unchanged.")
+      // restore, no brightness readback, no quit-time write, and — added by
+      // W3a — no OLED-care driver loop, so no dimming overlay and no panel
+      // hours. Sliders and keys still work and still send DDC, and so do the
+      // OLED Care pane's two screen-chrome switches (explicit writes to a
+      // system setting, not automatic behavior) — so this must NEVER claim "no
+      // DDC commands" or that OLED care is entirely off, which is the same
+      // class of false copy D11 exists to fix.
+      SettingsCaption("Hold Shift while launching for Safe Mode — \(AppInfo.productName) won't restore your saved values at startup or wake, won't read values back from your displays, won't write anything when it quits, and won't dim any display or count panel hours for OLED care. The sliders and keys still work, and your settings are left unchanged.")
     }
   }
 

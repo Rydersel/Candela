@@ -191,6 +191,98 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(clampSwitchingPoint(newValue), forKey: key("combinedSwitchingPoint")) }
   }
 
+  // MARK: - OLED care (W3a)
+
+  // The defaults ARE the Recommended preset, so enrolling writes nothing but
+  // `oledCareEnrolled` and an un-tuned display stays on the preset even as the
+  // preset changes. The two true-default bools store INVERTED, under
+  // `…Off` keys, so an absent key reads as ON rather than as OFF.
+
+  public var oledCareEnrolled: Bool {
+    get { defaults.bool(forKey: key("oledCareEnrolled")) }
+    set { defaults.set(newValue, forKey: key("oledCareEnrolled")) }
+  }
+
+  /// Idle before the care dim engages, in seconds.
+  public var oledIdleDimSeconds: Int {
+    get { defaults.object(forKey: key("oledIdleDimSeconds")) as? Int ?? 300 }
+    set { defaults.set(newValue, forKey: key("oledIdleDimSeconds")) }
+  }
+
+  /// Opacity of the black care overlay, NOT a fraction of the user's
+  /// brightness: **higher is darker**. `IdleDimmingEngine.alpha(for:)` hands
+  /// this straight to the overlay's content-view alpha, and blackout is the
+  /// same scale at 1.0. The display's own brightness is never written.
+  public var oledIdleDimLevel: Double {
+    get { defaults.object(forKey: key("oledIdleDimLevel")) as? Double ?? 0.5 }
+    set { defaults.set(newValue, forKey: key("oledIdleDimLevel")) }
+  }
+
+  public var oledLockDim: Bool {
+    get { !defaults.bool(forKey: key("oledLockDimOff")) }
+    set { defaults.set(!newValue, forKey: key("oledLockDimOff")) }
+  }
+
+  public var oledBlackoutEnabled: Bool {
+    get { defaults.bool(forKey: key("oledBlackoutEnabled")) }
+    set { defaults.set(newValue, forKey: key("oledBlackoutEnabled")) }
+  }
+
+  public var oledBlackoutSeconds: Int {
+    get { defaults.object(forKey: key("oledBlackoutSeconds")) as? Int ?? 1200 }
+    set { defaults.set(newValue, forKey: key("oledBlackoutSeconds")) }
+  }
+
+  public var oledUnfocusedDimEnabled: Bool {
+    get { defaults.bool(forKey: key("oledUnfocusedDimEnabled")) }
+    set { defaults.set(newValue, forKey: key("oledUnfocusedDimEnabled")) }
+  }
+
+  public var oledUnfocusedDimSeconds: Int {
+    get { defaults.object(forKey: key("oledUnfocusedDimSeconds")) as? Int ?? 600 }
+    set { defaults.set(newValue, forKey: key("oledUnfocusedDimSeconds")) }
+  }
+
+  /// Overlay opacity, same scale as `oledIdleDimLevel` — higher is darker.
+  ///
+  /// Default 0.3, LIGHTER than the idle dim's 0.5 on purpose: an unfocused
+  /// display is still in the user's view, so it gets a gentler dim than one
+  /// nobody has touched for five minutes. The original 0.7 was chosen under an
+  /// inverted reading of this scale (it would have made the unfocused dim the
+  /// darker of the two).
+  public var oledUnfocusedDimLevel: Double {
+    get { defaults.object(forKey: key("oledUnfocusedDimLevel")) as? Double ?? 0.3 }
+    set { defaults.set(newValue, forKey: key("oledUnfocusedDimLevel")) }
+  }
+
+  public var oledHoursTracking: Bool {
+    get { !defaults.bool(forKey: key("oledHoursTrackingOff")) }
+    set { defaults.set(!newValue, forKey: key("oledHoursTrackingOff")) }
+  }
+
+  /// Returns this display to the Recommended preset by REMOVING the ten keys
+  /// rather than writing their current default values back.
+  ///
+  /// The difference is not cosmetic: the accessors above document that an
+  /// absent key follows the preset, so a display reset by writing today's
+  /// numbers would be pinned to them and would stop tracking a later change to
+  /// the preset — the one property the "defaults ARE the preset" design buys.
+  ///
+  /// Accumulated panel hours are deliberately NOT touched. They are wear data
+  /// about the panel, not a setting, and they sit under their own keys
+  /// (`PanelHoursTracker`); the per-display reset keeps them for the same
+  /// reason it keeps the saved brightness, volume and contrast levels.
+  public func resetOledCare() {
+    for name in [
+      "oledCareEnrolled", "oledIdleDimSeconds", "oledIdleDimLevel", "oledLockDimOff",
+      "oledBlackoutEnabled", "oledBlackoutSeconds",
+      "oledUnfocusedDimEnabled", "oledUnfocusedDimSeconds", "oledUnfocusedDimLevel",
+      "oledHoursTrackingOff",
+    ] {
+      defaults.removeObject(forKey: key(name))
+    }
+  }
+
   // MARK: - Per-command DDC tuning
 
   public func tuning(for command: DDCCommand) -> CommandTuning {

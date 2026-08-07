@@ -179,6 +179,11 @@ public final class BrightnessController {
   /// the display blanks and re-modes.
   @ObservationIgnored private var settleInProgress = false
 
+  /// OLED care defers dim entry during a settle (OLED-care spec §8): an overlay
+  /// applied while the display blanks and re-modes is dimming nothing, and the
+  /// state machine would have to unwind it. Read-only.
+  public var isHDRSettling: Bool { self.settleInProgress }
+
   /// Mutable so `rebind(writer:panelIdentity:)` can swap in the writer a
   /// replugged display gets from rediscovery; the DDC applier is built per
   /// submit, so a swap takes effect on the very next write.

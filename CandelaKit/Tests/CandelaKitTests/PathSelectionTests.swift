@@ -1326,6 +1326,41 @@ struct AlreadyLiveEngageTests {
   }
 }
 
+/// `isHDRSettling` is the settle window's only public reader: OLED care defers
+/// dim entry while the display blanks and re-modes. Gated so the "true" half is
+/// pinned by the transition being parked, not by a sleep racing an assertion.
+@MainActor
+@Suite("HDR settle window is publicly readable")
+struct HDRSettleAccessorTests {
+  @Test func settlingIsTrueDuringATransitionAndFalseAfterIt() async {
+    let defaults = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "t")
+    prefs.hdrMode = .alwaysOn
+    let gated = GatedTransitionHDR()
+    let controller = BrightnessController(
+      writer: FakeDDC(readResult: nil),
+      backends: BrightnessBackends(
+        applierNative: FakeNativeApplier(), hdr: gated, shade: FakeShade(), gamma: FakeGamma()
+      ),
+      prefs: prefs,
+      displayID: 7
+    )
+    controller.settleDelay = .milliseconds(5)
+    await controller.initialHDRRefresh?.value
+    #expect(controller.isHDRSettling == false)
+
+    let exit = Task { await controller.setHDRMode(.off) }
+    // Parked inside the disengage: `beginHDRTransition()` has run, so the
+    // settle window is open and stays open until the gate is released.
+    #expect(await eventually { await gated.disengageCallCount() == 1 })
+    #expect(controller.isHDRSettling)
+
+    await gated.releaseDisengage()
+    await exit.value
+    #expect(controller.isHDRSettling == false)
+  }
+}
+
 /// HDRToggling fake with an independently released gate on EACH direction, so
 /// a test can park an exit transition on its disengage while a later
 /// transition parks on its engage (holding its settle window open).
