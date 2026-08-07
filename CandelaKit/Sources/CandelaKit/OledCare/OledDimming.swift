@@ -44,15 +44,18 @@ public struct OledDimConfig: Equatable, Sendable {
     // threshold: a zero or negative threshold means "dimmed always", and a
     // negative blackout derived from it would black the display out at zero
     // idle — unrecoverable from inside the app.
-    self.idleDimSeconds = max(idleDimSeconds, Self.minimumThresholdSeconds)
+    self.idleDimSeconds = Self.sanitizedSeconds(idleDimSeconds,
+                                                floor: Self.minimumThresholdSeconds)
     self.idleDimLevel = Self.sanitizedLevel(idleDimLevel)
     self.lockDim = lockDim
     self.blackoutEnabled = blackoutEnabled
     // A blackout that fires at or below the idle threshold is a config error;
     // clamp rather than trust the pane (spec §3).
-    self.blackoutSeconds = max(blackoutSeconds, self.idleDimSeconds + 60)
+    self.blackoutSeconds = Self.sanitizedSeconds(blackoutSeconds,
+                                                 floor: self.idleDimSeconds + 60)
     self.unfocusedDimEnabled = unfocusedDimEnabled
-    self.unfocusedDimSeconds = max(unfocusedDimSeconds, Self.minimumThresholdSeconds)
+    self.unfocusedDimSeconds = Self.sanitizedSeconds(unfocusedDimSeconds,
+                                                     floor: Self.minimumThresholdSeconds)
     self.unfocusedDimLevel = Self.sanitizedLevel(unfocusedDimLevel)
   }
 
@@ -72,6 +75,14 @@ public struct OledDimConfig: Equatable, Sendable {
   private static func sanitizedLevel(_ level: Double) -> Double {
     guard !level.isNaN else { return 0.5 }
     return min(max(level, levelRange.lowerBound), levelRange.upperBound)
+  }
+
+  /// `max(NaN, floor)` returns NaN — every comparison against it is false, so a
+  /// NaN threshold silently disables its row while the field still reads as
+  /// floored. The floor is a promise; this is what keeps it.
+  private static func sanitizedSeconds(_ seconds: Double, floor: Double) -> Double {
+    guard !seconds.isNaN else { return floor }
+    return max(seconds, floor)
   }
 }
 
@@ -141,8 +152,15 @@ public struct IdleDimmingEngine: Sendable {
       if inputOccurred { lockDimArmed = false }
       if idleSinceWake >= config.idleDimSeconds { lockDimArmed = true }
       // Locking never brightens: a display already blacked out stays black
-      // rather than rising to lock dim's lighter alpha. Input still lifts it.
-      if current == .blackout, !inputOccurred { state = .blackout; return state }
+      // rather than rising to lock dim's lighter alpha. The hold re-checks the
+      // condition it holds FOR, so it cannot outlive it — an unconditional hold
+      // swallows both the wake floor (wake must always land `.active`) and a
+      // blackout switched off while the screen is locked.
+      if current == .blackout, !inputOccurred, config.blackoutEnabled,
+         idleSinceWake >= config.blackoutSeconds {
+        state = .blackout
+        return state
+      }
       state = lockDimArmed ? .lockDim : .active
       return state
     }

@@ -140,9 +140,11 @@ struct OledDimmingTests {
     #expect(e.alpha(for: .suspended) == nil)
   }
 
-  /// All eight prefs get distinct, non-default values: with defaults left in
-  /// place a transposed pair (blackout seconds ↔ unfocused seconds, either level
-  /// into the other) reads correct.
+  /// All eight prefs get distinct values: with defaults left in place a
+  /// transposed pair (blackout seconds ↔ unfocused seconds, either level into
+  /// the other) reads correct. The two enable flags must DIFFER from each other
+  /// here — both true, as this test first had it, is transposable against a
+  /// defaults test where both are false.
   @Test func configFromPrefsReadsTask1Accessors() {
     let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
@@ -151,7 +153,7 @@ struct OledDimmingTests {
     prefs.oledLockDim = false
     prefs.oledBlackoutEnabled = true
     prefs.oledBlackoutSeconds = 900
-    prefs.oledUnfocusedDimEnabled = true
+    prefs.oledUnfocusedDimEnabled = false
     prefs.oledUnfocusedDimSeconds = 450
     prefs.oledUnfocusedDimLevel = 0.8
 
@@ -161,7 +163,7 @@ struct OledDimmingTests {
     #expect(c.lockDim == false)
     #expect(c.blackoutEnabled == true)
     #expect(c.blackoutSeconds == 900)
-    #expect(c.unfocusedDimEnabled == true)
+    #expect(c.unfocusedDimEnabled == false)
     #expect(c.unfocusedDimSeconds == 450)
     #expect(c.unfocusedDimLevel == 0.8)
   }
@@ -324,6 +326,31 @@ struct OledDimmingTests {
     #expect(e.tick(signals(idle: 2, locked: true)) == .active)  // input still lifts
   }
 
+  /// Round 2: the hold re-checks its own condition, so a wake escapes it with no
+  /// HID event at all — "wake always lands `.active`" outranks "never brightens".
+  @Test func wakeEscapesAHeldBlackoutWhileLocked() {
+    var e = IdleDimmingEngine(config: config(idle: 300, blackout: true, blackoutAt: 1200))
+    #expect(e.tick(signals(idle: 1300)) == .blackout)
+    e.noteLock()
+    #expect(e.tick(signals(idle: 1301, locked: true)) == .blackout)
+    e.noteWake()
+    // The counter still reads hours — sleep does not reset it — but none of it
+    // was spent awake, so the lock screen comes up lit.
+    #expect(e.tick(signals(idle: 7200, locked: true)) == .active)
+    #expect(e.tick(signals(idle: 7200 + 299, locked: true)) == .active)
+    #expect(e.tick(signals(idle: 7200 + 300, locked: true)) == .lockDim)
+  }
+
+  /// Round 2: the same re-check is what lets the toggle reach a locked screen.
+  @Test func disablingBlackoutWhileLockedExitsTheHold() {
+    var e = IdleDimmingEngine(config: config(blackout: true, blackoutAt: 1200))
+    #expect(e.tick(signals(idle: 1300)) == .blackout)
+    e.noteLock()
+    #expect(e.tick(signals(idle: 1301, locked: true)) == .blackout)
+    e.updateConfig(config(blackout: false))
+    #expect(e.tick(signals(idle: 1302, locked: true)) == .lockDim)
+  }
+
   /// RULING F: lock dim is exempt from the HDR-settle deferral — a full-bright
   /// lock screen during a settle is the worse outcome, and locking is an
   /// explicit user action rather than an inferred idle.
@@ -353,6 +380,18 @@ struct OledDimmingTests {
     #expect(ok.idleDimSeconds == 30)
     #expect(ok.unfocusedDimSeconds == 31)
     #expect(ok.blackoutSeconds == 5000)
+  }
+
+  /// Round 2: `max(NaN, floor)` returns NaN, which reads as "floored" while
+  /// disabling the row it belongs to — every `>=` against it is false.
+  @Test func nonFiniteSecondsFallBackToTheFloor() {
+    let c = OledDimConfig(idleDimSeconds: .nan, idleDimLevel: 0.5, lockDim: true,
+                          blackoutEnabled: true, blackoutSeconds: .nan,
+                          unfocusedDimEnabled: true, unfocusedDimSeconds: .nan,
+                          unfocusedDimLevel: 0.7)
+    #expect(c.idleDimSeconds == 30)
+    #expect(c.blackoutSeconds == 90)  // the floored idle threshold + 60
+    #expect(c.unfocusedDimSeconds == 30)
   }
 
   @Test func aNegativeBlackoutCannotFireAtZeroIdle() {
