@@ -43,6 +43,10 @@ struct DisplayDetailView: View {
     // only thing that re-evaluates the body after a write anywhere else.
     let _ = model.prefsRevision
     Form {
+      // Temporary host so the hero can be built and looked at. Task 13 turns
+      // this page into the hub and gives the hero its real place; this line is
+      // meant to be replaced, not extended.
+      DisplayHeroView(state: state)
       identitySection
       panelSection
       displayModeSection
