@@ -31,6 +31,12 @@ struct AboutPane: View {
           Text("Version \(AppInfo.version) (build \(AppInfo.build))")
             .font(.callout)
             .foregroundStyle(.secondary)
+          // A credit, not a claim of authorship over the acknowledged work
+          // below: kept one step quieter than the version line so the hero
+          // still reads version-first.
+          Text(verbatim: "Ryder Selikow")
+            .font(.caption)
+            .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
