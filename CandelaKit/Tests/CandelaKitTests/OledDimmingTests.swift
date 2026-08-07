@@ -57,13 +57,35 @@ struct OledDimmingTests {
 
   @Test func lockEdgeDimsImmediately() {
     var e = IdleDimmingEngine(config: config())
-    e.noteLock()
+    e.noteLock(idleSeconds: 1)
     #expect(e.tick(signals(idle: 1, locked: true)) == .lockDim)
+  }
+
+  /// The live defect: a fresh engine has `lastIdleSeconds == 0`, so the old
+  /// test could not see the fall that a real lock always produces. Locking is
+  /// itself input (a shortcut, a menu click, a hot corner), so on a warm engine
+  /// the idle counter DROPS at the lock edge, and reading that drop as "input
+  /// while locked" lifted the dim on the same tick that armed it.
+  @Test func lockEdgeDimsOnAWarmEngineWhoseIdleCounterJustFell() {
+    var e = IdleDimmingEngine(config: config())
+    #expect(e.tick(signals(idle: 42)) == .active)  // user reading, engine warm
+    e.noteLock(idleSeconds: 0.2)                   // the lock shortcut IS input
+    #expect(e.tick(signals(idle: 0.3, locked: true)) == .lockDim)
+  }
+
+  /// The lift must still work for input that lands AFTER the lock, including
+  /// input in the same window as the lock edge: the baseline is the reading at
+  /// the lock, so a later, lower count is real.
+  @Test func inputAfterTheLockEdgeStillLifts() {
+    var e = IdleDimmingEngine(config: config())
+    _ = e.tick(signals(idle: 42))
+    e.noteLock(idleSeconds: 5)
+    #expect(e.tick(signals(idle: 0.1, locked: true)) == .active)
   }
 
   @Test func inputWhileLockedLiftsThenRearms() {
     var e = IdleDimmingEngine(config: config(idle: 300))
-    e.noteLock()
+    e.noteLock(idleSeconds: 5)
     _ = e.tick(signals(idle: 5, locked: true))
     #expect(e.tick(signals(idle: 1, locked: true)) == .active)     // typing password
     #expect(e.tick(signals(idle: 299, locked: true)) == .active)
@@ -72,7 +94,7 @@ struct OledDimmingTests {
 
   @Test func wakeBeatsLock() {
     var e = IdleDimmingEngine(config: config())
-    e.noteLock()
+    e.noteLock(idleSeconds: 5)
     _ = e.tick(signals(idle: 5, locked: true))
     e.noteWake()
     #expect(e.tick(signals(idle: 6, locked: true)) == .active)
@@ -83,7 +105,7 @@ struct OledDimmingTests {
 
   @Test func unlockReturnsToActive() {
     var e = IdleDimmingEngine(config: config())
-    e.noteLock()
+    e.noteLock(idleSeconds: 5)
     _ = e.tick(signals(idle: 5, locked: true))
     e.noteUnlock()
     #expect(e.tick(signals(idle: 6)) == .active)
@@ -91,7 +113,7 @@ struct OledDimmingTests {
 
   @Test func lockDimRespectsItsToggle() {
     var e = IdleDimmingEngine(config: config(lock: false))
-    e.noteLock()
+    e.noteLock(idleSeconds: 5)
     #expect(e.tick(signals(idle: 5, locked: true)) == .active)
   }
 
@@ -119,7 +141,7 @@ struct OledDimmingTests {
 
   @Test func lockedWhileMirroredStaysSuspended() {
     var e = IdleDimmingEngine(config: config())
-    e.noteLock()
+    e.noteLock(idleSeconds: 5)
     #expect(e.tick(signals(idle: 5, locked: true, mirrored: true)) == .suspended)
   }
 
@@ -282,7 +304,7 @@ struct OledDimmingTests {
   /// deliver an hour of "idleness" the user never spent awake.
   @Test func wakeFloorsAStaleIdleCounterWhileLocked() {
     var e = IdleDimmingEngine(config: config(idle: 300))
-    e.noteLock()
+    e.noteLock(idleSeconds: 400)
     #expect(e.tick(signals(idle: 400, locked: true)) == .lockDim)
     e.noteWake()
     #expect(e.tick(signals(idle: 3600, locked: true)) == .active)
@@ -323,7 +345,7 @@ struct OledDimmingTests {
   @Test func lockingNeverBrightensABlackout() {
     var e = IdleDimmingEngine(config: config(blackout: true, blackoutAt: 1200))
     #expect(e.tick(signals(idle: 1300)) == .blackout)
-    e.noteLock()
+    e.noteLock(idleSeconds: 1300)
     #expect(e.tick(signals(idle: 1301, locked: true)) == .blackout)
     #expect(e.tick(signals(idle: 2, locked: true)) == .active)  // input still lifts
   }
@@ -333,7 +355,7 @@ struct OledDimmingTests {
   @Test func wakeEscapesAHeldBlackoutWhileLocked() {
     var e = IdleDimmingEngine(config: config(idle: 300, blackout: true, blackoutAt: 1200))
     #expect(e.tick(signals(idle: 1300)) == .blackout)
-    e.noteLock()
+    e.noteLock(idleSeconds: 1300)
     #expect(e.tick(signals(idle: 1301, locked: true)) == .blackout)
     e.noteWake()
     // The counter still reads hours — sleep does not reset it — but none of it
@@ -347,7 +369,7 @@ struct OledDimmingTests {
   @Test func disablingBlackoutWhileLockedExitsTheHold() {
     var e = IdleDimmingEngine(config: config(blackout: true, blackoutAt: 1200))
     #expect(e.tick(signals(idle: 1300)) == .blackout)
-    e.noteLock()
+    e.noteLock(idleSeconds: 1300)
     #expect(e.tick(signals(idle: 1301, locked: true)) == .blackout)
     e.updateConfig(config(blackout: false))
     #expect(e.tick(signals(idle: 1302, locked: true)) == .lockDim)
@@ -358,7 +380,7 @@ struct OledDimmingTests {
   /// explicit user action rather than an inferred idle.
   @Test func lockEdgeDimsEvenDuringHDRSettle() {
     var e = IdleDimmingEngine(config: config())
-    e.noteLock()
+    e.noteLock(idleSeconds: 1)
     #expect(e.tick(signals(idle: 1, locked: true, settling: true)) == .lockDim)
   }
 

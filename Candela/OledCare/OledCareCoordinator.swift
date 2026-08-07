@@ -150,7 +150,11 @@ final class OledCareCoordinator {
 
     lockObserver.onLock = { [weak self] in
       guard let self else { return }
-      for key in states.keys { states[key]?.engine.noteLock() }
+      // Read once and hand the same baseline to every engine: the lock action
+      // itself is input, and the engines must not read its falling idle counter
+      // as input that arrived after the lock.
+      let idleAtLock = OledCareSignalSources.systemIdleSeconds()
+      for key in states.keys { states[key]?.engine.noteLock(idleSeconds: idleAtLock) }
       tick()
     }
     lockObserver.onUnlock = { [weak self] in

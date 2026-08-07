@@ -134,7 +134,20 @@ public struct IdleDimmingEngine: Sendable {
   public init(config: OledDimConfig) { self.config = config }
 
   public mutating func updateConfig(_ config: OledDimConfig) { self.config = config }
-  public mutating func noteLock() { lockDimArmed = true }
+
+  /// `idleSeconds` is the idle reading AT the lock, and it is required for a
+  /// reason: locking is itself input (a shortcut, a menu item, a hot corner),
+  /// so the idle counter falls at the lock edge. The lift below reads a falling
+  /// counter as "input while locked", and without this baseline the very input
+  /// that locked the screen disarmed the dim on the same tick that armed it,
+  /// leaving a full-bright lock screen until the idle threshold re-elapsed.
+  /// Seeding the baseline keeps the lift honest: only a reading BELOW the one
+  /// taken at the lock is input that happened after it.
+  public mutating func noteLock(idleSeconds: Double) {
+    lockDimArmed = true
+    lastIdleSeconds = idleSeconds
+  }
+
   public mutating func noteUnlock() { lockDimArmed = false }
 
   /// Wake beats lock: the user woke the machine to use it. Disarming alone is
