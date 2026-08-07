@@ -38,8 +38,8 @@ struct DisplayHubView: View {
   /// Drafts, not direct pref bindings: a `TextField` bound straight to a pref
   /// would write (and fan out, and bump `prefsRevision`) on every keystroke,
   /// re-rendering the pane mid-edit. Committed on Return and on focus loss;
-  /// teardown discards them (SO10) — `@State` dies with the destination and
-  /// nothing commits on the way out.
+  /// on teardown the `@State` dies with the destination and no commit is
+  /// scheduled (SO10 — the same shape the pre-hub page shipped with).
   ///
   /// Seeded at identity creation (the stack's `.id(key)` gives each display its
   /// own hub identity) and re-seeded on `prefsRevision` from `onChange`
