@@ -173,10 +173,12 @@ struct DisplayHeroView: View {
   /// The fastest rate this size offers, when it is strictly faster than the one
   /// running.
   ///
-  /// `refreshRates(in:…)` dedupes on RAW doubles, so its list can hold 59.9998
-  /// and 60.0 as separate entries; quantizing before comparing is what keeps
-  /// float noise from reading as a faster rate (and what keeps a genuine 59.94
-  /// apart from 60 — the quantizer is designed for exactly that).
+  /// Quantized before comparing as belt and braces: live modes are already
+  /// quantized at the construction boundary, but `refreshRates(in:…)` dedupes
+  /// on RAW doubles, so the day an unquantized rate reaches the catalog its
+  /// noise would read as a faster rate rather than as the same one. The
+  /// quantizer still keeps a genuine 59.94 apart from 60 — it is designed for
+  /// exactly that.
   private var fasterRateAtCurrentSize: Double? {
     guard let mode = currentMode, let catalog else { return nil }
     let rates = DisplayModeCatalog.refreshRates(
@@ -200,21 +202,11 @@ struct DisplayHeroView: View {
         refreshHz: mode.refreshHz > 0 ? mode.refreshHz : nil
       ))
       if let faster = fasterRateAtCurrentSize {
-        parts.append("maximum \(spokenRate(faster))")
+        parts.append("maximum \(ModeSpeech.spokenRate(faster))")
       }
     }
     if state.controller.isHDREngaged { parts.append("HDR on") }
     return parts.joined(separator: ", ")
-  }
-
-  /// "hertz", spelled out, for the same reason `ModeSpeech` spells it: "Hz" is
-  /// read inconsistently across verbosity settings. The rate is quantized
-  /// first, exactly as `ModeSpeech` does, so 119.998 is never spoken digit by
-  /// digit. (`ModeSpeech` takes a whole mode, so a bare rate cannot go through
-  /// it.)
-  private func spokenRate(_ hz: Double) -> String {
-    let q = DisplayMode.quantizedRefresh(hz)
-    return "\(q == q.rounded() ? String(Int(q)) : String(q)) hertz"
   }
 
   // MARK: - Sliders
