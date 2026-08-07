@@ -134,10 +134,16 @@ final class DisplayModeCoordinator {
   private(set) var catalogs: [CGDirectDisplayID: Catalog] = [:]
   private(set) var preview: Preview?
   private(set) var startFailure: StartFailure?
-  /// Keyed by `DisplayConfigIdentity.key` so one display's disappointing
-  /// reconnect is never reported on another display's page — including the
-  /// display that inherits its `CGDirectDisplayID` after a replug, which is what
-  /// an ID-keyed map cannot rule out (SO8). Read through `report(for:)`.
+  /// Keyed by `DisplayConfigIdentity.key`, not by display ID, so a report
+  /// survives the replug that reassigns the ID and does not land on whatever
+  /// display inherits that ID (SO8). Read through `report(for:)`.
+  ///
+  /// It inherits that key's KNOWN LIMITATION rather than escaping it — see
+  /// `DisplayConfigIdentity`'s header. Two identical panels reporting serial 0
+  /// (the MAG 341C does) produce the SAME key, so with twins attached one
+  /// report overwrites the other and the survivor renders on both panes. The
+  /// stored mode already collides the same way for the same displays, so this
+  /// is one limitation, not a new one; fixing it means fixing the identity.
   private(set) var reapplyReports: [String: ReapplyReport] = [:]
   /// True from the click until the reconfiguration it started has settled.
   /// `begin()` spans a real CoreGraphics mode change, and a Keep pressed inside
