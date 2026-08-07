@@ -25,8 +25,9 @@ a{color:var(--accent);text-decoration:none}
 @media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
 
 /* hero */
-#hero{padding:84px 24px 24px;text-align:center}
-.app-mark{margin-bottom:26px}
+#hero{position:relative;padding:190px 24px 24px;text-align:center}
+.hero-bgc{position:absolute;top:-60px;left:50%;transform:translateX(-75.4%);width:min(720px,100vw);z-index:0;pointer-events:none}
+#hero>:not(.hero-bgc){position:relative;z-index:1}
 #hero h1{font-size:clamp(42px,7.4vw,76px);font-weight:700;letter-spacing:-.025em;line-height:1.03}
 #hero .sub{max-width:640px;margin:22px auto 0;font-size:19px;color:var(--text-2)}
 #hero .cta{display:flex;gap:12px;justify-content:center;margin-top:34px;flex-wrap:wrap}
@@ -37,12 +38,12 @@ a{color:var(--accent);text-decoration:none}
 
 /* hero entrance — the page's one authored motion moment */
 @keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
-.app-mark,#hero h1,#hero .sub,#hero .cta,#hero .fineprint{animation:rise .7s cubic-bezier(.22,1,.36,1) both}
+#hero h1,#hero .sub,#hero .cta,#hero .fineprint{animation:rise .7s cubic-bezier(.22,1,.36,1) both}
 #hero h1{animation-delay:.06s}
 #hero .sub{animation-delay:.14s}
 #hero .cta{animation-delay:.22s}
 #hero .fineprint{animation-delay:.28s}
-@media (prefers-reduced-motion:reduce){.app-mark,#hero h1,#hero .sub,#hero .cta,#hero .fineprint{animation:none}}
+@media (prefers-reduced-motion:reduce){#hero h1,#hero .sub,#hero .cta,#hero .fineprint{animation:none}}
 
 /* panel screenshot */
 #panel{padding-top:24px;display:flex;justify-content:center}

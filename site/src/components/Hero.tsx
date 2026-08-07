@@ -1,17 +1,16 @@
-import appIcon from '../assets/candela-icon.svg'
+import candelaCBg from '../assets/candela-c-bg.svg'
 
 export default function Hero() {
   return (
     <section id="hero" className="wrap">
-      <div className="app-mark" aria-hidden="true">
-        <img src={appIcon} width={88} height={88} alt="" />
-      </div>
+      <img src={candelaCBg} alt="" aria-hidden="true" className="hero-bgc" />
       <h1>
         The display control<br className="h1br" /> macOS forgot to ship.
       </h1>
       <p className="sub">
-        Retina-sharp scaling at any resolution, real hardware brightness and volume, virtual
-        displays — everything your external monitor should have come with. Free and open source.
+        Candela gives your external monitor everything it should have come with — Retina-sharp
+        scaling at any resolution, real hardware brightness and volume, virtual displays, and more.
+        Free and open source.
       </p>
       <div className="cta">
         <a className="btn btn-primary" href="https://github.com/Rydersel/Candela/releases/latest">Download for macOS</a>
