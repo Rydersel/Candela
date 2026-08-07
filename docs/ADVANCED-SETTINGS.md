@@ -10,8 +10,9 @@ control. (Cut from the UI by ruling D26, which also promised this page.)
 into the settings window. Each such key keeps its documentation here, with a
 line naming the control that now owns it — the key still works, and it is still
 the only route to the values the UI deliberately does not offer. Every promoted
-key lives on one display's **Advanced** sub-page (Settings → the display in the
-sidebar → **Advanced**).
+per-display key lives on one display's **Advanced** sub-page (Settings → the
+display in the sidebar → **Advanced**); the one promoted app-level key,
+`separateCombinedScale`, lives in Settings → **Keyboard** → *Precision*.
 
 A second list at the bottom covers names that are **reserved and do nothing**.
 They are documented so nobody sets one and concludes the app is broken.
@@ -57,7 +58,7 @@ than a caveat.
 
 | Key | Type | Default | Effect |
 |---|---|---|---|
-| `separateCombinedScale` | Bool | `NO` | Changes how far one press of a **brightness key** moves the slider while combined hardware+software dimming is active: 32 steps across the whole range instead of the usual 16. Sliders are unaffected. Ignored unless the display is actually on the combined path — no effect with "Dim past the display's minimum" off, with hardware control off for that display, or on the built-in panel. |
+| `separateCombinedScale` | Bool | `NO` | Changes how far one press of a **brightness key** moves the slider while combined hardware+software dimming is active: 32 steps across the whole range instead of the usual 16. Sliders are unaffected. Ignored unless the display is actually on the combined path — no effect with "Dim past the display's minimum" off, with hardware control off for that display, or on the built-in display. **Has a control:** Keyboard → Precision → *Extra-fine steps while combined dimming is active*. |
 
 ## Per-display (`<key>.<persistenceKey>`)
 

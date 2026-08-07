@@ -11,7 +11,7 @@ import SwiftUI
 /// UI only because the old pane iterated `model.displays`, which is
 /// external-only.
 ///
-/// "Show the built-in display in the menu bar panel" deliberately does NOT
+/// "Show the built-in display in the menu bar" deliberately does NOT
 /// live here. A laptop's panel disappears in clamshell, so a control governing
 /// whether this row exists cannot live inside it — it would vanish at exactly
 /// the moment it is needed. It stays in Menu Bar, and the button below

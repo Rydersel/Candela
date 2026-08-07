@@ -783,6 +783,17 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// Dock-less reopen (double-clicking the app in Finder, `open -a`): with no
   /// window to restore there is nothing for AppKit to do, so route it to
   /// Settings — never to onboarding, which is a first-run flow.
+  ///
+  /// This is SO24's recovery route, and the Menu Bar pane's hidden-icon caption
+  /// names it ("Open Candela again from Applications to get back to these
+  /// settings"). Deliberately NOT gated on the icon being hidden: the caption
+  /// depends on the hidden case, but a reopen with the icon showing has nothing
+  /// else to do either, and gating would delete a working route to buy nothing.
+  /// It is also the only settings route this app controls — ⌘, is delivered
+  /// straight to SwiftUI's own menu item and never reaches `SettingsOpener`.
+  ///
+  /// Only reaches a RUNNING app. A cold launch with the icon hidden shows
+  /// nothing; the second open is what lands here.
   func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows _: Bool) -> Bool {
     SettingsOpener.open()
     return false

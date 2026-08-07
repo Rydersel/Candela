@@ -31,7 +31,7 @@ struct AppMenuPane: View {
     // only thing that re-reads them and flips the popup.
     let _ = model.prefsRevision
     Form {
-      Section("Menu bar") {
+      Section("Menu Bar") {
         SettingRow {
           Picker("Show the menu bar icon:", selection: Binding(
             get: { prefs.menuIcon },
@@ -50,10 +50,12 @@ struct AppMenuPane: View {
             }
           }
           if prefs.menuIcon != .show {
-            // Every mode but "Always" can leave the user with no status item and
-            // therefore no panel. The fork's caption pointed at a relaunch action
-            // that never existed; this one promises only what works today.
-            SettingsCaption("With the icon hidden, open \(AppInfo.productName) again from Finder to get back here. You can quit it from the General pane.")
+            // Every mode but "Always" can leave the user with no icon and
+            // therefore no way in. SO24 makes that recovery real rather than a
+            // promise: `StatusItemController.applicationShouldHandleReopen`
+            // opens this window when the running app is opened again. The fork's
+            // caption pointed at a relaunch action that never existed.
+            SettingsCaption("Open \(AppInfo.productName) again from Applications to get back to these settings. You can quit it from General.")
           }
         }
       }
@@ -64,7 +66,7 @@ struct AppMenuPane: View {
         // is closed would make the setting unreachable from the state it
         // governs.
         SettingRow("Apple and built-in displays already have a brightness slider in Control Center.") {
-          Toggle("Show the built-in display in the menu bar panel", isOn: Binding(
+          Toggle("Show the built-in display in the menu bar", isOn: Binding(
             get: { !prefs.hideBuiltInDisplay },
             set: { shown in
               prefs.hideBuiltInDisplay = !shown
@@ -88,7 +90,7 @@ struct AppMenuPane: View {
         }
       }
 
-      Section("Slider appearance") {
+      Section("Slider Appearance") {
         Toggle("Snap to 25% steps", isOn: Binding(
           get: { prefs.enableSliderSnap },
           set: { enabled in
