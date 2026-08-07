@@ -44,6 +44,11 @@ enum SettingsRegistry {
         id: id, title: "Arrangement", symbol: "rectangle.3.group", tint: .teal,
         content: { AnyView(ArrangementPane()) }
       )
+    case .oledCare:
+      SettingsPaneDescriptor(
+        id: id, title: "OLED Care", symbol: "display", tint: .orange,
+        content: { AnyView(OledCarePane()) }
+      )
     case .keyboard:
       SettingsPaneDescriptor(
         id: id, title: "Keyboard", symbol: "keyboard", tint: .indigo,

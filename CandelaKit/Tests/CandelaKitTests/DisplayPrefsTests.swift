@@ -560,4 +560,58 @@ struct DisplayPrefsTests {
       #expect(prefs.oledHoursTracking == true)
     }
   }
+
+  @Test func resetOledCareRemovesTheKeysRatherThanRewritingThem() {
+    // Removal, not a write-back of today's numbers: an absent key follows the
+    // preset, and a reset that pinned the current values would quietly opt the
+    // display out of every later preset change. Checking the accessors alone
+    // could not tell the two apart.
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      prefs.oledCareEnrolled = true
+      prefs.oledIdleDimSeconds = 60
+      prefs.oledIdleDimLevel = 0.9
+      prefs.oledLockDim = false
+      prefs.oledBlackoutEnabled = true
+      prefs.oledBlackoutSeconds = 3000
+      prefs.oledUnfocusedDimEnabled = true
+      prefs.oledUnfocusedDimSeconds = 900
+      prefs.oledUnfocusedDimLevel = 0.4
+      prefs.oledHoursTracking = false
+
+      prefs.resetOledCare()
+
+      #expect(prefs.oledCareEnrolled == false)
+      #expect(prefs.oledIdleDimSeconds == 300)
+      #expect(prefs.oledIdleDimLevel == 0.5)
+      #expect(prefs.oledLockDim == true)
+      #expect(prefs.oledBlackoutEnabled == false)
+      #expect(prefs.oledBlackoutSeconds == 1200)
+      #expect(prefs.oledUnfocusedDimEnabled == false)
+      #expect(prefs.oledUnfocusedDimSeconds == 600)
+      #expect(prefs.oledUnfocusedDimLevel == 0.7)
+      #expect(prefs.oledHoursTracking == true)
+
+      for name in [
+        "oledCareEnrolled", "oledIdleDimSeconds", "oledIdleDimLevel", "oledLockDimOff",
+        "oledBlackoutEnabled", "oledBlackoutSeconds",
+        "oledUnfocusedDimEnabled", "oledUnfocusedDimSeconds", "oledUnfocusedDimLevel",
+        "oledHoursTrackingOff",
+      ] {
+        #expect(defaults.object(forKey: "\(name).pk") == nil, "\(name) survived the reset")
+      }
+    }
+  }
+
+  @Test func resetOledCareLeavesOtherDisplaysAlone() {
+    withSuite { defaults in
+      let a = DisplayPrefs(defaults: defaults, persistenceKey: "a")
+      let b = DisplayPrefs(defaults: defaults, persistenceKey: "b")
+      a.oledCareEnrolled = true
+      b.oledCareEnrolled = true
+      a.resetOledCare()
+      #expect(a.oledCareEnrolled == false)
+      #expect(b.oledCareEnrolled == true)
+    }
+  }
 }

@@ -242,6 +242,29 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(!newValue, forKey: key("oledHoursTrackingOff")) }
   }
 
+  /// Returns this display to the Recommended preset by REMOVING the ten keys
+  /// rather than writing their current default values back.
+  ///
+  /// The difference is not cosmetic: the accessors above document that an
+  /// absent key follows the preset, so a display reset by writing today's
+  /// numbers would be pinned to them and would stop tracking a later change to
+  /// the preset — the one property the "defaults ARE the preset" design buys.
+  ///
+  /// Accumulated panel hours are deliberately NOT touched. They are wear data
+  /// about the panel, not a setting, and they sit under their own keys
+  /// (`PanelHoursTracker`); the per-display reset keeps them for the same
+  /// reason it keeps the saved brightness, volume and contrast levels.
+  public func resetOledCare() {
+    for name in [
+      "oledCareEnrolled", "oledIdleDimSeconds", "oledIdleDimLevel", "oledLockDimOff",
+      "oledBlackoutEnabled", "oledBlackoutSeconds",
+      "oledUnfocusedDimEnabled", "oledUnfocusedDimSeconds", "oledUnfocusedDimLevel",
+      "oledHoursTrackingOff",
+    ] {
+      defaults.removeObject(forKey: key(name))
+    }
+  }
+
   // MARK: - Per-command DDC tuning
 
   public func tuning(for command: DDCCommand) -> CommandTuning {

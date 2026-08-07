@@ -36,6 +36,12 @@ public struct OledDimConfig: Equatable, Sendable {
   /// display ends up blacked out at zero idle with no input to recover it.
   public static let minimumThresholdSeconds: Double = 30
 
+  /// How far above the idle threshold the blackout threshold is forced to sit.
+  /// Public for the same reason as the two constants above: the pane's blackout
+  /// control derives its own lower bound from this, so it cannot offer a value
+  /// this type would silently rewrite.
+  public static let blackoutGapSeconds: Double = 60
+
   public init(idleDimSeconds: Double, idleDimLevel: Double, lockDim: Bool,
               blackoutEnabled: Bool, blackoutSeconds: Double,
               unfocusedDimEnabled: Bool, unfocusedDimSeconds: Double,
@@ -51,8 +57,9 @@ public struct OledDimConfig: Equatable, Sendable {
     self.blackoutEnabled = blackoutEnabled
     // A blackout that fires at or below the idle threshold is a config error;
     // clamp rather than trust the pane (spec §3).
-    self.blackoutSeconds = Self.sanitizedSeconds(blackoutSeconds,
-                                                 floor: self.idleDimSeconds + 60)
+    self.blackoutSeconds = Self.sanitizedSeconds(
+      blackoutSeconds, floor: self.idleDimSeconds + Self.blackoutGapSeconds
+    )
     self.unfocusedDimEnabled = unfocusedDimEnabled
     self.unfocusedDimSeconds = Self.sanitizedSeconds(unfocusedDimSeconds,
                                                      floor: Self.minimumThresholdSeconds)
