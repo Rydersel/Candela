@@ -58,9 +58,9 @@ public final class PanelHoursTracker {
     if unwrittenSeconds > Self.debounceSeconds { writeThrough() }
   }
 
-  /// Display slept, departed, or was powered off over DDC (0xD6). The last of
-  /// those is booked by the caller at the moment of the write — the panel goes
-  /// dark without macOS noticing anything (#94), so it is never observed.
+  /// Display slept or departed. A panel switched off at the monitor itself is
+  /// NOT one of these: macOS reports a DPMS-blanked panel as awake and never
+  /// reconfigures (#94), so that standby is invisible here.
   public func noteStandby() {
     sinceStandbySeconds = 0
     // The panel got its rest, so the next crossing has earned a fresh note.

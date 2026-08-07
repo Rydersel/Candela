@@ -102,17 +102,6 @@ final class OledCareCoordinator {
   /// Keyed by persistenceKey; created lazily and kept for the app's lifetime —
   /// hours are persistent facts about a panel, not about a connection.
   @ObservationIgnored private var trackers: [String: PanelHoursTracker] = [:]
-  /// The displays we believe are physically dark because WE powered them off
-  /// over VCP 0xD6 (#94), by persistenceKey. **An entry exists only while the
-  /// belief holds** — "the panel is lit" is represented by ABSENCE, so the
-  /// belief has one representation rather than two kept in agreement. Every
-  /// transition goes through `PanelPowerState` (CandelaKit, tested);
-  /// `updatePowerBelief` is the only writer and enforces the invariant.
-  ///
-  /// Deliberately outside `PerDisplay`: a display can be powered off from its
-  /// pane while it is not enrolled in OLED care at all, and un-enrolling and
-  /// re-enrolling a dark panel must not resurrect the phantom hours.
-  @ObservationIgnored private var poweredOff: [String: PanelPowerState] = [:]
   /// Per enrolled-and-connected display, by persistenceKey.
   @ObservationIgnored private var states: [String: PerDisplay] = [:]
   @ObservationIgnored private var driver: Task<Void, Never>?
@@ -290,65 +279,6 @@ final class OledCareCoordinator {
     if driver != nil { tick() }
   }
 
-  /// VCP 0xD6 power-off (spec §3): the wave's only DDC write.
-  ///
-  /// **There is no departure** [MEASURED 2026-08-07, #94, both panels]. A panel
-  /// blanked by `D6 set 4` stays in the online and active lists at full
-  /// resolution with `CGDisplayIsAsleep` false, and nothing reconfigures — macOS
-  /// never sees it go dark. The earlier claim here that the departure was
-  /// "expected" and flowed through `displaysReconfigured` was wrong; that path
-  /// simply never runs for this case.
-  ///
-  /// So the hours path cannot learn the panel is off from the system, and this
-  /// is the only place that knows: the belief is recorded HERE, before the write,
-  /// and `PanelPowerState` owns when it ends.
-  func powerOffDisplay(_ state: AppModel.DisplayState) async -> Bool {
-    let key = state.display.persistenceKey
-    // Deliberately UNGATED on `oledHoursTracking` — the one standby edge that
-    // is: this is an explicit user action whose whole point is a standby
-    // cycle, and recording it keeps the 8-hour note honest even for a display
-    // whose passive accumulation is switched off.
-    hoursTracker(for: key).noteStandby()
-    // ...and the tick must not book it a SECOND time when its effective-awake
-    // reading falls on the next pass; the edge is spent here.
-    states[key]?.wasAwake = false
-    // Recorded before the write, not after: `write` awaits, and a tick landing
-    // in that gap would otherwise accrue against a panel already going dark.
-    // `focusedElsewhere` is false unless focus is resolved AND on some other
-    // display — see PanelPowerState for why an unresolved sample must not arm
-    // the ratchet.
-    let focused = focus.focusedDisplayID()
-    updatePowerBelief(for: key) {
-      $0.notePoweredOff(focusedElsewhere: focused != nil && focused != state.id)
-    }
-    let sent = await state.writer.write(command: VCP.powerMode, value: 0x04)
-    if !sent {
-      // A write the panel refused is decent evidence nothing went dark (unlike
-      // a write it accepted, which is no evidence it was honoured). Suspending
-      // hours for a display that never turned off would be a defect of its own,
-      // and the pane tells the user the command failed.
-      updatePowerBelief(for: key) { $0.notePowerOffFailed() }
-    }
-    return sent
-  }
-
-  /// The ONLY writer of `poweredOff`. Enforces the map's invariant — an entry
-  /// exists exactly while the belief holds — so no caller has to remember it,
-  /// and returns the resulting belief so the tick reads it once.
-  @discardableResult
-  private func updatePowerBelief(
-    for key: String, _ mutate: (inout PanelPowerState) -> Void
-  ) -> PanelPowerState {
-    var belief = poweredOff[key] ?? PanelPowerState()
-    mutate(&belief)
-    if belief.believedPoweredOff {
-      poweredOff[key] = belief
-    } else {
-      poweredOff.removeValue(forKey: key)
-    }
-    return belief
-  }
-
   // MARK: - Sleep / wake
 
   private func systemWillSleep() {
@@ -422,18 +352,7 @@ final class OledCareCoordinator {
       if states[key]?.hoursTracking == true {
         hoursTracker(for: key).noteStandby()
       }
-      // A departure ends a power-off belief (#94): a real power-cycle IS a
-      // reconfiguration — the MAG departed once its compensation cycle finished
-      // — and the returning connection has no reason to be thought dark.
-      // Ungated on enrollment, like the belief itself.
-      updatePowerBelief(for: key) { $0.noteDeparted() }
       dropState(for: key)
-    }
-    // `seen` is every CONNECTED display, enrolled or not, so this also ends the
-    // belief for a display that was powered off while un-enrolled — the case the
-    // loop above cannot reach, and the reason the map cannot grow without bound.
-    for key in Array(poweredOff.keys) where !seen.contains(key) {
-      updatePowerBelief(for: key) { $0.noteDeparted() }
     }
   }
 
@@ -473,15 +392,7 @@ final class OledCareCoordinator {
     // display must not stay dimmed for seconds" rule. 0.46 ms per call
     // [MEASURED], well under 1% of a core at 10 Hz.
     let anyUnfocusedEnabled = states.values.contains(where: \.unfocusedDimEnabled)
-    // Also sampled while some enrolled display is believed powered off (#94):
-    // focus arriving there is the only evidence available that its panel is lit
-    // again. That case runs at the SLOW cadence (nothing is overlaid), so it
-    // costs 0.46 ms every 2 s. Restricted to enrolled keys — a belief held for a
-    // display with no engine has nothing to clear it for, and nothing accrues
-    // against it either.
-    let anyBelievedOff = states.keys.contains { poweredOff[$0] != nil }
-    let focusedDisplay = anyUnfocusedEnabled || anyBelievedOff
-      ? focus.focusedDisplayID() : nil
+    let focusedDisplay = anyUnfocusedEnabled ? focus.focusedDisplayID() : nil
     // ID → key resolved fresh every tick; IDs reassign and are never cached
     // as identity. Uniquing defensively: two identical panels can collide on
     // persistenceKey, and a crash would be worse than one of them winning.
@@ -555,19 +466,13 @@ final class OledCareCoordinator {
       // asleep spans contribute no noteTick. Mirrored displays accumulate
       // nothing (OC13: suspended means suspended).
       //
-      // `CGDisplayIsAsleep` alone is NOT enough (#94): it reports a panel we
-      // blanked over VCP 0xD6 as awake, so the belief carried by
-      // `PanelPowerState` is the other half of "is this panel actually lit". The
-      // dimming state machine above is deliberately untouched by it — this is an
-      // hours question, and an overlay on a dark panel is invisible and lifts on
-      // the next input like any other, so it needs no second suspension.
-      let belief = updatePowerBelief(for: key) { belief in
-        // nil = "no display resolved yet" (or just-invalidated), never "focus
-        // went nowhere"; feeding it in would arm the ratchet off a non-reading.
-        // A sample for a panel believed ON is a no-op inside the type.
-        if let focusedDisplay { belief.noteFocusSample(isThisDisplay: focusedDisplay == id) }
-      }
-      let awake = belief.accruesHours(systemReportsAsleep: CGDisplayIsAsleep(id) != 0)
+      // Known over-count, documented in the pane's caption rather than fixed
+      // (#94): a panel blanked by DPMS — the monitor's own power button — keeps
+      // reporting `CGDisplayIsAsleep == false`, at full resolution, with no
+      // reconfiguration, so hours accrue while it is dark. macOS exposes no
+      // signal that distinguishes it, and the one signal Candela used to have
+      // (its own 0xD6 write) went with the power-off action.
+      let awake = CGDisplayIsAsleep(id) == 0
       if state.hoursTracking {
         if state.wasAwake, !awake { hoursTracker(for: key).noteStandby() }
         if awake, !isMirrored, let last = state.hoursLastTick {
