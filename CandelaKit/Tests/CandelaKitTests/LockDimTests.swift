@@ -202,6 +202,38 @@ struct LockDimTests {
     #expect(rig.controller.brightness == 0.6)
   }
 
+  /// A reconfiguration mid-lock (a replug, a sibling display's HDR flip, a bus
+  /// drop) re-runs the SOFTWARE leg for the current value. It must re-run it
+  /// dimmed: an undimmed software leg over a hardware leg still holding the dim
+  /// is a partially lifted dim on a locked screen, and the coordinator's
+  /// per-tick re-assert cannot repair it, because `beginTemporaryDim` no-ops on
+  /// an unchanged factor.
+  @Test func aReconfigurationDuringTheDimReAppliesTheSoftwareLegDimmed() async {
+    // Combined path: the software leg carries everything below the switching
+    // point, so a dim that lands there is visible in the gamma scale.
+    let defaults = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "lock")
+    let gamma = FakeGamma()
+    let controller = BrightnessController(
+      writer: FakeDDC(readResult: nil),
+      backends: BrightnessBackends(
+        applierNative: FakeNativeApplier(), hdr: FakeHDR(supports: false, enabled: false),
+        shade: FakeShade(), gamma: gamma
+      ),
+      prefs: prefs,
+      displayID: 7,
+      role: .external,
+      store: PathMemoryStore(),
+      storageKey: Self.storageKey
+    )
+    controller.setBrightness(0.2)
+    controller.beginTemporaryDim(factor: 0.5)
+    await controller.waitForPendingWrites()
+    let dimmed = gamma.scales.last
+    await controller.handleReconfigure(recapture: false)
+    #expect(gamma.scales.last == dimmed)
+  }
+
   /// Teardown restore: the quit path writes the register's full-range
   /// equivalent of the PUBLISHED value, so a quit while lock-dimmed hands the
   /// panel back rather than leaving it dark with nobody left to restore it.
@@ -232,6 +264,35 @@ struct LockDimTests {
     rig.controller.endTemporaryDim()
     await rig.controller.waitForPendingWrites()
     #expect(await rig.ddc.recordedWrites().count == before)
+  }
+
+  /// The lift promise is 100 ms, and a lock dim raises no overlay, so the
+  /// cadence has to count it as a dim that is up. It did not: the wire-
+  /// delivered dim ticked every 2 s, which is what the user typing their
+  /// password would have waited for the brightness to come back.
+  @Test func aLockDimHoldsTheFastCadenceEvenThoughItRaisesNoOverlay() {
+    #expect(
+      OledCareCadence.interval(
+        anyOverlayUp: false, anyLockDimEngaged: true, verificationPending: false
+      ) == OledCareCadence.fast
+    )
+    // The other terms still stand on their own, and nothing wanted is slow.
+    #expect(
+      OledCareCadence.interval(
+        anyOverlayUp: true, anyLockDimEngaged: false, verificationPending: false
+      ) == OledCareCadence.fast
+    )
+    #expect(
+      OledCareCadence.interval(
+        anyOverlayUp: false, anyLockDimEngaged: false, verificationPending: true
+      ) == OledCareCadence.fast
+    )
+    #expect(
+      OledCareCadence.interval(
+        anyOverlayUp: false, anyLockDimEngaged: false, verificationPending: false
+      ) == OledCareCadence.slow
+    )
+    #expect(OledCareCadence.fast == .milliseconds(100))
   }
 
   /// The engine can no longer ask for a lock-dim OVERLAY at all. The delivery

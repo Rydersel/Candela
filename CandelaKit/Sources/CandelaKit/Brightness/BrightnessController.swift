@@ -437,7 +437,7 @@ public final class BrightnessController {
   public func setBrightness(_ value: Double) {
     let clamped = min(max(value, 0), 1)
     brightness = clamped
-    applyPaths(clamped)
+    applyPaths()
     persist(clamped)
   }
 
@@ -482,15 +482,16 @@ public final class BrightnessController {
   /// The order the fork's contract depends on is preserved inside the policy,
   /// where it is pinned by `BrightnessPathPolicyTests`; a `switch` here is
   /// order-free by construction.
-  private func applyPaths(_ requested: Double) {
-    // The temporary dim is applied HERE and nowhere else, and that placement is
-    // the whole design. Every leg, the echo slot the poller compares against,
-    // and every re-entry into path selection (`reassertHardware`,
-    // `reapplyAfterPrefChange`, a slider moved mid-dim) pick it up for free;
-    // `brightness` and the store keep the value the USER chose, so nothing has
-    // to remember to put it back and a process that dies mid-dim still restores
-    // the right value on its next launch.
-    let value = requested * (temporaryDimFactor ?? 1)
+  ///
+  /// **Takes no argument, deliberately.** Every leg has to derive from the same
+  /// effective value, and a parameter is exactly how that broke once:
+  /// `handleReconfigure` recomputed the software split from raw `brightness`
+  /// and re-applied an UNDIMMED software leg while the DDC leg held a temporary
+  /// dim, leaving a half-lifted dim on a locked screen that the coordinator's
+  /// re-assert could not repair (`beginTemporaryDim` no-ops on an unchanged
+  /// factor). With nothing to pass, a caller cannot pass the wrong thing.
+  private func applyPaths() {
+    let value = effectiveBrightness
     let tuning = prefs.tuning(for: .brightness)
     switch BrightnessPathPolicy.path(pathInputs(tuning: tuning)) {
     case .native:
@@ -657,7 +658,7 @@ public final class BrightnessController {
   /// through `applyPaths` (not a bare submit) also writes the echo slot, so the
   /// poller reads the assert back as an echo rather than an external change.
   private func assertNativeEntryBrightness() {
-    applyPaths(brightness)
+    applyPaths()
   }
 
   private var switchingValue: Double {
@@ -772,7 +773,7 @@ public final class BrightnessController {
         settleInProgress = false
         await refreshHDRCaches()
         guard hdrTransitionGeneration == generation else { return } // backlog #1: same fence as the success arm
-        applyPaths(brightness)
+        applyPaths()
       }
     } else {
       // Leaving the native path (`.alwaysOn` → `.off`, the only remaining exit
@@ -792,7 +793,7 @@ public final class BrightnessController {
       guard hdrTransitionGeneration == generation else { return } // post-settle
       settleInProgress = false
       coalescer.resetDuplicateState()
-      applyPaths(brightness)
+      applyPaths()
       await refreshHDRCaches()
     }
   }
@@ -833,11 +834,16 @@ public final class BrightnessController {
     backends.shade?.repinFrames()
     lastAppliedSw = nil
     guard !usesNative else { return }
+    // `effectiveBrightness`, never raw `brightness`: a reconfiguration during a
+    // temporary dim (a replug, a sibling display's HDR flip, a bus drop) would
+    // otherwise re-apply the software leg UNDIMMED while the hardware leg still
+    // holds the dim, which on a locked screen is a partially lifted dim.
+    let value = effectiveBrightness
     let sw: Double
     if prefs.forceSoftware {
-      sw = brightness
+      sw = value
     } else if !prefs.disableCombinedBrightness {
-      sw = DimmingMath.combinedSplit(value: brightness, switching: switchingValue).sw
+      sw = DimmingMath.combinedSplit(value: value, switching: switchingValue).sw
     } else {
       return // pure-DDC path has no software leg to re-apply
     }
@@ -1059,7 +1065,21 @@ public final class BrightnessController {
   /// value and the only truth a write-only panel has: a crash or a force-quit
   /// while dimmed would then make the dim permanent, and a slider moved during
   /// the dim would have nothing to be restored to.
+  ///
+  /// Scope of the "a process that dies while dimmed still reopens correctly"
+  /// claim: it is unconditional for a write-only panel, where the store IS the
+  /// truth. On a panel that answers DDC reads (the Dell here), a launch that
+  /// reads brightness back from the hardware can still adopt the dim the dead
+  /// process left in the register. The store is right either way; the readback
+  /// is what would overwrite it.
   public private(set) var temporaryDimFactor: Double?
+
+  /// The ONE place the temporary dim is folded in. Everything that computes a
+  /// leg's value starts here; `brightness` is the user's number and is never
+  /// what reaches the hardware while a dim is outstanding.
+  private var effectiveBrightness: Double {
+    brightness * (temporaryDimFactor ?? 1)
+  }
 
   /// Applies a temporary dim. Idempotent for an unchanged factor.
   ///
@@ -1073,7 +1093,7 @@ public final class BrightnessController {
     temporaryDimFactor = clamped
     lastAppliedSw = nil
     coalescer.resetDuplicateState()
-    applyPaths(brightness)
+    applyPaths()
   }
 
   /// Restores the published value exactly. Safe to call when nothing is dimmed
@@ -1084,7 +1104,7 @@ public final class BrightnessController {
     temporaryDimFactor = nil
     lastAppliedSw = nil
     coalescer.resetDuplicateState()
-    applyPaths(brightness)
+    applyPaths()
   }
 
   /// Re-asserts the current value on whatever path is live (the restore
@@ -1097,7 +1117,7 @@ public final class BrightnessController {
   /// whose published value is still the assumed 1.0 default over an empty
   /// store.
   public func reassertHardware() {
-    applyPaths(brightness)
+    applyPaths()
   }
 
   // MARK: - Settings re-apply (D28)
@@ -1176,7 +1196,7 @@ public final class BrightnessController {
     if choice != .gamma { backends.gamma?.applyGammaScale(1.0, on: displayID, enforcerOn: drawable) }
     lastAppliedSw = nil
     coalescer.resetDuplicateState()
-    applyPaths(brightness)
+    applyPaths()
   }
 
   /// Quit restore: write the register's FULL-RANGE equivalent of the

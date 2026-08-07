@@ -780,6 +780,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // (no restore ran and no software leg was re-applied on our behalf), so
     // skipping it leaves the monitor exactly where the user last put it.
     guard !isSafeMode else { return }
+    // Ordering, both halves of it. AFTER the gamma reset and shade removal
+    // above, and that is correct rather than incidental: those two tear the
+    // software surfaces down unconditionally, and the restore below re-applies
+    // whatever leg is live, so the final state is the user's value on a clean
+    // surface. Ending the dim first would just have it torn down again.
     // FIRST, and before the full-range restore below: quitting while a display
     // is lock-dimmed must hand the panel back to the user's own brightness.
     // `restoreFullRangeDDC` already writes the undimmed value on the DDC leg,

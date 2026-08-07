@@ -91,10 +91,9 @@ final class OledCareCoordinator {
   }
 
   /// Poll cadence: slow while every enrolled display is `.active`/`.suspended`;
-  /// fast while any overlay is up (restore latency gate is 100 ms, #21) or an
-  /// OC12 verification is pending.
-  private static let slowCadence: Duration = .seconds(2)
-  private static let fastCadence: Duration = .milliseconds(100)
+  /// fast while any dim is up by any delivery (restore latency gate is 100 ms,
+  /// #21) or an OC12 verification is pending. The predicate and both durations
+  /// live in `OledCareCadence`, under test.
   /// After this much CONTINUOUS settling the signal is ignored: the entry gate
   /// exists for a transition window measured in seconds, not for a latch that
   /// never cleared.
@@ -391,10 +390,9 @@ final class OledCareCoordinator {
     if let controller = model?.displays.first(
       where: { $0.display.persistenceKey == key }
     )?.controller {
-      endLockDim(&state, for: key, on: controller)
-    } else {
-      lockDimSkips.removeValue(forKey: key)
+      endLockDim(&state, on: controller)
     }
+    clearSkip(for: key)
     if let id = state.lastDisplayID {
       overlay.remove(for: id)
       // This removal deletes the state that would carry its OC12 marker, so
@@ -559,16 +557,15 @@ final class OledCareCoordinator {
     if published != dimStates { dimStates = published }
   }
 
+  /// A given-up verify drops the fast cadence only when nothing is wanted (the
+  /// strand case); a wanted dim keeps it, whichever way it is delivered.
   private func cadence() -> Duration {
-    // `overlayUp` reads the WANT, not the verified presence, on purpose: the
-    // 100 ms gate is about input lifting a dim the engine believes is up, and
-    // that belief is what needs fast ticks to be corrected. A given-up verify
-    // therefore drops the fast cadence only when nothing is wanted (the
-    // strand case); a wanted overlay keeps it, as any dim does.
-    let overlayUp = states.values.contains { $0.lastAppliedAlpha != nil }
-    let verifying = states.values.contains(where: \.needsVerify)
-      || !pendingRemovalVerifications.isEmpty
-    return overlayUp || verifying ? Self.fastCadence : Self.slowCadence
+    OledCareCadence.interval(
+      anyOverlayUp: states.values.contains { $0.lastAppliedAlpha != nil },
+      anyLockDimEngaged: states.values.contains(where: \.lockDimEngaged),
+      verificationPending: states.values.contains(where: \.needsVerify)
+        || !pendingRemovalVerifications.isEmpty
+    )
   }
 
   // MARK: - Lock dim (delivered on the wire, not by an overlay)
@@ -590,17 +587,23 @@ final class OledCareCoordinator {
     for key: String, on displayState: AppModel.DisplayState
   ) {
     guard dimState == .lockDim else {
-      endLockDim(&state, for: key, on: displayState.controller)
+      endLockDim(&state, on: displayState.controller)
+      clearSkip(for: key)
       return
     }
     let controller = displayState.controller
-    // RE-ASSERTED every tick rather than engaged once on the edge, for the same
-    // reason `render` re-applies the overlay every tick: a still-connected
-    // display can get a REBUILT controller under it (a reconfiguration reuses
-    // controllers, a replug does not), and a one-shot engage guarded on our own
-    // flag would leave that display undimmed while this object believed
-    // otherwise. `beginTemporaryDim` is idempotent for an unchanged factor, so
-    // the re-assert costs no write.
+    // Re-asserted every tick rather than engaged once on the edge, and the
+    // scope of what that buys is worth stating exactly, because a comment that
+    // claims more than the code enforces is its own defect:
+    //
+    // - It DOES cover a display that got a REBUILT controller under it while
+    //   locked (a reconfiguration reuses controllers, a replug does not). The
+    //   fresh controller has no factor, so `beginTemporaryDim` applies.
+    // - It does NOT, and cannot, repair a controller that still holds the dim
+    //   but re-applied a leg from the wrong value: the unchanged-factor guard
+    //   makes that call a no-op. That invariant is enforced where it belongs,
+    //   inside `BrightnessController` (`applyPaths` takes no argument and every
+    //   leg derives from one effective value), not by this loop.
     let decision = LockDimPolicy.decide(
       path: controller.brightnessPath,
       brightness: controller.brightness,
@@ -612,6 +615,12 @@ final class OledCareCoordinator {
       state.lockDimEngaged = true
       clearSkip(for: key)
     case let .skip(reason):
+      // A skip ENDS any dim this display already has. The path can change under
+      // a live dim (HDR engaged from System Settings, a command turned off), and
+      // recording "nothing can dim this" while a dim of ours is still on the
+      // wire is a state disagreement: the display would sit dimmed with the
+      // coordinator reporting it skipped.
+      endLockDim(&state, on: controller)
       // Recorded, never engaged: a display whose brightness nothing can move
       // must not be remembered as dimmed, or the unlock would "restore" a dim
       // that never happened. Assigned (and logged) only on a CHANGE: this runs
@@ -626,10 +635,11 @@ final class OledCareCoordinator {
     }
   }
 
-  private func endLockDim(
-    _ state: inout PerDisplay, for key: String, on controller: BrightnessController
-  ) {
-    clearSkip(for: key)
+  /// Ends the dim and nothing else. Clearing the recorded skip is deliberately
+  /// NOT folded in: the skip arm calls this and then records a reason, and a
+  /// clear in here would make that record look new on every tick, which is a
+  /// log line and an observation notify at the fast cadence.
+  private func endLockDim(_ state: inout PerDisplay, on controller: BrightnessController) {
     guard state.lockDimEngaged else { return }
     controller.endTemporaryDim()
     state.lockDimEngaged = false
@@ -662,7 +672,8 @@ final class OledCareCoordinator {
         lockDimSkips.removeValue(forKey: key)
         continue
       }
-      endLockDim(&state, for: key, on: controller)
+      endLockDim(&state, on: controller)
+      clearSkip(for: key)
       states[key] = state
     }
   }
