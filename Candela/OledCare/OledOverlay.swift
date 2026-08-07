@@ -5,10 +5,11 @@ import os
 /// OLED care's own overlay windows: one black, full-screen window per enrolled
 /// display, whose content-view alpha carries the care dim.
 ///
-/// Deliberately NOT `ShadeOverlay`, whose shape this copies: the brightness
-/// engine owns those windows and clears them wholesale on topology changes
-/// (`removeAllShades()`), on a schedule that has nothing to do with the dimming
-/// state machine's. Sharing them would let either owner erase the other's work.
+/// The window setup mirrors `ShadeOverlay`, transplanted from MonitorControl
+/// (MIT). Deliberately NOT the same windows, though: the brightness engine owns
+/// those and clears them wholesale on topology changes (`removeAllShades()`), on
+/// a schedule that has nothing to do with the dimming state machine's. Sharing
+/// them would let either owner erase the other's work.
 ///
 /// The ID arriving here is the display OLED care is enrolled on. Mirror
 /// resolution is NOT done here — OC13 suspends care on a mirror participant
@@ -17,31 +18,66 @@ import os
 final class OledOverlay {
   private static let log = Logger(subsystem: "com.rydersel.Candela", category: "oledcare")
 
-  private var windows: [CGDirectDisplayID: NSWindow] = [:]
+  private var windows: [CGDirectDisplayID: NSPanel] = [:]
+
+  /// The window number of the last overlay closed on each display, kept until
+  /// the window server confirms it is gone. Without it the removal half of
+  /// `verifyPresence` is a tautology — "no window cached" would answer "not
+  /// present" for a window we asked to close and the server never dropped,
+  /// which is the exact stranded-overlay case OC12 exists to catch.
+  private var lastRemoved: [CGDirectDisplayID: CGWindowID] = [:]
+
+  /// Displays already warned about for a missing `NSScreen`. A care overlay is
+  /// re-driven on every state tick, so an unrated warning would be a per-tick
+  /// log flood for as long as the display stays gone.
+  private var warnedMissingScreen: Set<CGDirectDisplayID> = []
 
   /// `alpha` nil removes the overlay; otherwise it is clamped to 0...1 and
   /// applied to the content view (the window itself stays opaque with a clear
   /// background — an alpha-faded *window* gets different compositor treatment
   /// and reads washed out, per `ShadeOverlay`).
-  func apply(alpha: Double?, blackout: Bool, on displayID: CGDirectDisplayID) {
+  ///
+  /// Returns false when the requested state could not be produced — no
+  /// `NSScreen` matches the display, so no overlay exists to carry the dim.
+  /// DT17's lesson, and the reason this is not a `Void` call: a caller that
+  /// cannot tell will memoise a dimming that never happened.
+  @discardableResult
+  func apply(alpha: Double?, blackout: Bool, on displayID: CGDirectDisplayID) -> Bool {
     guard let alpha else {
       self.remove(for: displayID)
-      return
+      return true
     }
     guard let window = self.window(for: displayID) else {
-      Self.log.warning("No screen matches display \(displayID, privacy: .public); OLED care overlay not applied")
-      return
+      if self.warnedMissingScreen.insert(displayID).inserted {
+        Self.log.warning("No screen matches display \(displayID, privacy: .public); OLED care overlay not applied")
+      }
+      return false
     }
     // OC15: blackout swallows mouse input (at full black a click-through click
     // is a blind click on live UI); every other level stays click-through so
     // the waking click lands where the user aimed.
     window.ignoresMouseEvents = !blackout
     window.contentView?.alphaValue = CGFloat(min(max(alpha, 0), 1))
+    // Re-assert on EVERY apply, not only at creation. The one state in which
+    // `verifyPresence` says false while a window is cached is a window the
+    // server dropped (space transition, another shielding window, a
+    // reconfiguration) — so if this did not re-order, the OC12 reconcile would
+    // have no lever and would report the same failure forever. Idempotent for
+    // a window already on screen.
+    window.orderFrontRegardless()
+    return true
   }
 
   func remove(for displayID: CGDirectDisplayID) {
     guard let window = self.windows.removeValue(forKey: displayID) else {
       return
+    }
+    // Retained for the stranded-overlay check; cleared once the server confirms
+    // the window is gone, or when a new overlay supersedes it. A window that
+    // never reached the screen has no number to watch (0 is `kCGNullWindowID`,
+    // which would make the query meaningless rather than negative).
+    if window.windowNumber > 0 {
+      self.lastRemoved[displayID] = CGWindowID(window.windowNumber)
     }
     // Safe for the same reason `ShadeOverlay.removeShade` is: the window is
     // borderless and `isReleasedWhenClosed` is false at creation, so ARC owns
@@ -68,55 +104,88 @@ final class OledOverlay {
   }
 
   /// OC12: presence answered by the window server, never by our own `NSWindow`
-  /// state — `isVisible` restates the request we issued. Asks whether the
-  /// window ID is in the window server's list AND on screen; the on-screen key
-  /// is the achieved half of the answer, since a window that exists but was
-  /// never composited still has an entry.
+  /// state — `isVisible` restates the request we issued. True means an overlay
+  /// window for this display is on screen *now*, whether or not we still want
+  /// one; both halves of the ruling (an add that did not land, a removal that
+  /// did not take) are answered by the same call.
   ///
   /// No TCC grant needed: only `kCGWindowName` is gated by Screen Recording.
   func verifyPresence(on displayID: CGDirectDisplayID) -> Bool {
-    guard let window = self.windows[displayID] else {
+    if let window = self.windows[displayID] {
+      return Self.isOnScreen(CGWindowID(window.windowNumber))
+    }
+    guard let closed = self.lastRemoved[displayID] else {
       return false
     }
-    guard let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(window.windowNumber)) as? [[String: Any]],
+    guard Self.isOnScreen(closed) else {
+      self.lastRemoved.removeValue(forKey: displayID)
+      return false
+    }
+    Self.log.error("OLED care overlay still on screen after close on display \(displayID, privacy: .public)")
+    return true
+  }
+
+  private static func isOnScreen(_ number: CGWindowID) -> Bool {
+    guard let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], number) as? [[String: Any]],
           let info = list.first
     else {
       return false
     }
-    // The key is present only while the window is on screen.
+    // The key is present only while the window is on screen; an entry can
+    // outlive that, which is why membership alone is not the answer.
     return info[kCGWindowIsOnscreen as String] as? Bool ?? false
   }
 
   /// Returns the display's overlay, creating it on first use. Nil only when no
   /// `NSScreen` currently matches the display (offline/unmatched).
-  private func window(for displayID: CGDirectDisplayID) -> NSWindow? {
+  private func window(for displayID: CGDirectDisplayID) -> NSPanel? {
     if let existing = self.windows[displayID] {
       return existing
     }
     guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
       return nil
     }
-    // The initial content rect is a throwaway — the real frame is applied below.
-    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 10, height: 1), styleMask: [], backing: .buffered, defer: false)
-    window.title = "Candela OLED Care Overlay for Display \(displayID)"
-    window.isReleasedWhenClosed = false
-    window.isMovableByWindowBackground = false
+    // An `NSPanel` with `.nonactivatingPanel`, not a plain `NSWindow`: the
+    // blackout overlay accepts clicks (OC15), and a click-accepting window in
+    // an accessory app would otherwise activate Candela and take key away from
+    // whatever the user was in. Same shape as `ConfirmationPanel`, the repo's
+    // only other click-receiving window. `.borderless` is the zero mask —
+    // named for what it means, since the mask is otherwise empty.
+    let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 10, height: 1),
+                        styleMask: [.borderless, .nonactivatingPanel],
+                        backing: .buffered,
+                        defer: false)
+    panel.title = "Candela OLED Care Overlay for Display \(displayID)"
+    panel.isReleasedWhenClosed = false
+    panel.isMovableByWindowBackground = false
+    // Nothing here takes input — the blackout window swallows clicks and hosts
+    // no controls — so it should never become key. Mouse events still arrive at
+    // the window under the cursor regardless of key state.
+    panel.becomesKeyOnlyIfNeeded = true
+    // Not a floating panel, so this is already the default; stated because
+    // `ConfirmationPanel` records that `isFloatingPanel` flips it, and an
+    // overlay that vanished on deactivation would be invisible exactly when it
+    // is meant to be dimming.
+    panel.hidesOnDeactivate = false
     // The window is clear; the black lives in the content view's layer.
-    window.backgroundColor = .clear
-    window.ignoresMouseEvents = true
+    panel.backgroundColor = .clear
+    panel.ignoresMouseEvents = true
     // Above the screen saver and above the HUD — anything that could paint over
     // the overlay would escape the dimming.
-    window.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
+    panel.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
     // `.fullScreenAuxiliary` keeps the overlay dimming over full-screen apps
     // instead of being dropped when a space goes full-screen.
-    window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-    window.setFrame(screen.frame, display: true)
-    window.contentView?.wantsLayer = true
-    window.contentView?.alphaValue = 0
-    window.contentView?.layer?.backgroundColor = .black
-    window.orderFrontRegardless()
-    self.windows[displayID] = window
+    panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+    panel.setFrame(screen.frame, display: true)
+    panel.contentView?.wantsLayer = true
+    panel.contentView?.alphaValue = 0
+    panel.contentView?.layer?.backgroundColor = .black
+    self.windows[displayID] = panel
+    // A live overlay supersedes the closed one this display may still be
+    // watched for; `apply` orders it front.
+    self.lastRemoved.removeValue(forKey: displayID)
+    self.warnedMissingScreen.remove(displayID)
     Self.log.info("OLED care overlay created for display \(displayID, privacy: .public)")
-    return window
+    return panel
   }
 }
