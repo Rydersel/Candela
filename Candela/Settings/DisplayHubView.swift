@@ -475,9 +475,9 @@ struct DisplayHubView: View {
   }
 
   /// Mirrors what the key path actually consults, so this row cannot say "On"
-  /// about keys that would move nothing. TWO unavailability signals, both
-  /// required: `volume.isAvailable` is the pref side (the command or hardware
-  /// control turned off for this display), `volumeSliderEnabled` is D24's —
+  /// about keys that would move nothing. TWO unavailability signals, and EITHER
+  /// one is enough: `volume.isAvailable` is the pref side (the command or
+  /// hardware control turned off for this display), `volumeSliderEnabled` is D24's:
   /// the monitor's own denial, the same verdict that greys the hero's slider.
   /// The Dell answers its capabilities with no VCP 0x62, and this row saying
   /// "On" there would contradict the greyed slider two sections up.
@@ -660,7 +660,7 @@ struct DisplayHubView: View {
           // are macOS-visible state this button deliberately leaves alone.
           // Counted panel hours are wear data, kept for the same reason the
           // levels are.
-          Text("This unmutes \(state.display.name), turns HDR off, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, and everything under Advanced, including control-code remaps and response curves. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. Resolution and rotation are not changed.")
+          Text("This unmutes \(state.display.name), turns HDR off, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, and everything under Advanced, including control-code remaps and response curves. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
         }
     }
   }

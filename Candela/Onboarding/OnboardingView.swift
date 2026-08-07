@@ -140,7 +140,7 @@ struct OnboardingView: View {
   /// The display-configuration pitch, under two copy constraints that pull the
   /// same way.
   ///
-  /// RM11: never imply true native HiDPI — every revealed mode except one
+  /// RM11: never imply true native HiDPI. Every revealed mode except one
   /// renders oversized and downsamples, so the app must not claim otherwise
   /// here and then be honest in the mode picker.
   ///

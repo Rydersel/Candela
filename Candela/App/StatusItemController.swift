@@ -904,8 +904,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
   /// D12: full-domain wipe, explicitly confirmed by the caller (the General
   /// pane owns the confirmation, and SO20 binds its copy to this function: it
-  /// names the hardware effects below — HDR off, unmute, OLED care torn down
-  /// with the hour counters cleared — as well as what is destroyed, including
+  /// names the hardware effects below (HDR off, unmute, OLED care torn down
+  /// with the hour counters cleared) as well as what is destroyed, including
   /// the login item and the stored brightness/volume/contrast, which on a
   /// write-only panel are the only record of where the display is).
   func performSettingsReset() {
