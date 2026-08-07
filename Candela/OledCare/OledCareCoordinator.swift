@@ -148,6 +148,16 @@ final class OledCareCoordinator {
   /// The most recent window observation per display, for attribution in the
   /// health view. Tracked for the same reason as `accumulators`.
   private var latestObservations: [String: WindowObservation] = [:]
+  /// OC18's per-app attribution OVER TIME — panel-seconds each app has
+  /// occupied, folded from the same observations `latestObservations` holds the
+  /// latest of. Restored on first touch and kept for the app's lifetime,
+  /// exactly like `accumulators`, and observation-tracked for the same reason:
+  /// `healthSummary(for:)` reads it.
+  ///
+  /// One instance per key, `hoursTracker(for:)`'s rule: two live accumulators
+  /// double-book every observation, and this is persisted, so the bias never
+  /// washes out.
+  private var ownerHours: [String: OwnerHoursAccumulator] = [:]
   /// The ageing half of window observation. `WindowObserver.observe` is
   /// MUTATING on a value type, so this must be mutated in place — a `let` copy
   /// discards every window's age on return and the stationary threshold could
@@ -248,7 +258,7 @@ final class OledCareCoordinator {
     sleepWakeObservers.append(NotificationCenter.default.addObserver(
       forName: NSApplication.willTerminateNotification, object: nil, queue: nil
     ) { [weak self] _ in
-      MainActor.assumeIsolated { self?.flushExposureMaps() }
+      MainActor.assumeIsolated { self?.flushExposureHistory() }
     })
 
     reconcileEnrollment()
@@ -290,38 +300,42 @@ final class OledCareCoordinator {
   /// from prefs otherwise, so a disconnected panel's history still reports the
   /// confidence it was recorded under rather than defaulting to `.estimated`.
   ///
-  /// Deliberately does NOT memoise the accumulator it may have to load: this is
+  /// Deliberately does NOT memoise either store it may have to load: this is
   /// called from a SwiftUI body, and populating an observation-tracked
-  /// dictionary there is a state mutation during view update. Reading
-  /// `accumulators` still registers the dependency, so the view refreshes when
-  /// a sample lands; until one does, the cost is decoding 240 doubles.
+  /// dictionary there is a state mutation during view update. Reading them
+  /// still registers the dependency, so the view refreshes when a sample lands;
+  /// until one does, the cost is decoding 240 doubles and a small dictionary.
   func healthSummary(for persistenceKey: String) -> PanelHealthSummary {
     let map = accumulators[persistenceKey]?.map ?? loadExposureMap(for: persistenceKey)
+    let owners = ownerHours[persistenceKey]?.hours ?? loadOwnerHours(for: persistenceKey)
     let telemetry = states[persistenceKey]?.telemetryEnabled
       ?? DisplayPrefs(persistenceKey: persistenceKey).oledTelemetry
     return PanelHealthSummary.make(
       map: map,
       observation: latestObservations[persistenceKey],
+      ownerHours: owners,
       telemetryEnabled: telemetry,
       sampleCount: map.sampleCount)
   }
 
-  /// The health view's delete action: the accumulated exposure map and the
-  /// window attribution derived from it, cleared in one step, in memory and on
-  /// disk.
+  /// The health view's delete action: the accumulated exposure map, the
+  /// per-app panel-seconds, and the window attribution derived from them,
+  /// cleared in one step, in memory and on disk.
   ///
-  /// Panel HOURS are deliberately NOT cleared. They are a different measurement
-  /// with its own reset path (`PanelHoursTracker.reset()`, driven by the
-  /// settings reset), and a control labelled for exposure history must not
-  /// silently destroy a lifetime counter. The plan's "and per-app hours" has
-  /// nothing else to clear: `PanelHealthSummary.topOwnersByHours` is always
-  /// empty because no per-owner time series is measured anywhere yet.
+  /// The panel's TOTAL HOURS are deliberately NOT cleared. They are a different
+  /// measurement with its own reset path (`PanelHoursTracker.reset()`, driven
+  /// by the settings reset), and a control labelled for exposure history must
+  /// not silently destroy a lifetime counter. Per-app hours ARE cleared: they
+  /// are derived from the same observations as the map, and leaving them would
+  /// let the health view keep naming apps for a history the user just deleted.
   func clearExposureHistory(for persistenceKey: String) {
     exposureEpoch += 1
     accumulators[persistenceKey] = ExposureAccumulator()
+    ownerHours[persistenceKey] = OwnerHoursAccumulator()
     forgetWindowObservation(for: persistenceKey)
     unsavedExposureKeys.remove(persistenceKey)
     UserDefaults.standard.removeObject(forKey: Self.exposureKeyName(persistenceKey))
+    UserDefaults.standard.removeObject(forKey: Self.ownerHoursKeyName(persistenceKey))
   }
 
   // MARK: - Entry points
@@ -373,6 +387,7 @@ final class OledCareCoordinator {
     exposureEpoch += 1
     unsavedExposureKeys.removeAll()
     accumulators.removeAll()
+    ownerHours.removeAll()
     observers.removeAll()
     latestObservations.removeAll()
     // These removals delete the per-display state that would carry their OC12
@@ -419,7 +434,7 @@ final class OledCareCoordinator {
     // Sleep is the one edge where the process can stop existing without a
     // termination notification (a battery that runs out in the bag), so the
     // debounced maps go down with it rather than up to five minutes of history.
-    flushExposureMaps()
+    flushExposureHistory()
   }
 
   private func systemDidWake() {
@@ -504,11 +519,12 @@ final class OledCareCoordinator {
     dimStates.removeValue(forKey: key)
     // Window ages describe how long a rect has been where it is ON THIS PANEL,
     // so a departure or an un-enrollment invalidates them for the same reason
-    // mirroring does. The ACCUMULATOR stays: it is wear data about the glass,
-    // and the panel comes back. Written through first — a dock cycle must not
-    // cost up to a debounce interval of history.
+    // mirroring does. Both ACCUMULATORS stay — the exposure map and the
+    // per-app panel-seconds are wear data about the glass, and the panel comes
+    // back. Written through first: a dock cycle must not cost up to a debounce
+    // interval of history.
     forgetWindowObservation(for: key)
-    saveExposureMap(for: key)
+    saveExposureHistory(for: key)
   }
 
   // MARK: - The tick
@@ -793,7 +809,7 @@ final class OledCareCoordinator {
       state.sampleInFlight = true
       captureExposure(for: key, on: id, through: transform)
     }
-    persistExposureMapsIfDue(at: now)
+    persistExposureHistoryIfDue(at: now)
   }
 
   /// THE suspension verdict for telemetry, in one place and derived from the
@@ -844,6 +860,21 @@ final class OledCareCoordinator {
     let observation = observer.observe(windows, through: transform, at: Date())
     observers[key] = observer
     latestObservations[key] = observation
+
+    // OC18's attribution over time. Booked at the NOMINAL interval for the
+    // exposure path's reason: an observation stands for one sampling slot, and
+    // the wall-clock gap since the last one can be an hour if the panel was
+    // locked. No epoch check, unlike `finishExposureCapture`: this whole path
+    // is synchronous on the main actor, so there is nothing in flight for a
+    // mid-capture delete to race — the epoch exists for the capture's ~70 ms
+    // suspension, which this side does not have.
+    var owners = ownerHoursAccumulator(for: key)
+    let before = owners.hours.totalSeconds
+    owners.accumulate(observation, elapsed: Self.seconds(Self.samplingInterval))
+    ownerHours[key] = owners
+    // Only a booked observation dirties the store: an all-uncovered panel adds
+    // nothing, and marking it dirty would re-encode an unchanged value.
+    if owners.hours.totalSeconds > before { unsavedExposureKeys.insert(key) }
   }
 
   private func forgetWindowObservation(for key: String) {
@@ -921,10 +952,22 @@ final class OledCareCoordinator {
     return accumulator
   }
 
+  /// Its neighbour's rule, for its reason: one live accumulator per key.
+  private func ownerHoursAccumulator(for key: String) -> OwnerHoursAccumulator {
+    if let existing = ownerHours[key] { return existing }
+    let accumulator = OwnerHoursAccumulator(hours: loadOwnerHours(for: key))
+    ownerHours[key] = accumulator
+    return accumulator
+  }
+
   private static func exposureKeyName(_ persistenceKey: String) -> String {
     // `PanelHoursTracker`'s spelling: engine state, not a `PrefName` case —
     // nothing routes accumulated wear through `SettingsActions`.
     "oledExposureMap.\(persistenceKey)"
+  }
+
+  private static func ownerHoursKeyName(_ persistenceKey: String) -> String {
+    "oledOwnerHours.\(persistenceKey)"
   }
 
   /// A `cells` array of the wrong length throws out of `ExposureMap.init(from:)`
@@ -946,30 +989,61 @@ final class OledCareCoordinator {
     }
   }
 
-  private func persistExposureMapsIfDue(at now: SuspendingClock.Instant) {
+  /// Reads back as `.empty` on anything unreadable, `loadExposureMap`'s reason
+  /// scaled down: a per-owner total nobody can decode is not worth propagating
+  /// a failure over, and starting the series again is honest.
+  private func loadOwnerHours(for key: String) -> OwnerHours {
+    guard let data = UserDefaults.standard.data(forKey: Self.ownerHoursKeyName(key)) else {
+      return .empty
+    }
+    do {
+      return try JSONDecoder().decode(OwnerHours.self, from: data)
+    } catch {
+      log.error("""
+      OLED care: stored per-app hours for \(key, privacy: .public) are unreadable \
+      (\(error.localizedDescription, privacy: .public)); starting over
+      """)
+      return .empty
+    }
+  }
+
+  private func persistExposureHistoryIfDue(at now: SuspendingClock.Instant) {
     guard !unsavedExposureKeys.isEmpty else { return }
     if let last = lastExposurePersist, now - last < Self.exposurePersistInterval { return }
     lastExposurePersist = now
-    flushExposureMaps()
+    flushExposureHistory()
   }
 
   /// The undebounced write: termination, system sleep, and a display leaving.
-  private func flushExposureMaps() {
-    for key in unsavedExposureKeys { saveExposureMap(for: key) }
+  private func flushExposureHistory() {
+    for key in unsavedExposureKeys { saveExposureHistory(for: key) }
   }
 
-  private func saveExposureMap(for key: String) {
-    // Clears the dirty flag whether or not the encode lands: a value that
+  /// Both halves of a panel's exposure history — the per-cell map and the
+  /// per-owner series — ride ONE dirty set: they are written on the same tick
+  /// and destroyed by the same delete, so a second set would be state kept in
+  /// agreement by discipline. Either store can legitimately be absent, because
+  /// telemetry and window observation are separate prefs; each is written only
+  /// if it exists.
+  private func saveExposureHistory(for key: String) {
+    // Clears the dirty flag whether or not the encodes land: a value that
     // cannot be encoded now cannot be encoded on the next pass either, and
     // leaving the key dirty would retry it forever.
-    guard unsavedExposureKeys.remove(key) != nil, let accumulator = accumulators[key] else {
-      return
+    guard unsavedExposureKeys.remove(key) != nil else { return }
+    if let map = accumulators[key]?.map {
+      if let data = try? JSONEncoder().encode(map) {
+        UserDefaults.standard.set(data, forKey: Self.exposureKeyName(key))
+      } else {
+        log.error("OLED care: could not encode the exposure map for \(key, privacy: .public)")
+      }
     }
-    guard let data = try? JSONEncoder().encode(accumulator.map) else {
-      log.error("OLED care: could not encode the exposure map for \(key, privacy: .public)")
-      return
+    if let hours = ownerHours[key]?.hours {
+      if let data = try? JSONEncoder().encode(hours) {
+        UserDefaults.standard.set(data, forKey: Self.ownerHoursKeyName(key))
+      } else {
+        log.error("OLED care: could not encode the per-app hours for \(key, privacy: .public)")
+      }
     }
-    UserDefaults.standard.set(data, forKey: Self.exposureKeyName(key))
   }
 
   /// Spec §4's low-battery skip.

@@ -25,18 +25,34 @@ struct PanelHealthSummaryTests {
     return acc.map
   }
 
+  /// `OwnerHours`'s memberwise init is internal and `@testable` reaches it.
+  /// Used where the test needs an exact per-owner second count; the tests that
+  /// pin the *unit* go through `OwnerHoursAccumulator` instead, so the
+  /// cell-quantized path is exercised too.
+  private func ownerHours(_ seconds: [String: Double]) -> OwnerHours {
+    OwnerHours(secondsByOwner: seconds, totalSeconds: seconds.values.reduce(0, +))
+  }
+
+  private func observation(_ owners: [String?]) -> WindowObservation {
+    WindowObservation(
+      dominantOwnerByCell: owners,
+      stationarySecondsByWindowID: [:],
+      stationaryByCell: [Bool](repeating: false, count: PanelGrid.cellCount),
+      fullScreenOwner: nil)
+  }
+
   // MARK: - Confidence
 
   @Test func insufficientDataIsReportedAsSuch() {
     let summary = PanelHealthSummary.make(
-      map: .empty, observation: nil, telemetryEnabled: true, sampleCount: 3)
+      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, sampleCount: 3)
     #expect(summary.confidence == .insufficient)
     #expect(summary.hottestRelative == nil)
   }
 
   @Test func telemetryOffIsEstimatedNotMeasured() {
     let summary = PanelHealthSummary.make(
-      map: .empty, observation: nil, telemetryEnabled: false, sampleCount: 0)
+      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: false, sampleCount: 0)
     #expect(summary.confidence == .estimated)
   }
 
@@ -44,7 +60,8 @@ struct PanelHealthSummaryTests {
     let grid = [Double](repeating: 0.5, count: PanelGrid.cellCount)
     let map = measuredMap(grid, samples: ExposureAccumulator.minimumSamplesForAnalysis)
     let summary = PanelHealthSummary.make(
-      map: map, observation: nil, telemetryEnabled: true, sampleCount: map.sampleCount)
+      map: map, observation: nil, ownerHours: .empty, telemetryEnabled: true,
+      sampleCount: map.sampleCount)
     #expect(summary.confidence == .measured)
   }
 
@@ -56,7 +73,8 @@ struct PanelHealthSummaryTests {
     grid[0] = 4.0
     let map = measuredMap(grid)
     let summary = PanelHealthSummary.make(
-      map: map, observation: nil, telemetryEnabled: false, sampleCount: map.sampleCount)
+      map: map, observation: nil, ownerHours: .empty, telemetryEnabled: false,
+      sampleCount: map.sampleCount)
     #expect(summary.confidence == .estimated)
     #expect(summary.hottestRelative == nil)
   }
@@ -66,7 +84,8 @@ struct PanelHealthSummaryTests {
     grid[0] = 4.0
     let map = measuredMap(grid, samples: ExposureAccumulator.minimumSamplesForAnalysis - 1)
     let summary = PanelHealthSummary.make(
-      map: map, observation: nil, telemetryEnabled: true, sampleCount: map.sampleCount)
+      map: map, observation: nil, ownerHours: .empty, telemetryEnabled: true,
+      sampleCount: map.sampleCount)
     #expect(summary.confidence == .insufficient)
     #expect(summary.hottestRelative == nil)
   }
@@ -78,7 +97,8 @@ struct PanelHealthSummaryTests {
     grid[0] = 4.0
     let map = measuredMap(grid)
     let summary = PanelHealthSummary.make(
-      map: map, observation: nil, telemetryEnabled: true, sampleCount: map.sampleCount)
+      map: map, observation: nil, ownerHours: .empty, telemetryEnabled: true,
+      sampleCount: map.sampleCount)
     #expect(summary.confidence == .measured)
     let relative = try #require(summary.hottestRelative)
     #expect(relative > 3.0 && relative < 4.5)
@@ -98,7 +118,8 @@ struct PanelHealthSummaryTests {
       stationaryByCell: [Bool](repeating: false, count: PanelGrid.cellCount),
       fullScreenOwner: nil)
     let summary = PanelHealthSummary.make(
-      map: map, observation: observation, telemetryEnabled: true, sampleCount: map.sampleCount)
+      map: map, observation: observation, ownerHours: .empty, telemetryEnabled: true,
+      sampleCount: map.sampleCount)
     #expect(summary.hottestOwner == "Xcode")
   }
 
@@ -107,18 +128,72 @@ struct PanelHealthSummaryTests {
     grid[0] = 4.0
     let map = measuredMap(grid)
     let summary = PanelHealthSummary.make(
-      map: map, observation: nil, telemetryEnabled: true, sampleCount: map.sampleCount)
+      map: map, observation: nil, ownerHours: .empty, telemetryEnabled: true,
+      sampleCount: map.sampleCount)
     #expect(summary.hottestOwner == nil)
   }
 
-  /// No per-owner time series exists yet anywhere in the codebase — neither
-  /// `ExposureMap` (per-cell) nor a single `WindowObservation` (one instant)
-  /// carries measured per-app hours. Pinned empty rather than left to invent
-  /// a number, per OC11.
-  @Test func topOwnersByHoursIsEmptyUntilThereIsAMeasuredPerOwnerTimeSeries() {
+  /// Replaces `topOwnersByHoursIsEmptyUntilThereIsAMeasuredPerOwnerTimeSeries`,
+  /// which pinned the always-empty stub that shipped before
+  /// `OwnerHoursAccumulator` existed. Empty is still the answer with no
+  /// measured series — it just is no longer the only answer.
+  @Test func topOwnersByHoursIsEmptyWithNoMeasuredSeries() {
     let summary = PanelHealthSummary.make(
-      map: .empty, observation: nil, telemetryEnabled: true, sampleCount: 0)
+      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, sampleCount: 0)
     #expect(summary.topOwnersByHours.isEmpty)
+  }
+
+  /// The unit contract, and the one number in this type a user can misread:
+  /// `OwnerHours` counts panel-SECONDS attributable to an app, and this field
+  /// is hours. A full-panel owner for one hour of panel time books 1.0.
+  @Test func aFullPanelOwnerBooksOnePanelHourPerHour() throws {
+    let summary = PanelHealthSummary.make(
+      map: .empty, observation: nil, ownerHours: ownerHours(["Xcode": 3600]),
+      telemetryEnabled: true, sampleCount: 0)
+    let top = try #require(summary.topOwnersByHours.first)
+    #expect(top.owner == "Xcode")
+    #expect(abs(top.hours - 1.0) < 0.0001)
+  }
+
+  /// Panel-time, not wall-clock: an app on a quarter of the panel through the
+  /// same hour books a quarter of it (OC11 — the label must not overstate).
+  @Test func aQuarterPanelOwnerBooksAQuarterOfThatHour() throws {
+    var owners = [String?](repeating: nil, count: PanelGrid.cellCount)
+    for index in 0..<(PanelGrid.cellCount / 4) { owners[index] = "Notes" }
+    var accumulator = OwnerHoursAccumulator()
+    accumulator.accumulate(observation(owners), elapsed: 3600)
+    let summary = PanelHealthSummary.make(
+      map: .empty, observation: nil, ownerHours: accumulator.hours,
+      telemetryEnabled: true, sampleCount: 0)
+    let top = try #require(summary.topOwnersByHours.first)
+    #expect(top.owner == "Notes")
+    #expect(abs(top.hours - 0.25) < 0.0001)
+  }
+
+  @Test func topOwnersByHoursIsDescendingAndClampedToTheLimit() {
+    var seconds: [String: Double] = [:]
+    for index in 0..<(PanelHealthSummary.topOwnerLimit + 3) {
+      seconds["App\(index)"] = Double(index + 1) * 3600
+    }
+    let summary = PanelHealthSummary.make(
+      map: .empty, observation: nil, ownerHours: ownerHours(seconds),
+      telemetryEnabled: true, sampleCount: 0)
+    let hours = summary.topOwnersByHours.map(\.hours)
+    #expect(summary.topOwnersByHours.count == PanelHealthSummary.topOwnerLimit)
+    #expect(hours == hours.sorted(by: >))
+    #expect(summary.topOwnersByHours.first?.owner == "App7")
+  }
+
+  /// Window observation is a separate pref from luminance telemetry and needs
+  /// no permission, so per-app hours survive `.estimated` — gating them on
+  /// exposure confidence would blank the one attribution the degraded mode
+  /// still measures honestly.
+  @Test func topOwnersByHoursSurvivesTelemetryBeingOff() {
+    let summary = PanelHealthSummary.make(
+      map: .empty, observation: nil, ownerHours: ownerHours(["Slack": 7200]),
+      telemetryEnabled: false, sampleCount: 0)
+    #expect(summary.confidence == .estimated)
+    #expect(summary.topOwnersByHours.map(\.owner) == ["Slack"])
   }
 
   // MARK: - Cells
@@ -128,7 +203,8 @@ struct PanelHealthSummaryTests {
     grid[5] = 1.0
     let map = measuredMap(grid)
     let summary = PanelHealthSummary.make(
-      map: map, observation: nil, telemetryEnabled: true, sampleCount: map.sampleCount)
+      map: map, observation: nil, ownerHours: .empty, telemetryEnabled: true,
+      sampleCount: map.sampleCount)
     #expect(summary.cells.count == PanelGrid.cellCount)
     #expect(summary.cells.allSatisfy { $0 >= 0 && $0 <= 1 })
     #expect(summary.cells[5] == 1.0)
@@ -136,7 +212,7 @@ struct PanelHealthSummaryTests {
 
   @Test func cellsAreAllZeroWithNoData() {
     let summary = PanelHealthSummary.make(
-      map: .empty, observation: nil, telemetryEnabled: true, sampleCount: 0)
+      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, sampleCount: 0)
     #expect(summary.cells.count == PanelGrid.cellCount)
     #expect(summary.cells.allSatisfy { $0 == 0 })
   }
@@ -145,9 +221,9 @@ struct PanelHealthSummaryTests {
 
   @Test func summariesWithIdenticalInputsAreEqual() {
     let a = PanelHealthSummary.make(
-      map: .empty, observation: nil, telemetryEnabled: true, sampleCount: 0)
+      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, sampleCount: 0)
     let b = PanelHealthSummary.make(
-      map: .empty, observation: nil, telemetryEnabled: true, sampleCount: 0)
+      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, sampleCount: 0)
     #expect(a == b)
   }
 }

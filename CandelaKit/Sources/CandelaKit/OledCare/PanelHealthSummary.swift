@@ -1,8 +1,9 @@
 /// Health-view-ready snapshot of one panel's exposure and window attribution.
 ///
-/// **OC11** — every value here reduces to *measured relative exposure* or
-/// *what is on screen right now*. This type must never gain a lifespan
-/// figure, a predicted date, a "% burn-in prevented" or a risk score.
+/// **OC11** — every value here reduces to *measured relative exposure*, *what
+/// is on screen right now*, or *measured panel-time attributable to an app*.
+/// This type must never gain a lifespan figure, a predicted date, a "%
+/// burn-in prevented" or a risk score.
 public struct PanelHealthSummary: Sendable {
   public enum Confidence: Equatable, Sendable {
     /// Telemetry on, `sampleCount` at or past
@@ -33,20 +34,27 @@ public struct PanelHealthSummary: Sendable {
   /// was supplied, or when that cell has no dominant owner.
   public let hottestOwner: String?
 
-  /// Always empty today. Populating it honestly needs a measured per-owner
-  /// time series — how many seconds each app has actually occupied the
-  /// screen — and neither `ExposureMap` (per-cell, not per-owner) nor a
-  /// single `WindowObservation` (one instant, not a duration) carries that.
-  /// `PanelHoursTracker` is the closest existing type and it tracks only the
-  /// panel's total hours, not a per-app breakdown. Left in the shape the
-  /// summary commits to, rather than dropped, so a consumer can render
-  /// "no data yet" instead of a missing field — but nothing here should
-  /// invent a number to fill it.
+  /// The heaviest apps by **panel-hours attributable to them** — *not*
+  /// wall-clock hours the app was open. A full-screen app books an hour per
+  /// hour; an app covering a quarter of the panel books fifteen minutes per
+  /// hour. Copy rendering this must not say "Slack was open for 340 hours"
+  /// (OC11: a number the UI would be read as claiming something it does not
+  /// measure).
+  ///
+  /// Independent of `confidence`, which describes the luminance telemetry
+  /// only. Per-owner hours come from window observation, which is a separate
+  /// pref and needs no permission, so this can be populated while confidence
+  /// is `.estimated` and empty while it is `.measured`.
   public let topOwnersByHours: [(owner: String, hours: Double)]
+
+  /// How many owners `make` carries through. The health view shows a short
+  /// leaderboard, not a process list; the tail is noise a user cannot act on.
+  public static let topOwnerLimit = 5
 
   public static func make(
     map: ExposureMap,
     observation: WindowObservation?,
+    ownerHours: OwnerHours,
     telemetryEnabled: Bool,
     sampleCount: Int
   ) -> PanelHealthSummary {
@@ -66,7 +74,18 @@ public struct PanelHealthSummary: Sendable {
       cells: normalized(map.cells),
       hottestRelative: hottestRelative,
       hottestOwner: hottestOwner,
-      topOwnersByHours: [])
+      topOwnersByHours: topOwners(ownerHours))
+  }
+
+  /// `OwnerHours.topOwners(limit:)` labels its tuple element `hours` but
+  /// returns panel-SECONDS. The conversion belongs here, at the boundary where
+  /// the value stops being an accumulator's internal unit and becomes a number
+  /// a view renders — passing it straight through would put a 3600× overstated
+  /// figure on screen under a label that says "hours".
+  private static func topOwners(_ ownerHours: OwnerHours) -> [(owner: String, hours: Double)] {
+    ownerHours.topOwners(limit: topOwnerLimit).map {
+      (owner: $0.owner, hours: $0.hours / 3600)
+    }
   }
 
   private static func confidence(telemetryEnabled: Bool, sampleCount: Int) -> Confidence {
