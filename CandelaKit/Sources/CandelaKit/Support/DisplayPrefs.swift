@@ -1,7 +1,15 @@
 import Foundation
 
-/// How a display uses macOS HDR. `alwaysOn` keeps HDR engaged; `off` leaves the
-/// display's HDR state alone.
+/// How a display uses macOS HDR — the mode Candela last DROVE the display to,
+/// not a standing policy it enforces.
+///
+/// `alwaysOn` does NOT keep HDR engaged, despite the name: nothing re-asserts
+/// it on wake, restore or reconfiguration, and the only engage path is a user
+/// action through `BrightnessController.setHDRMode`. So the mode can go stale
+/// whenever HDR is toggled in System Settings, which is why the panel reads
+/// `isHDREngaged` for what the display is actually doing (#84) and
+/// `BrightnessPathPolicy.usesNative` ignores the mode entirely (#52). #87
+/// tracks whether the mode should become a true mirror of the state.
 ///
 /// Raw value 1 was `boost` (removed 2026-07-30) — NEVER reuse it: displays that
 /// stored it must keep decoding to `.off` through `DisplayPrefs.hdrMode`'s

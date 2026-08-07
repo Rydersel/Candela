@@ -675,10 +675,22 @@ public final class BrightnessController {
     // is the exit catching up. Ruling: Candela's mode and the system's HDR state
     // stay in sync, so `.off` means the display leaves HDR whoever put it there.
     //
-    // The inequality still guards the case it exists for — `.off` on a display
-    // genuinely out of HDR is still a no-op, so a reset does not drive a
-    // pointless re-mode across every attached panel.
-    guard mode != previous || (mode == .off && cachedHDRActive) else { return }
+    // The inequality still guards the case it exists for — a mode the display
+    // is ALREADY in is still a no-op, so a reset does not drive a pointless
+    // re-mode across every attached panel.
+    //
+    // Symmetric on purpose. The panel's HDR button reads the STATE (#84), so
+    // with HDR switched off in System Settings under a stale `.alwaysOn` the
+    // button offers "HDR On" — and a mode-only guard would return early and
+    // leave that click dead.
+    //
+    // NOT preceded by a refresh, though the cache can be stale (R3). That was
+    // tried: an await here is a suspension point BEFORE `beginHDRTransition`
+    // takes the supersession token, and it broke the overlapping-transition
+    // guarantees. The engage arm's own post-refresh re-check remains the answer
+    // to a stale cache. See #87.
+    let observed: HDRMode = cachedHDRActive ? .alwaysOn : .off
+    guard mode != previous || mode != observed else { return }
     prefs.hdrMode = mode
     hdrMode = mode
     pathLog.log("hdrMode \(previous.rawValue) -> \(mode.rawValue) display=\(self.displayID)")
