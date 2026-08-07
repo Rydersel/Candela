@@ -37,8 +37,7 @@ export default function Hero() {
           </h1>
           <p className="sub">
             Candela gives your external monitor everything it should have come with — Retina-sharp
-            scaling at any resolution, real hardware brightness and volume, virtual displays, and
-            more. Free and open source.
+            scaling at any resolution, real brightness control, and virtual displays.
           </p>
           <div className="cta">
             <a className="btn btn-primary" href="https://github.com/Rydersel/Candela/releases/latest">Download for macOS</a>

@@ -25,9 +25,9 @@ a{color:var(--accent);text-decoration:none}
 @media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
 
 /* hero — split: copy left, panel right */
-#hero{position:relative;padding:140px 0 60px}
-.hero-bgc{position:absolute;top:-60px;left:50%;transform:translateX(-50%);width:min(760px,100vw);opacity:.15;z-index:0;pointer-events:none}
-.hero-inner{position:relative;z-index:1;display:flex;align-items:center;gap:64px}
+#hero{position:relative;padding:160px 0 70px}
+.hero-bgc{position:absolute;top:-60px;left:50%;transform:translateX(-50%);width:min(760px,100vw);opacity:.08;z-index:0;pointer-events:none}
+.hero-inner{position:relative;z-index:1;display:flex;align-items:center;gap:72px}
 .hero-copy{flex:1;text-align:left}
 #hero h1{font-size:clamp(38px,4.8vw,60px);font-weight:700;letter-spacing:-.025em;line-height:1.05}
 #hero .sub{max-width:560px;margin:20px 0 0;font-size:18px;color:var(--text-2)}
@@ -54,7 +54,7 @@ a{color:var(--accent);text-decoration:none}
 @media (max-width:520px){.h1br{display:none}}
 
 /* hero entrance — the page's one authored motion moment */
-@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
 #hero h1,#hero .sub,#hero .cta,#hero .brew,#hero .fineprint{animation:rise .7s cubic-bezier(.22,1,.36,1) both}
 #hero .brew{animation-delay:.25s}
 #hero h1{animation-delay:.06s}
@@ -65,7 +65,7 @@ a{color:var(--accent);text-decoration:none}
 
 /* panel screenshot */
 .stage{position:relative;width:min(324px,86vw)}
-.glowbed{position:absolute;top:-70px;bottom:-70px;left:50%;transform:translateX(-50%);width:min(100vw,560px);background:radial-gradient(closest-side,rgba(255,179,64,.2),transparent);pointer-events:none}
+.glowbed{position:absolute;top:-70px;bottom:-70px;left:50%;transform:translateX(-50%);width:min(100vw,560px);background:radial-gradient(closest-side,rgba(255,179,64,.13),transparent);pointer-events:none}
 .mb-strip{position:relative;display:block;width:100%;height:auto;
   -webkit-mask-image:linear-gradient(90deg,transparent 0,#000 16%,#000 84%,transparent 100%);
   mask-image:linear-gradient(90deg,transparent 0,#000 16%,#000 84%,transparent 100%)}
