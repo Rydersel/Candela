@@ -88,6 +88,11 @@ final class OledCareCoordinator {
     /// controller so the disengage is driven by what we engaged, and a dim some
     /// future caller owns is never ended on our behalf.
     var lockDimEngaged = false
+    /// The dim-in fade, while it is still running. Cancelled by every path that
+    /// ends the dim. Cancellation is the tidy half only: `endTemporaryDim`
+    /// supersedes an in-flight ramp by token, so a step already suspended when
+    /// the user unlocked cannot land after the restore even if this were nil.
+    var lockDimRamp: Task<Void, Never>?
   }
 
   /// Poll cadence: slow while every enrolled display is `.active`/`.suspended`;
@@ -611,8 +616,20 @@ final class OledCareCoordinator {
     )
     switch decision {
     case let .dim(factor):
-      controller.beginTemporaryDim(factor: factor)
-      state.lockDimEngaged = true
+      if !state.lockDimEngaged {
+        // The lock edge: fade in over ~1.2 s rather than stepping, which is the
+        // only place a ramp is wanted. Everything else here jumps.
+        state.lockDimRamp = controller.rampTemporaryDim(to: factor)
+        state.lockDimEngaged = true
+      } else if controller.temporaryDimFactor == nil {
+        // Already engaged as far as this object knows, yet the controller holds
+        // no dim: it was REBUILT under a still-connected display (a replug
+        // rebuilds; a reconfiguration reuses). Re-engage at the target and do
+        // NOT ramp, because this is a correction, not the lock transition. The
+        // ramp's synchronous first step is what keeps this branch from firing
+        // spuriously in the window between starting a ramp and its first write.
+        controller.beginTemporaryDim(factor: factor)
+      }
       clearSkip(for: key)
     case let .skip(reason):
       // A skip ENDS any dim this display already has. The path can change under
@@ -640,6 +657,8 @@ final class OledCareCoordinator {
   /// clear in here would make that record look new on every tick, which is a
   /// log line and an observation notify at the fast cadence.
   private func endLockDim(_ state: inout PerDisplay, on controller: BrightnessController) {
+    state.lockDimRamp?.cancel()
+    state.lockDimRamp = nil
     guard state.lockDimEngaged else { return }
     controller.endTemporaryDim()
     state.lockDimEngaged = false
@@ -667,6 +686,8 @@ final class OledCareCoordinator {
     for key in Array(states.keys) {
       guard var state = states[key] else { continue }
       guard let controller = live[key]?.controller else {
+        state.lockDimRamp?.cancel()
+        state.lockDimRamp = nil
         state.lockDimEngaged = false
         states[key] = state
         lockDimSkips.removeValue(forKey: key)

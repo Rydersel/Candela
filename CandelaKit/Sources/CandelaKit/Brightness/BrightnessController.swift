@@ -1081,29 +1081,97 @@ public final class BrightnessController {
     brightness * (temporaryDimFactor ?? 1)
   }
 
-  /// Applies a temporary dim. Idempotent for an unchanged factor.
-  ///
-  /// The two memos are cleared for the same reason `reapplyAfterPrefChange`
-  /// clears them: this changes what should be on the wire without changing the
-  /// published value, so a duplicate-suppressed write would leave the display
-  /// where it was while the engine believed otherwise.
+  /// Supersession token for `rampTemporaryDim`. Bumped by every EXPLICIT change
+  /// of the dim state, so an in-flight ramp that resumes after one is a no-op
+  /// even if nobody cancelled its task. That is what makes "a restore is never
+  /// re-dimmed by a step that was already in the air" a property of the type
+  /// rather than of the caller's cancel ordering.
+  @ObservationIgnored private var dimToken: UInt64 = 0
+
+  /// Test seam: the ramp's step spacing. `LockDimRamp.stepInterval` in
+  /// production; tests shrink it, exactly as they shrink `settleDelay`.
+  @ObservationIgnored var lockDimRampInterval: Duration = LockDimRamp.stepInterval
+
+  /// Applies a temporary dim immediately. Idempotent for an unchanged factor,
+  /// and supersedes any ramp in flight.
   public func beginTemporaryDim(factor: Double) {
-    let clamped = min(max(factor, 0), 1)
-    guard temporaryDimFactor != clamped else { return }
-    temporaryDimFactor = clamped
+    dimToken &+= 1
+    applyDimFactor(factor)
+  }
+
+  /// Fades the temporary dim to `target` over `LockDimRamp.duration`, applying
+  /// the FIRST step synchronously so the dim starts on this turn of the run
+  /// loop and `temporaryDimFactor` is non-nil the moment this returns (a caller
+  /// polling it cannot catch a window where a ramp is running but no dim is
+  /// recorded). The returned task carries the remaining steps.
+  ///
+  /// Cancelling the task stops it, but the token is what makes it SAFE: any
+  /// `beginTemporaryDim`, `endTemporaryDim` or newer ramp invalidates this one,
+  /// so a step that was already suspended when the user unlocked cannot land
+  /// after the restore.
+  @discardableResult
+  public func rampTemporaryDim(to target: Double) -> Task<Void, Never> {
+    dimToken &+= 1
+    let mine = dimToken
+    var remaining = LockDimRamp.factors(to: target)[...]
+    if let first = remaining.first {
+      applyDimFactor(first)
+      remaining = remaining.dropFirst()
+    }
+    return Task { @MainActor [weak self] in
+      for factor in remaining {
+        let interval: Duration
+        // Strong self confined to the non-suspending half of the iteration and
+        // dropped before the sleep, the same shape the OLED care driver uses:
+        // a binding whose scope covered the await would retain the controller
+        // across every suspension.
+        do {
+          guard let self, self.dimToken == mine, !Task.isCancelled else { return }
+          self.applyDimFactor(factor)
+          interval = self.lockDimRampInterval
+        }
+        do { try await Task.sleep(for: interval) } catch { return }
+      }
+    }
+  }
+
+  /// Restores the published value exactly, immediately, and supersedes any ramp
+  /// in flight. Deliberately NOT ramped: someone who has just unlocked wants
+  /// their screen back now, and only the dim-in fades.
+  ///
+  /// Safe to call when nothing is dimmed (a no-op), which is what lets every
+  /// teardown path call it unconditionally: unlock, display departure, settings
+  /// reset and quit.
+  public func endTemporaryDim() {
+    dimToken &+= 1
+    guard temporaryDimFactor != nil else { return }
+    temporaryDimFactor = nil
     lastAppliedSw = nil
     coalescer.resetDuplicateState()
     applyPaths()
   }
 
-  /// Restores the published value exactly. Safe to call when nothing is dimmed
-  /// (a no-op), which is what lets every teardown path call it unconditionally:
-  /// unlock, display departure, settings reset and quit.
-  public func endTemporaryDim() {
-    guard temporaryDimFactor != nil else { return }
-    temporaryDimFactor = nil
-    lastAppliedSw = nil
-    coalescer.resetDuplicateState()
+  /// The one place a dim factor is set. Private so the token discipline above
+  /// cannot be bypassed: a public setter that skipped the bump would let a
+  /// stale ramp step outlive the thing that superseded it.
+  ///
+  /// The memo clears run ONLY on the transition out of "no dim". Between ramp
+  /// steps they would be waste: consecutive steps carry different values, which
+  /// the duplicate memo and the software dedupe both let through on their own,
+  /// and resetting per step defeats the memo's one useful job here (two ramp
+  /// steps that round to the SAME register value should collapse to one write).
+  /// The transition still needs them, for the reason `reapplyAfterPrefChange`
+  /// gives: what should be on the wire changes while the published value does
+  /// not, so a suppressed write would leave the display where it was.
+  private func applyDimFactor(_ factor: Double) {
+    let clamped = min(max(factor, 0), 1)
+    guard temporaryDimFactor != clamped else { return }
+    let starting = temporaryDimFactor == nil
+    temporaryDimFactor = clamped
+    if starting {
+      lastAppliedSw = nil
+      coalescer.resetDuplicateState()
+    }
     applyPaths()
   }
 

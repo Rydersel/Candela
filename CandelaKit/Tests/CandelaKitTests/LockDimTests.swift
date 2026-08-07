@@ -266,6 +266,70 @@ struct LockDimTests {
     #expect(await rig.ddc.recordedWrites().count == before)
   }
 
+  // MARK: - The dim-in ramp
+
+  @Test func theRampDescendsMonotonicallyAndLandsExactlyOnTheTarget() {
+    let factors = LockDimRamp.factors(to: 0.5)
+    #expect(factors.count == LockDimRamp.steps)
+    #expect(factors.last == 0.5)
+    #expect(factors.first! < 1)          // the first step is a real change
+    #expect(factors.first! > factors.last!)
+    for (previous, next) in zip(factors, factors.dropFirst()) {
+      #expect(next < previous, "the fade must never brighten")
+    }
+    // Nothing to fade to is an EMPTY sequence, so no caller can walk a ramp
+    // that ends brighter than it started.
+    #expect(LockDimRamp.factors(to: 1).isEmpty)
+    #expect(LockDimRamp.factors(to: 1.5).isEmpty)
+    #expect(LockDimRamp.duration == .milliseconds(1200))
+  }
+
+  @Test func theRampWritesADescendingSequenceEndingAtTheTarget() async {
+    let rig = makeHardwareRig()
+    rig.controller.lockDimRampInterval = .milliseconds(1)
+    rig.controller.setBrightness(1.0)
+    await rig.controller.waitForPendingWrites()
+    await rig.controller.rampTemporaryDim(to: 0.5).value
+    await rig.controller.waitForPendingWrites()
+    let written = await rig.ddc.recordedWrites().map(\.value)
+    #expect(written.first == 100)
+    #expect(written.last == 50)
+    // Latest-wins coalescing may drop intermediate steps at a 1 ms test
+    // interval, so this asserts the SHAPE the user sees rather than a count:
+    // never brighter than the step before, and it arrives at the target.
+    for (previous, next) in zip(written, written.dropFirst()) {
+      #expect(next <= previous)
+    }
+    #expect(written.count > 2, "a ramp, not a jump")
+  }
+
+  /// The lift has to work MID-ramp, not just after it. Two properties, and the
+  /// second is the one a cancel alone would not give: the restore is exact, and
+  /// no step that was already suspended when the user unlocked lands afterwards
+  /// and re-dims the screen they just came back to.
+  @Test func cancellingMidRampRestoresTheExactValueAndNoLaterStepLands() async {
+    let rig = makeHardwareRig()
+    rig.controller.lockDimRampInterval = .milliseconds(20)
+    rig.controller.setBrightness(0.8)
+    await rig.controller.waitForPendingWrites()
+    let ramp = rig.controller.rampTemporaryDim(to: 0.1)
+    try? await Task.sleep(for: .milliseconds(50)) // a few steps in, not finished
+    let midRamp = rig.controller.temporaryDimFactor
+    #expect(midRamp != nil && midRamp! < 1 && midRamp! > 0.1, "should be mid-fade")
+
+    rig.controller.endTemporaryDim() // what the unlock and the input lift do
+    await rig.controller.waitForPendingWrites()
+    #expect(rig.controller.temporaryDimFactor == nil)
+    #expect(await rig.ddc.recordedWrites().last?.value == 80)
+
+    // Deliberately NOT cancelled: the token has to be what stops it, so let the
+    // remaining steps run out and confirm none of them reached the wire.
+    _ = await ramp.value
+    await rig.controller.waitForPendingWrites()
+    #expect(rig.controller.temporaryDimFactor == nil)
+    #expect(await rig.ddc.recordedWrites().last?.value == 80)
+  }
+
   /// The lift promise is 100 ms, and a lock dim raises no overlay, so the
   /// cadence has to count it as a dim that is up. It did not: the wire-
   /// delivered dim ticked every 2 s, which is what the user typing their
