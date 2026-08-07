@@ -83,11 +83,21 @@ public struct ArrangementPlan: Sendable, Equatable {
   /// `nil` when there is nothing to apply, or when the request cannot be
   /// applied as a whole:
   ///
-  /// - **A no-op.** `arrangement == baseline` — every tile already sits where it
-  ///   is being asked to sit. Equality is exact and NOT up to translation, on
-  ///   purpose: "make this display main" is a pure translation of the whole
-  ///   arrangement (`makingMain`) and is one of the most consequential changes
-  ///   this feature makes, since the menu bar and Dock follow it.
+  /// - **A no-op.** The ANCHORED arrangement equals the baseline: every tile
+  ///   already sits where it is being asked to sit. The comparison is on the
+  ///   anchored form, which changes exactly one family of cases: an unanchored
+  ///   pure translation (nobody at the origin, nobody asked to be main) moves
+  ///   nothing relative to anything and is a no-op, while "make this display
+  ///   main" (`makingMain`) puts a DIFFERENT tile at (0,0) and is still a plan,
+  ///   since the menu bar and Dock follow it.
+  /// - **A layout that cannot be anchored.** CG's global space is defined with
+  ///   the main display at (0,0), so a layout with no tile at the origin is not
+  ///   a request CG can honour. Measured live (2026-08-07): staging a non-zero
+  ///   origin for the main display is silently dropped; every stage and the
+  ///   complete return `.success` and nothing moves, which the post-commit
+  ///   check then reports as unhonoured (#53's accept-and-ignore class, again).
+  ///   `anchored(preservingMainOf:)` re-expresses such a layout on the
+  ///   baseline's main, and only a baseline with no main either is refused.
   /// - **A different display set.** The baseline is what was on screen when the
   ///   gesture started; if a display has arrived or left since, the plan
   ///   describes a machine that no longer exists, and applying it would leave
@@ -95,20 +105,42 @@ public struct ArrangementPlan: Sendable, Equatable {
   /// - **A mirror slave holding a tile** (AR6, above).
   /// - **An origin outside `Int32`.** `CGConfigureDisplayOrigin` takes
   ///   `int32_t`, so an origin that does not fit is not a request that can be
-  ///   made at all.
+  ///   made at all. Checked on the anchored form, since those are the origins
+  ///   actually staged.
   public init?(applying arrangement: DisplayArrangement, to baseline: DisplayArrangement) {
-    guard arrangement != baseline else { return nil }
     guard Set(arrangement.tiles.map(\.id)) == Set(baseline.tiles.map(\.id)) else { return nil }
+    guard let anchored = arrangement.anchored(preservingMainOf: baseline) else { return nil }
+    guard anchored != baseline else { return nil }
 
-    let mirrored = Set(arrangement.tiles.flatMap(\.mirroredIDs))
-    guard !arrangement.tiles.contains(where: { mirrored.contains($0.id) }) else { return nil }
+    let mirrored = Set(anchored.tiles.flatMap(\.mirroredIDs))
+    guard !anchored.tiles.contains(where: { mirrored.contains($0.id) }) else { return nil }
 
-    let fits = arrangement.tiles.allSatisfy {
+    let fits = anchored.tiles.allSatisfy {
       Int32(exactly: $0.rect.x) != nil && Int32(exactly: $0.rect.y) != nil
     }
     guard fits else { return nil }
 
-    self.arrangement = arrangement
+    self.arrangement = anchored
+  }
+}
+
+extension DisplayArrangement {
+  /// The same layout, expressed in coordinates CoreGraphics can honour.
+  ///
+  /// The display space is anchored on the main display: the tile at (0,0) IS
+  /// main (AR5), and a request that puts no tile there is one CG demonstrably
+  /// accepts and ignores (see `ArrangementPlan.init`). A layout that already
+  /// names a main is returned unchanged. One that does not, which is what
+  /// moving the main display's own tile produces, is translated so the
+  /// BASELINE's main returns to (0,0): moving the main display does not change
+  /// which display is main, so the move is every other display shifting by the
+  /// inverse delta. `nil` when the baseline has no main either (a read that
+  /// skipped the main display's unreadable bounds); nothing can anchor that
+  /// request.
+  public func anchored(preservingMainOf baseline: DisplayArrangement) -> DisplayArrangement? {
+    if mainDisplayID != nil { return self }
+    guard let main = baseline.mainDisplayID, let anchor = tile(main) else { return nil }
+    return translated(dx: -anchor.rect.x, dy: -anchor.rect.y)
   }
 }
 

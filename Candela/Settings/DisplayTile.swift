@@ -228,7 +228,7 @@ struct DisplayTile: View {
     .shadow(color: .black.opacity(isDragging ? 0.25 : 0), radius: 6, y: 2)
     // The escape hatch for a map whose tiles are too small to say everything —
     // the name and the size are then reachable without resizing anything.
-    .help(Text(verbatim: "\(name) — \(pointSize)"))
+    .help(Text(verbatim: "\(name) (\(pointSize))"))
   }
 
   /// Centred in the space BELOW the menu-bar strip's band, never in the tile:

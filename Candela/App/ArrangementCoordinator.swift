@@ -62,9 +62,12 @@ final class ArrangementCoordinator {
   /// A saved layout that could not be restored exactly.
   ///
   /// Restore is unattended, so this is the ONLY way the user finds out. It
-  /// survives until they dismiss it or the display set changes — the point is
-  /// that it is still there the next time they look, not that it was true at the
-  /// moment nobody was watching. `DisplayModeCoordinator.ReapplyReport`'s job,
+  /// survives until they dismiss it, or until a later restore pass has a newer
+  /// outcome for the set that is attached then — the point is that it is still
+  /// there the next time they look, not that it was true at the moment nobody
+  /// was watching. Nothing clears it on a departure alone (SO8); the comment in
+  /// `displaysChanged` says why that is deliberate rather than an oversight.
+  /// `DisplayModeCoordinator.ReapplyReport`'s job,
   /// with one value rather than a per-display map: a layout is a fact about the
   /// whole set, so there is one of these at a time.
   private(set) var restoreNotice: ArrangementReapplyNotice?
@@ -383,7 +386,10 @@ final class ArrangementCoordinator {
     // argument" is not a sentence to show someone who dropped a display back
     // where it started. Filtered here rather than reported; Task 6's proposal
     // type will filter it a step earlier, and this stays as the backstop.
-    guard wanted != live else {
+    // Compared on the ANCHORED form, the same one the plan will stage: an
+    // unanchored translation (dragging the only display, say) changes nothing
+    // relative to anything and must land here, not in the error card.
+    guard (wanted.anchored(preservingMainOf: live) ?? wanted) != live else {
       log.debug("arrangement request is a no-op")
       return
     }

@@ -30,6 +30,7 @@ struct KeyboardPane: View {
     Form {
       accessibilitySection
       brightnessSection
+      modifierSection
       volumeSection
       targetSection
       precisionSection
@@ -80,7 +81,7 @@ struct KeyboardPane: View {
   // MARK: - Brightness
 
   @ViewBuilder private var brightnessSection: some View {
-    Section("Brightness and contrast keys") {
+    Section("Brightness and Contrast Keys") {
       // Explicit enum tags, never `enumerated()` positions (fork QUIRK): the
       // raw values are shipped on-disk schema (D22) and the UI order is not
       // the raw order.
@@ -108,11 +109,6 @@ struct KeyboardPane: View {
       }
 
       if KeyModePolicy.watchesMediaKeys(prefs.keyboardBrightness) {
-        // Shown for "Both" as well — the fork hid the modifier documentation
-        // in that mode while the modifiers stayed live (ch.1 QUIRK, fixed).
-        SettingsCaption("Hold Control while pressing a brightness key to adjust the built-in display, Control and Command to adjust every external display, and Control, Option and Command to adjust contrast. Shift and Option give finer steps.")
-        SettingsCaption("Option on its own opens Displays settings, and Command with the brightness-down key switches display mirroring on or off.")
-
         SettingRow("F14 and F15 are Scroll Lock and Pause on PC keyboards, and the brightness keys on some Logitech keyboards.") {
           Toggle("Also accept F14 and F15", isOn: Binding(
             get: { prefs.interceptAlternateBrightnessKeys }, // D1 positive accessor
@@ -123,10 +119,64 @@ struct KeyboardPane: View {
     }
   }
 
+  // MARK: - Modifier keys
+
+  /// The two prose captions that used to explain the modifiers, as one row per
+  /// mapping (spec §8, SO16 — each row's spoken label IS the sentence it
+  /// replaced, so nothing a screen reader could hear was lost by the change).
+  ///
+  /// Gated on `watchesMediaKeys`, i.e. shown for "Both" as well as for the
+  /// media-key mode — the fork hid this documentation under "Both" while the
+  /// modifiers stayed live (ch.1 QUIRK, fixed). Deliberately NOT shown for
+  /// "Custom shortcuts": `AppModel.tapConfig` puts no brightness key in the
+  /// watched set in that mode, so the physical keys go to macOS and every
+  /// combination below would be describing something that cannot happen.
+  /// A shortcut carries its own fixed modifiers and none of these rules reach
+  /// it — `KeyRouter` routes `MediaKeyPress` only.
+  @ViewBuilder private var modifierSection: some View {
+    if KeyModePolicy.watchesMediaKeys(prefs.keyboardBrightness) {
+      Section("Modifier Keys") {
+        ModifierLegendRow(
+          title: "Built-in display",
+          combination: "⌃ + brightness key",
+          spoken: "Control plus a brightness key adjusts the built-in display."
+        )
+        ModifierLegendRow(
+          title: "All external displays",
+          combination: "⌃⌘ + brightness key",
+          spoken: "Control Command plus a brightness key adjusts every external display."
+        )
+        // Kept from the deleted prose: the contrast combination is documented
+        // nowhere else in the pane, unlike the fine-step modifiers, which the
+        // Precision section below still spells out.
+        ModifierLegendRow(
+          title: "Contrast",
+          combination: "⌃⌥⌘ + brightness key",
+          spoken: "Control Option Command plus a brightness key adjusts contrast."
+        )
+        // "+ brightness key" is accuracy, not column symmetry: `KeyRouter`
+        // rule 2 needs a brightness key, and Option on a VOLUME key opens Sound
+        // settings instead (`routeVolume`).
+        ModifierLegendRow(
+          title: "Open Displays settings",
+          combination: "⌥ + brightness key",
+          spoken: "Option with a brightness key opens Displays settings."
+        )
+        // Its own row, not a variation on the ones above: it is a different
+        // action on a specific key, and `KeyRouter` rule 1 treats it that way.
+        ModifierLegendRow(
+          title: "Toggle mirroring",
+          combination: "⌘ + brightness down",
+          spoken: "Command with the brightness-down key switches mirroring on or off."
+        )
+      }
+    }
+  }
+
   // MARK: - Volume
 
   @ViewBuilder private var volumeSection: some View {
-    Section("Volume keys") {
+    Section("Volume Keys") {
       SettingRow("Volume applies to external displays that accept volume commands over their data cable (DDC).") {
         Picker("Control volume with:", selection: Binding(
           get: { prefs.keyboardVolume },
@@ -160,12 +210,12 @@ struct KeyboardPane: View {
   /// dead. The rule is not arbitrary: these are system-wide hotkeys, so a
   /// bare key would capture that key in every other app.
   private static let modifierHint: LocalizedStringKey =
-    "Click a field and press the keys you want. A shortcut has to include ⌘, ⌃, ⌥ or ⇧ — a letter or number on its own is ignored, because it would be captured in every app."
+    "Click a field and press the keys you want. A shortcut has to include ⌘, ⌃, ⌥ or ⇧. A letter or number on its own is ignored, because it would be captured in every app."
 
   // MARK: - Targeting
 
   @ViewBuilder private var targetSection: some View {
-    Section("Target display") {
+    Section("Target Display") {
       SettingRow {
         Picker("Brightness keys affect:", selection: Binding(
           get: { prefs.multiKeyboardBrightness },
@@ -197,7 +247,7 @@ struct KeyboardPane: View {
 
   private var volumeTargetCaption: LocalizedStringKey {
     prefs.multiKeyboardVolume == .audioDeviceNameMatching
-      ? "Matches on the display's name. To override the name a display is matched against, use Audio device name on that display's page in the sidebar."
+      ? "Matches on the display's name, which you can override under Sound on that display's page."
       : "Applies when the selected audio device has no volume control of its own."
   }
 
@@ -221,6 +271,25 @@ struct KeyboardPane: View {
         .disabled(prefs.keyboardVolume == .disabled)
       }
       SettingsCaption("Custom shortcuts have no modifiers of their own, so they always use the step size selected here.")
+
+      // A1 relitigated D26 for this one: it is a key-step setting, which is
+      // what this section is, and the decision behind it ("how far does one
+      // press move while a display is dimming past its minimum") is one a
+      // person can make. `separateCombinedScale` stays app-level and stays a
+      // documented `defaults write` key.
+      // "A normal press" is load-bearing, not hedging: `DimmingMath.step`
+      // branches on `isFine` BEFORE it reads the chiclet count, so a fine step
+      // is a flat ±0.01 on both scales and this toggle does nothing to it.
+      // With "Fine steps for brightness and contrast" on two rows above, that
+      // is every press — a caption promising otherwise would contradict its
+      // own neighbour (the D11 defect class).
+      SettingRow("Halves how far a normal press moves on a display that is dimming past its minimum; fine steps are unchanged.") {
+        Toggle("Extra-fine steps while combined dimming is active", isOn: Binding(
+          get: { prefs.separateCombinedScale },
+          set: { setSeparateCombinedScale($0) }
+        ))
+        .disabled(prefs.keyboardBrightness == .disabled)
+      }
     }
   }
 
@@ -286,5 +355,52 @@ struct KeyboardPane: View {
   private func setFineScaleVolume(_ fine: Bool) {
     prefs.useFineScaleVolume = fine
     actions.prefDidChange(.useFineScaleVolume)
+  }
+
+  /// No `persistenceKey:`, like every other write in this pane. The parameter
+  /// is not a defaults domain — it is a FILTER on which display's controller
+  /// `.reapplyDimming` reaches (`SettingsActions.apply`), and `separateCombinedScale`
+  /// is app-level, so `"app"` would match zero displays and silently swallow a
+  /// future reapply row. The row is `.refreshUI` alone today because
+  /// `BrightnessController.step` reads the pref at key time (D20).
+  private func setSeparateCombinedScale(_ separate: Bool) {
+    prefs.separateCombinedScale = separate
+    actions.prefDidChange(.separateCombinedScale)
+  }
+}
+
+/// One modifier combination and what it does.
+///
+/// ONE accessibility element (SO16 + contract 5's shape): the label is the
+/// whole sentence the caption used to say, so the glyphs are never spelled out
+/// character by character and the combination is described in words. At
+/// accessibility text sizes the combination drops onto its own line rather than
+/// truncating (contract 10), the same `ViewThatFits` measurement `NavigationRow`
+/// uses.
+private struct ModifierLegendRow: View {
+  let title: LocalizedStringKey
+  let combination: String
+  let spoken: String
+
+  var body: some View {
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 8) {
+        Text(title)
+        Spacer(minLength: 8)
+        // Only on this candidate: a wrapping combination would let the row
+        // "fit" at any width and the fallback would never be reached.
+        combinationText.lineLimit(1)
+      }
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title)
+        combinationText
+      }
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(spoken)
+  }
+
+  private var combinationText: some View {
+    Text(verbatim: combination).foregroundStyle(.secondary)
   }
 }

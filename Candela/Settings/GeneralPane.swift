@@ -13,11 +13,11 @@ import SwiftUI
 /// section rather than trailing the pane, and every section below them is a
 /// setting rather than an action.
 ///
-/// Two fork controls are deliberately absent. "Enable smooth brightness
+/// One fork control is deliberately absent: "Enable smooth brightness
 /// transitions" has nothing left to control — the spec amendment of 2026-07-30
-/// removed the smooth-brightness animator — and "Separate scales for hardware
-/// and software dimming" is cut by D26, with `separateCombinedScale` surviving
-/// as a `defaults write` key that still works in the engine.
+/// removed the smooth-brightness animator. The fork's "Separate scales for
+/// hardware and software dimming" was cut here by D26 and came back under A1 as
+/// a key-step setting in Keyboard › Precision, which is what it always was.
 ///
 /// `@MainActor` because `LoginItem` is a `@MainActor @Observable` type and a
 /// `View`'s stored-property default expressions are nonisolated under
@@ -63,10 +63,15 @@ struct GeneralPane: View {
         .keyboardShortcut(.defaultAction)
       Button("Reset All Settings", role: .destructive) { actions.performReset() }
     } message: {
-      // D12(a): name what is destroyed — including the stored levels, which on
-      // a write-only panel are the only record of where the display is, and
-      // the login-item registration, which the wipe also removes.
-      Text("This removes every setting: per-display tuning and names, custom keyboard shortcuts, saved brightness, volume and contrast levels, and the Open at Login registration. Setup will run again afterwards.")
+      // D12(a) and SO20: name what is destroyed, and name what the reset DOES
+      // to the hardware on its way there. `runSettingsReset` turns HDR off,
+      // unmutes, ends every lock dim and clears the hour counters before the
+      // wipe (its own D29 ordering); copy that mentioned only the prefs left a
+      // person surprised by a display coming out of HDR. The stored levels are
+      // called out because on a write-only panel they are the only record of
+      // where the display is, and the login item because the wipe removes a
+      // registration that lives outside the prefs domain.
+      Text("Your displays are put into a known state first: HDR off, any display muted by \(AppInfo.productName) unmuted, and OLED care stopped with the counted hours of use cleared.\n\nThen every setting is removed: per-display tuning and names, custom keyboard shortcuts, saved brightness, volume and contrast levels, remembered resolutions and rotation, saved arrangements, OLED care enrollment, and the Open at Login registration. Setup will run again afterwards.")
     }
   }
 
@@ -95,9 +100,9 @@ struct GeneralPane: View {
         .fixedSize(horizontal: false, vertical: true)
       }
       HStack(spacing: 8) {
-        // The App Menu pane's caption promises this button by name when the
-        // menu bar icon is hidden ("You can quit it from the General pane") —
-        // with no icon and no Dock tile there is otherwise no way out.
+        // The Menu Bar pane's caption promises this button by name when the
+        // menu bar icon is hidden ("You can quit it from General") — with no
+        // icon and no Dock tile there is otherwise no way out.
         Button("Quit \(AppInfo.productName)") { NSApplication.shared.terminate(nil) }
         // Trailing ellipsis per buttons.md: the click opens a confirmation
         // rather than destroying anything. No `.destructive` role here — the
@@ -114,7 +119,7 @@ struct GeneralPane: View {
       // The fork's "Combine hardware and software dimming" named the
       // mechanism; this names the outcome and moves the mechanism into the
       // caption (D25).
-      SettingRow("Once a display reaches its lowest hardware brightness, \(AppInfo.productName) keeps dimming in software. DDC-controlled displays only.") {
+      SettingRow("Keeps dimming in software once a DDC-controlled display reaches its hardware minimum.") {
         Toggle("Dim past the display's minimum", isOn: Binding(
           get: { prefs.combinedBrightness },
           set: { enabled in
@@ -139,7 +144,9 @@ struct GeneralPane: View {
       // slider range IS the software leg. Disabling it there would lock a user
       // out of the one control that governs how dark that display can go. The
       // caption carries the condition instead.
-      SettingRow("The slider can reach 0%, which blanks the display completely. Applies wherever software dimming is in use — combined dimming above, or a display with hardware control turned off on its own page in the sidebar. If keyboard control is also off, a blank display can be hard to undo.") {
+      // Two sentences, not one: SO15's exception list names the blank display
+      // as a safety case, and the hazard is the second sentence.
+      SettingRow("The slider can reach 0% on any display dimming in software, which blanks it completely. If keyboard control is also off, a blank display can be hard to undo.") {
         Toggle("Allow a fully dark display", isOn: Binding(
           get: { prefs.allowZeroSwBrightness },
           set: { enabled in
@@ -199,24 +206,38 @@ struct GeneralPane: View {
             .foregroundStyle(.secondary)
           Text("Safe Mode is on for this session, so this setting is not in effect.")
         }
-        SettingsCaption("Shift was held at launch. Relaunch without holding Shift to restore normal startup and wake behavior. Your setting above is unchanged and will be used then.")
+        // The full scope lives HERE, in the state it describes, and nowhere
+        // else: an always-on paragraph explaining a mode nobody is in was the
+        // pane's longest block of text. D11's visibility rule is about the
+        // ACTIVE state, which keeps its status row above and this caption.
+        // Safe mode's real, final scope (D11): no startup restore, no wake
+        // restore, no brightness readback, no quit-time write, and — added by
+        // W3a — no OLED-care driver loop, so no dimming overlay and no panel
+        // hours. Sliders and keys still work and still send DDC, and so do the
+        // OLED Care pane's two screen-chrome switches (explicit writes to a
+        // system setting, not automatic behavior; that pane carries its own
+        // safe-mode note) — so this must NEVER claim "no DDC commands" or that
+        // OLED care is entirely off, which is the same class of false copy D11
+        // exists to fix.
+        SettingsCaption("Shift was held at launch, so \(AppInfo.productName) won't restore your saved values at startup or wake, won't read values back from your displays, won't write anything when it quits, and won't dim any display or count hours of use for OLED care. The sliders and keys still work, your settings are unchanged, and relaunching without Shift restores normal behavior.")
       }
       // `startupCaption` is NOT repeated here: `SettingRow` above already
       // renders it beneath the picker. Rendering it a second time printed the
       // same sentence twice, once tight under the control and once adrift
       // below the safe-mode block.
       if prefs.startupAction == .read {
-        SettingsCaption("Some displays never answer DDC reads (write-only panels); values then stay as last saved.")
+        // "Write-only panels" was the house term for these; SO14 makes the
+        // hardware a display everywhere in UI copy.
+        SettingsCaption("Some displays never answer DDC reads; values then stay as last saved.")
       }
-      // Safe mode's real, final scope (D11): no startup restore, no wake
-      // restore, no brightness readback, no quit-time write, and — added by
-      // W3a — no OLED-care driver loop, so no dimming overlay and no panel
-      // hours. Sliders and keys still work and still send DDC, and so do the
-      // OLED Care pane's two screen-chrome switches (explicit writes to a
-      // system setting, not automatic behavior) — so this must NEVER claim "no
-      // DDC commands" or that OLED care is entirely off, which is the same
-      // class of false copy D11 exists to fix.
-      SettingsCaption("Hold Shift while launching for Safe Mode — \(AppInfo.productName) won't restore your saved values at startup or wake, won't read values back from your displays, won't write anything when it quits, and won't dim any display or count panel hours for OLED care. The sliders and keys still work, and your settings are left unchanged.")
+      // One line when nobody is in it, and nothing at all during a safe-mode
+      // session — the branch above already says it, at length, in the state it
+      // is about. Safe mode's real, final scope (D11) must NEVER be written as
+      // "no DDC commands" in either place, which is the same false copy D11
+      // exists to fix: sliders and keys still work and still send DDC.
+      if !model.isSafeMode {
+        SettingsCaption("Hold Shift while launching for Safe Mode: saved values aren't restored.")
+      }
     }
   }
 

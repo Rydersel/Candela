@@ -346,7 +346,14 @@ public final class BrightnessController {
 
   // MARK: - Hardware readback
 
+  /// A read while WE hold a temporary dim reads our own write, not the user's
+  /// value: the dim is a multiplier on the way to the hardware and never
+  /// touches `brightness` or the store, so adopting the register back would
+  /// fold it in permanently and `endTemporaryDim` would then "restore" to the
+  /// corrupted number. Reached on every reconfiguration
+  /// (`AppModel.performRefresh`'s kept branch), which a lock dim can outlast.
   public func refreshFromHardware() async {
+    guard temporaryDimFactor == nil else { return }
     if role == .builtIn {
       // The built-in panel has no DDC wire — the native read is the only
       // truth (fork: `AppleDisplay.getAppleBrightness`). Publish only; no
@@ -437,7 +444,7 @@ public final class BrightnessController {
   public func setBrightness(_ value: Double) {
     let clamped = min(max(value, 0), 1)
     brightness = clamped
-    applyPaths(clamped)
+    applyPaths()
     persist(clamped)
   }
 
@@ -482,7 +489,16 @@ public final class BrightnessController {
   /// The order the fork's contract depends on is preserved inside the policy,
   /// where it is pinned by `BrightnessPathPolicyTests`; a `switch` here is
   /// order-free by construction.
-  private func applyPaths(_ value: Double) {
+  ///
+  /// **Takes no argument, deliberately.** Every leg has to derive from the same
+  /// effective value, and a parameter is exactly how that broke once:
+  /// `handleReconfigure` recomputed the software split from raw `brightness`
+  /// and re-applied an UNDIMMED software leg while the DDC leg held a temporary
+  /// dim, leaving a half-lifted dim on a locked screen that the coordinator's
+  /// re-assert could not repair (`beginTemporaryDim` no-ops on an unchanged
+  /// factor). With nothing to pass, a caller cannot pass the wrong thing.
+  private func applyPaths() {
+    let value = effectiveBrightness
     let tuning = prefs.tuning(for: .brightness)
     switch BrightnessPathPolicy.path(pathInputs(tuning: tuning)) {
     case .native:
@@ -649,7 +665,7 @@ public final class BrightnessController {
   /// through `applyPaths` (not a bare submit) also writes the echo slot, so the
   /// poller reads the assert back as an echo rather than an external change.
   private func assertNativeEntryBrightness() {
-    applyPaths(brightness)
+    applyPaths()
   }
 
   private var switchingValue: Double {
@@ -764,7 +780,7 @@ public final class BrightnessController {
         settleInProgress = false
         await refreshHDRCaches()
         guard hdrTransitionGeneration == generation else { return } // backlog #1: same fence as the success arm
-        applyPaths(brightness)
+        applyPaths()
       }
     } else {
       // Leaving the native path (`.alwaysOn` → `.off`, the only remaining exit
@@ -784,7 +800,7 @@ public final class BrightnessController {
       guard hdrTransitionGeneration == generation else { return } // post-settle
       settleInProgress = false
       coalescer.resetDuplicateState()
-      applyPaths(brightness)
+      applyPaths()
       await refreshHDRCaches()
     }
   }
@@ -825,11 +841,16 @@ public final class BrightnessController {
     backends.shade?.repinFrames()
     lastAppliedSw = nil
     guard !usesNative else { return }
+    // `effectiveBrightness`, never raw `brightness`: a reconfiguration during a
+    // temporary dim (a replug, a sibling display's HDR flip, a bus drop) would
+    // otherwise re-apply the software leg UNDIMMED while the hardware leg still
+    // holds the dim, which on a locked screen is a partially lifted dim.
+    let value = effectiveBrightness
     let sw: Double
     if prefs.forceSoftware {
-      sw = brightness
+      sw = value
     } else if !prefs.disableCombinedBrightness {
-      sw = DimmingMath.combinedSplit(value: brightness, switching: switchingValue).sw
+      sw = DimmingMath.combinedSplit(value: value, switching: switchingValue).sw
     } else {
       return // pure-DDC path has no software leg to re-apply
     }
@@ -1040,6 +1061,133 @@ public final class BrightnessController {
     return store.savedBrightness(for: storageKey) != nil
   }
 
+  // MARK: - Temporary dim (OLED care lock dim)
+
+  /// A multiplier applied to the published value on its way to the hardware,
+  /// or nil when nothing is dimming. Owned by whoever called
+  /// `beginTemporaryDim`; OLED care's lock dim is the only caller today.
+  ///
+  /// Deliberately NOT expressed as a `setBrightness` to a lower value. That
+  /// would overwrite `brightness` and the persisted store, which are the user's
+  /// value and the only truth a write-only panel has: a crash or a force-quit
+  /// while dimmed would then make the dim permanent, and a slider moved during
+  /// the dim would have nothing to be restored to.
+  ///
+  /// Scope of the "a process that dies while dimmed still reopens correctly"
+  /// claim: it is unconditional for a write-only panel, where the store IS the
+  /// truth. On a panel that answers DDC reads (the Dell here), the hazard is a
+  /// readback of a register we dimmed, and it is not confined to launch:
+  /// `refreshFromHardware` also runs on every reconfiguration, which a lock dim
+  /// outlasts. THIS process is covered, because that function returns early
+  /// while a dim is outstanding. What is left is a readback by a process that
+  /// did not set the dim: the next launch after a crash or force-quit, which
+  /// finds the register still down with no factor recorded anywhere. The store
+  /// is right either way; the readback is what would overwrite it.
+  public private(set) var temporaryDimFactor: Double?
+
+  /// The ONE place the temporary dim is folded in. Everything that computes a
+  /// leg's value starts here; `brightness` is the user's number and is never
+  /// what reaches the hardware while a dim is outstanding.
+  private var effectiveBrightness: Double {
+    brightness * (temporaryDimFactor ?? 1)
+  }
+
+  /// Supersession token for `rampTemporaryDim`. Bumped by every EXPLICIT change
+  /// of the dim state, so an in-flight ramp that resumes after one is a no-op
+  /// even if nobody cancelled its task. That is what makes "a restore is never
+  /// re-dimmed by a step that was already in the air" a property of the type
+  /// rather than of the caller's cancel ordering.
+  @ObservationIgnored private var dimToken: UInt64 = 0
+
+  /// Test seam: the ramp's step spacing. `LockDimRamp.stepInterval` in
+  /// production; tests shrink it, exactly as they shrink `settleDelay`.
+  @ObservationIgnored var lockDimRampInterval: Duration = LockDimRamp.stepInterval
+
+  /// Applies a temporary dim immediately. Idempotent for an unchanged factor,
+  /// and supersedes any ramp in flight.
+  public func beginTemporaryDim(factor: Double) {
+    dimToken &+= 1
+    applyDimFactor(factor)
+  }
+
+  /// Fades the temporary dim to `target` over `LockDimRamp.duration`, applying
+  /// the FIRST step synchronously so the dim starts on this turn of the run
+  /// loop and `temporaryDimFactor` is non-nil the moment this returns (a caller
+  /// polling it cannot catch a window where a ramp is running but no dim is
+  /// recorded). The returned task carries the remaining steps.
+  ///
+  /// Cancelling the task stops it, but the token is what makes it SAFE: any
+  /// `beginTemporaryDim`, `endTemporaryDim` or newer ramp invalidates this one,
+  /// so a step that was already suspended when the user unlocked cannot land
+  /// after the restore.
+  @discardableResult
+  public func rampTemporaryDim(to target: Double) -> Task<Void, Never> {
+    dimToken &+= 1
+    let mine = dimToken
+    var remaining = LockDimRamp.factors(to: target)[...]
+    if let first = remaining.first {
+      applyDimFactor(first)
+      remaining = remaining.dropFirst()
+    }
+    return Task { @MainActor [weak self] in
+      for factor in remaining {
+        let interval: Duration
+        // Strong self confined to the non-suspending half of the iteration and
+        // dropped before the sleep, the same shape the OLED care driver uses:
+        // a binding whose scope covered the await would retain the controller
+        // across every suspension.
+        do {
+          guard let self, self.dimToken == mine, !Task.isCancelled else { return }
+          self.applyDimFactor(factor)
+          interval = self.lockDimRampInterval
+        }
+        do { try await Task.sleep(for: interval) } catch { return }
+      }
+    }
+  }
+
+  /// Restores the published value exactly, immediately, and supersedes any ramp
+  /// in flight. Deliberately NOT ramped: someone who has just unlocked wants
+  /// their screen back now, and only the dim-in fades.
+  ///
+  /// Safe to call when nothing is dimmed (a no-op), which is what lets the
+  /// teardown paths call it unconditionally: unlock, losing enrollment,
+  /// settings reset and quit. Departure is NOT one of them: a departed
+  /// display's controller is gone, so `endAllLockDims` skips it and the next
+  /// arrival's restore pass is what puts the panel back.
+  public func endTemporaryDim() {
+    dimToken &+= 1
+    guard temporaryDimFactor != nil else { return }
+    temporaryDimFactor = nil
+    lastAppliedSw = nil
+    coalescer.resetDuplicateState()
+    applyPaths()
+  }
+
+  /// The one place a dim factor is set. Private so the token discipline above
+  /// cannot be bypassed: a public setter that skipped the bump would let a
+  /// stale ramp step outlive the thing that superseded it.
+  ///
+  /// The memo clears run ONLY on the transition out of "no dim". Between ramp
+  /// steps they would be waste: consecutive steps carry different values, which
+  /// the duplicate memo and the software dedupe both let through on their own,
+  /// and resetting per step defeats the memo's one useful job here (two ramp
+  /// steps that round to the SAME register value should collapse to one write).
+  /// The transition still needs them, for the reason `reapplyAfterPrefChange`
+  /// gives: what should be on the wire changes while the published value does
+  /// not, so a suppressed write would leave the display where it was.
+  private func applyDimFactor(_ factor: Double) {
+    let clamped = min(max(factor, 0), 1)
+    guard temporaryDimFactor != clamped else { return }
+    let starting = temporaryDimFactor == nil
+    temporaryDimFactor = clamped
+    if starting {
+      lastAppliedSw = nil
+      coalescer.resetDuplicateState()
+    }
+    applyPaths()
+  }
+
   /// Re-asserts the current value on whatever path is live (the restore
   /// pass's brightness leg). Routed through `applyPaths`, not a bare submit,
   /// so the echo slot stays honest for the poller; the software leg re-apply
@@ -1050,7 +1198,7 @@ public final class BrightnessController {
   /// whose published value is still the assumed 1.0 default over an empty
   /// store.
   public func reassertHardware() {
-    applyPaths(brightness)
+    applyPaths()
   }
 
   // MARK: - Settings re-apply (D28)
@@ -1129,7 +1277,7 @@ public final class BrightnessController {
     if choice != .gamma { backends.gamma?.applyGammaScale(1.0, on: displayID, enforcerOn: drawable) }
     lastAppliedSw = nil
     coalescer.resetDuplicateState()
-    applyPaths(brightness)
+    applyPaths()
   }
 
   /// Quit restore: write the register's FULL-RANGE equivalent of the
@@ -1142,6 +1290,12 @@ public final class BrightnessController {
   /// the coalescer drains off-actor, so the quit path's barrier (Task 10)
   /// only has to keep the process alive until the write lands, never block
   /// the main thread on DDC I/O.
+  ///
+  /// Reads `brightness`, so a quit during a temporary dim writes the UNDIMMED
+  /// value: the register is handed back to the user's setting on the way out.
+  /// That is a backstop, not the contract. The owner of the dim still ends it
+  /// explicitly at teardown, because this call returns early on three paths
+  /// (native included, which is where an HDR display's dim lives).
   public func restoreFullRangeDDC() {
     guard role == .external, !usesNative, !prefs.forceSoftware else { return }
     let tuning = prefs.tuning(for: .brightness)

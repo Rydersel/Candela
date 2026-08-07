@@ -5,6 +5,15 @@ The knobs below exist for broken or unusual hardware: they still work, they
 still have engine tests, and they are set with `defaults write` instead of a
 control. (Cut from the UI by ruling D26, which also promised this page.)
 
+**Several of these now have controls.** Ruling A1 partly relitigated D26: a
+`defaults write` key that expresses a decision a person can make was promoted
+into the settings window. Each such key keeps its documentation here, with a
+line naming the control that now owns it — the key still works, and it is still
+the only route to the values the UI deliberately does not offer. Every promoted
+per-display key lives on one display's **Advanced** sub-page (Settings → the
+display in the sidebar → **Advanced**); the one promoted app-level key,
+`separateCombinedScale`, lives in Settings → **Keyboard** → *Precision*.
+
 A second list at the bottom covers names that are **reserved and do nothing**.
 They are documented so nobody sets one and concludes the app is broken.
 
@@ -36,8 +45,7 @@ dimming, rebuilds the panel and refreshes the menu bar item as each pref
 requires; a write from the command line arrives with no such signal. So a key
 that is consulted fresh on every use (`pollingMode`, `pollingCount`,
 `separateCombinedScale`, `wireTimingGuard`) takes effect at the next read or
-keypress, while one
-whose effect has to be *re-applied* (`combinedSwitchingPoint`, `curveDDC`,
+keypress, while one whose effect has to be *re-applied* (`combinedSwitchingPoint`, `curveDDC`,
 `remapDDC`) sits in the domain looking ignored until something else re-applies
 it. Relaunching removes the distinction, which is why it is the rule rather
 than a caveat.
@@ -50,16 +58,16 @@ than a caveat.
 
 | Key | Type | Default | Effect |
 |---|---|---|---|
-| `separateCombinedScale` | Bool | `NO` | Changes how far one press of a **brightness key** moves the slider while combined hardware+software dimming is active: 32 steps across the whole range instead of the usual 16. Sliders are unaffected. Ignored unless the display is actually on the combined path — no effect with "Dim past the display's minimum" off, with hardware control off for that display, or on the built-in panel. |
+| `separateCombinedScale` | Bool | `NO` | Changes how far one press of a **brightness key** moves the slider while combined hardware+software dimming is active: 32 steps across the whole range instead of the usual 16. Fine steps are unaffected: a fine press is a flat ±0.01 on both scales, so this does nothing on a fine press. Fine is the EXCLUSIVE OR of the setting and the modifier (`KeyRouter`: holding Shift+Option toggles whatever "Fine steps for brightness and contrast" says), so this key applies whenever neither or BOTH of them are in play, and does nothing when exactly one is. The on-and-held case is a coarse press and this key governs it. Sliders are unaffected. Ignored unless the display is actually on the combined path: no effect with "Dim past the display's minimum" off, with hardware control off for that display, or on the built-in display. **Has a control:** Keyboard → Precision → *Extra-fine steps while combined dimming is active*. |
 | `wireTimingGuard` | Bool | `YES` | Whether to withhold extra resolutions whose refresh rate the display advertises no full-width timing for. **Leave this on unless you know you need it.** Some displays bind such a mode to an unrelated timing and scan the desktop out letterboxed or cropped — measured on an MSI MAG 341C, where the 3440×1440 HiDPI mode at 120 Hz arrived as 2560×1440 and cut off the right quarter of the screen, with macOS reporting success throughout. Set it to `NO` if your display is missing extra resolutions you know it can show; the modes reappear in both the resolution picker and the full list. Whatever this is set to, a resolution change still has to be confirmed before it sticks, so a bad mode reverts on its own. Settings → *(your display)* → Diagnostics reports how many modes are being withheld, and says `Unsupported-timing check: Off` when this is `NO`. |
 
 ## Per-display (`<key>.<persistenceKey>`)
 
 | Key | Type | Default | Effect |
 |---|---|---|---|
-| `combinedSwitchingPoint` | Int | `0` | Where combined dimming hands over from the hardware (DDC) leg to the software leg. Range `-8`…`7`; values outside it are clamped on both read and write. Negative moves the crossover darker, positive brighter. Only meaningful while "Dim past the display's minimum" (Settings → General) is on. Set back to `0` by "Reset Display Settings…". |
-| `pollingMode` | Int | `0` | How many times a DDC read is retried, and **only** when Settings → General → "On startup and wake:" is set to *Ask the display for its current values*. `-2` none, `-1` minimal (1 try), `0` normal (5), `1` heavy (20), `2` custom. Applies to the volume and contrast readback; the brightness readback makes a single attempt regardless. |
-| `pollingCount` | Int | `0` | The try count used when `pollingMode` is `2`. Negative values clamp to 0. |
+| `combinedSwitchingPoint` | Int | `0` | Where combined dimming hands over from the hardware (DDC) leg to the software leg. Range `-8`…`7`; values outside it are clamped on both read and write. Negative moves the crossover darker, positive brighter. Only meaningful while "Dim past the display's minimum" (Settings → General) is on. **Has a control:** Advanced → Combined Dimming → the *Hand off* slider, which shows the position as "Default" / "Earlier by N" / "Later by N" and never the raw number. Set back to `0` by "Restore Advanced Defaults…" and by "Reset Display Settings…". |
+| `pollingMode` | Int | `0` | How many times a DDC read is retried, and **only** when Settings → General → "On startup and wake:" is set to *Ask the display for its current values*. `-2` none, `-1` minimal (1 try), `0` normal (5), `1` heavy (20), `2` custom. Applies to the volume and contrast readback; the brightness readback makes a single attempt regardless. **Has a control:** Advanced → Reading Values From the Display → *Retries*. The section shows the verdict instead of the retry controls on a display that has never answered a read. |
+| `pollingCount` | Int | `0` | The try count used when `pollingMode` is `2`. Negative values clamp to 0. **Has a control:** Advanced → Reading Values From the Display → *Attempts*, shown only while *Retries* is set to Custom. The stepper's range is 0–99; wider values remain settable here. |
 
 Example:
 
@@ -74,8 +82,8 @@ defaults write com.rydersel.Candela "pollingMode.4C2D-6E00-0000-0000-..." -int 1
 
 | Key | Type | Default | Effect |
 |---|---|---|---|
-| `curveDDC` | Int | `0` | Response curve, `1`–`9`. `0` (unset) and `5` are both linear; below 5 biases the low end, above 5 the high end. The engine default suits essentially all hardware — reach for the Min/Max fields in Settings → Displays first. |
-| `remapDDC` | String | `""` | Comma-separated hex VCP codes to use instead of the standard one, for monitors that put a feature somewhere non-standard. Reads use only the FIRST code; writes go to all of them. Empty, `0` and non-hex tokens are dropped. |
+| `curveDDC` | Int | `0` | Response curve, `1`–`9`. `0` (unset) and `5` are both linear; below 5 biases the low end, above 5 the high end. The engine default suits essentially all hardware — reach for the Min/Max fields first. **Has a partial control:** Advanced → Command Tuning → VCP Overrides → *response curve*, which offers only the three decisions — **Linear** (writes `0`), **Favor low brightness** (`3`) and **Favor high brightness** (`7`). The fine values `1`, `2`, `4`, `6`, `8` and `9` stay `defaults write` only; a stored one of those is shown as an extra "Custom (N)" item and is never rewritten unless you choose something else. A stored `5` displays as Linear and is likewise left alone. |
+| `remapDDC` | String | `""` | Comma-separated hex VCP codes to use instead of the standard one, for monitors that put a feature somewhere non-standard. Reads use only the FIRST code; writes go to all of them. Empty, `0` and non-hex tokens are dropped. **Has a control:** Advanced → Command Tuning → VCP Overrides → *control code*. The field shows the codes that survived parsing, so a dropped token disappears on commit. |
 
 Example — a monitor that answers brightness on `0xE1`:
 
@@ -85,7 +93,7 @@ defaults write com.rydersel.Candela "curveDDC.brightness.4C2D-..." -int 7
 ```
 
 The other per-command settings — Min, Max, Invert and the per-command On
-switch — **do** have controls, in Settings → Displays under "Command tuning".
+switch — **do** have controls, in Advanced → Command Tuning.
 
 ---
 
@@ -105,8 +113,8 @@ page only — Candela has never written them and has no accessor for them.
 | `longerDelay` | per-display | accessor + test | The fork paced its DDC reads more slowly with this, and force-disabled launch-at-login as a "safety measure" with nothing to re-enable it. Neither behavior is ported. Set back to `NO` by "Reset Display Settings…", only so a stray `defaults write` can be cleared. |
 | `showTickMarks` | app-level | accessor + test | The fork drew tick marks under its sliders (and, by mistake, chose the quit button's glyph with the same key). Candela's panel has no tick renderer — cut before one was written. |
 | `menuItemStyle` | app-level | accessor + test | The fork's menu had icon/text/hidden footer styles. Candela's panel footer is a designed, fixed row; no code reads this. |
-| `hideBrightness` | app-level | name only | The fork hid every brightness slider app-wide. Hiding every brightness slider in a brightness app is a footgun, and the per-display controls in Settings → Displays are strictly more expressive. |
-| `hideVolume` | app-level | name only | Same as above; superseded by the per-display "Show the volume slider in the panel". |
+| `hideBrightness` | app-level | name only | The fork hid every brightness slider app-wide. Hiding every brightness slider in a brightness app is a footgun, and the per-display controls on each display's own settings page are strictly more expressive. |
+| `hideVolume` | app-level | name only | Same as above; superseded by the per-display "Show the volume slider in the menu bar". |
 | `multiSliders` | app-level | name only | The fork's combined/relevant multi-slider menu modes. Recorded as an M5 scope gap rather than a decision against it: the modes are unbuildable and untestable on single-monitor hardware. |
 
 ---
@@ -127,9 +135,14 @@ page only — Candela has never written them and has no accessor for them.
 
 Settings → General → **"Reset All Settings…"** removes the whole domain —
 per-display tuning, names, custom shortcuts, saved levels, and the Open at
-Login registration — and runs Setup again. Settings → Displays →
+Login registration — and runs Setup again. A display's own page →
 **"Reset Display Settings…"** clears one display's settings, including the
-keys on this page, and keeps its saved levels.
+keys on this page, and keeps its saved levels. Advanced →
+**"Restore Advanced Defaults…"** is the narrower of the two: it clears only
+what that sub-page can write — `forceSw`, `avoidGamma`, `hideOsd`,
+`combinedSwitchingPoint`, `pollingMode`, `pollingCount` and every per-command
+tuning key — and leaves the display's name, menu-bar visibility, keyboard and
+sound settings alone.
 
 Holding Shift during launch is *Safe Mode*, which is unrelated and changes no
 settings at all. For that session Candela does not restore your saved values at

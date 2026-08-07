@@ -59,9 +59,12 @@ class InMemoryDefaults: UserDefaults, @unchecked Sendable {
   override func data(forKey key: String) -> Data? { object(forKey: key) as? Data }
 
   /// This instance's dictionary, not the superclass's merged domains — the
-  /// same reason every accessor above is overridden. It is what lets a test
-  /// ask "what is left in the store?" rather than checking a hand-written list
-  /// of keys, which is the only form that catches a key nobody remembered.
+  /// same reason every accessor above is overridden (the superclass would
+  /// report the fallback suite plus the global domain, i.e. never the keys the
+  /// test wrote). `DisplayPrefs.hasAnyStoredValue` scans it, and it is what
+  /// lets a test ask "what is left in the store?" rather than checking a
+  /// hand-written list of keys — the only form that catches a key nobody
+  /// remembered.
   override func dictionaryRepresentation() -> [String: Any] {
     lock.withLock { storage }
   }

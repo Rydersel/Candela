@@ -222,7 +222,7 @@ case "modeapply":
     print("after:  \(after.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID)" } ?? "unknown")")
     print("scope: \(applyScope); holding \(holdSeconds)s...")
     sleep(holdSeconds)
-    print("exiting — preview scope reverts now.")
+    print("exiting: preview scope reverts now.")
   } catch {
     print("apply FAILED: \(error)")
     exit(4)
@@ -362,7 +362,7 @@ case "gamma":
     }
     let holdSeconds = arguments.count > 2 ? Double(arguments[2]) ?? 15 : 15
     print("gamma: scale \(scale), holding \(holdSeconds) s.")
-    print("gamma: CAVEAT — gamma set by this process is restored the moment the process exits;")
+    print("gamma: CAVEAT. Gamma set by this process is restored the moment the process exits;")
     print("       observe the display during the hold, not after.")
     for display in online {
       print("\(display.name): scale \(scale) -> \(applyGammaScale(scale, to: display.id) ? "ok" : "FAILED")")

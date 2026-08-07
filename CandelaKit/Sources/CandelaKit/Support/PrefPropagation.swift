@@ -12,17 +12,21 @@
 ///   go through `BrightnessController.setHDRMode`.
 /// - `menuItemStyle`, `showTickMarks`, `longerDelay`: reserved keys with no
 ///   reader anywhere in Candela (D32). A row for them would be a lie.
-/// - `pollingMode`, `pollingCount`: read at DDC-read time; nothing to fan out.
-/// - `separateCombinedScale`: read only inside `step()`, at key time.
 /// - `oledPanelSeconds`, `oledStandbySeconds`, `oledStandbyNoteDismissed`:
 ///   accumulated usage and the note's dismissal, written by the hours tracker —
 ///   engine state, not settings (same rule as `muted`).
+///
+/// `pollingMode`, `pollingCount` (read at DDC-read time) and
+/// `separateCombinedScale` (read inside `step()`, at key time) ARE cases: the
+/// settings overhaul gave them real UI, and D27 makes a written pref a case.
+/// Being read at use, they fan out to `refreshUI` alone.
 public enum PrefName: String, Sendable, CaseIterable {
   // App-level — panel and menu-bar presentation
   case menuIcon, hideBuiltInDisplay, showContrast
   case enableSliderSnap, enableSliderPercent
   // App-level — dimming
   case disableCombinedBrightness, allowZeroSwBrightness, enableBrightnessSync, startupAction
+  case separateCombinedScale
   // App-level — keyboard
   case keyboardBrightness, keyboardVolume, disableAltBrightnessKeys
   case multiKeyboardBrightness, multiKeyboardVolume
@@ -31,6 +35,7 @@ public enum PrefName: String, Sendable, CaseIterable {
   case friendlyName, hideDisplay, isDisabled, hideVolumeSlider, hideOsd
   case forceSw, avoidGamma, combinedSwitchingPoint
   case enableMuteUnmute, audioSinkOverride, audioDeviceNameOverride
+  case pollingMode, pollingCount
   // Per-display — display configuration (W2 SP1)
   case rememberDisplayMode, storedDisplayMode
   // Per-display — OLED care (W3a). The accessor defaults ARE the Recommended
@@ -109,9 +114,10 @@ public enum PrefPropagation {
       []
 
     case .enableMuteUnmute, .startupAction, .multiKeyboardBrightness,
-         .useFineScaleBrightness, .useFineScaleVolume:
-      // Read at key time / launch time. `.refreshUI` alone is the whole row —
-      // that is a deliberate answer, not a missing one.
+         .useFineScaleBrightness, .useFineScaleVolume,
+         .pollingMode, .pollingCount, .separateCombinedScale:
+      // Read at key time / launch time / DDC-read time. `.refreshUI` alone is
+      // the whole row — that is a deliberate answer, not a missing one.
       []
 
     case .keyboardBrightness, .keyboardVolume:

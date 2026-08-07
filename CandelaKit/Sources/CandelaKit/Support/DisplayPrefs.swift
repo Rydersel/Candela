@@ -209,13 +209,29 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("oledIdleDimSeconds")) }
   }
 
-  /// Opacity of the black care overlay, NOT a fraction of the user's
-  /// brightness: **higher is darker**. `IdleDimmingEngine.alpha(for:)` hands
-  /// this straight to the overlay's content-view alpha, and blackout is the
-  /// same scale at 1.0. The display's own brightness is never written.
-  public var oledIdleDimLevel: Double {
-    get { defaults.object(forKey: key("oledIdleDimLevel")) as? Double ?? 0.5 }
-    set { defaults.set(newValue, forKey: key("oledIdleDimLevel")) }
+  /// **How bright the display is while dimmed**: 0.1 is darkest, 0.9 is barely
+  /// dimmed. This is the number the user sets and reads, and it is the ONLY
+  /// meaning of "level" anywhere above this line.
+  ///
+  /// **The stored value is its complement, the overlay's OPACITY**, which is
+  /// what the key has always held and still holds: 0.5 on disk has meant, and
+  /// still means, a half-opaque overlay. The inversion lives here, at the
+  /// accessor, so that no stored value changes meaning and no migration is
+  /// owed. Everything that already existed on disk keeps rendering exactly as
+  /// before; only the number shown to the user flipped, which was the ask
+  /// (users read "10%" as "10% brightness", not "10% dimming").
+  ///
+  /// This accessor is the only INTERPRETER of the key. The other three uses of
+  /// the string are uninterpreted: `resetOledCare` removes it, and `PrefName`
+  /// carries it as a propagation identifier. Verified before choosing this over
+  /// a new key, because the whole argument depends on it.
+  ///
+  /// The engine still dims with an overlay whose alpha is this complement; the
+  /// lock dim, which is delivered on the wire, uses this number directly as the
+  /// fraction of the user's brightness to keep.
+  public var oledIdleDimBrightness: Double {
+    get { 1 - (defaults.object(forKey: key("oledIdleDimLevel")) as? Double ?? 0.5) }
+    set { defaults.set(1 - newValue, forKey: key("oledIdleDimLevel")) }
   }
 
   public var oledLockDim: Bool {
@@ -243,16 +259,16 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("oledUnfocusedDimSeconds")) }
   }
 
-  /// Overlay opacity, same scale as `oledIdleDimLevel` — higher is darker.
+  /// Brightness while dimmed, same scale and same stored complement as
+  /// `oledIdleDimBrightness`.
   ///
-  /// Default 0.3, LIGHTER than the idle dim's 0.5 on purpose: an unfocused
+  /// Default 0.7, BRIGHTER than the idle dim's 0.5 on purpose: an unfocused
   /// display is still in the user's view, so it gets a gentler dim than one
-  /// nobody has touched for five minutes. The original 0.7 was chosen under an
-  /// inverted reading of this scale (it would have made the unfocused dim the
-  /// darker of the two).
-  public var oledUnfocusedDimLevel: Double {
-    get { defaults.object(forKey: key("oledUnfocusedDimLevel")) as? Double ?? 0.3 }
-    set { defaults.set(newValue, forKey: key("oledUnfocusedDimLevel")) }
+  /// nobody has touched for five minutes. The stored 0.3 is unchanged; it is
+  /// the same gentler dim, written as the overlay opacity it has always been.
+  public var oledUnfocusedDimBrightness: Double {
+    get { 1 - (defaults.object(forKey: key("oledUnfocusedDimLevel")) as? Double ?? 0.3) }
+    set { defaults.set(1 - newValue, forKey: key("oledUnfocusedDimLevel")) }
   }
 
   public var oledHoursTracking: Bool {
@@ -603,6 +619,20 @@ public final class DisplayPrefs: @unchecked Sendable {
 
   private func key(_ name: String) -> String {
     "\(name).\(persistenceKey)"
+  }
+
+  /// SO22: whether ANYTHING has ever been stored for this display — prefs,
+  /// saved levels, tuning. Every per-display key ends `".<persistenceKey>"`
+  /// (this type's `key`/`commandKey`, the brightness/volume/contrast stores'
+  /// `"<name>.<pk>"` storage keys), so an empty answer means the domain is
+  /// genuinely fresh, which is what distinguishes "first time seeing this
+  /// display" from "its settings failed to restore". A suffix scan, not a
+  /// prefix: the persistence key is the TAIL of every stored key.
+  public static func hasAnyStoredValue(
+    forKey persistenceKey: String, defaults: UserDefaults = .standard
+  ) -> Bool {
+    let suffix = ".\(persistenceKey)"
+    return defaults.dictionaryRepresentation().keys.contains { $0.hasSuffix(suffix) }
   }
 
   private func clampSwitchingPoint(_ point: Int) -> Int {

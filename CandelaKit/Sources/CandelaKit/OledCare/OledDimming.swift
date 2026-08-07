@@ -12,27 +12,31 @@ public enum OledDimState: Equatable, Sendable {
 /// from prefs and hands the whole value to `updateConfig`, so nothing needs to
 /// mutate a field in place.
 ///
-/// Both `…DimLevel`s are the black overlay's OPACITY — higher is darker, and
-/// blackout is the same scale at 1.0. They are not a fraction of the user's
-/// brightness, and nothing here writes the display's brightness.
+/// Both `…DimBrightness` values are HOW BRIGHT the display is left while
+/// dimmed: 0.1 is darkest, 0.9 is barely dimmed. The overlay's opacity is their
+/// complement, computed by `alpha(for:)`, and blackout is opacity 1.0. The
+/// overlay path never writes the display's own brightness; the lock dim, which
+/// does, uses this number directly as the fraction of the user's brightness to
+/// keep.
 public struct OledDimConfig: Equatable, Sendable {
   public private(set) var idleDimSeconds: Double
-  public private(set) var idleDimLevel: Double
+  public private(set) var idleDimBrightness: Double
   public private(set) var lockDim: Bool
   public private(set) var blackoutEnabled: Bool
   public private(set) var blackoutSeconds: Double
   public private(set) var unfocusedDimEnabled: Bool
   public private(set) var unfocusedDimSeconds: Double
-  public private(set) var unfocusedDimLevel: Double
+  public private(set) var unfocusedDimBrightness: Double
 
-  /// A dim of 0 does nothing and a dim of 1 is a silent blackout — one that
-  /// would stay click-through, unlike the real thing (OC15). Neither is a
-  /// setting anyone means, so both are config errors.
+  /// A brightness of 1 dims nothing and a brightness of 0 is a silent
+  /// blackout, one that would stay click-through unlike the real thing (OC15).
+  /// Neither is a setting anyone means, so both are config errors. The window
+  /// is symmetric, so it is the same window the opacity used.
   ///
   /// Public so the pane's sliders offer exactly the range the config accepts;
   /// a control that can express a value this type will silently rewrite is a
   /// control that lies about what it did.
-  public static let levelRange: ClosedRange<Double> = 0.1...0.9
+  public static let brightnessRange: ClosedRange<Double> = 0.1...0.9
 
   /// Floor for every idle-driven threshold. Below this a "timeout" is
   /// indistinguishable from "always on", and the blackout row derives its own
@@ -46,17 +50,17 @@ public struct OledDimConfig: Equatable, Sendable {
   /// this type would silently rewrite.
   public static let blackoutGapSeconds: Double = 60
 
-  public init(idleDimSeconds: Double, idleDimLevel: Double, lockDim: Bool,
+  public init(idleDimSeconds: Double, idleDimBrightness: Double, lockDim: Bool,
               blackoutEnabled: Bool, blackoutSeconds: Double,
               unfocusedDimEnabled: Bool, unfocusedDimSeconds: Double,
-              unfocusedDimLevel: Double) {
+              unfocusedDimBrightness: Double) {
     // Floored FIRST, so the blackout clamp below compounds off a sane idle
     // threshold: a zero or negative threshold means "dimmed always", and a
     // negative blackout derived from it would black the display out at zero
     // idle — unrecoverable from inside the app.
     self.idleDimSeconds = Self.sanitizedSeconds(idleDimSeconds,
                                                 floor: Self.minimumThresholdSeconds)
-    self.idleDimLevel = Self.sanitizedLevel(idleDimLevel)
+    self.idleDimBrightness = Self.sanitizedBrightness(idleDimBrightness)
     self.lockDim = lockDim
     self.blackoutEnabled = blackoutEnabled
     // A blackout that fires at or below the idle threshold is a config error;
@@ -67,25 +71,25 @@ public struct OledDimConfig: Equatable, Sendable {
     self.unfocusedDimEnabled = unfocusedDimEnabled
     self.unfocusedDimSeconds = Self.sanitizedSeconds(unfocusedDimSeconds,
                                                      floor: Self.minimumThresholdSeconds)
-    self.unfocusedDimLevel = Self.sanitizedLevel(unfocusedDimLevel)
+    self.unfocusedDimBrightness = Self.sanitizedBrightness(unfocusedDimBrightness)
   }
 
   public init(prefs: DisplayPrefs) {
     self.init(idleDimSeconds: Double(prefs.oledIdleDimSeconds),
-              idleDimLevel: prefs.oledIdleDimLevel,
+              idleDimBrightness: prefs.oledIdleDimBrightness,
               lockDim: prefs.oledLockDim,
               blackoutEnabled: prefs.oledBlackoutEnabled,
               blackoutSeconds: Double(prefs.oledBlackoutSeconds),
               unfocusedDimEnabled: prefs.oledUnfocusedDimEnabled,
               unfocusedDimSeconds: Double(prefs.oledUnfocusedDimSeconds),
-              unfocusedDimLevel: prefs.oledUnfocusedDimLevel)
+              unfocusedDimBrightness: prefs.oledUnfocusedDimBrightness)
   }
 
   /// NaN survives `min(max(…))` untouched, and a NaN alpha is an undefined
   /// overlay rather than a visible error — so it lands mid-range instead.
-  private static func sanitizedLevel(_ level: Double) -> Double {
-    guard !level.isNaN else { return 0.5 }
-    return min(max(level, levelRange.lowerBound), levelRange.upperBound)
+  private static func sanitizedBrightness(_ brightness: Double) -> Double {
+    guard !brightness.isNaN else { return 0.5 }
+    return min(max(brightness, brightnessRange.lowerBound), brightnessRange.upperBound)
   }
 
   /// `max(NaN, floor)` returns NaN — every comparison against it is false, so a
@@ -134,7 +138,20 @@ public struct IdleDimmingEngine: Sendable {
   public init(config: OledDimConfig) { self.config = config }
 
   public mutating func updateConfig(_ config: OledDimConfig) { self.config = config }
-  public mutating func noteLock() { lockDimArmed = true }
+
+  /// `idleSeconds` is the idle reading AT the lock, and it is required for a
+  /// reason: locking is itself input (a shortcut, a menu item, a hot corner),
+  /// so the idle counter falls at the lock edge. The lift below reads a falling
+  /// counter as "input while locked", and without this baseline the very input
+  /// that locked the screen disarmed the dim on the same tick that armed it,
+  /// leaving a full-bright lock screen until the idle threshold re-elapsed.
+  /// Seeding the baseline keeps the lift honest: only a reading BELOW the one
+  /// taken at the lock is input that happened after it.
+  public mutating func noteLock(idleSeconds: Double) {
+    lockDimArmed = true
+    lastIdleSeconds = idleSeconds
+  }
+
   public mutating func noteUnlock() { lockDimArmed = false }
 
   /// Wake beats lock: the user woke the machine to use it. Disarming alone is
@@ -162,16 +179,18 @@ public struct IdleDimmingEngine: Sendable {
     if signals.isLocked && config.lockDim {
       if inputOccurred { lockDimArmed = false }
       if idleSinceWake >= config.idleDimSeconds { lockDimArmed = true }
-      // Locking never brightens: a display already blacked out stays black
-      // rather than rising to lock dim's lighter alpha. The hold re-checks the
-      // condition it holds FOR, so it cannot outlive it — an unconditional hold
-      // swallows both the wake floor (wake must always land `.active`) and a
-      // blackout switched off while the screen is locked.
-      if current == .blackout, !inputOccurred, config.blackoutEnabled,
-         idleSinceWake >= config.blackoutSeconds {
-        state = .blackout
-        return state
-      }
+      // A blacked-out display that gets locked drops to `.lockDim`, and that IS
+      // ruling D (locking never brightens) rather than a violation of it.
+      //
+      // The hold this replaces (amendment A-3) kept `.blackout` so the panel
+      // would not rise to lock dim's lighter level. It could not: `.blackout`
+      // is delivered ONLY by an overlay, and A-16 measured that no overlay of
+      // ours renders above the lock screen. So the held blackout put the panel
+      // at the FULL-BRIGHT lock screen while every surface said "Screen off".
+      // `.lockDim` goes on the wire, which the lock screen cannot cover, so it
+      // is strictly darker than the hold ever actually was. Ruling D is kept in
+      // the only terms that are observable, which is light coming off the
+      // panel, not the name of a state.
       state = lockDimArmed ? .lockDim : .active
       return state
     }
@@ -200,12 +219,32 @@ public struct IdleDimmingEngine: Sendable {
     return state
   }
 
+  /// The overlay opacity a state calls for, or nil when the state wants no
+  /// overlay.
+  ///
+  /// **`.lockDim` answers nil, and that is the delivery ruling, not an
+  /// omission.** A `CGShieldingWindowLevel()` overlay does not render above the
+  /// macOS lock screen: MEASURED 2026-08-07, with `loginwindow`'s shield taking
+  /// the front of the window list over a window two billion levels above it and
+  /// a capture showing the lock screen at full brightness while the overlay
+  /// still reported itself on screen. Lock dim is delivered on the wire instead
+  /// (`LockDimPolicy` and `BrightnessController.beginTemporaryDim`), so the
+  /// overlay layer is structurally unable to produce a lock dim that nobody
+  /// could see.
   public func alpha(for state: OledDimState) -> Double? {
     switch state {
-    case .idleDim, .lockDim: config.idleDimLevel
+    // The COMPLEMENT: the config carries how bright the display is left, the
+    // overlay needs how much to cover it with.
+    case .idleDim: 1 - config.idleDimBrightness
     case .blackout: 1.0
-    case .unfocusedDim: config.unfocusedDimLevel
-    case .active, .suspended: nil
+    case .unfocusedDim: 1 - config.unfocusedDimBrightness
+    case .lockDim, .active, .suspended: nil
     }
+  }
+
+  /// How far down the wire-level lock dim takes this display's brightness,
+  /// derived from the same level the idle dim uses.
+  public var lockDimFactor: Double {
+    LockDimPolicy.factor(forBrightness: config.idleDimBrightness)
   }
 }

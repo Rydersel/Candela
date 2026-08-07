@@ -11,7 +11,7 @@ import SwiftUI
 /// UI only because the old pane iterated `model.displays`, which is
 /// external-only.
 ///
-/// "Show the built-in display in the menu bar panel" deliberately does NOT
+/// "Show the built-in display in the menu bar" deliberately does NOT
 /// live here. A laptop's panel disappears in clamshell, so a control governing
 /// whether this row exists cannot live inside it — it would vanish at exactly
 /// the moment it is needed. It stays in Menu Bar, and the button below
@@ -19,9 +19,14 @@ import SwiftUI
 @MainActor
 struct BuiltInDisplayPane: View {
   @Binding var selection: SettingsDestination?
+  @Binding var path: [DisplaySubPage]
 
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
+
+  /// Pop restoration (a11y contract 1): the Diagnostics row is the only pusher
+  /// here, and it takes focus back when its page pops.
+  @FocusState private var focusedRow: DisplaySubPage?
 
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "builtIn") }
   /// The same seam every per-display write goes through, for the same reason:
@@ -47,23 +52,28 @@ struct BuiltInDisplayPane: View {
         SettingsCaption("macOS controls the built-in display's brightness directly, so there is nothing to set here. \(AppInfo.productName) reads its level to keep your other displays in step.")
       }
 
-      Section("Menu bar panel") {
-        SettingRow("Whether this display's slider appears in the panel is set under Menu Bar, so it stays reachable when the lid is closed and this display disappears.") {
+      Section("Menu Bar") {
+        SettingRow("Whether this display's slider appears in the menu bar is set under Menu Bar, so it stays reachable when the lid is closed and this display disappears.") {
           Button("Open Menu Bar Settings") { selection = .pane(.menuBar) }
         }
       }
 
-      // DT45: the built-in gets the Diagnostics section too. "Why can't
-      // hardware control reach my laptop screen?" is one of the questions this
-      // feature exists to answer, and the answer belongs on the page for the
-      // display it is about — not only on the pages of displays that do not
-      // have the problem. The section omits every row that describes a cable,
-      // an EDID or a DDC answer.
-      if let state = model.builtIn {
-        DisplayDiagnosticsSection(state: state)
+      // DT45: the built-in gets Diagnostics too. "Why can't hardware control
+      // reach my laptop screen?" is one of the questions that feature exists
+      // to answer, and the route belongs on the page for the display it is
+      // about. A chevron to the sub-page since Task 13 (spec §8); no readback
+      // preview — the built-in has no wire for a read verdict to be about.
+      Section {
+        NavigationRow(title: "Diagnostics", value: nil) { path.append(.diagnostics) }
+          .focused($focusedRow, equals: .diagnostics)
       }
     }
     .formStyle(.grouped)
+    .onChange(of: path) { old, new in
+      if new.count < old.count, let popped = old.last {
+        focusedRow = popped
+      }
+    }
     // The built-in never passes through the launch warm-up (that walks
     // `model.displays`, which is external-only), so without this its catalog
     // stays absent and the Diagnostics "Current mode" row has nothing to

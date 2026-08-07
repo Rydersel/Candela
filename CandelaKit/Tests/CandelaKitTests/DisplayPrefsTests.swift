@@ -561,6 +561,25 @@ struct DisplayPrefsTests {
     #expect(safe.pollingTries == 0)
   }
 
+  // MARK: - First-sight (SO22)
+
+  @Test func anEmptyDomainHasNoStoredValue() {
+    withSuite { defaults in
+      #expect(!DisplayPrefs.hasAnyStoredValue(forKey: "AAAA-BBBB", defaults: defaults))
+    }
+  }
+
+  @Test func anySeededKeyCountsAsStored() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "AAAA-BBBB")
+      prefs.friendlyName = "Desk"
+      #expect(DisplayPrefs.hasAnyStoredValue(forKey: "AAAA-BBBB", defaults: defaults))
+      // Suffix match, not substring: another display's domain stays fresh.
+      #expect(!DisplayPrefs.hasAnyStoredValue(forKey: "BBBB", defaults: defaults))
+      #expect(!DisplayPrefs.hasAnyStoredValue(forKey: "CCCC-DDDD", defaults: defaults))
+    }
+  }
+
   // MARK: - OLED care (W3a)
 
   @Test func oledDefaultsAreTheRecommendedPreset() {
@@ -568,7 +587,7 @@ struct DisplayPrefsTests {
       let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
       #expect(prefs.oledCareEnrolled == false)
       #expect(prefs.oledIdleDimSeconds == 300)
-      #expect(prefs.oledIdleDimLevel == 0.5)
+      #expect(prefs.oledIdleDimBrightness == 0.5)
       #expect(prefs.oledLockDim == true)
       #expect(prefs.oledBlackoutEnabled == false)
       #expect(prefs.oledBlackoutSeconds == 1200)
@@ -577,7 +596,7 @@ struct DisplayPrefsTests {
       // Lighter than the idle dim's 0.5, because the level IS the black
       // overlay's opacity — higher is darker — and an unfocused display is
       // still in view.
-      #expect(prefs.oledUnfocusedDimLevel == 0.3)
+      #expect(prefs.oledUnfocusedDimBrightness == 0.7)
       #expect(prefs.oledHoursTracking == true)
     }
   }
@@ -622,13 +641,13 @@ struct DisplayPrefsTests {
       let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
       prefs.oledCareEnrolled = true
       prefs.oledIdleDimSeconds = 60
-      prefs.oledIdleDimLevel = 0.9
+      prefs.oledIdleDimBrightness = 0.9
       prefs.oledLockDim = false
       prefs.oledBlackoutEnabled = true
       prefs.oledBlackoutSeconds = 3000
       prefs.oledUnfocusedDimEnabled = true
       prefs.oledUnfocusedDimSeconds = 900
-      prefs.oledUnfocusedDimLevel = 0.4
+      prefs.oledUnfocusedDimBrightness = 0.4
       prefs.oledHoursTracking = false
       // Panel hours are NOT prefs — they live under `PanelHoursTracker`'s own
       // keys and the reset must leave them alone. Written directly here
@@ -642,13 +661,13 @@ struct DisplayPrefsTests {
 
       #expect(prefs.oledCareEnrolled == false)
       #expect(prefs.oledIdleDimSeconds == 300)
-      #expect(prefs.oledIdleDimLevel == 0.5)
+      #expect(prefs.oledIdleDimBrightness == 0.5)
       #expect(prefs.oledLockDim == true)
       #expect(prefs.oledBlackoutEnabled == false)
       #expect(prefs.oledBlackoutSeconds == 1200)
       #expect(prefs.oledUnfocusedDimEnabled == false)
       #expect(prefs.oledUnfocusedDimSeconds == 600)
-      #expect(prefs.oledUnfocusedDimLevel == 0.3)
+      #expect(prefs.oledUnfocusedDimBrightness == 0.7)
       #expect(prefs.oledHoursTracking == true)
 
       // The sweep can only see keys something wrote above, so pin the

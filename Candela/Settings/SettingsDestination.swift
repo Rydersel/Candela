@@ -22,3 +22,19 @@ enum SettingsDestination: Hashable {
   case pane(PaneID)
   case display(String)
 }
+
+/// A display destination's pushed sub-pages (SO1). Raw values are the
+/// `CANDELA_DEBUG_SETTINGS` sub-page ids — user-visible names live in `title`,
+/// which pushed pages, toolbar titles and VoiceOver all share so a rename
+/// cannot fork them.
+enum DisplaySubPage: String, CaseIterable, Hashable {
+  case allModes, advanced, diagnostics
+
+  var title: String {
+    switch self {
+    case .allModes: "All Sizes & Refresh Rates"
+    case .advanced: "Advanced"
+    case .diagnostics: "Diagnostics"
+    }
+  }
+}
