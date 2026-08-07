@@ -84,9 +84,11 @@ struct DisplayHeroView: View {
 
   // MARK: - Tile
 
-  /// Decoration for VoiceOver by the sidebar's own precedent: every fact it
-  /// draws — shape, mirroring — is stated in words elsewhere on the page, and
-  /// a shape has no reading.
+  /// Decoration for VoiceOver, by the arrangement canvas's own precedent: a
+  /// shape has no reading. What it draws is said in words by the sections this
+  /// page already carries — the mode caption right beside it, and Mirroring
+  /// below — so a hero that ever draws a fact NOT stated in words has broken
+  /// this, and the fix is the words, not an accessibility label on a rectangle.
   private var tile: some View {
     let box = tileFit
     return RoundedRectangle(cornerRadius: 6, style: .continuous)
