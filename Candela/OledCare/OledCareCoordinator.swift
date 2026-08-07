@@ -2,6 +2,7 @@ import AppKit
 import CandelaKit
 import CoreGraphics
 import Foundation
+import IOKit.ps
 import Observation
 import os
 
@@ -36,6 +37,10 @@ import os
 ///   are explicit user actions on system settings, not automatic behavior, so
 ///   they stay functional; the driver loop — overlays, sampling, hours — never
 ///   starts.
+/// - **W3b-1 telemetry rides the same loop at its own 60 s cadence**, and takes
+///   its suspension verdict from the dimming engine's published state rather
+///   than re-deriving one. `samplingQualifies(dimState:on:)` is the whole of
+///   that decision.
 @MainActor
 @Observable
 final class OledCareCoordinator {
@@ -54,6 +59,11 @@ final class OledCareCoordinator {
     /// decide whether to run the focus sampler without a per-tick prefs read.
     var unfocusedDimEnabled: Bool
     var hoursTracking: Bool
+    /// Cached from prefs alongside the others. Telemetry gates the luminance
+    /// capture only; window observation is a separate pref because it needs no
+    /// permission and is the degraded mode's only data source.
+    var telemetryEnabled: Bool
+    var windowObservationEnabled: Bool
     /// The ID this display's overlay was last driven under — a rendering
     /// address, never identity. Refreshed from the live display list each tick.
     var lastDisplayID: CGDirectDisplayID?
@@ -77,6 +87,19 @@ final class OledCareCoordinator {
     /// in `BrightnessController` has no timeout on its clear path, so a
     /// dropped transition would otherwise disable dim entry for the session.
     var hdrSettlingSince: SuspendingClock.Instant?
+    /// Start of the last telemetry slot this display took. ONE clock drives
+    /// both halves — spec §4 schedules window observation on the sampling
+    /// clock — so a display can never be sampled and observed on drifting
+    /// cadences that each pay their own cost.
+    var lastSampleAt: SuspendingClock.Instant?
+    /// A capture is out on the XPC round trip. Nothing else may issue one: two
+    /// in flight would double-book the interval they both stand for.
+    var sampleInFlight = false
+    /// Mirror-set membership as of the last tick, for OC13's entry EDGE. The
+    /// steady state is already handled (a mirrored display never qualifies);
+    /// this exists so the observer's ageing state is dropped exactly once,
+    /// when the panel stops showing what those ages describe.
+    var wasMirrored = false
   }
 
   /// Poll cadence: slow while every enrolled display is `.active`/`.suspended`;
@@ -94,6 +117,17 @@ final class OledCareCoordinator {
   /// (a departing display, a shield above us), and retrying forever would pin
   /// the fast cadence and put an error in the log ten times a second.
   private static let maxVerifyAttempts = 5
+  /// Spec §4: one capture per enrolled display per 60 s, and the window list on
+  /// the same clock.
+  private static let samplingInterval: Duration = .seconds(60)
+  /// "At most every few minutes, plus at termination" (spec §4). A defaults
+  /// write per sample would put one on a permanent 60 s timer per panel for a
+  /// value that is only ever read by a settings view.
+  private static let exposurePersistInterval: Duration = .seconds(300)
+  /// Spec §4's "low battery" skip. A threshold has to be a number; 20% is where
+  /// macOS itself starts warning, and the cost of being wrong either way is one
+  /// minute of sampling.
+  private static let lowBatteryPercent: Double = 20
 
   @ObservationIgnored private weak var model: AppModel?
   @ObservationIgnored private let overlay = OledOverlay()
@@ -102,6 +136,32 @@ final class OledCareCoordinator {
   /// Keyed by persistenceKey; created lazily and kept for the app's lifetime —
   /// hours are persistent facts about a panel, not about a connection.
   @ObservationIgnored private var trackers: [String: PanelHoursTracker] = [:]
+  @ObservationIgnored private let sampler = LuminanceSampler()
+  /// Accumulated exposure per panel, by persistenceKey, restored from disk on
+  /// first touch and kept for the app's lifetime — wear is a fact about a
+  /// panel, not about a connection, exactly like `trackers`.
+  ///
+  /// Observation-tracked, unlike its two neighbours: `healthSummary(for:)`
+  /// reads it, so a SwiftUI health view re-renders when a sample lands without
+  /// anyone maintaining a revision counter.
+  private var accumulators: [String: ExposureAccumulator] = [:]
+  /// The most recent window observation per display, for attribution in the
+  /// health view. Tracked for the same reason as `accumulators`.
+  private var latestObservations: [String: WindowObservation] = [:]
+  /// The ageing half of window observation. `WindowObserver.observe` is
+  /// MUTATING on a value type, so this must be mutated in place — a `let` copy
+  /// discards every window's age on return and the stationary threshold could
+  /// then never be reached. Not observation-tracked: nothing renders it, only
+  /// the `WindowObservation` it produces.
+  @ObservationIgnored private var observers: [String: WindowObserver] = [:]
+  /// Displays whose accumulated map has changed since the last write-through.
+  @ObservationIgnored private var unsavedExposureKeys: Set<String> = []
+  @ObservationIgnored private var lastExposurePersist: SuspendingClock.Instant?
+  /// Bumped by anything that destroys accumulated exposure. A capture issued
+  /// before the bump lands after it, and would otherwise re-book an interval
+  /// into a map the user just deleted; comparing the epoch makes that
+  /// impossible rather than unlikely.
+  @ObservationIgnored private var exposureEpoch = 0
   /// Per enrolled-and-connected display, by persistenceKey.
   @ObservationIgnored private var states: [String: PerDisplay] = [:]
   @ObservationIgnored private var driver: Task<Void, Never>?
@@ -180,6 +240,17 @@ final class OledCareCoordinator {
       MainActor.assumeIsolated { self?.systemDidWake() }
     })
 
+    // Spec §4's "plus at termination" half. Registered here rather than added
+    // to `StatusItemController.applicationWillTerminate` because this object
+    // owns the maps and nothing outside it knows they are dirty; `queue: nil`
+    // for the sleep observers' reason — the block must run synchronously at
+    // post time, and an enqueued one would land after the process is gone.
+    sleepWakeObservers.append(NotificationCenter.default.addObserver(
+      forName: NSApplication.willTerminateNotification, object: nil, queue: nil
+    ) { [weak self] _ in
+      MainActor.assumeIsolated { self?.flushExposureMaps() }
+    })
+
     reconcileEnrollment()
     // start() is single-shot (the chrome guard above), so there is never a
     // previous driver to cancel here.
@@ -209,6 +280,48 @@ final class OledCareCoordinator {
     let tracker = PanelHoursTracker(persistenceKey: persistenceKey)
     trackers[persistenceKey] = tracker
     return tracker
+  }
+
+  /// The health view's one door (W3b-1 Task 9). Safe for a display that is not
+  /// enrolled, not connected, or has never been sampled: the map is restored
+  /// from disk on first touch and `.empty` answers everything honestly.
+  ///
+  /// Telemetry is read from the cached enrollment state when there is one and
+  /// from prefs otherwise, so a disconnected panel's history still reports the
+  /// confidence it was recorded under rather than defaulting to `.estimated`.
+  ///
+  /// Deliberately does NOT memoise the accumulator it may have to load: this is
+  /// called from a SwiftUI body, and populating an observation-tracked
+  /// dictionary there is a state mutation during view update. Reading
+  /// `accumulators` still registers the dependency, so the view refreshes when
+  /// a sample lands; until one does, the cost is decoding 240 doubles.
+  func healthSummary(for persistenceKey: String) -> PanelHealthSummary {
+    let map = accumulators[persistenceKey]?.map ?? loadExposureMap(for: persistenceKey)
+    let telemetry = states[persistenceKey]?.telemetryEnabled
+      ?? DisplayPrefs(persistenceKey: persistenceKey).oledTelemetry
+    return PanelHealthSummary.make(
+      map: map,
+      observation: latestObservations[persistenceKey],
+      telemetryEnabled: telemetry,
+      sampleCount: map.sampleCount)
+  }
+
+  /// The health view's delete action: the accumulated exposure map and the
+  /// window attribution derived from it, cleared in one step, in memory and on
+  /// disk.
+  ///
+  /// Panel HOURS are deliberately NOT cleared. They are a different measurement
+  /// with its own reset path (`PanelHoursTracker.reset()`, driven by the
+  /// settings reset), and a control labelled for exposure history must not
+  /// silently destroy a lifetime counter. The plan's "and per-app hours" has
+  /// nothing else to clear: `PanelHealthSummary.topOwnersByHours` is always
+  /// empty because no per-owner time series is measured anywhere yet.
+  func clearExposureHistory(for persistenceKey: String) {
+    exposureEpoch += 1
+    accumulators[persistenceKey] = ExposureAccumulator()
+    forgetWindowObservation(for: persistenceKey)
+    unsavedExposureKeys.remove(persistenceKey)
+    UserDefaults.standard.removeObject(forKey: Self.exposureKeyName(persistenceKey))
   }
 
   // MARK: - Entry points
@@ -251,6 +364,17 @@ final class OledCareCoordinator {
   /// MUST pair this with `resetDidComplete()` after the wipe.
   func prepareForReset() {
     resetting = true
+    // Sampling stops BEFORE the prefs are wiped, never after (D29's ordering
+    // applied to this path). The domain wipe removes the exposure keys, so a
+    // live accumulator surviving it would write the deleted map back on its
+    // next debounce — the same defect the tracker reset below prevents for
+    // hours. The epoch bump does the same for a capture already in flight,
+    // which would otherwise land in a fresh map after the wipe.
+    exposureEpoch += 1
+    unsavedExposureKeys.removeAll()
+    accumulators.removeAll()
+    observers.removeAll()
+    latestObservations.removeAll()
     // These removals delete the per-display state that would carry their OC12
     // marker, so verification rides the pending list instead: a blackout
     // window whose close the server ignores must not become unwatched at the
@@ -292,6 +416,10 @@ final class OledCareCoordinator {
     for (key, state) in states where state.hoursTracking {
       hoursTracker(for: key).noteStandby()
     }
+    // Sleep is the one edge where the process can stop existing without a
+    // termination notification (a battery that runs out in the bag), so the
+    // debounced maps go down with it rather than up to five minutes of history.
+    flushExposureMaps()
   }
 
   private func systemDidWake() {
@@ -335,12 +463,16 @@ final class OledCareCoordinator {
           hoursTracker(for: key).noteStandby()
         }
         existing.hoursTracking = tracking
+        existing.telemetryEnabled = prefs.oledTelemetry
+        existing.windowObservationEnabled = prefs.oledWindowObservation
         states[key] = existing
       } else {
         states[key] = PerDisplay(
           engine: IdleDimmingEngine(config: config),
           unfocusedDimEnabled: prefs.oledUnfocusedDimEnabled,
           hoursTracking: prefs.oledHoursTracking,
+          telemetryEnabled: prefs.oledTelemetry,
+          windowObservationEnabled: prefs.oledWindowObservation,
           lastDisplayID: displayState.id
         )
       }
@@ -370,6 +502,13 @@ final class OledCareCoordinator {
       }
     }
     dimStates.removeValue(forKey: key)
+    // Window ages describe how long a rect has been where it is ON THIS PANEL,
+    // so a departure or an un-enrollment invalidates them for the same reason
+    // mirroring does. The ACCUMULATOR stays: it is wear data about the glass,
+    // and the panel comes back. Written through first — a dock cycle must not
+    // cost up to a debounce interval of history.
+    forgetWindowObservation(for: key)
+    saveExposureMap(for: key)
   }
 
   // MARK: - The tick
@@ -488,6 +627,13 @@ final class OledCareCoordinator {
       }
       state.wasAwake = awake
       state.hoursLastTick = now
+
+      // OC13's mirror-entry edge: drop the ageing state once, on the way in.
+      if isMirrored, !state.wasMirrored { forgetWindowObservation(for: key) }
+      state.wasMirrored = isMirrored
+      // Telemetry rides this loop at its own cadence; `newState` is the
+      // suspension authority, not a second reading of the same signals.
+      updateTelemetry(for: key, state: &state, dimState: newState, on: id, at: now)
 
       // OC12 ordering: last tick's mutation is verified BEFORE this tick's
       // render, so the check always runs a full tick after the change it is
@@ -609,6 +755,249 @@ final class OledCareCoordinator {
         pendingRemovalVerifications[id] = attempts + 1
       }
     }
+  }
+
+  // MARK: - Telemetry (W3b-1)
+
+  /// The 60 s schedule, riding the driver loop — there is no second timer.
+  ///
+  /// The two halves share one clock (spec §4: window observation is scheduled
+  /// on the sampling clock) but are gated by separate prefs, because window
+  /// observation needs no permission and is the whole of the degraded mode.
+  ///
+  /// The window list is polled inline: it is the same `CGWindowListCopyWindowInfo`
+  /// the focus sampler already makes on this loop [MEASURED 2026-08-06: 0.46 ms].
+  /// The luminance capture is not — it suspends for ~70 ms across an
+  /// `SCShareableContent` XPC round trip, and the driver loop is the thing that
+  /// has to answer input inside 100 ms when an overlay is up (#21). It is
+  /// therefore handed to a ONE-SHOT task; the loop itself stays synchronous.
+  private func updateTelemetry(
+    for key: String, state: inout PerDisplay, dimState: OledDimState,
+    on id: CGDirectDisplayID, at now: SuspendingClock.Instant
+  ) {
+    guard state.telemetryEnabled || state.windowObservationEnabled else { return }
+    guard samplingQualifies(dimState: dimState, on: id) else { return }
+    if let last = state.lastSampleAt, now - last < Self.samplingInterval { return }
+    state.lastSampleAt = now
+
+    // A degenerate transform does NOT reject the sample downstream —
+    // `panelNativeGrid` re-bins on rotation alone and never looks at
+    // `displaySize` — so a mid-reconfiguration display has to be gated here or
+    // it accumulates normally into cells that mean nothing.
+    guard let transform = Self.transform(for: id) else { return }
+
+    if state.windowObservationEnabled {
+      observeWindows(for: key, on: id, through: transform)
+    }
+    if state.telemetryEnabled, !state.sampleInFlight {
+      state.sampleInFlight = true
+      captureExposure(for: key, on: id, through: transform)
+    }
+    persistExposureMapsIfDue(at: now)
+  }
+
+  /// THE suspension verdict for telemetry, in one place and derived from the
+  /// engine's own published state: `.suspended` IS mirrored (OC13), and every
+  /// dim state is a panel that is not showing what a capture would measure.
+  /// Nothing here re-reads a signal the overlay path already turned into a
+  /// verdict.
+  ///
+  /// The lock is checked separately because lock dim is a PREF — a locked
+  /// display with `oledLockDim` off sits at `.active`, and spec §4 skips it
+  /// regardless. Sleep and battery are the two conditions the engine takes no
+  /// input from at all.
+  private func samplingQualifies(dimState: OledDimState, on id: CGDirectDisplayID) -> Bool {
+    guard !resetting, dimState == .active, !lockObserver.isLocked else { return false }
+    guard CGDisplayIsAsleep(id) == 0 else { return false }
+    return !Self.onLowBattery()
+  }
+
+  /// Display geometry for the transform, from `CGDisplayBounds` — the same
+  /// source `CGWindowListSource` subtracts its origin from, so a window rect
+  /// and a luminance cell land in one coordinate system. `NSScreen.frame` is
+  /// bottom-left and would put every window on the wrong half of the panel.
+  ///
+  /// Nil, never a default, on a zero size or a rotation that is not a right
+  /// angle: the first is a mid-reconfiguration reading and the second is one
+  /// this feature declines to describe (RT7) rather than round into a
+  /// scrambled wear history.
+  private static func transform(for id: CGDirectDisplayID) -> PanelSpaceTransform? {
+    let size = CGDisplayBounds(id).size
+    guard size.width > 0, size.height > 0 else { return nil }
+    guard let rotation = DisplayRotation(degrees: CGDisplayRotation(id)) else { return nil }
+    return PanelSpaceTransform(displaySize: size, rotation: rotation)
+  }
+
+  /// Constructed at the point of use rather than stored: the source is a
+  /// display ID and one method, and IDs reassign across a replug. A stored
+  /// instance would need re-creating on every reconfiguration to stay correct;
+  /// this cannot go stale, because the ID it gets is the one this tick
+  /// resolved.
+  private func observeWindows(
+    for key: String, on id: CGDirectDisplayID, through transform: PanelSpaceTransform
+  ) {
+    let windows = CGWindowListSource(displayID: id).onScreenWindows()
+    // Mutated IN PLACE: `observe` is mutating on a value type, and a local copy
+    // would discard every window's age on return — the 5-minute stationary
+    // threshold could then never be reached.
+    var observer = observers[key] ?? WindowObserver()
+    let observation = observer.observe(windows, through: transform, at: Date())
+    observers[key] = observer
+    latestObservations[key] = observation
+  }
+
+  private func forgetWindowObservation(for key: String) {
+    observers.removeValue(forKey: key)
+    latestObservations.removeValue(forKey: key)
+  }
+
+  private func captureExposure(
+    for key: String, on id: CGDirectDisplayID, through transform: PanelSpaceTransform
+  ) {
+    let epoch = exposureEpoch
+    log.debug("OLED care: exposure capture issued for display \(id, privacy: .public)")
+    // One shot, not a loop. `self` is deliberately not held across the await —
+    // the driver loop's rule, for its reason: the sampler is a separate object,
+    // so awaiting through it retains the sampler and not this coordinator.
+    Task { @MainActor [weak self] in
+      guard let sampler = self?.sampler else { return }
+      let sample = await sampler.sample(displayID: id)
+      self?.finishExposureCapture(sample, for: key, on: id, through: transform, epoch: epoch)
+    }
+  }
+
+  /// Everything the capture's suspension can invalidate is re-checked here.
+  /// ~70 ms is long enough for the display to lock, mirror, sleep, dim, be
+  /// reconfigured, be un-enrolled, or have its history deleted, and a sample
+  /// taken before any of those is exposure the panel did not emit.
+  private func finishExposureCapture(
+    _ sample: LuminanceSampler.Sample?, for key: String, on id: CGDirectDisplayID,
+    through transform: PanelSpaceTransform, epoch: Int
+  ) {
+    states[key]?.sampleInFlight = false
+    guard let sample, epoch == exposureEpoch else { return }
+    guard let state = states[key], state.telemetryEnabled, state.lastDisplayID == id,
+      let dimState = dimStates[key], samplingQualifies(dimState: dimState, on: id)
+    else { return }
+    // Geometry can change under a capture without the display departing (a
+    // rotation, a mode switch). The grid was reduced through the OLD geometry,
+    // so it is binned rather than re-mapped through geometry it never saw.
+    guard Self.transform(for: id) == transform else { return }
+
+    var accumulator = exposureAccumulator(for: key)
+    let before = accumulator.map.sampleCount
+    // Handed over whole: `accumulate` is all-or-nothing and refuses a malformed
+    // sample itself, so pre-filtering here would only be a second opinion that
+    // can disagree.
+    accumulator.accumulate(
+      displayGrid: sample.grid, cols: sample.cols, rows: sample.rows, through: transform,
+      // The NOMINAL interval, not the measured gap. A sample stands for one
+      // sampling slot; the gap since the last one can be an hour if the panel
+      // was locked, and booking that as time at this luminance would credit the
+      // map with exposure that never happened. The unit is arbitrary and only
+      // ever compared against itself, so the jitter this ignores is noise.
+      elapsed: Self.seconds(Self.samplingInterval), at: Date())
+    guard accumulator.map.sampleCount > before else {
+      log.debug("OLED care: exposure sample refused for display \(id, privacy: .public)")
+      return
+    }
+    accumulators[key] = accumulator
+    unsavedExposureKeys.insert(key)
+    log.debug("""
+    OLED care: exposure sample accepted for display \(id, privacy: .public) \
+    (\(accumulator.map.sampleCount, privacy: .public) total)
+    """)
+  }
+
+  // MARK: - Exposure persistence
+
+  /// Restored from disk on first touch and memoised, `hoursTracker(for:)`'s
+  /// rule and its reason: two live accumulators for one key double-book every
+  /// sample, and the map is persisted, so the bias never washes out.
+  private func exposureAccumulator(for key: String) -> ExposureAccumulator {
+    if let existing = accumulators[key] { return existing }
+    let accumulator = ExposureAccumulator(map: loadExposureMap(for: key))
+    accumulators[key] = accumulator
+    return accumulator
+  }
+
+  private static func exposureKeyName(_ persistenceKey: String) -> String {
+    // `PanelHoursTracker`'s spelling: engine state, not a `PrefName` case —
+    // nothing routes accumulated wear through `SettingsActions`.
+    "oledExposureMap.\(persistenceKey)"
+  }
+
+  /// A `cells` array of the wrong length throws out of `ExposureMap.init(from:)`
+  /// BY DESIGN — decoding it would hand the health view a map that traps the
+  /// first time it is indexed — so an unreadable store starts over rather than
+  /// propagating.
+  private func loadExposureMap(for key: String) -> ExposureMap {
+    guard let data = UserDefaults.standard.data(forKey: Self.exposureKeyName(key)) else {
+      return .empty
+    }
+    do {
+      return try JSONDecoder().decode(ExposureMap.self, from: data)
+    } catch {
+      log.error("""
+      OLED care: stored exposure map for \(key, privacy: .public) is unreadable \
+      (\(error.localizedDescription, privacy: .public)); starting over
+      """)
+      return .empty
+    }
+  }
+
+  private func persistExposureMapsIfDue(at now: SuspendingClock.Instant) {
+    guard !unsavedExposureKeys.isEmpty else { return }
+    if let last = lastExposurePersist, now - last < Self.exposurePersistInterval { return }
+    lastExposurePersist = now
+    flushExposureMaps()
+  }
+
+  /// The undebounced write: termination, system sleep, and a display leaving.
+  private func flushExposureMaps() {
+    for key in unsavedExposureKeys { saveExposureMap(for: key) }
+  }
+
+  private func saveExposureMap(for key: String) {
+    // Clears the dirty flag whether or not the encode lands: a value that
+    // cannot be encoded now cannot be encoded on the next pass either, and
+    // leaving the key dirty would retry it forever.
+    guard unsavedExposureKeys.remove(key) != nil, let accumulator = accumulators[key] else {
+      return
+    }
+    guard let data = try? JSONEncoder().encode(accumulator.map) else {
+      log.error("OLED care: could not encode the exposure map for \(key, privacy: .public)")
+      return
+    }
+    UserDefaults.standard.set(data, forKey: Self.exposureKeyName(key))
+  }
+
+  /// Spec §4's low-battery skip.
+  ///
+  /// Deliberately NOT `ProcessInfo.isLowPowerModeEnabled`: Low Power Mode is a
+  /// user preference that can be on at 100% charge, and the spec's condition is
+  /// the charge itself. Read at the 60 s decision point only — never on the
+  /// 10 Hz tick, where an IOKit power-source copy would be the most expensive
+  /// thing in the loop.
+  private static func onLowBattery() -> Bool {
+    guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+      let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef]
+    else { return false }
+    for source in sources {
+      guard let description = IOPSGetPowerSourceDescription(blob, source)?.takeUnretainedValue()
+        as? [String: Any]
+      else { continue }
+      // On mains power the charge level is irrelevant — the panel is not being
+      // sampled to save a battery that is filling.
+      guard description[kIOPSPowerSourceStateKey] as? String == kIOPSBatteryPowerValue else {
+        continue
+      }
+      guard let current = description[kIOPSCurrentCapacityKey] as? Double,
+        let capacity = description[kIOPSMaxCapacityKey] as? Double, capacity > 0
+      else { continue }
+      if current / capacity * 100 <= lowBatteryPercent { return true }
+    }
+    return false
   }
 
   private static func seconds(_ duration: Duration) -> Double {
