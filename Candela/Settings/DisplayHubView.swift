@@ -258,7 +258,7 @@ struct DisplayHubView: View {
           ),
           outcome.lowersCurrentRate
     else { return base }
-    return "\(base) — caps at \(DisplayModeCopy.refresh(outcome.appliedHz))"
+    return "\(base) (caps at \(DisplayModeCopy.refresh(outcome.appliedHz)))"
   }
 
   /// The curated row the display is running, by SIZE — `ioModeID` would come up
@@ -637,7 +637,7 @@ struct DisplayHubView: View {
           // are macOS-visible state this button deliberately leaves alone.
           // Counted panel hours are wear data, kept for the same reason the
           // levels are.
-          Text("This unmutes \(state.display.name), turns HDR off, and clears its \(AppInfo.productName) settings — name, menu bar visibility, keyboard, sound, OLED care, and everything under Advanced, including control-code remaps and response curves. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. Resolution and rotation are not changed.")
+          Text("This unmutes \(state.display.name), turns HDR off, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, and everything under Advanced, including control-code remaps and response curves. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. Resolution and rotation are not changed.")
         }
     }
   }

@@ -48,7 +48,7 @@ enum RotationCopy {
   /// The subtitle under the question: which display, and to what.
   static func previewSubtitle(name: String, to rotation: DisplayRotation) -> String {
     let angle = angleText(rotation)
-    return name.isEmpty ? angle : "\(name) — \(angle)"
+    return name.isEmpty ? angle : "\(name): \(angle)"
   }
 
   /// Every refusal states its own reason. No `default:` arm — a new
@@ -75,6 +75,6 @@ enum RotationCopy {
   /// and reported success, and the display did not move. "It failed" would be
   /// the wrong shape of statement for a call that returned no error.
   static var resolveFailure: LocalizedStringKey {
-    "The display could not be rotated back. Nothing retries this on its own — try again."
+    "The display could not be rotated back. Nothing retries this on its own. Try again."
   }
 }

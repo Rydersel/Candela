@@ -88,7 +88,7 @@ struct OnboardingView: View {
         .accessibilityHidden(true)
       Text("Welcome to \(AppInfo.productName)")
         .font(.largeTitle.weight(.semibold))
-      Text("Control the brightness, volume and contrast of your external displays from the menu bar — or straight from the keys you already use.")
+      Text("Control the brightness, volume and contrast of your external displays from the menu bar, or straight from the keys you already use.")
         .font(.callout)
         .foregroundStyle(.secondary)
         .multilineTextAlignment(.center)
@@ -123,7 +123,7 @@ struct OnboardingView: View {
         .foregroundStyle(.red)
         .fixedSize(horizontal: false, vertical: true)
       }
-      SettingsCaption("Off unless you turn it on. \(AppInfo.productName) has no Dock icon — it lives in the menu bar.")
+      SettingsCaption("Off unless you turn it on. \(AppInfo.productName) has no Dock icon; it lives in the menu bar.")
     }
   }
 
@@ -144,7 +144,7 @@ struct OnboardingView: View {
   private var displayControl: some View {
     VStack(alignment: .leading, spacing: 8) {
       heading("Your displays, on your terms", symbol: "display", tint: .teal)
-      keyRow(symbol: "squares.leading.rectangle", label: "Every resolution your display supports — including HiDPI sizes macOS hides, made for 4K and 5K screens")
+      keyRow(symbol: "squares.leading.rectangle", label: "Every resolution your display supports (including HiDPI sizes macOS hides, made for 4K and 5K screens)")
       keyRow(symbol: "arrow.triangle.2.circlepath", label: "Refresh rate, rotation and mirroring")
       keyRow(symbol: "rectangle.3.group", label: "Arrange displays and save the layout for later")
       SettingsCaption("All of it lives in Settings, per display. A resolution change always previews first and reverts itself if you don't confirm.")

@@ -320,13 +320,13 @@ final class AppModel {
       // The built-in never passes through `DisplayDiscovery`, so its facts are
       // permanently absent and "not reported" would read as a failed lookup
       // rather than as a panel with no cable.
-      connection: isBuiltIn ? "None — built-in display" : DiagnosticsCopy.transport(facts),
+      connection: isBuiltIn ? "None: built-in display" : DiagnosticsCopy.transport(facts),
       manufacturer: isBuiltIn ? nil : facts?.manufacturerID,
       hasSerial: facts?.numericSerialNumber != nil || facts?.alphanumericSerialNumber != nil,
       currentMode: displayModes.catalogs[state.id]?.current.map(DiagnosticsCopy.mode),
       controlMethod: DiagnosticsCopy.brightnessPath(state.controller.brightnessPath),
       readbackVerdict: isBuiltIn
-        ? "Not applicable — no data cable"
+        ? "Not applicable: no data cable"
         : DiagnosticsCopy.readbackVerdict(DDCReadEvidence.worst([
           state.controller.readEvidence,
           state.volume.readEvidence,

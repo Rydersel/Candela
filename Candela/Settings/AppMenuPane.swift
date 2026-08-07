@@ -104,7 +104,7 @@ struct AppMenuPane: View {
         // `enableMuteUnmute`, a persistent VCP 0x8D hardware mute. A cosmetic
         // convenience must not be able to cause that from the bottom 3% of a
         // drag.
-        SettingRow("Snapping pulls a slider to the nearest 25%, 50%, 75% or 100% position while you drag — and to 0% for brightness and contrast. Percentages show the exact value next to each slider.") {
+        SettingRow("Snapping pulls a slider to the nearest 25%, 50%, 75% or 100% position while you drag (and to 0% for brightness and contrast). Percentages show the exact value next to each slider.") {
           Toggle("Show percentages", isOn: Binding(
             get: { prefs.enableSliderPercent },
             set: { enabled in

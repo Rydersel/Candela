@@ -66,7 +66,7 @@ enum MirroringCopy {
   /// `.nothingToMirror`. The named master is fine; there is nothing that can
   /// join it.
   static var nothingToMirror: LocalizedStringKey {
-    "No other display can be mirrored onto this one — macOS keeps the rest locked to the displays they are already showing."
+    "No other display can be mirrored onto this one: macOS keeps the rest locked to the displays they are already showing."
   }
 
   /// `.alreadyMirrored`. The named master's set already holds everything that
@@ -214,7 +214,7 @@ enum MirroringCopy {
   }
 
   static var resolveFailure: LocalizedStringKey {
-    "Mirroring could not be undone. Nothing retries this on its own — try again."
+    "Mirroring could not be undone. Nothing retries this on its own. Try again."
   }
 
   /// A break that LEFT SOMETHING BEHIND.

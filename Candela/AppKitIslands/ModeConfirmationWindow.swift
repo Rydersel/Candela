@@ -175,6 +175,6 @@ struct ModeConfirmationView: View {
 
   private func subtitle(_ preview: DisplayModeCoordinator.Preview) -> String {
     let mode = "\(DisplayModeCopy.size(preview.mode)), \(DisplayModeCopy.refresh(preview.mode.refreshHz))"
-    return displayName.isEmpty ? mode : "\(displayName) — \(mode)"
+    return displayName.isEmpty ? mode : "\(displayName): \(mode)"
   }
 }

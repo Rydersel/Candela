@@ -130,7 +130,7 @@ struct AdvancedPage: View {
 
   @ViewBuilder private var controlMethodSection: some View {
     Section {
-      SettingRow("Turn off if hardware control misbehaves — brightness dims in software instead.") {
+      SettingRow("Turn off if hardware control misbehaves; brightness dims in software instead.") {
         Toggle("Use hardware (DDC) control", isOn: Binding(
           get: { !prefs.forceSoftware },
           set: { useDDC in
@@ -302,7 +302,7 @@ struct AdvancedPage: View {
         // the write here — never a disabled control whose enabler lives on
         // another page.
         LabeledContent("Combined dimming", value: "Off")
-        SettingRow("A global setting — applies to every display.") {
+        SettingRow("A global setting: applies to every display.") {
           Button("Turn On Dim Past the Display's Minimum") {
             // No persistence key: `.disableCombinedBrightness` carries
             // `.reapplyDimming`, and the seam scopes that by key — passing this
@@ -399,7 +399,7 @@ struct AdvancedPage: View {
       } else {
         // SO11 again — the same shape as Combined Dimming above.
         LabeledContent("Startup readback", value: "Off")
-        SettingRow("A global setting — applies to every display.") {
+        SettingRow("A global setting: applies to every display.") {
           Button("Ask the Display at Startup") {
             appPrefs.startupAction = .read
             actions.prefDidChange(.startupAction)

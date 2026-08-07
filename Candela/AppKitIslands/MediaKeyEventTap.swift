@@ -307,7 +307,7 @@ final class MediaKeyEventTap {
         let trusted = AXIsProcessTrustedWithOptions(nil)
         heartbeat.withLock { $0.probing = nil; $0.alive = Date() }
         if !trusted {
-          Self.watchdogLog.notice("grant revoked — tearing down tap")
+          Self.watchdogLog.notice("grant revoked, tearing down tap")
           Self.teardown(watchdogRuntime)
           Self.watchdogLog.notice("teardown complete")
           onEmergencyTeardown?()
@@ -339,7 +339,7 @@ final class MediaKeyEventTap {
         let proberDead = Date().timeIntervalSince(hb.alive) > 12
         if pingLost || probeStuck || proberDead {
           Self.watchdogLog.fault(
-            "EMERGENCY — pingLost=\(pingLost) probeStuck=\(probeStuck) proberDead=\(proberDead)"
+            "EMERGENCY: pingLost=\(pingLost) probeStuck=\(probeStuck) proberDead=\(proberDead)"
           )
           Self.teardown(watchdogRuntime)
           // Invalidating the port is NOT enough once the wedge has formed
@@ -350,7 +350,7 @@ final class MediaKeyEventTap {
           // The relauncher's sleep outlives our death, by which point the
           // pipeline is free again and the app comes back with the banner
           // showing. A false fire (e.g. a wake edge) costs one app blink.
-          Self.watchdogLog.fault("event pipeline wedged — exiting to clear it; relauncher spawned")
+          Self.watchdogLog.fault("event pipeline wedged: exiting to clear it; relauncher spawned")
           let relauncher = Process()
           relauncher.executableURL = URL(fileURLWithPath: "/bin/sh")
           relauncher.arguments = [

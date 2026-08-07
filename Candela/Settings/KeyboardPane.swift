@@ -210,7 +210,7 @@ struct KeyboardPane: View {
   /// dead. The rule is not arbitrary: these are system-wide hotkeys, so a
   /// bare key would capture that key in every other app.
   private static let modifierHint: LocalizedStringKey =
-    "Click a field and press the keys you want. A shortcut has to include ⌘, ⌃, ⌥ or ⇧ — a letter or number on its own is ignored, because it would be captured in every app."
+    "Click a field and press the keys you want. A shortcut has to include ⌘, ⌃, ⌥ or ⇧. A letter or number on its own is ignored, because it would be captured in every app."
 
   // MARK: - Targeting
 

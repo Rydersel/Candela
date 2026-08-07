@@ -60,6 +60,6 @@ func logMismatchOnce(_ flag: OSAllocatedUnfairLock<Bool>, _ message: String) {
     return true
   }
   if firstTime {
-    applierLog.error("\(message, privacy: .public) — path-selection wiring bug")
+    applierLog.error("\(message, privacy: .public) (path-selection wiring bug)")
   }
 }

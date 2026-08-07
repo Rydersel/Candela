@@ -337,7 +337,7 @@ struct DisplayHeroView: View {
     case .hdrEngaged:
       "HDR is on. macOS is setting this display's brightness; hardware commands are inactive."
     case .valueNotReadBack:
-      "Brightness shown as last set — this display doesn't report its values."
+      "Brightness shown as last set: this display doesn't report its values."
     case nil:
       nil
     }

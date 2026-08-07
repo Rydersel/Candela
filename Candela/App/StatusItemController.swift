@@ -683,7 +683,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // with the icon right where the arrow points.
     let barAutoHides = UserDefaults.standard.bool(forKey: "_HIHideMenuBar")
     let message = barAutoHides
-      ? "\(AppInfo.productName) lives in the menu bar, which is set to hide itself. Move the pointer to the top of the screen — the icon is right about here."
+      ? "\(AppInfo.productName) lives in the menu bar, which is set to hide itself. Move the pointer to the top of the screen: the icon is right about here."
       : "\(AppInfo.productName) lives up here in the menu bar. Click the icon whenever you need it."
 
     // Plain AppKit, deliberately: an NSHostingView used as a borderless
@@ -1046,7 +1046,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       try mediaKeyTap.start(config: config)
       model.noteTapArmed(config)
     } catch {
-      log.error("media-key tap failed to start: \(error) — keys disabled until relaunch")
+      log.error("media-key tap failed to start: \(error); keys disabled until relaunch")
     }
   }
 

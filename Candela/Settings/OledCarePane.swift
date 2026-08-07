@@ -134,7 +134,7 @@ struct OledCarePane: View {
         // One sentence (SO15): consequence plus its trade-off, and the
         // mechanism ("most static bright areas") stays because it IS the
         // consequence — hiding stops those pixels being driven (OC11).
-        SettingRow(caption: SettingsCaption("The menu bar and the Dock are the most static bright areas on a Mac screen, and hiding them stops those pixels being driven — at the cost of the clock, status items and menus taking a trip to the screen's edge.")) {
+        SettingRow(caption: SettingsCaption("The menu bar and the Dock are the most static bright areas on a Mac screen, and hiding them stops those pixels being driven (at the cost of the clock, status items and menus taking a trip to the screen's edge).")) {
           VStack(alignment: .leading, spacing: 6) {
             Toggle("Automatically hide the menu bar", isOn: Binding(
               get: { chrome.menuBarAutoHide },
@@ -307,10 +307,10 @@ private struct OledCareDisplaySection: View {
     // blank row.
     switch model.oledCare.dimStates[persistenceKey] {
     case .active: return "Not dimming"
-    case .idleDim: return "Dimmed — the display has been idle"
-    case .blackout: return "Screen off — the display has been idle"
-    case .lockDim: return "Dimmed — the screen is locked"
-    case .unfocusedDim: return "Dimmed — no window in focus on this display"
+    case .idleDim: return "Dimmed: the display has been idle"
+    case .blackout: return "Screen off: the display has been idle"
+    case .lockDim: return "Dimmed: the screen is locked"
+    case .unfocusedDim: return "Dimmed: no window in focus on this display"
     case .suspended: return "Paused while this display is mirrored"
     // Between enrolling and the first tick, and for a display the coordinator
     // has not reconciled yet. Says what is true rather than guessing.
@@ -387,7 +387,7 @@ private struct OledCareDisplaySection: View {
   // MARK: - Unfocused dim
 
   @ViewBuilder private var unfocusedControls: some View {
-    SettingRow("Dims while no window on this display is in focus, even while you are working on another display — only clicking into this display brings it back, not typing elsewhere.") {
+    SettingRow("Dims while no window on this display is in focus, even while you are working on another display: only clicking into this display brings it back, not typing elsewhere.") {
       Toggle("Dim while this display has nothing in focus", isOn: Binding(
         get: { prefs.oledUnfocusedDimEnabled },
         set: { on in writer.write(.oledUnfocusedDimEnabled) { $0.oledUnfocusedDimEnabled = on } }
@@ -399,7 +399,7 @@ private struct OledCareDisplaySection: View {
       }
       levelRow(
         label: "Dim by",
-        caption: "Usually lighter than the idle dim — the display is still in view.",
+        caption: "Usually lighter than the idle dim: the display is still in view.",
         draft: $unfocusedLevelDraft,
         value: prefs.oledUnfocusedDimLevel,
         accessibilityName: "Unfocused dim amount"

@@ -134,7 +134,7 @@ struct DiagnosticsPage: View {
       return "macOS controls this display's brightness directly, so there is nothing for \(AppInfo.productName) to send over a cable."
     }
     if case .unavailable = brightnessPath {
-      return "Nothing is moving this display's brightness — see Availability below."
+      return "Nothing is moving this display's brightness. See Availability below."
     }
     if state.controller.lastApplyFailed() {
       return "The last brightness command was not accepted. Try a different cable or port."
@@ -339,7 +339,7 @@ struct DiagnosticsPage: View {
       LabeledContent("Native brightness") {
         Text(DisplayServices.isAvailable
           ? "Available on this Mac"
-          : "Unavailable — macOS did not load the framework \(AppInfo.productName) needs for it")
+          : "Unavailable: macOS did not load the framework \(AppInfo.productName) needs for it")
           .foregroundStyle(.secondary)
       }
     }
@@ -350,7 +350,7 @@ struct DiagnosticsPage: View {
     if isBuiltIn {
       SettingRow("macOS drives the built-in display's backlight itself, so there is nothing for \(AppInfo.productName) to send and nothing that can be turned back on.") {
         LabeledContent("Hardware control") {
-          Text("Does not apply — this display has no data cable to carry hardware commands")
+          Text("Does not apply: this display has no data cable to carry hardware commands")
             .foregroundStyle(.secondary)
         }
       }
@@ -395,13 +395,13 @@ struct DiagnosticsPage: View {
   private func gammaConflictText(_ count: Int) -> String {
     count == 0
       ? "None noticed"
-      : "\(count) — another app keeps taking this display's color profile back"
+      : "\(count): another app keeps taking this display's color profile back"
   }
 
   /// Both limits of the number are stated, because neither is guessable from
   /// it: WHEN the count restarts, and that it only counts what was looked at.
   private var gammaConflictCaption: LocalizedStringKey {
-    "\(AppInfo.productName) only looks while it is dimming this display through its color profile, and the count starts again whenever your displays are reconfigured — a resolution change, a display plugged or unplugged, or the Mac waking."
+    "\(AppInfo.productName) only looks while it is dimming this display through its color profile, and the count starts again whenever your displays are reconfigured: a resolution change, a display plugged or unplugged, or the Mac waking."
   }
 
   private var brightnessPathCaption: LocalizedStringKey {
@@ -453,7 +453,7 @@ struct DiagnosticsPage: View {
   private var capabilityAnswerCaption: LocalizedStringKey {
     if capabilities != nil {
       if advertisedCodes == nil {
-        return "The display's description is shown below exactly as it arrived. It is unbalanced, carries no command list, or lists no codes — so nothing on this page claims what the display supports."
+        return "The display's description is shown below exactly as it arrived. It is unbalanced, carries no command list, or lists no codes, so nothing on this page claims what the display supports."
       }
       return "\(AppInfo.productName) asks each display to describe itself once after it is plugged in."
     }
@@ -464,13 +464,13 @@ struct DiagnosticsPage: View {
       // replug hands out a fresh `IOAVService` and an old answer is not
       // evidence about the new wire. So the window is the plug, not the
       // session, and unplugging re-asks.
-      return "\(AppInfo.productName) asked once since this display was plugged in. Either the display sent nothing or it sent something that could not be put back together — from here the two look the same."
+      return "\(AppInfo.productName) asked once since this display was plugged in. Either the display sent nothing or it sent something that could not be put back together. From here the two look the same."
     }
     // The one skip that is not "hasn't got round to it yet": DDC is dead under
     // HDR, so `CapabilityProbePolicy` refuses to probe and refuses to cache a
     // verdict that would outlive its cause.
     if state.controller.isHDREngaged {
-      return "\(AppInfo.productName) does not ask a display that is in HDR mode — hardware commands do not reach it — and will ask once HDR turns off."
+      return "\(AppInfo.productName) does not ask a display that is in HDR mode (hardware commands do not reach it) and will ask once HDR turns off."
     }
     return "\(AppInfo.productName) asks each display to describe itself once after it is plugged in. It has not asked this one yet."
   }
@@ -543,9 +543,9 @@ struct DiagnosticsPage: View {
       return "This display reported a maximum of \(state.controller.maxDDCValue)"
     }
     if state.controller.readEvidence == .notAttempted {
-      return "Assumed 100 — \(AppInfo.productName) has not asked this display for its scale"
+      return "Assumed 100: \(AppInfo.productName) has not asked this display for its scale"
     }
-    return "Assumed 100 — the display did not report one"
+    return "Assumed 100: the display did not report one"
   }
 
   /// The four commands this app speaks, and which of them this display
@@ -589,7 +589,7 @@ struct DiagnosticsPage: View {
     switch readEvidence {
     case .notAttempted: "\(AppInfo.productName) has not read from this display"
     case .answered: "This display answers reads"
-    case .allZeros: "Write-only — this display takes commands but never answers a read"
+    case .allZeros: "Write-only: this display takes commands but never answers a read"
     case .noReply: "This display did not reply to a read"
     }
   }
@@ -675,9 +675,9 @@ struct DiagnosticsPage: View {
   private var brightnessAvailabilityText: String {
     switch brightnessPath {
     case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
-      "Unavailable — combined dimming is off for this display and its hardware brightness command is turned off"
+      "Unavailable: combined dimming is off for this display and its hardware brightness command is turned off"
     case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
-      "Partly available — the hardware brightness command is turned off, so only the part of the slider below \(SliderSnap.percentText(dimsBelow)) moves anything"
+      "Partly available: the hardware brightness command is turned off, so only the part of the slider below \(SliderSnap.percentText(dimsBelow)) moves anything"
     case .native, .software, .hardware, .combined:
       "Available"
     }
@@ -692,9 +692,9 @@ struct DiagnosticsPage: View {
   private var volumeAvailabilityText: String {
     switch prefs.audioSinkOverride {
     case .forceNone:
-      return "Unavailable — you set this display's volume slider to always off"
+      return "Unavailable: you set this display's volume slider to always off"
     case .forcePresent:
-      return "Available — you set this display's volume slider to always on"
+      return "Available: you set this display's volume slider to always on"
     case .auto:
       break
     }
@@ -706,13 +706,13 @@ struct DiagnosticsPage: View {
     // never-looked-reported-as-nothing-found defect this page exists to
     // remove, one row away from the row that states it.
     guard let support = model.volumeSupport[persistenceKey] else {
-      return "Available — \(AppInfo.productName) has not asked this display yet, so the control stays on"
+      return "Available: \(AppInfo.productName) has not asked this display yet, so the control stays on"
     }
     switch support {
     case .supported:
-      return "Available — this display lists the volume command"
+      return "Available: this display lists the volume command"
     case .unsupported:
-      return "Unavailable — this display's description parsed cleanly and does not list the volume command"
+      return "Unavailable: this display's description parsed cleanly and does not list the volume command"
     case .unknown:
       // A stored `.unknown` has TWO producers
       // (`AppModel.probeVolumeCapabilities`): `readCapabilityString()` came
@@ -729,8 +729,8 @@ struct DiagnosticsPage: View {
       // distinction; the row that decides whether a control stays on has more
       // reason to draw it, not less.
       return capabilities == nil
-        ? "Available — this display sent no answer \(AppInfo.productName) could read, so the control stays on"
-        : "Available — \(AppInfo.productName) could not read a command list out of this display's description, so the control stays on"
+        ? "Available: this display sent no answer \(AppInfo.productName) could read, so the control stays on"
+        : "Available: \(AppInfo.productName) could not read a command list out of this display's description, so the control stays on"
     }
   }
 
@@ -740,7 +740,7 @@ struct DiagnosticsPage: View {
 
   private var muteAvailabilityText: String {
     if !prefs.enableMuteUnmute {
-      return "Unavailable — muting with the display's own mute command is turned off"
+      return "Unavailable: muting with the display's own mute command is turned off"
     }
     return state.volume.isAvailable ? "Available" : ddcOffReason(command: "volume")
   }
@@ -752,9 +752,9 @@ struct DiagnosticsPage: View {
   /// and a row that shrugs.
   private func ddcOffReason(command: String) -> String {
     if prefs.forceSoftware {
-      return "Unavailable — hardware control is turned off for this display"
+      return "Unavailable: hardware control is turned off for this display"
     }
-    return "Unavailable — the \(command) command is turned off for this display"
+    return "Unavailable: the \(command) command is turned off for this display"
   }
 
   /// `supportsHDR` is `cachedSupportsHDR`, and it is false in three different
@@ -775,10 +775,10 @@ struct DiagnosticsPage: View {
   /// the guard first.
   private var hdrAvailabilityText: String {
     guard DisplayServices.isAvailable else {
-      return "Unavailable — macOS did not load the framework \(AppInfo.productName) needs for HDR brightness"
+      return "Unavailable: macOS did not load the framework \(AppInfo.productName) needs for HDR brightness"
     }
     guard state.controller.supportsHDR else {
-      return "Unavailable — \(AppInfo.productName) has no HDR answer for this display: either it lists no HDR modes, or macOS did not load the framework \(AppInfo.productName) asks. From here the two look the same."
+      return "Unavailable: \(AppInfo.productName) has no HDR answer for this display. Either it lists no HDR modes, or macOS did not load the framework \(AppInfo.productName) asks. From here the two look the same."
     }
     return "Available"
   }
@@ -828,7 +828,7 @@ struct DiagnosticsPage: View {
     // gates rather than picking one — which of them is holding is not visible
     // from here, and all of them are necessary conditions.
     if watchedKeyFamilies.isEmpty, model.lastArmedTapConfig != nil {
-      SettingRow("\(AppInfo.productName) watches a family of keys only while something can act on it: brightness while an external display is connected, volume while the sound output matches a display it controls — and either one only while that family is set to use the media keys. Keys it does not watch go straight to macOS.") {
+      SettingRow("\(AppInfo.productName) watches a family of keys only while something can act on it: brightness while an external display is connected, volume while the sound output matches a display it controls, and either one only while that family is set to use the media keys. Keys it does not watch go straight to macOS.") {
         LabeledContent("Keys being watched") {
           Text(verbatim: watchedKeysText).foregroundStyle(.secondary)
         }
@@ -876,11 +876,11 @@ struct DiagnosticsPage: View {
   /// exactly when a rearm failed — which is the case this row is for (B9).
   private var watchedKeysText: String {
     guard model.lastArmedTapConfig != nil else {
-      return "None — the media-key tap is not running"
+      return "None: the media-key tap is not running"
     }
     let families = watchedKeyFamilies
     return families.isEmpty
-      ? "None — every media key is going straight to macOS"
+      ? "None: every media key is going straight to macOS"
       : families.joined(separator: ", ")
   }
 
@@ -909,8 +909,8 @@ struct DiagnosticsPage: View {
       nameOverride: prefs.audioDeviceNameOverride
     )
     return matches
-      ? "\(device.name) — matched to this display"
-      : "\(device.name) — not matched to this display"
+      ? "\(device.name): matched to this display"
+      : "\(device.name): not matched to this display"
   }
 
   private var lastWriteText: String {
@@ -1068,9 +1068,9 @@ enum DiagnosticsCopy {
     case .software(.overlay):
       "Software, through a dark overlay"
     case let .combined(switching, .gamma):
-      "Split at \(SliderSnap.percentText(switching)) — software below, the data cable above"
+      "Split at \(SliderSnap.percentText(switching)): software below, the data cable above"
     case let .combined(switching, .overlay):
-      "Split at \(SliderSnap.percentText(switching)) — overlay below, the data cable above"
+      "Split at \(SliderSnap.percentText(switching)): overlay below, the data cable above"
     case let .softwareOnly(.gamma, .ddcTurnedOff, dimsBelow):
       "Software only below \(SliderSnap.percentText(dimsBelow)), through the display's color profile"
     case let .softwareOnly(.overlay, .ddcTurnedOff, dimsBelow):

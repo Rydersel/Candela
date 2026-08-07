@@ -63,8 +63,8 @@ enum DisplayModeCopy {
   /// to nothing.
   static func passiveCountdown(_ seconds: Int) -> String {
     seconds == 1
-      ? "Reverting in 1 second — answer in the confirmation window."
-      : "Reverting in \(seconds) seconds — answer in the confirmation window."
+      ? "Reverting in 1 second. Answer in the confirmation window."
+      : "Reverting in \(seconds) seconds. Answer in the confirmation window."
   }
 
   /// A11y contract 8: the announcement posted when the answerable banner
@@ -116,7 +116,7 @@ enum DisplayModeCopy {
   /// A `confirm()`/`revert()`/expiry that threw. The preview is still on the
   /// display and nothing auto-retries, so this must invite another attempt.
   static var resolveFailure: LocalizedStringKey {
-    "\(AppInfo.productName) could not complete that change. The display is still showing the preview — try again."
+    "\(AppInfo.productName) could not complete that change. The display is still showing the preview. Try again."
   }
 
   /// Said only alongside `resolveFailure`: the countdown is spent, so the user
@@ -138,20 +138,20 @@ enum DisplayModeCopy {
   static func reapplySubstituted(
     requested: DisplayModeDescriptor, applied: DisplayMode
   ) -> LocalizedStringKey {
-    "The resolution saved for this display — \(size(requested)), \(refresh(requested.refreshHz)) — is no longer available. \(AppInfo.productName) used \(size(applied)), \(refresh(applied.refreshHz)) instead."
+    "The resolution saved for this display (\(size(requested)), \(refresh(requested.refreshHz))) is no longer available. \(AppInfo.productName) used \(size(applied)), \(refresh(applied.refreshHz)) instead."
   }
 
   /// Nothing close enough existed, so nothing was changed. Says so explicitly:
   /// "we left it alone" is information, and its absence reads as a silent
   /// failure of the whole feature.
   static func reapplyUnavailable(requested: DisplayModeDescriptor) -> LocalizedStringKey {
-    "The resolution saved for this display — \(size(requested)), \(refresh(requested.refreshHz)) — is no longer available, and nothing close enough to use in its place. \(AppInfo.productName) left this display as it found it."
+    "The resolution saved for this display (\(size(requested)), \(refresh(requested.refreshHz))) is no longer available, and nothing close enough to use in its place. \(AppInfo.productName) left this display as it found it."
   }
 
   /// The apply itself failed. Distinct from `reapplyUnavailable` because the
   /// mode still exists — trying again, from the list, is worth doing.
   static func reapplyFailed(requested: DisplayModeDescriptor) -> LocalizedStringKey {
-    "\(AppInfo.productName) could not restore the resolution saved for this display — \(size(requested)), \(refresh(requested.refreshHz)). Nothing was changed."
+    "\(AppInfo.productName) could not restore the resolution saved for this display (\(size(requested)), \(refresh(requested.refreshHz))). Nothing was changed."
   }
 
   /// One sentence for whichever of the three happened, so both surfaces make

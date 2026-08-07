@@ -78,14 +78,14 @@ final class SystemChromeWriter: ChromeWriting {
     process.terminationHandler = { finished in
       guard finished.terminationStatus != 0 else { return }
       log.warning(
-        "killall Dock exited \(finished.terminationStatus, privacy: .public) — autohide pref written but the Dock may not have adopted it"
+        "killall Dock exited \(finished.terminationStatus, privacy: .public); autohide pref written but the Dock may not have adopted it"
       )
     }
     do {
       try process.run()
     } catch {
       log.warning(
-        "killall Dock could not launch: \(error.localizedDescription, privacy: .public) — autohide pref written but the Dock has not adopted it"
+        "killall Dock could not launch: \(error.localizedDescription, privacy: .public); autohide pref written but the Dock has not adopted it"
       )
     }
   }

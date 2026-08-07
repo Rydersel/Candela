@@ -231,7 +231,7 @@ struct GeneralPane: View {
       // "no DDC commands" in either place, which is the same false copy D11
       // exists to fix: sliders and keys still work and still send DDC.
       if !model.isSafeMode {
-        SettingsCaption("Hold Shift while launching for Safe Mode — saved values aren't restored.")
+        SettingsCaption("Hold Shift while launching for Safe Mode: saved values aren't restored.")
       }
     }
   }

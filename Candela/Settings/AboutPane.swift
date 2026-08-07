@@ -55,10 +55,10 @@ struct AboutPane: View {
       }
       Section("Acknowledgements") {
         LabeledContent("MonitorControl") {
-          Text("MIT — DDC/CI transport and the behavior this app is measured against")
+          Text("MIT (DDC/CI transport and the behavior this app is measured against)")
         }
         LabeledContent("KeyboardShortcuts") {
-          Text("MIT — Sindre Sorhus")
+          Text("MIT (Sindre Sorhus)")
         }
         SettingsCaption(copyrightLine)
       }
