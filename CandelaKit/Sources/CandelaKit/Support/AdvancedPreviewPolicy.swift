@@ -8,7 +8,9 @@ public struct AdvancedSnapshot: Equatable, Sendable {
   public let ddcOff: Bool
   /// `avoidGamma` — dimming runs through the shade overlay instead of gamma.
   public let overlayOn: Bool
-  /// `hideOsd` — the display's own volume OSD is suppressed.
+  /// `hideOsd` — Candela's volume/mute HUD pills are suppressed for this
+  /// display. Not the monitor's built-in OSD, which we cannot suppress; and
+  /// brightness/contrast pills still show (fork parity).
   public let osdHidden: Bool
   /// Non-default tuning fields plus curve/remap/crossover/polling. Excludes
   /// `osdHidden`, which the label folds in itself.
