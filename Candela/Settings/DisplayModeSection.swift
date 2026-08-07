@@ -152,18 +152,20 @@ struct DisplayModeSection: View {
   ///
   /// Reapply runs at launch and on reconnect with nobody in front of the
   /// screen, so this is not a notification the user missed — it is the whole
-  /// report, and it waits here until they dismiss it, choose a mode themselves,
-  /// or unplug the display. Rendering it in the section that owns "Remember
-  /// this resolution" is deliberate: the control that made the promise is the
-  /// one that has to admit it could not keep it.
+  /// report, and it waits here until they dismiss it or choose a mode
+  /// themselves — an unplug no longer takes it away (SO8). Rendering it in the
+  /// section that owns "Remember this resolution" is deliberate: the control
+  /// that made the promise is the one that has to admit it could not keep it.
   @ViewBuilder private var reapplyBanner: some View {
-    if let report = coordinator.reapplyReports[displayID] {
+    if let report = coordinator.report(for: displayID) {
       VStack(alignment: .leading, spacing: 6) {
         SettingsCaption(DisplayModeCopy.reapply(
           requested: report.requested, notice: report.notice
         ))
         .modifier(ReapplyDiagnostic(notice: report.notice))
-        Button("OK") { coordinator.dismissReapplyReport(for: displayID) }
+        // Keyed by the report on screen, so OK can only clear the notice the
+        // user is reading — and the same call the panel's OK makes.
+        Button("OK") { coordinator.dismissReport(forKey: report.key) }
       }
       .padding(.vertical, 2)
     }

@@ -153,12 +153,29 @@ struct SettingsSidebar: View {
       friendlyName: DisplayPrefs(persistenceKey: display.persistenceKey).friendlyName,
       hardwareName: display.name
     )
+    let isSelected = selection == .display(display.persistenceKey)
     row(.display(display.persistenceKey)) {
       Label {
         VStack(alignment: .leading, spacing: 3) {
-          Text(verbatim: name) // a display's name — never a lookup key
-            .lineLimit(1)
-            .truncationMode(.tail)
+          HStack(spacing: 5) {
+            Text(verbatim: name) // a display's name — never a lookup key
+              .lineLimit(1)
+              .truncationMode(.tail)
+            // Something happened on this display while nobody was looking and
+            // nobody has read it yet. A dot, not a count: the destination
+            // carries the account, this only says there is one to open. It is
+            // never the sole carrier of the fact either — the notice itself is
+            // inside — so a missed dot costs nothing.
+            if model.displayModes.hasUnreadReport(for: display.id) {
+              Circle()
+                // White on the selected row for the reason the row forces its
+                // foreground: an accent dot on the accent pill is invisible.
+                .fill(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(Color.accentColor))
+                .frame(width: 6, height: 6)
+                .accessibilityElement()
+                .accessibilityLabel("Has an unread notice")
+            }
+          }
           Capsule()
             .fill(.quaternary)
             .frame(height: 3)

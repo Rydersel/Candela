@@ -50,7 +50,7 @@ struct PanelResolutionSection: View {
   private var isAwaitingAnswer: Bool { coordinator.preview?.displayID == displayID }
 
   private var report: DisplayModeCoordinator.ReapplyReport? {
-    coordinator.reapplyReports[displayID]
+    coordinator.report(for: displayID)
   }
 
   var body: some View {
@@ -150,14 +150,16 @@ struct PanelResolutionSection: View {
 
   /// What reapply could not do on this display, at launch or when it
   /// reconnected. Nobody was watching then, so this is the first moment the
-  /// user can be told — it stays until they dismiss it, pick a resolution
-  /// themselves, or unplug the display.
+  /// user can be told — it stays until they dismiss it or pick a resolution
+  /// themselves. An unplug no longer takes it away (SO8).
   @ViewBuilder private var reapplyReport: some View {
     if let report {
       PanelReportRow(
         text: Text(DisplayModeCopy.reapply(requested: report.requested, notice: report.notice))
       ) {
-        coordinator.dismissReapplyReport(for: displayID)
+        // The same call the settings banner's OK makes, against the same key —
+        // one dismissal clears the notice on every surface.
+        coordinator.dismissReport(forKey: report.key)
       }
       .padding(.horizontal, 4)
     }

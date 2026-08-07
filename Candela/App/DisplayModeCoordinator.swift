@@ -92,12 +92,19 @@ final class DisplayModeCoordinator {
   /// A reapply that could not honour the stored mode exactly.
   ///
   /// Reapply is unattended, so this is the ONLY way the user finds out. It is
-  /// kept per display and survives until they dismiss it, pick a mode
-  /// themselves, or unplug the display — the point is that it is still there
-  /// the next time they look, not that it was true at the moment nobody was
-  /// watching.
+  /// kept per display and survives until they dismiss it or pick a mode
+  /// themselves — the point is that it is still there the next time they look,
+  /// not that it was true at the moment nobody was watching. Unplugging the
+  /// display no longer takes it away (SO8): the display coming back is exactly
+  /// when someone is in front of it again.
   struct ReapplyReport: Equatable {
-    let displayID: CGDirectDisplayID
+    /// `DisplayConfigIdentity.key` — the SAME key the stored mode this report is
+    /// about is filed under, not a `CGDirectDisplayID`. IDs reassign across a
+    /// replug, so an ID-keyed report either has to be thrown away on departure
+    /// or risks surfacing on whichever display takes the ID next. Carried on the
+    /// report rather than only in the dictionary so a surface rendering one can
+    /// dismiss exactly the report it is showing.
+    let key: String
     /// What the user actually chose, not what we managed. Kept so the report
     /// can name it — "we could not give you X" is a different sentence from
     /// "you are on Y", and the first is the one that explains anything.
@@ -127,9 +134,11 @@ final class DisplayModeCoordinator {
   private(set) var catalogs: [CGDirectDisplayID: Catalog] = [:]
   private(set) var preview: Preview?
   private(set) var startFailure: StartFailure?
-  /// Keyed by display so one display's disappointing reconnect is never
-  /// reported on another display's page.
-  private(set) var reapplyReports: [CGDirectDisplayID: ReapplyReport] = [:]
+  /// Keyed by `DisplayConfigIdentity.key` so one display's disappointing
+  /// reconnect is never reported on another display's page — including the
+  /// display that inherits its `CGDirectDisplayID` after a replug, which is what
+  /// an ID-keyed map cannot rule out (SO8). Read through `report(for:)`.
+  private(set) var reapplyReports: [String: ReapplyReport] = [:]
   /// True from the click until the reconfiguration it started has settled.
   /// `begin()` spans a real CoreGraphics mode change, and a Keep pressed inside
   /// that window is queued behind it and would commit the NEW mode while the
@@ -300,15 +309,21 @@ final class DisplayModeCoordinator {
     // and this handler itself can run late, which is why it is told what was
     // live rather than asked to look.
     arrivals.noteObserved(live: observedLive)
-    // A report about a display that is gone describes nothing the user can act
-    // on, and would reappear on the pane of whatever takes its ID next.
-    reapplyReports = reapplyReports.filter { live.contains($0.key) }
-    // Same rule for a start failure, and it needs saying separately because the
-    // preview path self-heals here and this one cannot: a failure has no
-    // countdown re-presenting it every second, and `dropPreviewOnDepartedDisplay`
-    // returns early when nothing is outstanding. Left alone, unplugging the
-    // display leaves a window naming a display that is gone, which AppKit then
-    // relocates onto some other screen.
+    // Reports are deliberately NOT pruned here (SO8). Pruning existed for one
+    // reason — an ID-keyed report would reappear on whatever display took the ID
+    // next — and identity keying removes that hazard outright. What is left is
+    // the case the report exists for: a reapply nobody watched, on a display the
+    // user unplugged before looking. Dropping it on departure means the one
+    // moment they are back in front of that display is the moment the account of
+    // it is gone. Only a dismissal, or a later pass with a newer outcome for the
+    // same identity, clears one.
+    //
+    // A start failure is different and still cleared below: it is about a
+    // control on a page that has just disappeared, and its surface is a floating
+    // window AppKit would relocate onto another screen. It needs saying
+    // separately because the preview path self-heals here and this one cannot —
+    // a failure has no countdown re-presenting it every second, and
+    // `dropPreviewOnDepartedDisplay` returns early when nothing is outstanding.
     if let failure = startFailure, !live.contains(failure.displayID) {
       dismissStartFailure()
     }
@@ -374,8 +389,36 @@ final class DisplayModeCoordinator {
     await enqueueReturning { await self.performReapply(displays) }
   }
 
-  func dismissReapplyReport(for displayID: CGDirectDisplayID) {
-    reapplyReports[displayID] = nil
+  // MARK: - Reports
+
+  /// Identity keys with a notice nobody has dismissed. What a summary surface —
+  /// the sidebar badge, a banner region — asks, so no such surface has to
+  /// reproduce the "is there anything to say about this display" test.
+  var unreadReportKeys: Set<String> { Set(reapplyReports.keys) }
+
+  /// The report for a display that is plugged in RIGHT NOW.
+  ///
+  /// The dictionary is keyed by identity, so this resolves the ID it is given
+  /// through the live display list. The emptiness test first is not a
+  /// micro-optimisation: without it every sidebar row would pay a CoreGraphics
+  /// enumeration per body evaluation for the answer "no", which is the answer
+  /// almost always.
+  func report(for displayID: CGDirectDisplayID) -> ReapplyReport? {
+    guard !reapplyReports.isEmpty, let key = identity(for: displayID)?.key else { return nil }
+    return reapplyReports[key]
+  }
+
+  func hasUnreadReport(for displayID: CGDirectDisplayID) -> Bool {
+    report(for: displayID) != nil
+  }
+
+  /// THE one place a person clears a report, whichever surface they clicked OK
+  /// in. Keyed rather than taking a display: a surface rendering a report has
+  /// the report, so it can only dismiss the one it was showing — an ID would
+  /// have to be re-resolved and could resolve to nothing (or, after a replug, to
+  /// something else).
+  func dismissReport(forKey key: String) {
+    reapplyReports[key] = nil
   }
 
   private func performReapply(_ displays: [ConfiguredDisplay]) async {
@@ -464,22 +507,24 @@ final class DisplayModeCoordinator {
       }
 
       if let notice {
-        // A display can leave across the queue wait or across the apply itself
-        // — and `handleDisplaysChanged` has by then already pruned the reports
-        // it knew about. Writing this one now would leave a report on the pane
-        // of a display that is gone, until the next screen-parameters event
-        // happened to clear it. The claim goes back with it: the arrival was
-        // never completed, so its return is an arrival again.
+        // A display can leave across the queue wait or across the apply itself.
+        // Not because a report about an absent display is now unshowable — SO8
+        // keeps those — but because this one describes an attempt that never
+        // finished. The claim goes back with it: the arrival was never
+        // completed, so its return is an arrival again, and that pass writes a
+        // fresh outcome for the same identity in place of this half-answer.
         guard configurator.displays().contains(where: { $0.id == display.id }) else {
           arrivals.release(display.id)
           continue
         }
-        reapplyReports[display.id] = ReapplyReport(
-          displayID: display.id, requested: requested, notice: notice
+        reapplyReports[identity.key] = ReapplyReport(
+          key: identity.key, requested: requested, notice: notice
         )
         log.error("could not restore stored mode on display \(display.id): \(String(describing: notice), privacy: .public)")
       } else {
-        reapplyReports[display.id] = nil
+        // Replacement, not a clear-on-departure: this pass has a newer answer
+        // for the same identity and the answer is "nothing to say".
+        reapplyReports[identity.key] = nil
       }
     }
     // Reapply opens no preview, so the claim it took is spent the moment the
@@ -661,8 +706,9 @@ final class DisplayModeCoordinator {
     dismissStartFailure()
     // The user has answered the report themselves — whatever reapply could not
     // do for this display, they are now doing by hand. Leaving the notice up
-    // would have it contradict the choice they just made.
-    reapplyReports[displayID] = nil
+    // would have it contradict the choice they just made. A dismissal, so it
+    // goes through the one dismissal path.
+    if let key = identity(for: displayID)?.key { dismissReport(forKey: key) }
     // AR12, asked BEFORE `begin()` because that is what makes a refusal cost
     // nothing: no transaction has been opened and no display has moved, so there
     // is a sentence to say and nothing to undo. Granted when WE are already the

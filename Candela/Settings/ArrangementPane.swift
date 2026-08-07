@@ -205,7 +205,8 @@ struct ArrangementPane: View {
       }
 
       // The only account an unattended restore ever gives, and it waits here
-      // until the user dismisses it or the display set changes — rendered in the
+      // until the user dismisses it or a later restore pass supersedes it —
+      // never taken away by a departure alone (SO8) — rendered in the
       // section whose control made the promise, exactly as the stored-mode
       // reapply banner sits under "Remember this resolution".
       if let notice = coordinator.restoreNotice {

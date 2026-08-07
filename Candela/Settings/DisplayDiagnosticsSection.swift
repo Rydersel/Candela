@@ -816,7 +816,7 @@ struct DisplayDiagnosticsSection: View {
       Text(verbatim: lastWriteText).foregroundStyle(.secondary)
     }
 
-    if let report = model.displayModes.reapplyReports[state.id] {
+    if let report = model.displayModes.report(for: state.id) {
       LabeledContent("Last resolution problem") {
         Text(verbatim: reapplyText(report.notice)).foregroundStyle(.secondary)
       }
