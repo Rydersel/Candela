@@ -7,8 +7,10 @@ import Foundation
 enum PaneID: String, CaseIterable, Hashable {
   // Order is the sidebar's order. `arrangement` sits after `menuBar` because it
   // is about the desktop rather than about the app, and before the input and
-  // informational panes.
-  case general, menuBar, arrangement, keyboard, about
+  // informational panes. `oledCare` follows it: it is also about the displays
+  // themselves, and its per-display sections read as a continuation of the
+  // arrangement pane's subject rather than of the app's own settings.
+  case general, menuBar, arrangement, oledCare, keyboard, about
 }
 
 /// The split view's selection type.

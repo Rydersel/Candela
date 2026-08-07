@@ -66,6 +66,18 @@ struct DiagnosticsPrefSummaryTests {
     prefs.audioDeviceNameOverride = "Dell Speakers"
     prefs.pollingMode = .heavy
     prefs.pollingCount = 4
+    // Every OLED-care value off its Recommended-preset default (the accessor
+    // defaults, pinned by `oledDefaultsAreTheRecommendedPreset`).
+    prefs.oledCareEnrolled = true
+    prefs.oledIdleDimSeconds = 120
+    prefs.oledIdleDimLevel = 0.8
+    prefs.oledLockDim = false
+    prefs.oledBlackoutEnabled = true
+    prefs.oledBlackoutSeconds = 2400
+    prefs.oledUnfocusedDimEnabled = true
+    prefs.oledUnfocusedDimSeconds = 900
+    prefs.oledUnfocusedDimLevel = 0.4
+    prefs.oledHoursTracking = false
     for command in DDCCommand.allCases {
       prefs.setTuning(
         CommandTuning(

@@ -60,6 +60,26 @@ public enum DiagnosticsPrefSummary {
     if prefs.pollingCount != 0 { note(.pollingCount, "\(prefs.pollingCount)") }
     if remembersMode { note(.rememberDisplayMode, "true") }
 
+    // OLED care (W3a). The comparison values ARE the accessor defaults — the
+    // Recommended preset, pinned by `oledDefaultsAreTheRecommendedPreset` — so
+    // a preset change fails that test first and points here. Churn bugs in the
+    // care dim are exactly the reports where "enrolled, blackout on, idle dim
+    // at 60 s" is the line that explains everything.
+    if prefs.oledCareEnrolled { note(.oledCareEnrolled, "true") }
+    if prefs.oledIdleDimSeconds != 300 { note(.oledIdleDimSeconds, "\(prefs.oledIdleDimSeconds)") }
+    if prefs.oledIdleDimLevel != 0.5 { note(.oledIdleDimLevel, "\(prefs.oledIdleDimLevel)") }
+    if !prefs.oledLockDim { note(.oledLockDim, "false") }
+    if prefs.oledBlackoutEnabled { note(.oledBlackoutEnabled, "true") }
+    if prefs.oledBlackoutSeconds != 1200 { note(.oledBlackoutSeconds, "\(prefs.oledBlackoutSeconds)") }
+    if prefs.oledUnfocusedDimEnabled { note(.oledUnfocusedDimEnabled, "true") }
+    if prefs.oledUnfocusedDimSeconds != 600 {
+      note(.oledUnfocusedDimSeconds, "\(prefs.oledUnfocusedDimSeconds)")
+    }
+    if prefs.oledUnfocusedDimLevel != 0.3 {
+      note(.oledUnfocusedDimLevel, "\(prefs.oledUnfocusedDimLevel)")
+    }
+    if !prefs.oledHoursTracking { note(.oledHoursTracking, "false") }
+
     for command in DDCCommand.allCases {
       let tuning = prefs.tuning(for: command)
       guard tuning != .unset else { continue }

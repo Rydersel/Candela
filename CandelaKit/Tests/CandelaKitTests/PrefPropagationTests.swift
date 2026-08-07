@@ -35,6 +35,19 @@ struct PrefPropagationTests {
     #expect(PrefName(rawValue: "longerDelay") == nil)
   }
 
+  @Test func oledEngineStateIsNotAPrefName() {
+    // Hours accumulation is engine state written by the tracker, not a
+    // setting a pane may route through (same rule as `muted`).
+    #expect(PrefName(rawValue: "oledPanelSeconds") == nil)
+    #expect(PrefName(rawValue: "oledStandbySeconds") == nil)
+    // Same rule for the note's dismissal: the tracker persists it, no pane
+    // writes it, so it must never become a case a pane could route through.
+    #expect(PrefName(rawValue: "oledStandbyNoteDismissed") == nil)
+    // The two inverted storage keys are keys, not propagation identifiers.
+    #expect(PrefName(rawValue: "oledLockDimOff") == nil)
+    #expect(PrefName(rawValue: "oledHoursTrackingOff") == nil)
+  }
+
   @Test func prefNameRawValuesAreTheOnDiskKeys() {
     // D22: the raw values compose real key strings. The three that invite a
     // typo are pinned by hand; the rest are the case name verbatim.
@@ -53,7 +66,13 @@ struct PrefPropagationTests {
     #expect(PrefName.pollingMode.rawValue == "pollingMode")
     #expect(PrefName.pollingCount.rawValue == "pollingCount")
     #expect(PrefName.separateCombinedScale.rawValue == "separateCombinedScale")
-    #expect(PrefName.allCases.count == 40)
+    // W3a added ten OLED-care keys: 40 -> 50. Two of them are the exception to
+    // the heading above — `oledLockDim` and `oledHoursTracking` store INVERTED
+    // (`…Off`), so their raw value is a propagation identifier, not the key
+    // (precedent: the `forceSw` accessor is named `forceSoftware`).
+    #expect(PrefName.oledCareEnrolled.rawValue == "oledCareEnrolled")
+    #expect(PrefName.oledLockDim.rawValue == "oledLockDim")
+    #expect(PrefName.allCases.count == 50)
   }
 
   // MARK: - Rows
@@ -139,6 +158,23 @@ struct PrefPropagationTests {
     #expect(PrefPropagation.effects(forChange: .forceSw)
       == [.refreshUI, .rearmTap, .reapplyDimming, .rebuildPanel])
     #expect(PrefPropagation.effects(forChange: .startupAction) == [.refreshUI])
+  }
+
+  @Test func oledCarePrefsFanOutToOledCare() {
+    let oled: [PrefName] = [
+      .oledCareEnrolled, .oledIdleDimSeconds, .oledIdleDimLevel, .oledLockDim,
+      .oledBlackoutEnabled, .oledBlackoutSeconds,
+      .oledUnfocusedDimEnabled, .oledUnfocusedDimSeconds, .oledUnfocusedDimLevel,
+      .oledHoursTracking,
+    ]
+    for name in oled {
+      #expect(PrefPropagation.effects(forChange: name).contains(.reapplyOledCare), "\(name.rawValue)")
+      #expect(PrefPropagation.effects(forChange: name).contains(.refreshUI), "\(name.rawValue)")
+    }
+    // Exact, not merely non-empty: OLED care runs its own timers and dimming
+    // leg, so a stray `.reapplyDimming` here would re-write the DDC bus on
+    // every idle-timeout tweak.
+    #expect(PrefPropagation.effects(forChange: .oledCareEnrolled) == [.refreshUI, .reapplyOledCare])
   }
 
   // MARK: - Batch fan-out (the per-display reset rides on this)

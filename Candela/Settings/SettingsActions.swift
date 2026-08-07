@@ -62,6 +62,12 @@ final class SettingsActions {
         state.controller.reapplyAfterPrefChange()
       }
     }
+    if effects.contains(.reapplyOledCare), let model {
+      // Separate from `.reapplyDimming` on purpose: OLED care re-arms its own
+      // timers and re-evaluates its own dim leg, and must not put the DDC bus
+      // to work on every timeout tweak.
+      model.oledCare.reapplyAfterPrefChange(persistenceKey: persistenceKey)
+    }
   }
 }
 

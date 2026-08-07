@@ -251,6 +251,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // run loop, and only the main thread has one that lives forever.
     model.displayManager.activate()
 
+    // OLED care (W3a): starts the driver loop (unless Safe Mode, which still
+    // builds the chrome controller — spec §7) and wires its own lock and
+    // sleep/wake observers. Its display membership is resolved by the warm
+    // task and the topology loop below via `displaysReconfigured()`.
+    model.oledCare.start(model: model)
+
     // Sleep/wake stay app-side (NSWorkspace is AppKit) and forward to the
     // engine's epoch intake. Both notification pairs, like the fork: a
     // display sleep and a system sleep must each gate DDC writes.
@@ -427,6 +433,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         let departed = await self.model.refresh()
         self.refreshTapConfig()
         self.updateStatusItemVisibility()
+        // OLED care: IDs may have been REASSIGNED even with every display
+        // still present (MAG 3→2, Dell 2→3 across one dock cycle), so the
+        // coordinator tears its overlays down and re-renders from state under
+        // freshly resolved IDs — never a repin (W3a ruling). After `refresh()`
+        // so it reconciles against the post-event display list.
+        self.model.oledCare.displaysReconfigured()
         // D5: a reconfigure pass restores once (the wake repeat chain, when
         // one is running, keeps re-asserting on its own schedule).
         self.restoreCoordinator.noteLaunchOrReconfigure()
@@ -593,6 +605,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // is tracking.
       warmModeCatalogs()
       restoreUnattended()
+      // The launch discovery pass produces no topology event (the CG callback
+      // fires only on actual reconfigurations), so the initial OLED-care
+      // enrollment resolve happens here, against the freshly discovered list.
+      model.oledCare.displaysReconfigured()
       #if DEBUG
         // Screenshot hook (DT6). After `model.refresh()`, so `display:first`
         // has a display list to resolve against.
@@ -883,6 +899,23 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   }
 
   private func runSettingsReset() async {
+    // ---- 0. OLED care first (D29's ordering applied to dimming): overlays
+    //         down and hour counters reset while their objects are still
+    //         alive. The domain wipe below never reaches them —
+    //         `rebuildControllers()` does not touch `model.oledCare` — so a
+    //         live tracker's debounced write-through would re-persist the
+    //         hours the user just cleared.
+    model.oledCare.prepareForReset()
+    // The other half of the contract, bound to scope exit rather than to the
+    // last statement: `prepareForReset()` raised a latch that swallows every
+    // topology event and pref reapply for the duration (an HDR-off below IS a
+    // reconfiguration, and a mid-reset reconcile would re-arm overlays from
+    // still-unwiped enrollment prefs). Only this call clears it and re-derives
+    // membership from the wiped domain — nothing else re-reconciles after the
+    // wipe, so an early exit added here later must not be able to skip it or
+    // OLED care is silently dead for the rest of the session.
+    defer { model.oledCare.resetDidComplete() }
+
     // ---- 1. Drive the hardware to a known state through the engine's own
     //         doors, while the prefs that describe that state still exist.
     //         (D30: the controllers holding this state are about to be dropped,
@@ -960,6 +993,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // Post-reset state IS first-run state: prefsSchemaVersion is gone, so
     // onboarding re-runs (wired by Task 15; default no-op until then).
     settingsActions.postReset()
+    // OLED care's latch is cleared by the `defer` at the top of this function,
+    // which runs here — after every statement above.
   }
 
   /// Hands every display's controller a pre-gamma-apply hook that runs the

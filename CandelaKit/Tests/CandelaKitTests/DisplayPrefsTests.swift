@@ -530,4 +530,133 @@ struct DisplayPrefsTests {
       #expect(!DisplayPrefs.hasAnyStoredValue(forKey: "CCCC-DDDD", defaults: defaults))
     }
   }
+
+  // MARK: - OLED care (W3a)
+
+  @Test func oledDefaultsAreTheRecommendedPreset() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      #expect(prefs.oledCareEnrolled == false)
+      #expect(prefs.oledIdleDimSeconds == 300)
+      #expect(prefs.oledIdleDimLevel == 0.5)
+      #expect(prefs.oledLockDim == true)
+      #expect(prefs.oledBlackoutEnabled == false)
+      #expect(prefs.oledBlackoutSeconds == 1200)
+      #expect(prefs.oledUnfocusedDimEnabled == false)
+      #expect(prefs.oledUnfocusedDimSeconds == 600)
+      // Lighter than the idle dim's 0.5, because the level IS the black
+      // overlay's opacity — higher is darker — and an unfocused display is
+      // still in view.
+      #expect(prefs.oledUnfocusedDimLevel == 0.3)
+      #expect(prefs.oledHoursTracking == true)
+    }
+  }
+
+  @Test func oledPrefsArePerDisplay() {
+    withSuite { defaults in
+      let a = DisplayPrefs(defaults: defaults, persistenceKey: "a")
+      let b = DisplayPrefs(defaults: defaults, persistenceKey: "b")
+      a.oledCareEnrolled = true
+      a.oledIdleDimSeconds = 120
+      #expect(b.oledCareEnrolled == false)
+      #expect(b.oledIdleDimSeconds == 300)
+    }
+  }
+
+  @Test func trueDefaultOledBoolsStoreInverted() {
+    // Absence must read as ON, so these two persist under `…Off` keys. A
+    // straight `bool(forKey:)` would silently ship lock dimming disabled on
+    // every fresh install, and the getter alone cannot show the round trip.
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      prefs.oledLockDim = false
+      prefs.oledHoursTracking = false
+      #expect(prefs.oledLockDim == false)
+      #expect(prefs.oledHoursTracking == false)
+      #expect(defaults.bool(forKey: "oledLockDimOff.pk"))
+      #expect(defaults.bool(forKey: "oledHoursTrackingOff.pk"))
+      #expect(defaults.object(forKey: "oledLockDim.pk") == nil)
+      prefs.oledLockDim = true
+      prefs.oledHoursTracking = true
+      #expect(prefs.oledLockDim == true)
+      #expect(prefs.oledHoursTracking == true)
+    }
+  }
+
+  @Test func resetOledCareRemovesTheKeysRatherThanRewritingThem() {
+    // Removal, not a write-back of today's numbers: an absent key follows the
+    // preset, and a reset that pinned the current values would quietly opt the
+    // display out of every later preset change. Checking the accessors alone
+    // could not tell the two apart.
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      prefs.oledCareEnrolled = true
+      prefs.oledIdleDimSeconds = 60
+      prefs.oledIdleDimLevel = 0.9
+      prefs.oledLockDim = false
+      prefs.oledBlackoutEnabled = true
+      prefs.oledBlackoutSeconds = 3000
+      prefs.oledUnfocusedDimEnabled = true
+      prefs.oledUnfocusedDimSeconds = 900
+      prefs.oledUnfocusedDimLevel = 0.4
+      prefs.oledHoursTracking = false
+      // Panel hours are NOT prefs — they live under `PanelHoursTracker`'s own
+      // keys and the reset must leave them alone. Written directly here
+      // because the tracker owns them, and because the sweep below needs them
+      // present to prove it distinguishes "kept" from "wiped".
+      defaults.set(3600.0, forKey: "oledPanelSeconds.pk")
+      defaults.set(120.0, forKey: "oledStandbySeconds.pk")
+      defaults.set(true, forKey: "oledStandbyNoteDismissed.pk")
+
+      prefs.resetOledCare()
+
+      #expect(prefs.oledCareEnrolled == false)
+      #expect(prefs.oledIdleDimSeconds == 300)
+      #expect(prefs.oledIdleDimLevel == 0.5)
+      #expect(prefs.oledLockDim == true)
+      #expect(prefs.oledBlackoutEnabled == false)
+      #expect(prefs.oledBlackoutSeconds == 1200)
+      #expect(prefs.oledUnfocusedDimEnabled == false)
+      #expect(prefs.oledUnfocusedDimSeconds == 600)
+      #expect(prefs.oledUnfocusedDimLevel == 0.3)
+      #expect(prefs.oledHoursTracking == true)
+
+      // The sweep can only see keys something wrote above, so pin the
+      // population first: an eleventh OLED pref fails HERE, which is the
+      // prompt to add its write — and only then can the sweep catch a
+      // `resetOledCare` that forgot to remove it.
+      let oledPrefNames = PrefName.allCases.filter { $0.rawValue.hasPrefix("oled") }
+      #expect(oledPrefNames.count == 10, "a new OLED pref needs a write above")
+
+      // A SWEEP of the store, not a second hand-written key list. These ten are
+      // already enumerated by hand in two other places and in two spellings —
+      // `PrefName` cases in the per-display reset's fan-out, and key strings in
+      // `resetOledCare`, where `oledLockDim` and `oledHoursTracking` carry the
+      // inverted `…Off` suffix. A third copy here would have the same defect
+      // the other two do: an eleventh pref compiles clean and silently survives
+      // the reset. Asking the store instead cannot miss one.
+      let keptHoursKeys: Set<String> = [
+        "oledPanelSeconds.pk", "oledStandbySeconds.pk", "oledStandbyNoteDismissed.pk",
+      ]
+      let survivors = defaults.dictionaryRepresentation().keys
+        .filter { $0.hasPrefix("oled") && $0.hasSuffix(".pk") && !keptHoursKeys.contains($0) }
+        .sorted()
+      #expect(survivors.isEmpty, "survived the reset: \(survivors.joined(separator: ", "))")
+      // …and the wear data is still there, so "nothing left" above is not
+      // passing because the reset wiped everything.
+      #expect(keptHoursKeys.allSatisfy { defaults.object(forKey: $0) != nil })
+    }
+  }
+
+  @Test func resetOledCareLeavesOtherDisplaysAlone() {
+    withSuite { defaults in
+      let a = DisplayPrefs(defaults: defaults, persistenceKey: "a")
+      let b = DisplayPrefs(defaults: defaults, persistenceKey: "b")
+      a.oledCareEnrolled = true
+      b.oledCareEnrolled = true
+      a.resetOledCare()
+      #expect(a.oledCareEnrolled == false)
+      #expect(b.oledCareEnrolled == true)
+    }
+  }
 }

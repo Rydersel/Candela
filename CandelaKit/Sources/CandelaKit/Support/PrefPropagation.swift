@@ -12,6 +12,9 @@
 ///   go through `BrightnessController.setHDRMode`.
 /// - `menuItemStyle`, `showTickMarks`, `longerDelay`: reserved keys with no
 ///   reader anywhere in Candela (D32). A row for them would be a lie.
+/// - `oledPanelSeconds`, `oledStandbySeconds`, `oledStandbyNoteDismissed`:
+///   accumulated usage and the note's dismissal, written by the hours tracker —
+///   engine state, not settings (same rule as `muted`).
 ///
 /// `pollingMode`, `pollingCount` (read at DDC-read time) and
 /// `separateCombinedScale` (read inside `step()`, at key time) ARE cases: the
@@ -35,6 +38,16 @@ public enum PrefName: String, Sendable, CaseIterable {
   case pollingMode, pollingCount
   // Per-display — display configuration (W2 SP1)
   case rememberDisplayMode, storedDisplayMode
+  // Per-display — OLED care (W3a). The accessor defaults ARE the Recommended
+  // preset. Two of these are the exception to the "raw values ARE the key
+  // names" rule above: `oledLockDim` and `oledHoursTracking` default to TRUE
+  // and so store INVERTED, under `oledLockDimOff`/`oledHoursTrackingOff`. The
+  // case names stay positive because a PrefName is a propagation identifier,
+  // not a key (precedent: the `forceSw` accessor is named `forceSoftware`).
+  case oledCareEnrolled, oledIdleDimSeconds, oledIdleDimLevel, oledLockDim
+  case oledBlackoutEnabled, oledBlackoutSeconds
+  case oledUnfocusedDimEnabled, oledUnfocusedDimSeconds, oledUnfocusedDimLevel
+  case oledHoursTracking
   // App-level — display arrangement (#13). `savedArrangements` names a FAMILY
   // of keys, one per topology signature, the way `storedDisplayMode` names one
   // per display identity — a layout is a statement about a display SET, not
@@ -56,6 +69,10 @@ public enum PrefEffect: Sendable, Hashable {
   case rebuildPanel // this pref also changes what the menu-bar panel renders
   case updateStatusItem // status-item visibility re-evaluation
   case recheckPermissions // Accessibility prompt re-check
+  /// `OledCareCoordinator.reapplyAfterPrefChange()`: re-arm the idle/blackout
+  /// timers and re-evaluate the care dim. Distinct from `.reapplyDimming` —
+  /// OLED care owns its own dimming leg and must not drag the DDC bus.
+  case reapplyOledCare
 }
 
 public enum PrefPropagation {
@@ -120,6 +137,12 @@ public enum PrefPropagation {
 
     case .forceSw:
       [.reapplyDimming, .rebuildPanel, .rearmTap]
+
+    case .oledCareEnrolled, .oledIdleDimSeconds, .oledIdleDimLevel, .oledLockDim,
+         .oledBlackoutEnabled, .oledBlackoutSeconds,
+         .oledUnfocusedDimEnabled, .oledUnfocusedDimSeconds, .oledUnfocusedDimLevel,
+         .oledHoursTracking:
+      [.reapplyOledCare]
     }
     return engine.union([.refreshUI])
   }

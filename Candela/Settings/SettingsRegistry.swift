@@ -44,6 +44,15 @@ enum SettingsRegistry {
         id: id, title: "Arrangement", symbol: "rectangle.3.group", tint: .teal,
         content: { AnyView(ArrangementPane()) }
       )
+    case .oledCare:
+      SettingsPaneDescriptor(
+        // NOT `display`: every per-display sidebar row already draws that
+        // glyph, so this row would be distinguished from them by tint alone —
+        // state by colour alone, which this repo does not do. `sun.min` reads
+        // as "reduce luminance", which is what the pane is for.
+        id: id, title: "OLED Care", symbol: "sun.min", tint: .orange,
+        content: { AnyView(OledCarePane()) }
+      )
     case .keyboard:
       SettingsPaneDescriptor(
         id: id, title: "Keyboard", symbol: "keyboard", tint: .indigo,

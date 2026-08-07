@@ -107,6 +107,10 @@ final class AppModel {
     gate: reconfigurationGate
   )
 
+  /// OLED care's timers and care dim (W3a). Owned here for `displayModes`'
+  /// reason — the idle timers must outlive whatever pane configured them.
+  @ObservationIgnored private(set) lazy var oledCare = OledCareCoordinator()
+
   /// App-level M4 prefs (startupAction, multiKeyboardVolume, showContrast)
   /// read through one DisplayPrefs like the engine does; the persistence key
   /// is irrelevant for unsuffixed accessors. Assigned in `init` rather than
