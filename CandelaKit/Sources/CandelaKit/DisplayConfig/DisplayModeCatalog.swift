@@ -61,8 +61,16 @@ public enum DisplayModeCatalog {
     }
   }
 
-  /// Everything, unfiltered and ungrouped. The escape hatch that stops us
-  /// being a nicer version of the thing users resent.
+  /// Everything, ungrouped. The escape hatch that stops us being a nicer
+  /// version of the thing users resent.
+  ///
+  /// "Everything" means every mode in the list it is handed — which is the
+  /// public CoreGraphics list plus whatever survived revelation's gates, not
+  /// every mode the two enumerations named. #110 settled that deliberately:
+  /// the wire-timing guard filters here as well as in `curated`, rather than
+  /// annotating, because a mode that scans out cropped is not an option a
+  /// full list owes anybody. The `wireTimingGuard` default (D26) is what
+  /// brings those back.
   public static func full(_ modes: [DisplayMode]) -> [DisplayMode] {
     modes.sorted {
       if $0.logicalArea != $1.logicalArea { return $0.logicalArea > $1.logicalArea }

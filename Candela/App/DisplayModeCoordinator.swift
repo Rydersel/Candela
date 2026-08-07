@@ -81,6 +81,11 @@ final class DisplayModeCoordinator {
     /// full list has to answer `isScaled` per mode, and only the curated rows
     /// carry a precomputed answer.
     let nativePixels: PixelSize?
+    /// How many revealed modes the #110 wire-timing guard withheld. Reported
+    /// rather than merely applied: modes vanishing with no account is the same
+    /// silence we refuse elsewhere (CR11), and on the hardware pass this count
+    /// is what distinguishes "the guard fired" from "revelation found nothing".
+    let withheldForWireTiming: Int
 
     var nativeKnown: Bool { nativePixels != nil }
   }
@@ -179,6 +184,10 @@ final class DisplayModeCoordinator {
   /// reported in diagnostics rather than silently indistinguishable from a
   /// panel that simply has no hidden modes.
   var revealsHiddenModes: Bool { configurator.revealsHiddenModes }
+
+  /// #110. Zero withheld modes means something different depending on this, so
+  /// the two are always reported together.
+  var guardsWireTiming: Bool { configurator.guardsWireTiming }
 
   /// AR12. Held from just before `begin()` until nothing is outstanding, so no
   /// other display-reconfiguring feature can move a display out from under a
@@ -322,7 +331,8 @@ final class DisplayModeCoordinator {
       all: all,
       current: configurator.currentMode(for: displayID),
       distinctLogicalSizes: Set(all.map { LogicalSize(mode: $0) }).count,
-      nativePixels: native.map { PixelSize(width: $0.width, height: $0.height) }
+      nativePixels: native.map { PixelSize(width: $0.width, height: $0.height) },
+      withheldForWireTiming: configurator.modesWithheldByWireTimingGuard(for: displayID)
     )
   }
 

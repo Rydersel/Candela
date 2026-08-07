@@ -253,6 +253,19 @@ public protocol DisplayConfiguring: Sendable {
   /// capability-answer shape as `canRotate` below.
   var revealsHiddenModes: Bool { get }
 
+  /// Whether the #110 wire-timing guard is active. Off only by the documented
+  /// `defaults write` escape hatch, and worth surfacing precisely because a
+  /// disabled guard is the state in which the picker can offer a mode that
+  /// scans out cropped.
+  var guardsWireTiming: Bool { get }
+
+  /// How many revealed modes the guard withheld for this display.
+  ///
+  /// Zero is ambiguous alone — nothing to withhold reads the same as a guard
+  /// that is off — so a caller reporting this must report `guardsWireTiming`
+  /// with it.
+  func modesWithheldByWireTimingGuard(for displayID: CGDirectDisplayID) -> Int
+
   /// Whether this build can rotate displays at all.
   ///
   /// **RT5** — a missing private symbol is a capability answer, not a crash. When

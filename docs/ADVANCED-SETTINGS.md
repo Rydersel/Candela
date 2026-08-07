@@ -44,8 +44,8 @@ edits through the app's pref-change seam, which re-arms the key tap, re-applies
 dimming, rebuilds the panel and refreshes the menu bar item as each pref
 requires; a write from the command line arrives with no such signal. So a key
 that is consulted fresh on every use (`pollingMode`, `pollingCount`,
-`separateCombinedScale`) takes effect at the next read or keypress, while one
-whose effect has to be *re-applied* (`combinedSwitchingPoint`, `curveDDC`,
+`separateCombinedScale`, `wireTimingGuard`) takes effect at the next read or
+keypress, while one whose effect has to be *re-applied* (`combinedSwitchingPoint`, `curveDDC`,
 `remapDDC`) sits in the domain looking ignored until something else re-applies
 it. Relaunching removes the distinction, which is why it is the rule rather
 than a caveat.
@@ -59,6 +59,7 @@ than a caveat.
 | Key | Type | Default | Effect |
 |---|---|---|---|
 | `separateCombinedScale` | Bool | `NO` | Changes how far one press of a **brightness key** moves the slider while combined hardware+software dimming is active: 32 steps across the whole range instead of the usual 16. Fine steps are unaffected: a fine press is a flat ±0.01 on both scales, so this does nothing on a fine press. Fine is the EXCLUSIVE OR of the setting and the modifier (`KeyRouter`: holding Shift+Option toggles whatever "Fine steps for brightness and contrast" says), so this key applies whenever neither or BOTH of them are in play, and does nothing when exactly one is. The on-and-held case is a coarse press and this key governs it. Sliders are unaffected. Ignored unless the display is actually on the combined path: no effect with "Dim past the display's minimum" off, with hardware control off for that display, or on the built-in display. **Has a control:** Keyboard → Precision → *Extra-fine steps while combined dimming is active*. |
+| `wireTimingGuard` | Bool | `YES` | Whether to withhold extra resolutions whose refresh rate the display advertises no full-width timing for. **Leave this on unless you know you need it.** Some displays bind such a mode to an unrelated timing and scan the desktop out letterboxed or cropped — measured on an MSI MAG 341C, where the 3440×1440 HiDPI mode at 120 Hz arrived as 2560×1440 and cut off the right quarter of the screen, with macOS reporting success throughout. Set it to `NO` if your display is missing extra resolutions you know it can show; the modes reappear in both the resolution picker and the full list. Whatever this is set to, a resolution change still has to be confirmed before it sticks, so a bad mode reverts on its own. Settings → *(your display)* → Diagnostics reports how many modes are being withheld, and says `Unsupported-timing check: Off` when this is `NO`. |
 
 ## Per-display (`<key>.<persistenceKey>`)
 

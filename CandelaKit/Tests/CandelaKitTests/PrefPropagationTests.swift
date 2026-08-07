@@ -33,6 +33,10 @@ struct PrefPropagationTests {
     #expect(PrefName(rawValue: "menuItemStyle") == nil)
     #expect(PrefName(rawValue: "showTickMarks") == nil)
     #expect(PrefName(rawValue: "longerDelay") == nil)
+    // #110's escape hatch has no UI by design (D26) — being read at use is not
+    // the reason (`pollingMode` is read at use and IS a case); having no pane
+    // to write it through is. Nothing can route a change, so it gets no row.
+    #expect(PrefName(rawValue: "wireTimingGuard") == nil)
   }
 
   @Test func oledEngineStateIsNotAPrefName() {

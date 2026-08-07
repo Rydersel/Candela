@@ -558,6 +558,29 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: "hideBuiltInDisplay") }
   }
 
+  /// D26 escape hatch for #110, with NO UI by design. Default ON, so the
+  /// stored form is the override rather than the setting: an absent key means
+  /// guarded.
+  ///
+  /// Off, the mode picker again offers revealed modes at refreshes the panel
+  /// has no native-width timing for — measured to scan out pillarboxed and
+  /// cropped on the MAG 341C. It exists because the rule is inferred from ONE
+  /// panel family's behaviour: a display the rule misjudges would otherwise
+  /// lose good modes with no way back short of a new build.
+  /// `object(forKey:)` decides only PRESENCE; `bool(forKey:)` reads the value.
+  /// Casting the object to `Bool` instead looks equivalent and is not: the cast
+  /// fails on `defaults write … wireTimingGuard NO`, which stores the STRING
+  /// "NO", and the hatch would then silently do nothing for anyone who omitted
+  /// `-bool`. Measured while verifying this key on hardware. `bool(forKey:)`
+  /// coerces "NO", "0" and `0` the way every other pref here already does.
+  public var wireTimingGuard: Bool {
+    get {
+      defaults.object(forKey: "wireTimingGuard") == nil
+        ? true : defaults.bool(forKey: "wireTimingGuard")
+    }
+    set { defaults.set(newValue, forKey: "wireTimingGuard") }
+  }
+
   // App-level keys. The key strings are shipped schema — never rename them.
 
   public var enableBrightnessSync: Bool {
