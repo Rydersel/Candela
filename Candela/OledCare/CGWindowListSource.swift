@@ -1,6 +1,7 @@
 import CandelaKit
 import CoreGraphics
 import Foundation
+import os
 
 /// `WindowListing` over `CGWindowListCopyWindowInfo` — the permission-free half
 /// of W3b's telemetry. It reports geometry and owning application only; it
@@ -39,10 +40,63 @@ struct CGWindowListSource: WindowListing {
     let ourPID = ProcessInfo.processInfo.processIdentifier
     let displayOrigin = CGDisplayBounds(displayID).origin
 
+    logFieldAvailabilityOnce(info, ourPID: ourPID)
+
     return info.compactMap { entry in
       snapshot(from: entry, excludingPID: ourPID, relativeTo: displayOrigin)
     }
   }
+
+  /// Once per launch: does the window server hand us owner names without a
+  /// Screen Recording grant?
+  ///
+  /// The whole permission-free half of OLED care rests on yes, and it is a
+  /// platform behaviour we do not control — so this is permanent telemetry
+  /// about whether telemetry can work, not a debug switch. It stays useful the
+  /// day a macOS release changes the rules and the health view quietly loses
+  /// every app name.
+  ///
+  /// **Read it only from an `open`-launched instance.** TCC attributes a
+  /// capture check to the *responsible* process, so running the executable
+  /// straight from a shell inherits the terminal's grant and reports
+  /// `preflight=true` for a build whose own grant is revoked
+  /// [MEASURED 2026-08-07, same bundle both ways].
+  private func logFieldAvailabilityOnce(_ info: [[String: Any]], ourPID: Int32) {
+    let first = Self.diagnosticLogged.withLock { logged -> Bool in
+      if logged { return false }
+      logged = true
+      return true
+    }
+    guard first else { return }
+
+    // Counted before `snapshot` filters, which drops a window that has no
+    // owner name — counting after would report 100% by construction.
+    var foreign = 0, named = 0, bounded = 0
+    for entry in info {
+      guard let pid = (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+        pid != ourPID
+      else { continue }
+      foreign += 1
+      if entry[kCGWindowOwnerName as String] as? String != nil { named += 1 }
+      if entry[kCGWindowBounds as String] != nil { bounded += 1 }
+    }
+
+    Self.log.notice(
+      """
+      window-list field availability: screenRecordingGranted=\
+      \(CGPreflightScreenCaptureAccess(), privacy: .public) \
+      foreign=\(foreign, privacy: .public) \
+      withOwnerName=\(named, privacy: .public) \
+      withBounds=\(bounded, privacy: .public)
+      """)
+  }
+
+  private static let log = Logger(subsystem: "com.rydersel.Candela", category: "oledcare")
+
+  /// `OSAllocatedUnfairLock` rather than a `nonisolated(unsafe)` flag: the
+  /// protocol method is not actor-isolated, and one source per display means
+  /// concurrent first calls are possible.
+  private static let diagnosticLogged = OSAllocatedUnfairLock(initialState: false)
 
   /// Windows outside this display are deliberately kept: the caller decides
   /// what intersects (Task 8), and `PanelSpaceTransform` clips anything that
