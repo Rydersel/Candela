@@ -121,4 +121,48 @@ struct OwnerHoursAccumulatorTests {
     let data = try JSONEncoder().encode(acc.hours)
     #expect(try JSONDecoder().decode(OwnerHours.self, from: data) == acc.hours)
   }
+
+  /// A round trip passes under ANY rename, because it encodes and decodes with
+  /// the same build. These strings are the on-disk schema (§4), and they used
+  /// to be synthesised from the property names, so the rename this file's own
+  /// doc comment invites (`secondsByOwner` holds seconds under a type called
+  /// `OwnerHours`) would have silently stranded every stored blob.
+  @Test func theEncodedKeyNamesAreTheOnDiskSchema() throws {
+    var acc = OwnerHoursAccumulator()
+    acc.accumulate(
+      observation([String?](repeating: "Slack", count: PanelGrid.cellCount)),
+      elapsed: 60)
+    let data = try JSONEncoder().encode(acc.hours)
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(object["secondsByOwner"] != nil)
+    #expect(object["totalSeconds"] != nil)
+    #expect(object["schemaVersion"] as? Int == OledStoreSchema.currentVersion)
+  }
+
+  @Test func decodingANewerSchemaIsRefusedRatherThanGuessedAt() throws {
+    let data = try JSONEncoder().encode(OwnerHours.empty)
+    var future = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    future["schemaVersion"] = OledStoreSchema.currentVersion + 1
+    let futureData = try JSONSerialization.data(withJSONObject: future)
+    #expect(
+      throws: OledStoreDecodeFailure.unsupportedVersion(
+        found: OledStoreSchema.currentVersion + 1,
+        supported: OledStoreSchema.currentVersion)
+    ) {
+      try JSONDecoder().decode(OwnerHours.self, from: futureData)
+    }
+  }
+
+  @Test func aStoreWithNoVersionFieldDecodesAsVersionOne() throws {
+    var acc = OwnerHoursAccumulator()
+    acc.accumulate(
+      observation([String?](repeating: "Slack", count: PanelGrid.cellCount)),
+      elapsed: 60)
+    let data = try JSONEncoder().encode(acc.hours)
+    var legacy = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    legacy.removeValue(forKey: "schemaVersion")
+    let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+
+    #expect(try JSONDecoder().decode(OwnerHours.self, from: legacyData) == acc.hours)
+  }
 }

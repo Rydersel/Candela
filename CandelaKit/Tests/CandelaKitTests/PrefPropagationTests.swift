@@ -84,7 +84,7 @@ struct PrefPropagationTests {
     // from the enum, not arithmetic on the two claims.
     #expect(PrefName.oledTelemetry.rawValue == "oledTelemetry")
     #expect(PrefName.oledWindowObservation.rawValue == "oledWindowObservation")
-    #expect(PrefName.allCases.count == 52)
+    #expect(PrefName.allCases.count == 53)
   }
 
   // MARK: - Rows
@@ -178,6 +178,7 @@ struct PrefPropagationTests {
       .oledBlackoutEnabled, .oledBlackoutSeconds,
       .oledUnfocusedDimEnabled, .oledUnfocusedDimSeconds, .oledUnfocusedDimLevel,
       .oledHoursTracking, .oledTelemetry, .oledWindowObservation,
+      .oledDetectionDimming,
     ]
     for name in oled {
       #expect(PrefPropagation.effects(forChange: name).contains(.reapplyOledCare), "\(name.rawValue)")

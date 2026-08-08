@@ -80,6 +80,20 @@ final class OledCareCoordinator {
     /// applied state). nil = no overlay wanted. This is what OC12 verifies.
     var lastAppliedAlpha: Double?
     var lastAppliedBlackout = false
+    var lastAppliedMask: OverlayMask.Oriented?
+    /// #20. Off by default, so an enrolled display that never opts in pays
+    /// nothing past the flag test in `render`.
+    var detectionDimmingEnabled = false
+    /// This tick's display-sleep assertion reading, carried so `render` can
+    /// apply spec §4's "same assertion gate as idle dimming" to #20. The engine
+    /// gates its own states on it, but `.active` never passes through
+    /// `mayShow`, and `.active` is exactly when detection dimming runs.
+    var assertionHeld = false
+    /// The current nomination in PANEL space, recomputed only when a new
+    /// luminance sample lands. Nil means "nothing qualifies", which is
+    /// deliberately distinguishable from an all-zero mask: the render then
+    /// skips the mask path entirely and keeps the cheaper scalar one.
+    var nominatedMask: OverlayMask?
     /// OC12: the last render mutated window-server state; verify it on a
     /// LATER tick than the one that mutated.
     var needsVerify = false
@@ -149,6 +163,10 @@ final class OledCareCoordinator {
   /// Keyed by persistenceKey; created lazily and kept for the app's lifetime —
   /// hours are persistent facts about a panel, not about a connection.
   @ObservationIgnored private var trackers: [String: PanelHoursTracker] = [:]
+  /// OC20's wear signal, one per panel, keyed and reset exactly like `trackers`
+  /// because it measures the same thing about the same glass: how long, and now
+  /// also at what level.
+  @ObservationIgnored private var wearTrackers: [String: WearSignalTracker] = [:]
   @ObservationIgnored private let sampler = LuminanceSampler()
   /// Accumulated exposure per panel, by persistenceKey, restored from disk on
   /// first touch and kept for the app's lifetime — wear is a fact about a
@@ -179,6 +197,12 @@ final class OledCareCoordinator {
   @ObservationIgnored private var observers: [String: WindowObserver] = [:]
   /// Displays whose accumulated map has changed since the last write-through.
   @ObservationIgnored private var unsavedExposureKeys: Set<String> = []
+  /// Keys whose stored wear history this build could not interpret but which
+  /// are NOT junk: a newer schema, or a different `PanelGrid`. Nothing is
+  /// written back for them, so a later build can still migrate the bytes.
+  /// Cleared only by the user's own delete, which is the one action that means
+  /// "I do not want this history".
+  @ObservationIgnored private var unwritableExposureKeys: Set<String> = []
   @ObservationIgnored private var lastExposurePersist: SuspendingClock.Instant?
   /// Bumped by anything that destroys accumulated exposure. A capture issued
   /// before the bump lands after it, and would otherwise re-book an interval
@@ -313,6 +337,44 @@ final class OledCareCoordinator {
     return tracker
   }
 
+  /// Same single-instance rule as `hoursTracker`, for the same reason: two live
+  /// trackers over one key double-book every tick, and this one feeds a
+  /// multi-week soak where a 2× error is indistinguishable from a real result.
+  func wearTracker(for persistenceKey: String) -> WearSignalTracker {
+    if let existing = wearTrackers[persistenceKey] { return existing }
+    let tracker = WearSignalTracker(persistenceKey: persistenceKey)
+    wearTrackers[persistenceKey] = tracker
+    return tracker
+  }
+
+  /// The proxy OC20 accumulates against: the fraction of full output the panel
+  /// is left at, composing the overlay's retained fraction with the brightness
+  /// setting.
+  ///
+  /// `.lockDim` reads its factor explicitly rather than through `alpha(for:)`,
+  /// which answers nil there by design: the lock dim is delivered on the wire
+  /// and deliberately never writes `controller.brightness` or the store, so the
+  /// controller reports the user's own setting for the whole locked span. Using
+  /// the alpha path would book every locked hour at full brightness.
+  ///
+  /// Reasoned, not measured. It ignores the panel's EOTF and any local dimming,
+  /// which is why OC20 also stores the dim-state axis as an independent,
+  /// model-free answer to OC17's gate.
+  static func effectiveLevel(
+    state: OledDimState, engine: IdleDimmingEngine, brightness: Double
+  ) -> Double {
+    guard brightness.isFinite else { return 0 }
+    switch state {
+    case .blackout: return 0
+    case .lockDim: return brightness * engine.lockDimFactor
+    case .idleDim, .unfocusedDim:
+      // `alpha` is how much we cover the panel with; what is left is its
+      // complement, which is the config's own "how bright it is LEFT" number.
+      return brightness * (1 - (engine.alpha(for: state) ?? 0))
+    case .active, .suspended: return brightness
+    }
+  }
+
   /// The health view's one door (W3b-1 Task 9). Safe for a display that is not
   /// enrolled, not connected, or has never been sampled: the map is restored
   /// from disk on first touch and `.empty` answers everything honestly.
@@ -329,14 +391,16 @@ final class OledCareCoordinator {
   func healthSummary(for persistenceKey: String) -> PanelHealthSummary {
     let map = accumulators[persistenceKey]?.map ?? loadExposureMap(for: persistenceKey)
     let owners = ownerHours[persistenceKey]?.hours ?? loadOwnerHours(for: persistenceKey)
-    let telemetry = states[persistenceKey]?.telemetryEnabled
-      ?? DisplayPrefs(persistenceKey: persistenceKey).oledTelemetry
+    let prefs = DisplayPrefs(persistenceKey: persistenceKey)
+    let telemetry = states[persistenceKey]?.telemetryEnabled ?? prefs.oledTelemetry
+    let observing = states[persistenceKey]?.windowObservationEnabled
+      ?? prefs.oledWindowObservation
     return PanelHealthSummary.make(
       map: map,
       observation: latestObservations[persistenceKey],
       ownerHours: owners,
       telemetryEnabled: telemetry,
-      sampleCount: map.sampleCount)
+      observationEnabled: observing)
   }
 
   /// The health view's delete action: the accumulated exposure map, the
@@ -355,6 +419,9 @@ final class OledCareCoordinator {
     ownerHours[persistenceKey] = OwnerHoursAccumulator()
     forgetWindowObservation(for: persistenceKey)
     unsavedExposureKeys.remove(persistenceKey)
+    // The bytes were held back precisely because destroying them was not the
+    // user's call. It is now.
+    unwritableExposureKeys.remove(persistenceKey)
     UserDefaults.standard.removeObject(forKey: Self.exposureKeyName(persistenceKey))
     UserDefaults.standard.removeObject(forKey: Self.ownerHoursKeyName(persistenceKey))
   }
@@ -417,6 +484,10 @@ final class OledCareCoordinator {
     // which would otherwise land in a fresh map after the wipe.
     exposureEpoch += 1
     unsavedExposureKeys.removeAll()
+    // The wipe removes the stored bytes the quarantine existed to protect, so
+    // holding the flag past it would leave a display recording nothing forever
+    // over a file that is already gone.
+    unwritableExposureKeys.removeAll()
     accumulators.removeAll()
     ownerHours.removeAll()
     observers.removeAll()
@@ -435,6 +506,20 @@ final class OledCareCoordinator {
     states = [:]
     dimStates = [:]
     for tracker in trackers.values { tracker.reset() }
+    // Same reason, same moment: a live wear tracker's debounced write-through
+    // would re-persist the histogram the wipe just removed.
+    //
+    // DISCARDED as well as reset, unlike `trackers`, because `flush()` writes
+    // unconditionally. `reset()` alone removes both keys and then leaves the
+    // object here, so the first sleep or quit AFTER the latch clears calls
+    // `flush()` on it and re-creates `oledWearSeconds`/`oledWearSchema` as an
+    // all-zero histogram, which is exactly what `reset()` promises not to leave
+    // behind. Matches how `accumulators` and `ownerHours` are handled below.
+    // (A `guard !resetting` in `flushExposureHistory` does NOT fix this: every
+    // caller is already excluded by the latch, so the hazard is entirely on the
+    // far side of it.)
+    for tracker in wearTrackers.values { tracker.reset() }
+    wearTrackers.removeAll()
   }
 
   /// The post-wipe half of the reset contract (paired with
@@ -511,6 +596,31 @@ final class OledCareCoordinator {
         existing.hoursTracking = tracking
         existing.telemetryEnabled = prefs.oledTelemetry
         existing.windowObservationEnabled = prefs.oledWindowObservation
+        // Turning #20 off must drop the nomination, not merely stop consulting
+        // it. A retained mask would come straight back on the next re-enable
+        // built from a screen the user has since changed, and until then it
+        // would sit in the state as a live-looking value nothing updates: the
+        // same shape as the stale `hottestOwner` this wave already had to fix.
+        existing.detectionDimmingEnabled = prefs.oledDetectionDimming
+        // Dropped when EITHER producer stops, not just when #20 itself is
+        // switched off. `renominate` only runs when a luminance sample lands,
+        // so with telemetry off it is never called again and the last
+        // nomination would be rendered indefinitely, dimming regions of a
+        // screen the user changed hours ago; with observation off the
+        // staticness half freezes the same way. The pane says "without them
+        // nothing is dimmed", and this is what makes that true.
+        let hasProducers = existing.telemetryEnabled && existing.windowObservationEnabled
+        if !existing.detectionDimmingEnabled || !hasProducers {
+          existing.nominatedMask = nil
+        }
+        // The window ages go with it. `WindowObserver` holds a per-window
+        // "unchanged since" instant, and that clock keeps running while
+        // observation is off: a window that never moved, or moved and moved
+        // back, would read as stationary for the whole unobserved span and
+        // could be nominated on the first sample after re-enabling. Same
+        // staleness the nomination drop above exists to prevent, one layer
+        // down.
+        if !existing.windowObservationEnabled { forgetWindowObservation(for: key) }
         states[key] = existing
       } else {
         states[key] = PerDisplay(
@@ -519,7 +629,8 @@ final class OledCareCoordinator {
           hoursTracking: prefs.oledHoursTracking,
           telemetryEnabled: prefs.oledTelemetry,
           windowObservationEnabled: prefs.oledWindowObservation,
-          lastDisplayID: displayState.id
+          lastDisplayID: displayState.id,
+          detectionDimmingEnabled: prefs.oledDetectionDimming
         )
       }
     }
@@ -648,6 +759,10 @@ final class OledCareCoordinator {
         state.unfocusedSince = nil
       }
 
+      // Carried onto the state so `render` can apply the same gate to #20,
+      // which runs in `.active` and so never passes through the engine's own.
+      state.assertionHeld = assertionHeld
+
       let newState = state.engine.tick(OledDimSignals(
         idleSeconds: idleSeconds,
         assertionHeld: assertionHeld,
@@ -679,9 +794,21 @@ final class OledCareCoordinator {
       if state.hoursTracking {
         if state.wasAwake, !awake { hoursTracker(for: key).noteStandby() }
         if awake, !isMirrored, let last = state.hoursLastTick {
+          let elapsed = Self.seconds(now - last)
           hoursTracker(for: key).noteTick(
-            displayAwake: true, secondsSinceLastTick: Self.seconds(now - last)
+            displayAwake: true, secondsSinceLastTick: elapsed
           )
+          // OC20 rides the SAME gate and the SAME delta as panel hours, so the
+          // two counters cannot disagree about how long a panel was on. That is
+          // also why `.suspended` never accumulates here: a mirrored display
+          // books nothing in either counter (OC13), and the slot exists only so
+          // the on-disk state ordering stays stable.
+          wearTracker(for: key).noteTick(
+            dimState: newState,
+            effectiveLevel: Self.effectiveLevel(
+              state: newState, engine: state.engine,
+              brightness: displayState.controller.brightness),
+            secondsSinceLastTick: elapsed)
         }
       }
       state.wasAwake = awake
@@ -867,24 +994,110 @@ final class OledCareCoordinator {
   // MARK: - Rendering (with the two funcs below, the ONLY overlay callers)
 
   /// THE render funnel: every overlay apply in this type goes through here.
+  ///
+  /// **The mask carries ABSOLUTE per-cell opacity, and `alpha` goes to 1 when
+  /// one is present.** `contentView.alphaValue` multiplies the layer, mask
+  /// included, so passing the dim state's own alpha alongside a mask would
+  /// scale every nominated cell down by it: an idle dim of 0.5 with a 0.15
+  /// nomination would render 0.075 in the region and, worse, **zero everywhere
+  /// else**, silently deleting the uniform dim the user actually asked for.
+  /// Composing to absolutes and handing the whole thing over as the mask is the
+  /// only arrangement where both survive.
   private func render(_ dimState: OledDimState, into state: inout PerDisplay, on id: CGDirectDisplayID) {
-    let alpha = state.engine.alpha(for: dimState)
+    let stateAlpha = state.engine.alpha(for: dimState)
     let blackout = dimState == .blackout
-    guard overlay.apply(alpha: alpha, blackout: blackout, on: id) else {
+    // `.active` DOES compose: #20 is the one care feature that runs while the
+    // user is working, so it can require an overlay in a state whose own alpha
+    // is nil and which would otherwise have no window at all. Four cases do
+    // not, each for its own reason:
+    //   `.blackout`: OC17's rule, and there is no luminance left to spend.
+    //   `.suspended`: OC13. Produced ONLY by mirroring, and suspended means
+    //     suspended. Without it a mirror-set participant keeps an overlay up
+    //     carrying a nomination computed before mirroring, which `renominate`
+    //     can never refresh because `samplingQualifies` requires `.active`.
+    //   `.lockDim`: delivered on the wire, not by the overlay (A-16 measured
+    //     that a shielding window does not render above the lock screen), so a
+    //     mask here would be an overlay nobody could see.
+    //   assertion held: spec §4 gives #20 "the same assertion gate as idle
+    //     dimming". A video player or a presentation holding a display-sleep
+    //     assertion must not have its window dimmed under it, and `.active`
+    //     never passes through the engine's own `mayShow`, so the gate has to
+    //     be applied here.
+    let excluded = blackout || dimState == .suspended || dimState == .lockDim
+    let nomination =
+      (state.detectionDimmingEnabled && !excluded && !state.assertionHeld)
+      ? state.nominatedMask : nil
+
+    var alpha = stateAlpha
+    var mask: OverlayMask.Oriented?
+    if let nomination, let transform = Self.transform(for: id) {
+      let composed = OverlayMask.uniform(stateAlpha ?? 0).darkened(by: nomination)
+      if composed.isUniform {
+        // **Collapse to the scalar path with the COMPOSED level, never to
+        // `alpha = 1.0` with no mask.** A uniform composition is reachable
+        // whenever every cell is nominated, and the overlay cannot make this
+        // decision for us because `alpha`'s meaning depends on the mask being
+        // there. Getting this wrong painted the panel opaque black.
+        let level = composed.peak
+        alpha = level > 0 ? level : stateAlpha
+      } else {
+        mask = composed.displayOriented(through: transform)
+        // Safe ONLY because a mask is going with it, carrying absolute
+        // per-cell opacity that this multiplies by 1.
+        alpha = 1.0
+      }
+    }
+
+    guard overlay.apply(alpha: alpha, mask: mask, blackout: blackout, on: id) else {
       // No NSScreen matched: nothing reached the screen, so there is nothing
       // to verify and no state to memoise — the next tick retries, and the
       // overlay rate-limits its own warning.
       state.lastAppliedAlpha = nil
       state.lastAppliedBlackout = false
+      state.lastAppliedMask = nil
       return
     }
-    if alpha != state.lastAppliedAlpha || blackout != state.lastAppliedBlackout {
+    if alpha != state.lastAppliedAlpha || blackout != state.lastAppliedBlackout
+      || mask != state.lastAppliedMask {
       // The window server actually moved (or will, a run-loop turn from now).
+      // The mask is in this test because `write` re-orders the window on every
+      // state change, mask included, so a mask-only change is still something
+      // OC12 has to verify landed.
       state.needsVerify = true
       state.verifyAttempts = 0
       state.lastAppliedAlpha = alpha
       state.lastAppliedBlackout = blackout
+      state.lastAppliedMask = mask
     }
+  }
+
+  /// Recomputes #20's nomination for one display. Called when a new luminance
+  /// sample lands, which is the only thing that can change the answer.
+  ///
+  /// Stored in PANEL space, not display space: the render composes it with the
+  /// uniform dim and orients the result, so keeping it panel-side means one
+  /// orientation per render instead of one here plus a re-orientation whenever
+  /// the display rotates under a cached mask.
+  private func renominate(
+    for key: String, grid: [Double], cols: Int, rows: Int, through transform: PanelSpaceTransform
+  ) {
+    guard states[key]?.detectionDimmingEnabled == true else {
+      states[key]?.nominatedMask = nil
+      return
+    }
+    guard states[key]?.windowObservationEnabled == true,
+      let observation = latestObservations[key]
+    else {
+      // No window list means no staticness prior, and the conjunction is the
+      // feature. The pref is checked as well as the value: a retained
+      // observation from before the user switched it off is exactly as stale
+      // as the nomination it would produce.
+      states[key]?.nominatedMask = nil
+      return
+    }
+    let panelGrid = transform.panelNativeGrid(fromDisplayGrid: grid, cols: cols, rows: rows)
+    states[key]?.nominatedMask = StaticRegionDetector.nominate(
+      recentGrid: panelGrid, observation: observation, thresholds: .default)
   }
 
   /// OC12 reconcile, one tick after a mutation. True when the window server
@@ -991,6 +1204,24 @@ final class OledCareCoordinator {
   /// display with `oledLockDim` off sits at `.active`, and spec §4 skips it
   /// regardless. Sleep and battery are the two conditions the engine takes no
   /// input from at all.
+  ///
+  /// **`CGDisplayIsAsleep` cannot see a panel blanked at the monitor itself,
+  /// and this gate inherits that hole (#94, MEASURED).** A DPMS-off panel stays
+  /// in both display lists, keeps `CGDisplayIsAsleep` false and reports full
+  /// resolution, so the check below passes over a dark panel and a capture
+  /// returns the still-composited framebuffer. The hours counter has the same
+  /// hole and documents it ~300 lines above; the consequence here is worse in
+  /// kind rather than in degree. Hours over-count by a scalar, while the
+  /// exposure map and the per-app attribution book wear against SPECIFIC cells
+  /// and SPECIFIC apps that emitted nothing, and both are persisted.
+  ///
+  /// Bounded, not fixed, because §2 says a blanked panel is indistinguishable
+  /// at every layer we can observe and does not self-recover. What bounds it is
+  /// HID idle time: with nobody typing, the engine leaves `.active` at the idle
+  /// threshold and sampling stops. **The uncovered case is a second display**,
+  /// where the user works on one panel while the other sits blanked, holding
+  /// idle at zero and this one at `.active` indefinitely. Do not "fix" this
+  /// with a readback or a DPMS probe; see #94 and §2.
   private func samplingQualifies(dimState: OledDimState, on id: CGDirectDisplayID) -> Bool {
     guard !resetting, dimState == .active, !lockObserver.isLocked else { return false }
     guard CGDisplayIsAsleep(id) == 0 else { return false }
@@ -1103,6 +1334,11 @@ final class OledCareCoordinator {
     }
     accumulators[key] = accumulator
     unsavedExposureKeys.insert(key)
+    // #20 nominates off the sampling clock, not the 10 Hz tick: the grid it
+    // reads changes once a minute, so re-nominating per tick would burn CPU to
+    // reach the same answer 600 times.
+    renominate(for: key, grid: sample.grid, cols: sample.cols, rows: sample.rows,
+               through: transform)
     log.debug("""
     OLED care: exposure sample accepted for display \(id, privacy: .public) \
     (\(accumulator.map.sampleCount, privacy: .public) total)
@@ -1143,12 +1379,25 @@ final class OledCareCoordinator {
   /// BY DESIGN — decoding it would hand the health view a map that traps the
   /// first time it is indexed — so an unreadable store starts over rather than
   /// propagating.
+  ///
+  /// **Starting over is destructive, so what it may start over FROM is
+  /// narrow.** Returning `.empty` here does not merely lose the history in
+  /// memory: the next accepted sample marks the key dirty and
+  /// `saveExposureHistory` encodes the empty map straight over the stored one,
+  /// inside a minute. That is correct for malformed JSON, which is junk. It is
+  /// not correct for a store written by a newer build or laid out for a
+  /// different grid, which is intact history a later build could migrate, so
+  /// `OledStoreDecodeFailure` quarantines the key instead and nothing is
+  /// written back for it.
   private func loadExposureMap(for key: String) -> ExposureMap {
     guard let data = UserDefaults.standard.data(forKey: Self.exposureKeyName(key)) else {
       return .empty
     }
     do {
       return try JSONDecoder().decode(ExposureMap.self, from: data)
+    } catch let failure as OledStoreDecodeFailure {
+      quarantine(key, reason: "exposure map", failure: failure)
+      return .empty
     } catch {
       log.error("""
       OLED care: stored exposure map for \(key, privacy: .public) is unreadable \
@@ -1160,13 +1409,19 @@ final class OledCareCoordinator {
 
   /// Reads back as `.empty` on anything unreadable, `loadExposureMap`'s reason
   /// scaled down: a per-owner total nobody can decode is not worth propagating
-  /// a failure over, and starting the series again is honest.
+  /// a failure over, and starting the series again is honest. The quarantine
+  /// split is NOT scaled down — the two stores share one dirty set and one
+  /// write, so holding one back while overwriting the other would leave a
+  /// display's history half-migrable.
   private func loadOwnerHours(for key: String) -> OwnerHours {
     guard let data = UserDefaults.standard.data(forKey: Self.ownerHoursKeyName(key)) else {
       return .empty
     }
     do {
       return try JSONDecoder().decode(OwnerHours.self, from: data)
+    } catch let failure as OledStoreDecodeFailure {
+      quarantine(key, reason: "per-app hours", failure: failure)
+      return .empty
     } catch {
       log.error("""
       OLED care: stored per-app hours for \(key, privacy: .public) are unreadable \
@@ -1174,6 +1429,15 @@ final class OledCareCoordinator {
       """)
       return .empty
     }
+  }
+
+  private func quarantine(_ key: String, reason: String, failure: OledStoreDecodeFailure) {
+    unwritableExposureKeys.insert(key)
+    log.error("""
+    OLED care: stored \(reason, privacy: .public) for \(key, privacy: .public) was written by a \
+    schema this build does not read (\(String(describing: failure), privacy: .public)); keeping \
+    the stored bytes and recording nothing new for this display until its history is deleted
+    """)
   }
 
   private func persistExposureHistoryIfDue(at now: SuspendingClock.Instant) {
@@ -1184,8 +1448,14 @@ final class OledCareCoordinator {
   }
 
   /// The undebounced write: termination, system sleep, and a display leaving.
+  ///
+  /// OC20's histogram rides the same three moments. It debounces on the same
+  /// 60 s as panel hours, so without this a quit loses up to a minute per
+  /// display per launch, which over a multi-week soak is a systematic
+  /// undercount rather than noise.
   private func flushExposureHistory() {
     for key in unsavedExposureKeys { saveExposureHistory(for: key) }
+    for tracker in wearTrackers.values { tracker.flush() }
   }
 
   /// Both halves of a panel's exposure history — the per-cell map and the
@@ -1199,6 +1469,10 @@ final class OledCareCoordinator {
     // cannot be encoded now cannot be encoded on the next pass either, and
     // leaving the key dirty would retry it forever.
     guard unsavedExposureKeys.remove(key) != nil else { return }
+    // Quarantined: the stored bytes are history this build cannot read but a
+    // later one might. The dirty flag is still cleared above, so this display
+    // simply records nothing until the user deletes its history.
+    guard !unwritableExposureKeys.contains(key) else { return }
     if let map = accumulators[key]?.map {
       if let data = try? JSONEncoder().encode(map) {
         UserDefaults.standard.set(data, forKey: Self.exposureKeyName(key))

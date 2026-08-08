@@ -255,6 +255,18 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(!newValue, forKey: key("oledWindowObservationOff")) }
   }
 
+  /// Detection-driven region dimming (#20).
+  ///
+  /// **Off by default even for an enrolled display, and not in the Recommended
+  /// preset.** Every other care feature acts when the user is away or the
+  /// screen is locked; this one alters the screen while they are looking at it,
+  /// which makes it the only one where a wrong nomination is visible as a
+  /// defect rather than as protection. Opting in is the point.
+  public var oledDetectionDimming: Bool {
+    get { defaults.bool(forKey: key("oledDetectionDimming")) }
+    set { defaults.set(newValue, forKey: key("oledDetectionDimming")) }
+  }
+
   public var oledBlackoutEnabled: Bool {
     get { defaults.bool(forKey: key("oledBlackoutEnabled")) }
     set { defaults.set(newValue, forKey: key("oledBlackoutEnabled")) }
@@ -292,7 +304,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(!newValue, forKey: key("oledHoursTrackingOff")) }
   }
 
-  /// Returns this display to the Recommended preset by REMOVING the ten keys
+  /// Returns this display to the Recommended preset by REMOVING the thirteen keys
   /// rather than writing their current default values back.
   ///
   /// The difference is not cosmetic: the accessors above document that an
@@ -315,7 +327,7 @@ public final class DisplayPrefs: @unchecked Sendable {
       // reset. The accumulated exposure map is NOT cleared here, for the same
       // reason panel hours are not — it is wear data, not a setting, and it
       // has its own delete action in the panel health view.
-      "oledTelemetry", "oledWindowObservationOff",
+      "oledTelemetry", "oledWindowObservationOff", "oledDetectionDimming",
     ] {
       defaults.removeObject(forKey: key(name))
     }

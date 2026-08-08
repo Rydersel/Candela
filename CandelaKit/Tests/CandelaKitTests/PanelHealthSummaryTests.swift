@@ -45,14 +45,14 @@ struct PanelHealthSummaryTests {
 
   @Test func insufficientDataIsReportedAsSuch() {
     let summary = PanelHealthSummary.make(
-      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, sampleCount: 3)
+      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, observationEnabled: true)
     #expect(summary.confidence == .insufficient)
     #expect(summary.hottestRelative == nil)
   }
 
   @Test func telemetryOffIsEstimatedNotMeasured() {
     let summary = PanelHealthSummary.make(
-      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: false, sampleCount: 0)
+      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: false, observationEnabled: true)
     #expect(summary.confidence == .estimated)
   }
 
@@ -61,7 +61,7 @@ struct PanelHealthSummaryTests {
     let map = measuredMap(grid, samples: ExposureAccumulator.minimumSamplesForAnalysis)
     let summary = PanelHealthSummary.make(
       map: map, observation: nil, ownerHours: .empty, telemetryEnabled: true,
-      sampleCount: map.sampleCount)
+      observationEnabled: true)
     #expect(summary.confidence == .measured)
   }
 
@@ -74,7 +74,7 @@ struct PanelHealthSummaryTests {
     let map = measuredMap(grid)
     let summary = PanelHealthSummary.make(
       map: map, observation: nil, ownerHours: .empty, telemetryEnabled: false,
-      sampleCount: map.sampleCount)
+      observationEnabled: true)
     #expect(summary.confidence == .estimated)
     #expect(summary.hottestRelative == nil)
   }
@@ -85,7 +85,7 @@ struct PanelHealthSummaryTests {
     let map = measuredMap(grid, samples: ExposureAccumulator.minimumSamplesForAnalysis - 1)
     let summary = PanelHealthSummary.make(
       map: map, observation: nil, ownerHours: .empty, telemetryEnabled: true,
-      sampleCount: map.sampleCount)
+      observationEnabled: true)
     #expect(summary.confidence == .insufficient)
     #expect(summary.hottestRelative == nil)
   }
@@ -98,7 +98,7 @@ struct PanelHealthSummaryTests {
     let map = measuredMap(grid)
     let summary = PanelHealthSummary.make(
       map: map, observation: nil, ownerHours: .empty, telemetryEnabled: true,
-      sampleCount: map.sampleCount)
+      observationEnabled: true)
     #expect(summary.confidence == .measured)
     let relative = try #require(summary.hottestRelative)
     #expect(relative > 3.0 && relative < 4.5)
@@ -119,7 +119,7 @@ struct PanelHealthSummaryTests {
       fullScreenOwner: nil)
     let summary = PanelHealthSummary.make(
       map: map, observation: observation, ownerHours: .empty, telemetryEnabled: true,
-      sampleCount: map.sampleCount)
+      observationEnabled: true)
     #expect(summary.hottestOwner == "Xcode")
   }
 
@@ -129,7 +129,7 @@ struct PanelHealthSummaryTests {
     let map = measuredMap(grid)
     let summary = PanelHealthSummary.make(
       map: map, observation: nil, ownerHours: .empty, telemetryEnabled: true,
-      sampleCount: map.sampleCount)
+      observationEnabled: true)
     #expect(summary.hottestOwner == nil)
   }
 
@@ -139,7 +139,7 @@ struct PanelHealthSummaryTests {
   /// measured series — it just is no longer the only answer.
   @Test func topOwnersByHoursIsEmptyWithNoMeasuredSeries() {
     let summary = PanelHealthSummary.make(
-      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, sampleCount: 0)
+      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, observationEnabled: true)
     #expect(summary.topOwnersByHours.isEmpty)
   }
 
@@ -149,7 +149,7 @@ struct PanelHealthSummaryTests {
   @Test func aFullPanelOwnerBooksOnePanelHourPerHour() throws {
     let summary = PanelHealthSummary.make(
       map: .empty, observation: nil, ownerHours: ownerHours(["Xcode": 3600]),
-      telemetryEnabled: true, sampleCount: 0)
+      telemetryEnabled: true, observationEnabled: true)
     let top = try #require(summary.topOwnersByHours.first)
     #expect(top.owner == "Xcode")
     #expect(abs(top.hours - 1.0) < 0.0001)
@@ -164,7 +164,7 @@ struct PanelHealthSummaryTests {
     accumulator.accumulate(observation(owners), elapsed: 3600)
     let summary = PanelHealthSummary.make(
       map: .empty, observation: nil, ownerHours: accumulator.hours,
-      telemetryEnabled: true, sampleCount: 0)
+      telemetryEnabled: true, observationEnabled: true)
     let top = try #require(summary.topOwnersByHours.first)
     #expect(top.owner == "Notes")
     #expect(abs(top.hours - 0.25) < 0.0001)
@@ -177,7 +177,7 @@ struct PanelHealthSummaryTests {
     }
     let summary = PanelHealthSummary.make(
       map: .empty, observation: nil, ownerHours: ownerHours(seconds),
-      telemetryEnabled: true, sampleCount: 0)
+      telemetryEnabled: true, observationEnabled: true)
     let hours = summary.topOwnersByHours.map(\.hours)
     #expect(summary.topOwnersByHours.count == PanelHealthSummary.topOwnerLimit)
     #expect(hours == hours.sorted(by: >))
@@ -191,7 +191,7 @@ struct PanelHealthSummaryTests {
   @Test func topOwnersByHoursSurvivesTelemetryBeingOff() {
     let summary = PanelHealthSummary.make(
       map: .empty, observation: nil, ownerHours: ownerHours(["Slack": 7200]),
-      telemetryEnabled: false, sampleCount: 0)
+      telemetryEnabled: false, observationEnabled: true)
     #expect(summary.confidence == .estimated)
     #expect(summary.topOwnersByHours.map(\.owner) == ["Slack"])
   }
@@ -204,7 +204,7 @@ struct PanelHealthSummaryTests {
     let map = measuredMap(grid)
     let summary = PanelHealthSummary.make(
       map: map, observation: nil, ownerHours: .empty, telemetryEnabled: true,
-      sampleCount: map.sampleCount)
+      observationEnabled: true)
     #expect(summary.cells.count == PanelGrid.cellCount)
     #expect(summary.cells.allSatisfy { $0 >= 0 && $0 <= 1 })
     #expect(summary.cells[5] == 1.0)
@@ -212,18 +212,73 @@ struct PanelHealthSummaryTests {
 
   @Test func cellsAreAllZeroWithNoData() {
     let summary = PanelHealthSummary.make(
-      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, sampleCount: 0)
+      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, observationEnabled: true)
     #expect(summary.cells.count == PanelGrid.cellCount)
     #expect(summary.cells.allSatisfy { $0 == 0 })
+  }
+
+  // MARK: - Observation gating
+
+  /// The coordinator keeps the last observation for the life of the process
+  /// after the pref goes off, so a summary that read it anyway would let the
+  /// view keep naming an app the user stopped us watching. The snapshot here is
+  /// deliberately fresh and complete: the gate is the pref, not staleness,
+  /// because staleness is exactly what cannot be detected from the snapshot.
+  @Test func hottestOwnerIsWithheldWhenObservationIsOff() {
+    var grid = [Double](repeating: 1.0, count: PanelGrid.cellCount)
+    grid[0] = 4.0
+    let map = measuredMap(grid)
+    var owners = [String?](repeating: nil, count: PanelGrid.cellCount)
+    owners[0] = "Slack"
+    let observation = WindowObservation(
+      dominantOwnerByCell: owners,
+      stationarySecondsByWindowID: [:],
+      stationaryByCell: [Bool](repeating: false, count: PanelGrid.cellCount),
+      fullScreenOwner: nil)
+
+    let watching = PanelHealthSummary.make(
+      map: map, observation: observation, ownerHours: .empty,
+      telemetryEnabled: true, observationEnabled: true)
+    #expect(watching.hottestOwner == "Slack")
+
+    let stopped = PanelHealthSummary.make(
+      map: map, observation: observation, ownerHours: .empty,
+      telemetryEnabled: true, observationEnabled: false)
+    #expect(stopped.hottestOwner == nil)
+    // The exposure half is unaffected: luminance telemetry is a separate pref.
+    #expect(stopped.confidence == .measured)
+    #expect(stopped.hottestRelative != nil)
+  }
+
+  @Test func observationEnabledIsCarriedThroughForCopyToBranchOn() {
+    let on = PanelHealthSummary.make(
+      map: .empty, observation: nil, ownerHours: .empty,
+      telemetryEnabled: false, observationEnabled: true)
+    let off = PanelHealthSummary.make(
+      map: .empty, observation: nil, ownerHours: .empty,
+      telemetryEnabled: false, observationEnabled: false)
+    #expect(on.observationEnabled)
+    #expect(!off.observationEnabled)
+    #expect(on != off)
+  }
+
+  /// `sampleCount` used to be a parameter beside `map`, so a caller could pass
+  /// one that disagreed and get `.measured` over an empty map. It is now read
+  /// off the map and there is no second source to disagree with.
+  @Test func confidenceIsReadFromTheMapNotFromABesideParameter() {
+    let summary = PanelHealthSummary.make(
+      map: .empty, observation: nil, ownerHours: .empty,
+      telemetryEnabled: true, observationEnabled: true)
+    #expect(summary.confidence == .insufficient)
   }
 
   // MARK: - Equatable
 
   @Test func summariesWithIdenticalInputsAreEqual() {
     let a = PanelHealthSummary.make(
-      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, sampleCount: 0)
+      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, observationEnabled: true)
     let b = PanelHealthSummary.make(
-      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, sampleCount: 0)
+      map: .empty, observation: nil, ownerHours: .empty, telemetryEnabled: true, observationEnabled: true)
     #expect(a == b)
   }
 }

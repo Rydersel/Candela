@@ -35,6 +35,42 @@ public struct OwnerHours: Equatable, Sendable, Codable {
     }
     totalSeconds += totalAdded
   }
+
+  /// Spelled out rather than synthesised. These strings are shipped on-disk
+  /// schema (§4) and were previously the property names themselves, which made
+  /// renaming `secondsByOwner` — exactly what a pass fixing the seconds/hours
+  /// naming would do — delete every user's history without a diagnostic.
+  private enum CodingKeys: String, CodingKey {
+    case schemaVersion = "schemaVersion"
+    case secondsByOwner = "secondsByOwner"
+    case totalSeconds = "totalSeconds"
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(OledStoreSchema.currentVersion, forKey: .schemaVersion)
+    try container.encode(secondsByOwner, forKey: .secondsByOwner)
+    try container.encode(totalSeconds, forKey: .totalSeconds)
+  }
+
+  public init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    let version = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+    guard version <= OledStoreSchema.currentVersion else {
+      throw OledStoreDecodeFailure.unsupportedVersion(
+        found: version, supported: OledStoreSchema.currentVersion)
+    }
+    self.secondsByOwner = try container.decode([String: Double].self, forKey: .secondsByOwner)
+    self.totalSeconds = try container.decode(Double.self, forKey: .totalSeconds)
+  }
+
+  /// Internal, not private: this replaces the synthesised memberwise init that
+  /// adding `init(from:)` suppressed, and `PanelHealthSummaryTests` reaches it
+  /// through `@testable` to build an exact per-owner second count.
+  init(secondsByOwner: [String: Double], totalSeconds: Double) {
+    self.secondsByOwner = secondsByOwner
+    self.totalSeconds = totalSeconds
+  }
 }
 
 /// Folds periodic `WindowObservation`s into a per-owner time series.

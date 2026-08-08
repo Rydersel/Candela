@@ -180,15 +180,22 @@ struct WindowObservationTests {
     let rotated = PanelSpaceTransform(
       displaySize: CGSize(width: 2160, height: 3840), rotation: .twoSeventy)
     // Under 270°, top-left in DISPLAY space is the panel's TOP-RIGHT. See the
-    // rotation-convention note in PanelSpaceTransform — the direction is
-    // reasoned from CGDisplayRotation's counter-clockwise sign and is NOT yet
-    // hardware-verified.
+    // rotation-convention note in PanelSpaceTransform: settled from Apple's own
+    // header, which states CGDisplayRotation is degrees CLOCKWISE. No longer
+    // reasoned, and no longer waiting on the rotated Dell.
     let w = window(1, "Slack", CGRect(x: 0, y: 0, width: 200, height: 200))
     let result = observer.observe([w], through: rotated, at: Date())
     #expect(result.dominantOwnerByCell[PanelGrid.cols - 1] == "Slack")
     #expect(result.dominantOwnerByCell[(PanelGrid.rows - 1) * PanelGrid.cols] == nil)
   }
 
+  /// `fullScreenOwner` reads only `transform.displaySize` and never touches
+  /// `rotation`, so this passes with the rotation math entirely broken. That is
+  /// correct behaviour, not a gap: full-screen-ness is a display-space
+  /// question, and the #20 gate that consumes it asks about the display the
+  /// user is looking at. Asserted here so the independence is on record rather
+  /// than incidental, and so a later change that DID make it rotation-sensitive
+  /// fails loudly.
   @Test func aRotatedFullScreenWindowIsStillFullScreen() {
     var observer = WindowObserver()
     let rotated = PanelSpaceTransform(
@@ -196,5 +203,38 @@ struct WindowObservationTests {
     let full = window(1, "IINA", CGRect(x: 0, y: 0, width: 2160, height: 3840))
     let result = observer.observe([full], through: rotated, at: Date())
     #expect(result.fullScreenOwner == "IINA")
+
+    // Same window, same display size, every rotation: the verdict must not move.
+    for rotation in [DisplayRotation.standard, .ninety, .oneEighty, .twoSeventy] {
+      var each = WindowObserver()
+      let t = PanelSpaceTransform(
+        displaySize: CGSize(width: 2160, height: 3840), rotation: rotation)
+      #expect(each.observe([full], through: t, at: Date()).fullScreenOwner == "IINA")
+    }
+
+    // And a window that is full-screen for the ROTATED size must not be judged
+    // full-screen against the display's actual size, which is the mistake a
+    // rotation-sensitive implementation would make.
+    var swapped = WindowObserver()
+    let landscapeSized = window(2, "IINA", CGRect(x: 0, y: 0, width: 3840, height: 2160))
+    let result2 = swapped.observe([landscapeSized], through: rotated, at: Date())
+    #expect(result2.fullScreenOwner == nil)
+  }
+
+  /// A window the window server reports with a NaN bound must contribute
+  /// nothing. Without the guard it out-covers every real window (coverage 1.0
+  /// in all 240 cells beats any fraction), takes every cell in
+  /// `dominantOwnerByCell`, and books the whole interval to its owner in a
+  /// persisted store.
+  @Test func aWindowWithANonFiniteRectIsAttributedNowhere() {
+    var observer = WindowObserver()
+    let t = PanelSpaceTransform(
+      displaySize: CGSize(width: 3440, height: 1440), rotation: .standard)
+    let real = window(1, "Xcode", CGRect(x: 0, y: 0, width: 3440, height: 720))
+    let broken = window(2, "Ghost", CGRect(x: CGFloat.nan, y: CGFloat.nan, width: CGFloat.nan, height: CGFloat.nan))
+
+    let result = observer.observe([real, broken], through: t, at: Date())
+    #expect(!result.dominantOwnerByCell.contains("Ghost"))
+    #expect(result.dominantOwnerByCell[0] == "Xcode")
   }
 }

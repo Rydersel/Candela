@@ -54,19 +54,46 @@ public struct ExposureMap: Equatable, Sendable, Codable {
     lastSample = now
   }
 
+  /// Raw values are spelled out rather than synthesised from the property
+  /// names: these strings are shipped on-disk schema (§4), and a synthesised
+  /// key turns an ordinary rename into a silent data loss.
   private enum CodingKeys: String, CodingKey {
-    case cells, sampleCount, firstSample, lastSample
+    case schemaVersion = "schemaVersion"
+    case cells = "cells"
+    case sampleCount = "sampleCount"
+    case firstSample = "firstSample"
+    case lastSample = "lastSample"
   }
 
-  /// A short `cells` array would trap the first time the health view indexed
-  /// it, so a corrupt store fails to decode rather than decoding into a mine.
+  public func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(OledStoreSchema.currentVersion, forKey: .schemaVersion)
+    try container.encode(cells, forKey: .cells)
+    try container.encode(sampleCount, forKey: .sampleCount)
+    try container.encodeIfPresent(firstSample, forKey: .firstSample)
+    try container.encodeIfPresent(lastSample, forKey: .lastSample)
+  }
+
+  /// Two failure modes with opposite correct responses, which is why they throw
+  /// different error types. A short `cells` array would trap the first time the
+  /// health view indexed it, so neither decodes into a mine; but a grid change
+  /// or a newer schema is intact history and throws
+  /// `OledStoreDecodeFailure` so the caller keeps the bytes, while malformed
+  /// JSON throws `DecodingError` and may be discarded.
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
+    // Absent means v1: stores written before the version field existed are
+    // valid v1 data, and treating them as unreadable would quarantine every
+    // existing user's history on upgrade.
+    let version = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+    guard version <= OledStoreSchema.currentVersion else {
+      throw OledStoreDecodeFailure.unsupportedVersion(
+        found: version, supported: OledStoreSchema.currentVersion)
+    }
     let cells = try container.decode([Double].self, forKey: .cells)
     guard cells.count == PanelGrid.cellCount else {
-      throw DecodingError.dataCorruptedError(
-        forKey: .cells, in: container,
-        debugDescription: "expected \(PanelGrid.cellCount) cells, found \(cells.count)")
+      throw OledStoreDecodeFailure.gridChanged(
+        found: cells.count, expected: PanelGrid.cellCount)
     }
     self.cells = cells
     self.sampleCount = try container.decode(Int.self, forKey: .sampleCount)

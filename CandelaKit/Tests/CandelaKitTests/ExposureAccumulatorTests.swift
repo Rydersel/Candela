@@ -90,6 +90,14 @@ struct ExposureAccumulatorTests {
 
     #expect(afterUpright == 0)
     #expect(acc.map.hottestCell == afterUpright)
+    // THE assertion. `hottestCell` above cannot fail here: under the inverted
+    // convention the second sample lands in cell 239 instead of cell 0, giving
+    // an exact 60/60 tie, and `hottestCell` answers with the first index of the
+    // maximum — so it returns 0 either way and the test passed while pinning
+    // nothing. The whole point of panel-physical space is that the two samples
+    // land in the SAME cell and it keeps growing, which is 120 against 60.
+    #expect(abs(acc.map.cells[0] - 120) < 1e-9)
+    #expect(abs(acc.map.cells[PanelGrid.cellCount - 1]) < 1e-9)
   }
 
   // MARK: - Relative exposure
@@ -250,17 +258,68 @@ struct ExposureAccumulatorTests {
   }
 
   /// A truncated or hand-edited store must not decode into a map that traps the
-  /// first time the health view indexes a cell.
-  @Test func decodingAWrongSizedMapFails() throws {
+  /// first time the health view indexes a cell. It throws
+  /// `OledStoreDecodeFailure`, NOT `DecodingError`, and the difference is
+  /// load-bearing: the coordinator discards the first and quarantines the
+  /// second, so downgrading this to a plain decoding error would restore the
+  /// silent-overwrite path.
+  @Test func decodingAWrongSizedMapReportsAGridChange() throws {
     let data = try JSONEncoder().encode(ExposureMap.empty)
     let object = try #require(
       JSONSerialization.jsonObject(with: data) as? [String: Any])
     var corrupt = object
     corrupt["cells"] = [0.5, 0.5, 0.5]
     let corruptData = try JSONSerialization.data(withJSONObject: corrupt)
-    #expect(throws: DecodingError.self) {
+    #expect(throws: OledStoreDecodeFailure.gridChanged(found: 3, expected: PanelGrid.cellCount)) {
       try JSONDecoder().decode(ExposureMap.self, from: corruptData)
     }
+  }
+
+  /// Written by a build from the future. The bytes may be perfectly good
+  /// history, so this must be distinguishable from junk rather than decoded
+  /// on a best-effort basis.
+  @Test func decodingANewerSchemaIsRefusedRatherThanGuessedAt() throws {
+    let data = try JSONEncoder().encode(ExposureMap.empty)
+    let object = try #require(
+      JSONSerialization.jsonObject(with: data) as? [String: Any])
+    var future = object
+    future["schemaVersion"] = OledStoreSchema.currentVersion + 1
+    let futureData = try JSONSerialization.data(withJSONObject: future)
+    #expect(
+      throws: OledStoreDecodeFailure.unsupportedVersion(
+        found: OledStoreSchema.currentVersion + 1,
+        supported: OledStoreSchema.currentVersion)
+    ) {
+      try JSONDecoder().decode(ExposureMap.self, from: futureData)
+    }
+  }
+
+  /// Stores written before the version field existed are valid v1 data.
+  /// Quarantining them would strand every existing user's history on upgrade,
+  /// which is the failure this whole mechanism exists to prevent.
+  @Test func aStoreWithNoVersionFieldDecodesAsVersionOne() throws {
+    var seed = ExposureAccumulator()
+    seed.accumulate(
+      displayGrid: hotTopRowGrid(), cols: PanelGrid.cols, rows: PanelGrid.rows,
+      through: uprightTransform, elapsed: 60, at: Date(timeIntervalSince1970: 0))
+    let data = try JSONEncoder().encode(seed.map)
+    var legacy = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    legacy.removeValue(forKey: "schemaVersion")
+    let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+
+    let decoded = try JSONDecoder().decode(ExposureMap.self, from: legacyData)
+    #expect(decoded == seed.map)
+  }
+
+  /// The encoded key names are the on-disk schema (§4). Pinned as literals so a
+  /// property rename cannot quietly change the wire format, which under the
+  /// quarantine rules would strand every stored map.
+  @Test func theEncodedKeyNamesAreTheOnDiskSchema() throws {
+    let data = try JSONEncoder().encode(ExposureMap.empty)
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(object["cells"] != nil)
+    #expect(object["sampleCount"] != nil)
+    #expect(object["schemaVersion"] as? Int == OledStoreSchema.currentVersion)
   }
 
   @Test func anEmptyMapHasTwoHundredAndFortyZeroedCells() {
