@@ -508,7 +508,18 @@ final class OledCareCoordinator {
     for tracker in trackers.values { tracker.reset() }
     // Same reason, same moment: a live wear tracker's debounced write-through
     // would re-persist the histogram the wipe just removed.
+    //
+    // DISCARDED as well as reset, unlike `trackers`, because `flush()` writes
+    // unconditionally. `reset()` alone removes both keys and then leaves the
+    // object here, so the first sleep or quit AFTER the latch clears calls
+    // `flush()` on it and re-creates `oledWearSeconds`/`oledWearSchema` as an
+    // all-zero histogram, which is exactly what `reset()` promises not to leave
+    // behind. Matches how `accumulators` and `ownerHours` are handled below.
+    // (A `guard !resetting` in `flushExposureHistory` does NOT fix this: every
+    // caller is already excluded by the latch, so the hazard is entirely on the
+    // far side of it.)
     for tracker in wearTrackers.values { tracker.reset() }
+    wearTrackers.removeAll()
   }
 
   /// The post-wipe half of the reset contract (paired with
@@ -602,6 +613,14 @@ final class OledCareCoordinator {
         if !existing.detectionDimmingEnabled || !hasProducers {
           existing.nominatedMask = nil
         }
+        // The window ages go with it. `WindowObserver` holds a per-window
+        // "unchanged since" instant, and that clock keeps running while
+        // observation is off: a window that never moved, or moved and moved
+        // back, would read as stationary for the whole unobserved span and
+        // could be nominated on the first sample after re-enabling. Same
+        // staleness the nomination drop above exists to prevent, one layer
+        // down.
+        if !existing.windowObservationEnabled { forgetWindowObservation(for: key) }
         states[key] = existing
       } else {
         states[key] = PerDisplay(
@@ -987,26 +1006,23 @@ final class OledCareCoordinator {
   private func render(_ dimState: OledDimState, into state: inout PerDisplay, on id: CGDirectDisplayID) {
     let stateAlpha = state.engine.alpha(for: dimState)
     let blackout = dimState == .blackout
-    // Blackout is excluded (OC17's rule, and there is no luminance left to
-    // spend). Everything else composes, INCLUDING `.active`: #20 is the one
-    // care feature that runs while the user is working, so it can require an
-    // overlay in a state whose own alpha is nil and which would otherwise have
-    // no window at all.
-    // Excluded states, each for its own reason:
-    //   `.blackout`  — OC17's rule, and there is no luminance left to spend.
-    //   `.suspended` — OC13. This state is produced ONLY by mirroring, and
-    //                  suspended means suspended. Without it a mirror-set
-    //                  participant keeps an overlay up carrying a nomination
-    //                  computed before mirroring, which `renominate` can never
-    //                  refresh because `samplingQualifies` requires `.active`.
-    //   `.lockDim`   — delivered on the wire, not by the overlay (A-16 measured
-    //                  that a shielding window does not render above the lock
-    //                  screen), so a mask here would be an overlay nobody sees.
-    //   assertion held — spec section 4 gives #20 "the same assertion gate as
-    //                  idle dimming". A video player or a presentation holding
-    //                  a display-sleep assertion must not have its window dimmed
-    //                  under it; `.active` never passes through the engine's own
-    //                  `mayShow`, so this gate has to be applied here.
+    // `.active` DOES compose: #20 is the one care feature that runs while the
+    // user is working, so it can require an overlay in a state whose own alpha
+    // is nil and which would otherwise have no window at all. Four cases do
+    // not, each for its own reason:
+    //   `.blackout`: OC17's rule, and there is no luminance left to spend.
+    //   `.suspended`: OC13. Produced ONLY by mirroring, and suspended means
+    //     suspended. Without it a mirror-set participant keeps an overlay up
+    //     carrying a nomination computed before mirroring, which `renominate`
+    //     can never refresh because `samplingQualifies` requires `.active`.
+    //   `.lockDim`: delivered on the wire, not by the overlay (A-16 measured
+    //     that a shielding window does not render above the lock screen), so a
+    //     mask here would be an overlay nobody could see.
+    //   assertion held: spec §4 gives #20 "the same assertion gate as idle
+    //     dimming". A video player or a presentation holding a display-sleep
+    //     assertion must not have its window dimmed under it, and `.active`
+    //     never passes through the engine's own `mayShow`, so the gate has to
+    //     be applied here.
     let excluded = blackout || dimState == .suspended || dimState == .lockDim
     let nomination =
       (state.detectionDimmingEnabled && !excluded && !state.assertionHeld)
@@ -1439,11 +1455,6 @@ final class OledCareCoordinator {
   /// undercount rather than noise.
   private func flushExposureHistory() {
     for key in unsavedExposureKeys { saveExposureHistory(for: key) }
-    // NOT during a reset. `prepareForReset` calls `reset()` on these, which
-    // removes both keys, but leaves the objects in the dictionary; the next
-    // sleep or termination would then write them straight back as zeros and
-    // defeat `reset()`'s own "a settings reset should leave no key behind".
-    guard !resetting else { return }
     for tracker in wearTrackers.values { tracker.flush() }
   }
 
