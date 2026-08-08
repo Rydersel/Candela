@@ -211,15 +211,22 @@ struct GeneralPane: View {
         // pane's longest block of text. D11's visibility rule is about the
         // ACTIVE state, which keeps its status row above and this caption.
         // Safe mode's real, final scope (D11): no startup restore, no wake
-        // restore, no brightness readback, no quit-time write, and — added by
-        // W3a — no OLED-care driver loop, so no dimming overlay and no panel
-        // hours. Sliders and keys still work and still send DDC, and so do the
-        // OLED Care pane's two screen-chrome switches (explicit writes to a
-        // system setting, not automatic behavior; that pane carries its own
-        // safe-mode note) — so this must NEVER claim "no DDC commands" or that
-        // OLED care is entirely off, which is the same class of false copy D11
-        // exists to fix.
-        SettingsCaption("Shift was held at launch, so \(AppInfo.productName) won't restore your saved values at startup or wake, won't read values back from your displays, won't write anything when it quits, and won't dim any display or count hours of use for OLED care. The sliders and keys still work, your settings are unchanged, and relaunching without Shift restores normal behavior.")
+        // restore, no brightness readback, no quit-time write, and (added by
+        // W3a) no OLED-care driver loop. `OledCareCoordinator.start` returns
+        // before the loop is built, so EVERYTHING that rides it stops: the
+        // dimming overlay, panel hours, and (added by W3b-1) brightness
+        // sampling and window observation. Sliders and keys still work and
+        // still send DDC, and so do the OLED Care pane's two screen-chrome
+        // switches (explicit writes to a system setting, not automatic
+        // behavior; that pane carries its own safe-mode note), so this must
+        // NEVER claim "no DDC commands" or that OLED care is entirely off.
+        //
+        // It listed dimming and hours but not the two measurement features,
+        // which W3b-1 added to the same loop. Understating the scope is the
+        // same class of false copy as overstating it, and D11 covers both
+        // directions: a reader who trusts this list grants Screen Recording in
+        // a safe-mode session and waits for readings that cannot come.
+        SettingsCaption("Shift was held at launch, so \(AppInfo.productName) won't restore your saved values at startup or wake, won't read values back from your displays, won't write anything when it quits, and won't dim any display, count hours of use, or take any measurements for OLED care. The sliders and keys still work, your settings are unchanged, and relaunching without Shift restores normal behavior.")
       }
       // `startupCaption` is NOT repeated here: `SettingRow` above already
       // renders it beneath the picker. Rendering it a second time printed the

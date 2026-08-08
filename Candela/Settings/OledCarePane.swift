@@ -142,17 +142,21 @@ struct OledCarePane: View {
   }
 
   /// D11's rule, applied here: say exactly what Safe Mode suppresses, where it
-  /// changes what a control means. The dimming loop and the hours counter do
-  /// not run in a safe-mode session; the two chrome switches are explicit
-  /// writes to system settings and still work, so this must not claim the pane
-  /// is inert.
+  /// changes what a control means. `OledCareCoordinator.start` returns at its
+  /// safe-mode guard BEFORE the driver loop is built, so the dimming loop, the
+  /// hours counter, the brightness sampler and the window observer are all
+  /// inert; the two chrome switches are explicit writes to system settings and
+  /// still work, so this must not claim the pane is inert either. D11 is a rule
+  /// against overstating scope, and understating it misleads the same way: a
+  /// note that named only dimming and hours left the two measurement toggles
+  /// looking live in a session that measures nothing.
   private var safeModeNote: some View {
     VStack(alignment: .leading, spacing: 5) {
       HStack(alignment: .firstTextBaseline, spacing: 6) {
         // Symbol AND text — never state by colour alone.
         Image(systemName: "exclamationmark.triangle")
           .foregroundStyle(.secondary)
-        Text("Safe Mode is on for this session, so no display is being dimmed and no hours of use are being counted.")
+        Text("Safe Mode is on for this session, so no display is being dimmed, no hours of use are being counted, and no measurements are being taken.")
       }
       SettingsCaption("Shift was held at launch. The two Screen Chrome settings below still work, and the settings you make here are saved for the next normal launch.")
     }
@@ -203,13 +207,25 @@ struct OledCarePane: View {
             }
           }
         }
-
-        SettingsCaption("Both settings belong to macOS rather than to \(AppInfo.productName): they apply to every display, and enrolling a display never changes them on its own.")
       } else {
         SettingsCaption("These settings are not available yet. Reopen this window in a moment.")
       }
     } header: {
       Text("Screen Chrome").settingsHeading()
+    } footer: {
+      // The section's footer, NOT a `Form` row of its own, which is what this
+      // was: a row gets a divider above it and full padding, so a sentence
+      // about BOTH switches read as a third setting. It cannot ride either
+      // switch's `SettingRow` either, because a `SettingRow` caption is
+      // republished as that ONE control's accessibility hint, and this sentence
+      // is about the pair.
+      //
+      // Suppressed while the controls are missing: a note about what "both
+      // settings" are is noise under a section that is currently showing
+      // neither.
+      if model.oledCare.chrome != nil {
+        SettingsCaption("Both settings belong to macOS rather than to \(AppInfo.productName): they apply to every display, and enrolling a display never changes them on its own.")
+      }
     }
   }
 
@@ -368,7 +384,7 @@ private struct OledCareDisplaySection: View {
     // Screenshot validation has no other route into a sheet: Accessibility is
     // not granted, so nothing can click the row that opens it, and the app has
     // no URL scheme (that is W4). Same permanent, compiled-out-by-construction
-    // shape as `DebugSettingsHook` and the coordinators' preview observers —
+    // shape as `DebugSettingsHook` and the coordinators' preview observers:
     // the `#if` wraps the MODIFIER, so Release keeps no residue.
     //
     //   CANDELA_DEBUG_PANEL_HEALTH=first            first external display
@@ -573,7 +589,7 @@ private struct OledCareDisplaySection: View {
   /// one that needs none.
   @ViewBuilder private var measurementControls: some View {
     // Spec §4's prompt copy, used verbatim as the toggle's own explanation so
-    // the reason is on screen BEFORE macOS's own dialog — which says "record
+    // the reason is on screen BEFORE macOS's own dialog, which says "record
     // the contents of your screen" and can say nothing else. The only
     // substitution is the product name, which every other caption in this file
     // interpolates for the same reason (the working name is not final).
@@ -598,13 +614,34 @@ private struct OledCareDisplaySection: View {
         ))
         // What "the resolution of this grid" means, at the size it means it.
         PanelGridMark()
-        if prefs.oledTelemetry, !CGPreflightScreenCaptureAccess() {
+        // The ONE control in this pane that gets its own safe-mode note, and
+        // only because it is the one that spends something: the setter above
+        // raises the Screen Recording dialog unconditionally, so without this
+        // a safe-mode session grants a system permission to a sampler that
+        // cannot run until the next normal launch, with every visible signal
+        // (switch on, no not-granted note) saying it worked. Every other
+        // control here is covered by the status row and the pane-level note.
+        //
+        // Safe Mode WINS over the grant note rather than joining it: both are
+        // true at once, but two notes giving two reasons for one silence read
+        // as a bug, and the grant is the reason that cannot be acted on
+        // usefully this session.
+        if model.isSafeMode {
+          OledInlineNote(Text("Safe Mode is on for this session, so nothing is being measured whatever this is set to, and Screen Recording is not needed until the next normal launch."))
+        } else if prefs.oledTelemetry, !CGPreflightScreenCaptureAccess() {
           OledInlineNote(Text("macOS has not granted Screen Recording, so no readings are being taken. Grant it in System Settings > Privacy & Security > Screen Recording."))
         }
       }
     }
 
-    SettingRow("Needs no permission. Reads each on-screen window's position and the name of the app that owns it — never window titles, and never their contents. This is what puts an app's name next to an area of the display.") {
+    // The battery clause is stated ONCE, on the last row of the measurement
+    // group, because `OledCareCoordinator.samplingQualifies` gates BOTH toggles
+    // on the same signal: below the threshold both counters freeze, and nothing
+    // on any surface said so. The number mirrors
+    // `OledCareSignalSources.lowBatteryPercent` (20, at or below, and only on
+    // battery power); a vaguer "on low battery" would not tell anyone whether
+    // what they are seeing is the gate or a broken counter.
+    SettingRow("Needs no permission: reads each on-screen window's position and the name of the app that owns it, never window titles and never their contents. This is what puts an app's name next to an area of the display. Both measurements pause while the Mac is running on battery at 20% charge or less.") {
       Toggle("Note which apps are on this display", isOn: Binding(
         get: { prefs.oledWindowObservation },
         set: { on in writer.write(.oledWindowObservation) { $0.oledWindowObservation = on } }
@@ -613,10 +650,15 @@ private struct OledCareDisplaySection: View {
   }
 
   /// A row that OPENS the health view rather than containing it (OC19).
+  ///
+  /// SO14 in both strings: the hardware is a "display", never a "panel". The
+  /// row label matches the health view's own header so the two surfaces name
+  /// the same page; `PanelHealthView` and `PanelGrid` keep "panel" as type
+  /// names, which SO14 leaves alone.
   private var healthRow: some View {
-    SettingRow(caption: SettingsCaption("Which areas of this panel have been lit the most, and which apps have been showing them.")) {
+    SettingRow(caption: SettingsCaption("Which areas of this display have been lit the most, and which apps have been showing them.")) {
       HStack(alignment: .firstTextBaseline, spacing: 8) {
-        Text("Panel health")
+        Text("Display health")
         Spacer(minLength: 0)
         Button("Show…") { showingHealth = true }
       }
@@ -799,13 +841,19 @@ private struct OledCareDisplaySection: View {
     value == 1 ? "1 minute" : "\(value) minutes"
   }
 
-  /// One decimal below ten hours, whole hours above it. A freshly enrolled
-  /// display otherwise reads "0 hours" for its first hour, which looks like a
-  /// counter that is not running. No singular case: it can only be reached
-  /// above ten hours.
+  /// Converged with `PanelHealthView.panelTimePhrase` via `PanelHealthCopy`.
+  ///
+  /// The two had grown apart: the same unit rendered "0.4 hours" here and "24
+  /// minutes" one click away, "0 hours" here and "none yet" there, and each
+  /// site carried a comment explaining why its own choice avoided a
+  /// stuck-counter reading. The minutes form won, because a freshly enrolled
+  /// display reading zero for its whole first hour is the defect BOTH were
+  /// written around and only one of them actually fixed.
+  ///
+  /// The zero phrase stays this surface's own: here the number is the subject
+  /// of the sentence, so it reads "0 hours"; a leaderboard row with no time
+  /// should not have appeared at all, so there it reads "none yet".
   private static func hoursPhrase(_ hours: Double) -> String {
-    guard hours.isFinite, hours > 0 else { return "0 hours" }
-    if hours < 10 { return String(format: "%.1f hours", hours) }
-    return "\(Int(hours.rounded())) hours"
+    PanelHealthCopy.hours(hours)
   }
 }
