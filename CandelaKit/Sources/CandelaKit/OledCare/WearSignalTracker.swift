@@ -161,11 +161,18 @@ public final class WearSignalTracker {
   /// **OC17's effect-size gate, as one number.** The share of panel-on time
   /// spent in a state the wear mask would apply to.
   ///
-  /// Suspended time is excluded from the denominator, not counted against the
-  /// feature: a mirrored display (OC13) is not showing what we would dim, so
-  /// including it would understate the fraction by however long a projector was
-  /// plugged in. Nil rather than zero when nothing has accumulated, because
-  /// "0% of no time" is not an answer and reads as a verdict.
+  /// Suspended time is excluded from the denominator. **This is defensive, not
+  /// load-bearing, and the comment used to claim otherwise.** It said the
+  /// exclusion stopped "a projector plugged in for a day" from diluting the
+  /// ratio; it cannot, because the coordinator books wear only under
+  /// `awake && !isMirrored` and `.suspended` is produced only by mirroring, so
+  /// that slot is structurally always zero. The subtraction stays because the
+  /// gate lives in a different file from this arithmetic and a later caller
+  /// that does book suspended time should get the right answer, but nobody
+  /// should read it as evidence the case is handled today.
+  ///
+  /// Nil rather than zero when nothing has accumulated, because "0% of no time"
+  /// is not an answer and reads as a verdict.
   ///
   /// This is a count of seconds. It carries none of the level axis's proxy
   /// caveat, which is the reason both axes are stored.

@@ -2,14 +2,26 @@ import Foundation
 
 /// Nominates panel regions for detection dimming (#20).
 ///
-/// **The conjunction is the feature.** A cell is nominated only when it is both
-/// persistently bright and covered by a window whose bounds have not moved past
-/// `WindowObserver.stationaryThresholdSeconds`. Neither half stands alone:
-/// brightness by itself nominates a playing video, whose bounds sit still while
-/// every pixel under them changes, and dimming someone's film is the failure
-/// that loses trust outright. Staticness by itself nominates a dark-mode
-/// terminal, which is not wearing the panel, so the dim is spent where there is
-/// nothing to protect.
+/// **The conjunction is the feature, but it is narrower than it sounds.** A
+/// cell is nominated only when it is both bright in the latest sample and
+/// covered by a window whose bounds have not moved past
+/// `WindowObserver.stationaryThresholdSeconds`. Staticness alone would nominate
+/// a dark-mode terminal, which is not wearing the panel, so the dim would be
+/// spent where there is nothing to protect. Brightness alone would nominate
+/// anything bright, including a region under a window being dragged.
+///
+/// **It does NOT exclude a windowed video, and nothing here should claim it
+/// does.** `WindowObserver`'s own doc says so and is right: bounds stability is
+/// not content staticness, and a player holding a fixed rect for five minutes
+/// passes BOTH halves. Only `fullScreenOwner` protects, and only for a genuinely
+/// full-screen window. That is why OC18 calls geometry a prior and never a
+/// verdict, and why the user-visible caption promises exactly what is true
+/// ("full-screen video is never dimmed") and no more. A windowed player is a
+/// known gap, recorded on #20.
+///
+/// "Persistently" is also weaker than it reads: `recentGrid` is ONE 60-second
+/// sample, not the accumulated map. Persistence comes from the staticness half
+/// alone.
 ///
 /// Pure and static: everything arrives as an argument, including the grid, so
 /// the coordinator owns the sampling cadence and this type owns only the rule.

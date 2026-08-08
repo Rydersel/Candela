@@ -304,7 +304,7 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(!newValue, forKey: key("oledHoursTrackingOff")) }
   }
 
-  /// Returns this display to the Recommended preset by REMOVING the ten keys
+  /// Returns this display to the Recommended preset by REMOVING the thirteen keys
   /// rather than writing their current default values back.
   ///
   /// The difference is not cosmetic: the accessors above document that an

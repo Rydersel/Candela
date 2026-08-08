@@ -84,6 +84,11 @@ final class OledCareCoordinator {
     /// #20. Off by default, so an enrolled display that never opts in pays
     /// nothing past the flag test in `render`.
     var detectionDimmingEnabled = false
+    /// This tick's display-sleep assertion reading, carried so `render` can
+    /// apply spec §4's "same assertion gate as idle dimming" to #20. The engine
+    /// gates its own states on it, but `.active` never passes through
+    /// `mayShow`, and `.active` is exactly when detection dimming runs.
+    var assertionHeld = false
     /// The current nomination in PANEL space, recomputed only when a new
     /// luminance sample lands. Nil means "nothing qualifies", which is
     /// deliberately distinguishable from an all-zero mask: the render then
@@ -586,7 +591,17 @@ final class OledCareCoordinator {
         // would sit in the state as a live-looking value nothing updates: the
         // same shape as the stale `hottestOwner` this wave already had to fix.
         existing.detectionDimmingEnabled = prefs.oledDetectionDimming
-        if !existing.detectionDimmingEnabled { existing.nominatedMask = nil }
+        // Dropped when EITHER producer stops, not just when #20 itself is
+        // switched off. `renominate` only runs when a luminance sample lands,
+        // so with telemetry off it is never called again and the last
+        // nomination would be rendered indefinitely, dimming regions of a
+        // screen the user changed hours ago; with observation off the
+        // staticness half freezes the same way. The pane says "without them
+        // nothing is dimmed", and this is what makes that true.
+        let hasProducers = existing.telemetryEnabled && existing.windowObservationEnabled
+        if !existing.detectionDimmingEnabled || !hasProducers {
+          existing.nominatedMask = nil
+        }
         states[key] = existing
       } else {
         states[key] = PerDisplay(
@@ -724,6 +739,10 @@ final class OledCareCoordinator {
       } else {
         state.unfocusedSince = nil
       }
+
+      // Carried onto the state so `render` can apply the same gate to #20,
+      // which runs in `.active` and so never passes through the engine's own.
+      state.assertionHeld = assertionHeld
 
       let newState = state.engine.tick(OledDimSignals(
         idleSeconds: idleSeconds,
@@ -973,14 +992,44 @@ final class OledCareCoordinator {
     // care feature that runs while the user is working, so it can require an
     // overlay in a state whose own alpha is nil and which would otherwise have
     // no window at all.
-    let nomination = (state.detectionDimmingEnabled && !blackout) ? state.nominatedMask : nil
+    // Excluded states, each for its own reason:
+    //   `.blackout`  — OC17's rule, and there is no luminance left to spend.
+    //   `.suspended` — OC13. This state is produced ONLY by mirroring, and
+    //                  suspended means suspended. Without it a mirror-set
+    //                  participant keeps an overlay up carrying a nomination
+    //                  computed before mirroring, which `renominate` can never
+    //                  refresh because `samplingQualifies` requires `.active`.
+    //   `.lockDim`   — delivered on the wire, not by the overlay (A-16 measured
+    //                  that a shielding window does not render above the lock
+    //                  screen), so a mask here would be an overlay nobody sees.
+    //   assertion held — spec section 4 gives #20 "the same assertion gate as
+    //                  idle dimming". A video player or a presentation holding
+    //                  a display-sleep assertion must not have its window dimmed
+    //                  under it; `.active` never passes through the engine's own
+    //                  `mayShow`, so this gate has to be applied here.
+    let excluded = blackout || dimState == .suspended || dimState == .lockDim
+    let nomination =
+      (state.detectionDimmingEnabled && !excluded && !state.assertionHeld)
+      ? state.nominatedMask : nil
 
     var alpha = stateAlpha
     var mask: OverlayMask.Oriented?
     if let nomination, let transform = Self.transform(for: id) {
       let composed = OverlayMask.uniform(stateAlpha ?? 0).darkened(by: nomination)
-      mask = composed.displayOriented(through: transform)
-      alpha = 1.0
+      if composed.isUniform {
+        // **Collapse to the scalar path with the COMPOSED level, never to
+        // `alpha = 1.0` with no mask.** A uniform composition is reachable
+        // whenever every cell is nominated, and the overlay cannot make this
+        // decision for us because `alpha`'s meaning depends on the mask being
+        // there. Getting this wrong painted the panel opaque black.
+        let level = composed.peak
+        alpha = level > 0 ? level : stateAlpha
+      } else {
+        mask = composed.displayOriented(through: transform)
+        // Safe ONLY because a mask is going with it, carrying absolute
+        // per-cell opacity that this multiplies by 1.
+        alpha = 1.0
+      }
     }
 
     guard overlay.apply(alpha: alpha, mask: mask, blackout: blackout, on: id) else {
@@ -1020,9 +1069,13 @@ final class OledCareCoordinator {
       states[key]?.nominatedMask = nil
       return
     }
-    guard let observation = latestObservations[key] else {
+    guard states[key]?.windowObservationEnabled == true,
+      let observation = latestObservations[key]
+    else {
       // No window list means no staticness prior, and the conjunction is the
-      // feature: nominating on brightness alone is what dims a playing video.
+      // feature. The pref is checked as well as the value: a retained
+      // observation from before the user switched it off is exactly as stale
+      // as the nomination it would produce.
       states[key]?.nominatedMask = nil
       return
     }
@@ -1386,6 +1439,11 @@ final class OledCareCoordinator {
   /// undercount rather than noise.
   private func flushExposureHistory() {
     for key in unsavedExposureKeys { saveExposureHistory(for: key) }
+    // NOT during a reset. `prepareForReset` calls `reset()` on these, which
+    // removes both keys, but leaves the objects in the dictionary; the next
+    // sleep or termination would then write them straight back as zeros and
+    // defeat `reset()`'s own "a settings reset should leave no key behind".
+    guard !resetting else { return }
     for tracker in wearTrackers.values { tracker.flush() }
   }
 

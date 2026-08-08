@@ -103,14 +103,20 @@ final class OledOverlay {
       }
       return false
     }
-    // A uniform mask is indistinguishable from no mask on screen, and the
-    // scalar path is cheaper (no image, no layer contents), so it is normalized
-    // away here rather than rendered. This also keeps `==` from treating
-    // "uniform 0.5 mask" and "no mask, alpha 0.5" as different states and
-    // re-ordering the window between them.
-    let effectiveMask = (mask?.isUniform ?? true) ? nil : mask
+    // **A uniform mask is NOT normalized away here, and that is deliberate.**
+    // It used to be, on the reasoning that a uniform mask looks the same as no
+    // mask and the scalar path is cheaper. It does not look the same: the
+    // caller sets `alpha = 1.0` precisely BECAUSE a mask is present and carries
+    // the absolute per-cell opacity, so dropping the mask leaves alpha 1.0 over
+    // an empty layer and paints the panel opaque black. Every idle dim did
+    // exactly that.
+    //
+    // The lesson generalizes past this call: `alpha`'s meaning DEPENDS on
+    // whether a mask came with it, so this method cannot unilaterally discard
+    // one. Collapsing a uniform mask back to a scalar is the caller's job,
+    // where both values are set together (`OledCareCoordinator.render`).
     let state = AppliedState(
-      alpha: min(max(alpha, 0), 1), blackout: blackout, mask: effectiveMask)
+      alpha: min(max(alpha, 0), 1), blackout: blackout, mask: mask)
     guard !existed || self.lastApplied[displayID] != state else {
       return true
     }

@@ -90,17 +90,47 @@ struct OverlayMaskTests {
 
   // MARK: - Composition
 
-  /// Detection dimming layers on top of the uniform dim already in force and
-  /// may only take a region FURTHER down. Averaging would let a nominated
-  /// region come out lighter than the level the user chose, which reads as the
-  /// feature undoing the setting.
-  @Test func composingTakesTheDarkerOfEachCell() {
+  /// Two sheets of tint: the light surviving both is the product of what each
+  /// lets through, so the combined opacity is `1 - (1 - a)(1 - b)`.
+  @Test func composingMultipliesTheLightEachLetsThrough() {
     var regions = cells(0)
     regions[10] = 0.8
     let composed = OverlayMask.uniform(0.5).darkened(by: OverlayMask(cells: regions))
 
-    #expect(composed.cells[10] == OverlayMask.quantize(0.8))
+    // 1 - (0.5 * 0.2) = 0.9
+    #expect(composed.cells[10] == OverlayMask.quantize(0.9))
+    // Untouched by the nomination, so still exactly the uniform dim.
     #expect(composed.cells[11] == OverlayMask.quantize(0.5))
+  }
+
+  /// **The regression this replaced `max` to fix.** `max` satisfies "never
+  /// lighter" and passed its test, while making the feature a no-op exactly
+  /// where it matters: a 0.15 nomination under a 0.5 idle dim composed to
+  /// `max(0.5, 0.15)` = 0.5, identical to its surroundings, so the region a
+  /// user turned this on to protect got no more protection than the region
+  /// beside it.
+  @Test func aShallowNominationStillDarkensUnderADeepUniformDim() {
+    var regions = cells(0)
+    regions[10] = 0.15
+    let composed = OverlayMask.uniform(0.5).darkened(by: OverlayMask(cells: regions))
+
+    #expect(composed.cells[10] > composed.cells[11], "the nominated cell is not darker")
+    #expect(composed.cells[10] == OverlayMask.quantize(0.575))
+  }
+
+  /// The other half of the same bug. `max` made the composition UNIFORM in the
+  /// common case, and a uniform composition is what drove the caller's
+  /// `alpha = 1.0` convention into painting the panel opaque black.
+  @Test func composingADimWithANominationIsNotUniform() {
+    var regions = cells(0)
+    regions[10] = 0.15
+    #expect(!OverlayMask.uniform(0.5).darkened(by: OverlayMask(cells: regions)).isUniform)
+  }
+
+  @Test func composingCannotReachOpaqueUnlessAnInputAlreadyIs() {
+    let composed = OverlayMask.uniform(0.9).darkened(by: .uniform(0.9))
+    #expect(composed.peak < 1.0)
+    #expect(OverlayMask.uniform(1.0).darkened(by: .uniform(0.5)).peak == 1.0)
   }
 
   @Test func composingNeverLightensAnyCell() {

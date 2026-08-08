@@ -58,25 +58,24 @@ public struct OverlayMask: Equatable, Sendable {
 
   public var peak: Double { cells.max() ?? 0 }
 
-  /// Composes two masks by taking the DARKER of each cell.
+  /// Composes two masks as two sheets of tint over one another: the light that
+  /// survives both is the product of what each lets through, so the combined
+  /// opacity is `1 - (1 - a)(1 - b)`.
   ///
-  /// Detection dimming layers on top of whatever uniform dim is already in
-  /// force, and it may only ever take a region further down. Averaging or
-  /// replacing would let a nominated region come out LIGHTER than the dim the
-  /// user asked for, which reads as the feature undoing the setting.
+  /// **Not `max`.** `max` satisfies "never lighter", which is the rule this has
+  /// to obey, and it was what shipped first. But it also makes the feature a
+  /// no-op wherever it matters: a 0.15 nomination under a 0.5 idle dim composes
+  /// to `max(0.5, 0.15)` = 0.5, identical to its surroundings, so the region a
+  /// user turned this on to protect is dimmed exactly as much as the region
+  /// beside it. Worse, the result is UNIFORM, which is the input that made the
+  /// caller's `alpha = 1.0` convention paint the panel opaque black.
+  ///
+  /// The product form is both correct and strictly darker: the same pair
+  /// composes to 0.575, and it can only reach 1.0 if one input already is.
   public func darkened(by other: OverlayMask) -> OverlayMask {
-    OverlayMask(cells: zip(cells, other.cells).map { Swift.max($0, $1) })
+    OverlayMask(cells: zip(cells, other.cells).map { 1 - (1 - $0) * (1 - $1) })
   }
 
-  /// Re-expresses the mask in DISPLAY orientation, which is the space the
-  /// overlay window is drawn in.
-  ///
-  /// Returns the grid transposed as the rotation requires, so a mask hot in the
-  /// panel's top-right comes back hot in the display's top-left at 270°. The
-  /// caller renders it as an image and lets the GPU interpolate; this method
-  /// does no smoothing of its own, because a 24×10 grid magnified with a linear
-  /// filter is already the gradient OC17 asks for and a second blur here would
-  /// only cost fidelity.
   /// A mask already turned into the display's own orientation, ready to render.
   ///
   /// A distinct type rather than a tuple because it is what crosses into the
@@ -96,6 +95,15 @@ public struct OverlayMask: Equatable, Sendable {
     }
   }
 
+  /// Re-expresses the mask in DISPLAY orientation, which is the space the
+  /// overlay window is drawn in.
+  ///
+  /// Returns the grid transposed as the rotation requires, so a mask hot in the
+  /// panel's top-right comes back hot in the display's top-left at 270°. The
+  /// caller renders it as an image and lets the GPU interpolate; this method
+  /// does no smoothing of its own, because a 24x10 grid magnified with a linear
+  /// filter is already the gradient OC17 asks for and a second blur here would
+  /// only cost fidelity.
   public func displayOriented(through transform: PanelSpaceTransform) -> Oriented {
     let swaps = transform.rotation.swapsAxes
     let cols = swaps ? PanelGrid.rows : PanelGrid.cols

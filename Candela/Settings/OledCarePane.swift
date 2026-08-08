@@ -655,9 +655,16 @@ private struct OledCareDisplaySection: View {
     // screen is locked. This one changes what they are looking at, so a wrong
     // nomination is visible as a defect rather than felt as protection, and the
     // honest framing is the one that lets someone decline. It also depends on
-    // BOTH measurements above: the conjunction that keeps a playing video out
-    // of the set needs luminance from one and staticness from the other, so the
+    // BOTH measurements above, one for luminance and one for staticness, so the
     // caption says so instead of leaving the switch to do nothing silently.
+    //
+    // The caption promises exactly what the code delivers: "full-screen video
+    // is never dimmed" is the `fullScreenOwner` gate, which is read from the
+    // window list and is exact. It does NOT promise that a WINDOWED video is
+    // safe, because it is not: bounds stability is not content staticness, so a
+    // player holding a fixed rect passes both halves of the conjunction. An
+    // earlier version of this comment claimed the conjunction excluded a
+    // playing video, contradicting `WindowObserver`'s own doc, which is right.
     // NOT claimed here: "eases off where you are pointing". The spec's §4 wants
     // pointer-proximity falloff and it is NOT built: the pointer is not an
     // input to `StaticRegionDetector`, which is pure, and nothing in the
