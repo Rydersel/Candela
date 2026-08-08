@@ -47,6 +47,16 @@ final class OledOverlay {
   private struct AppliedState: Equatable {
     let alpha: Double
     let blackout: Bool
+    /// The spatial axis (OC17, #20). Nil is exactly what shipped before it
+    /// existed: one uniform alpha over the whole content view.
+    ///
+    /// `OverlayMask` quantizes to 1/255 on construction, which is what keeps
+    /// this struct's `==` meaningful. Without that, a mask derived from live
+    /// luminance would differ in the twelfth decimal every tick, every apply
+    /// would be a memo miss, and the overlay would re-order ~10 times a second
+    /// per display. The memo is not an optimization here: each re-order
+    /// re-stacks the overlay above whatever else sits at shielding level.
+    let mask: OverlayMask.Oriented?
   }
 
   private var lastApplied: [CGDirectDisplayID: AppliedState] = [:]
@@ -73,8 +83,15 @@ final class OledOverlay {
   /// no-op. Re-asserting a state the window already carries is
   /// `reassert(on:)`'s job — that is the OC12 reconcile's lever, and keeping it
   /// separate is what keeps the steady-state cadence off the window server.
+  ///
+  /// `mask` is the spatial axis, already in DISPLAY orientation. Nil keeps the
+  /// scalar behaviour this shipped with, so every OC12 guarantee is untouched
+  /// for callers that do not use it.
   @discardableResult
-  func apply(alpha: Double?, blackout: Bool, on displayID: CGDirectDisplayID) -> Bool {
+  func apply(
+    alpha: Double?, mask: OverlayMask.Oriented? = nil, blackout: Bool,
+    on displayID: CGDirectDisplayID
+  ) -> Bool {
     guard let alpha else {
       self.remove(for: displayID)
       return true
@@ -86,7 +103,14 @@ final class OledOverlay {
       }
       return false
     }
-    let state = AppliedState(alpha: min(max(alpha, 0), 1), blackout: blackout)
+    // A uniform mask is indistinguishable from no mask on screen, and the
+    // scalar path is cheaper (no image, no layer contents), so it is normalized
+    // away here rather than rendered. This also keeps `==` from treating
+    // "uniform 0.5 mask" and "no mask, alpha 0.5" as different states and
+    // re-ordering the window between them.
+    let effectiveMask = (mask?.isUniform ?? true) ? nil : mask
+    let state = AppliedState(
+      alpha: min(max(alpha, 0), 1), blackout: blackout, mask: effectiveMask)
     guard !existed || self.lastApplied[displayID] != state else {
       return true
     }
@@ -116,7 +140,71 @@ final class OledOverlay {
     // the waking click lands where the user aimed.
     window.ignoresMouseEvents = !state.blackout
     window.contentView?.alphaValue = CGFloat(state.alpha)
+    Self.writeMask(state.mask, to: window)
     window.orderFrontRegardless()
+  }
+
+  /// Renders the spatial axis as the layer's contents.
+  ///
+  /// The mask becomes a tiny grayscale image (24×10, or 10×24 on a rotated
+  /// panel) and the layer magnifies it with a LINEAR filter. That is what
+  /// satisfies OC17's "smoothly interpolated gradient, never per-cell blocks":
+  /// at 3440×1440 a cell is ~143 px, and a step function at that scale is a
+  /// visible tile pattern, which would be a self-inflicted version of the
+  /// problem the feature exists to solve. Drawing 240 rectangles would produce
+  /// exactly that pattern; handing the GPU an image and letting it interpolate
+  /// costs nothing and produces the falloff for free.
+  ///
+  /// Nil CLEARS the contents rather than leaving them: a display that had a
+  /// mask and no longer does must go back to a uniform dim, not keep a stale
+  /// gradient nothing will update.
+  private static func writeMask(_ mask: OverlayMask.Oriented?, to window: NSPanel) {
+    guard let layer = window.contentView?.layer else { return }
+    guard let mask else {
+      layer.contents = nil
+      layer.backgroundColor = .black
+      return
+    }
+    guard let image = maskImage(mask) else {
+      // Fall back to the uniform dim rather than to nothing: a failed image is
+      // a reason to lose the spatial detail, never a reason to stop dimming a
+      // panel the user asked to have dimmed.
+      layer.contents = nil
+      layer.backgroundColor = .black
+      return
+    }
+    // The image carries the black AND its per-cell alpha, so the flat
+    // background must go: leaving it would floor every cell at full black and
+    // the mask would have no visible effect at all.
+    layer.backgroundColor = NSColor.clear.cgColor
+    layer.magnificationFilter = .linear
+    layer.minificationFilter = .linear
+    layer.contentsGravity = .resize
+    layer.contents = image
+  }
+
+  /// Black pixels whose ALPHA is the mask. Premultiplied, because the mask is
+  /// the alpha channel and the colour is a constant zero.
+  private static func maskImage(_ mask: OverlayMask.Oriented) -> CGImage? {
+    let (cells, cols, rows) = (mask.cells, mask.cols, mask.rows)
+    guard cols > 0, rows > 0, cells.count == cols * rows else { return nil }
+
+    var pixels = [UInt8](repeating: 0, count: cols * rows * 4)
+    for index in cells.indices {
+      let alpha = UInt8(clamping: Int((cells[index] * 255).rounded()))
+      // BGRA premultiplied: colour channels are alpha * 0 = 0, so only the
+      // alpha byte carries anything.
+      pixels[index * 4 + 3] = alpha
+    }
+
+    let space = CGColorSpaceCreateDeviceRGB()
+    let info = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue)
+      .union(.byteOrder32Little)
+    guard let context = CGContext(
+      data: &pixels, width: cols, height: rows, bitsPerComponent: 8,
+      bytesPerRow: cols * 4, space: space, bitmapInfo: info.rawValue)
+    else { return nil }
+    return context.makeImage()
   }
 
   func remove(for displayID: CGDirectDisplayID) {

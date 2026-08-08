@@ -89,6 +89,16 @@ public struct PanelSpaceTransform: Equatable, Sendable {
     }
   }
 
+  /// `panelPoint` for `OverlayMask`, which needs the same mapping to walk a
+  /// display-oriented grid back into panel cells.
+  ///
+  /// Exposed rather than duplicated: the rotation convention is subtle enough
+  /// that it already shipped with a backwards doc comment, and two spellings of
+  /// it would be two places a correction has to find. This is the one place.
+  func panelPointForDisplay(u: Double, v: Double) -> (p: Double, q: Double) {
+    panelPoint(u: u, v: v)
+  }
+
   private func displayPoint(p: Double, q: Double) -> (u: Double, v: Double) {
     switch rotation {
     case .standard: (p, q)
