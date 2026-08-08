@@ -64,6 +64,18 @@ public struct PanelSpaceTransform: Equatable, Sendable {
 
   private static let noCoverage = [Double](repeating: 0, count: PanelGrid.cellCount)
 
+  /// `CGRect.intersection` treats NaN as "no constraint" rather than
+  /// propagating it, so a rect with a NaN origin intersects a 3440×1440 display
+  /// to a FULL-WIDTH strip and an all-NaN rect to the whole display. That
+  /// window would then out-cover every real one in `WindowObserver.observe`
+  /// (1.0 beats any fraction), take every cell, and book the whole interval to
+  /// its owner in a store that never washes out. `isNull` and `isInfinite` do
+  /// not catch it.
+  static func isUsable(_ rect: CGRect) -> Bool {
+    rect.origin.x.isFinite && rect.origin.y.isFinite
+      && rect.size.width.isFinite && rect.size.height.isFinite
+  }
+
   // MARK: - The rotation, in one place
 
   /// Normalized display point → normalized panel-native point. Both are
@@ -110,7 +122,9 @@ public struct PanelSpaceTransform: Equatable, Sendable {
   /// boundary contributes in proportion, or attribution quantizes into visible
   /// lies at 143 px granularity.
   public func coverage(ofDisplayRect rect: CGRect) -> [Double] {
-    guard hasUsableSize, !rect.isNull, !rect.isInfinite else { return Self.noCoverage }
+    guard hasUsableSize, !rect.isNull, !rect.isInfinite, Self.isUsable(rect) else {
+      return Self.noCoverage
+    }
     let onScreen = rect.intersection(CGRect(origin: .zero, size: displaySize))
     guard !onScreen.isNull, onScreen.width > 0, onScreen.height > 0 else { return Self.noCoverage }
 

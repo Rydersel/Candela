@@ -18,9 +18,25 @@ public struct PanelHealthSummary: Sendable {
 
   public let confidence: Confidence
 
+  /// Whether window observation is currently recording for this display.
+  ///
+  /// Separate from `confidence`, which describes luminance telemetry only.
+  /// Both are prefs and either can be off alone, so a surface that says what is
+  /// being recorded needs both: with telemetry off and observation off, the
+  /// honest statement is "nothing", and stating "window geometry is what is
+  /// left" describes a producer that is not running.
+  public let observationEnabled: Bool
+
   /// 240 cells, panel-native order, each normalized against this map's own
   /// peak — 1.0 is the hottest cell this map has seen, not an absolute
   /// luminance unit. All zero when nothing has accumulated yet.
+  ///
+  /// **Populated regardless of `confidence`**, deliberately: this is the
+  /// accumulated history, and a display whose telemetry was switched off after
+  /// a month still HAS that month. Whether it may be DRAWN is a separate
+  /// question the caller answers, because drawing an exposure heat map implies
+  /// a currency the `.estimated` state cannot support. A caller that blanks it
+  /// must not also say nothing was measured.
   public let cells: [Double]
 
   /// The hottest cell's exposure as a multiple of the panel mean. Nil unless
@@ -32,6 +48,12 @@ public struct PanelHealthSummary: Sendable {
   /// The app dominating the hottest cell, from the same snapshot used for
   /// `hottestRelative`. Nil under the same conditions, or when no observation
   /// was supplied, or when that cell has no dominant owner.
+  ///
+  /// **Also nil whenever `observationEnabled` is false**, however recent the
+  /// snapshot looks. The coordinator keeps the last observation for the life of
+  /// the process after the pref goes off, so without this gate a surface saying
+  /// "X is on that part of the display right now" would keep naming an app the
+  /// user stopped us watching, possibly hours after it quit.
   public let hottestOwner: String?
 
   /// The heaviest apps by **panel-hours attributable to them** — *not*
@@ -51,35 +73,45 @@ public struct PanelHealthSummary: Sendable {
   /// leaderboard, not a process list; the tail is noise a user cannot act on.
   public static let topOwnerLimit = 5
 
+  /// `sampleCount` is read off `map` rather than passed alongside it. It was a
+  /// separate parameter, which made two sources of truth for one number and let
+  /// `make(map: .empty, …, sampleCount: 999)` answer `.measured` over an empty
+  /// map — a non-blank, all-zero heat map presented as measured. No caller did
+  /// that, and none can now.
   public static func make(
     map: ExposureMap,
     observation: WindowObservation?,
     ownerHours: OwnerHours,
     telemetryEnabled: Bool,
-    sampleCount: Int
+    observationEnabled: Bool
   ) -> PanelHealthSummary {
-    let confidence = confidence(telemetryEnabled: telemetryEnabled, sampleCount: sampleCount)
+    let confidence = confidence(telemetryEnabled: telemetryEnabled, map: map)
 
     var hottestRelative: Double?
     var hottestOwner: String?
     if confidence == .measured, let hottest = map.hottestCell {
       hottestRelative = map.relativeExposure(atCell: hottest)
-      if let owners = observation?.dominantOwnerByCell, owners.indices.contains(hottest) {
+      if observationEnabled,
+        let owners = observation?.dominantOwnerByCell, owners.indices.contains(hottest) {
         hottestOwner = owners[hottest]
       }
     }
 
     return PanelHealthSummary(
       confidence: confidence,
+      observationEnabled: observationEnabled,
       cells: normalized(map.cells),
       hottestRelative: hottestRelative,
       hottestOwner: hottestOwner,
       topOwnersByHours: ownerHours.topOwners(limit: topOwnerLimit))
   }
 
-  private static func confidence(telemetryEnabled: Bool, sampleCount: Int) -> Confidence {
+  /// Defers to `ExposureAccumulator.hasEnoughSamplesForAnalysis` rather than
+  /// re-comparing against the threshold. The two used to be separate spellings
+  /// of one rule, and the accumulator's had no production caller at all.
+  private static func confidence(telemetryEnabled: Bool, map: ExposureMap) -> Confidence {
     guard telemetryEnabled else { return .estimated }
-    guard sampleCount >= ExposureAccumulator.minimumSamplesForAnalysis else { return .insufficient }
+    guard ExposureAccumulator(map: map).hasEnoughSamplesForAnalysis else { return .insufficient }
     return .measured
   }
 
@@ -101,6 +133,7 @@ extension PanelHealthSummary: Equatable {
   // no synthesis to fall back on.
   public static func == (lhs: PanelHealthSummary, rhs: PanelHealthSummary) -> Bool {
     lhs.confidence == rhs.confidence
+      && lhs.observationEnabled == rhs.observationEnabled
       && lhs.cells == rhs.cells
       && lhs.hottestRelative == rhs.hottestRelative
       && lhs.hottestOwner == rhs.hottestOwner

@@ -335,14 +335,16 @@ final class OledCareCoordinator {
   func healthSummary(for persistenceKey: String) -> PanelHealthSummary {
     let map = accumulators[persistenceKey]?.map ?? loadExposureMap(for: persistenceKey)
     let owners = ownerHours[persistenceKey]?.hours ?? loadOwnerHours(for: persistenceKey)
-    let telemetry = states[persistenceKey]?.telemetryEnabled
-      ?? DisplayPrefs(persistenceKey: persistenceKey).oledTelemetry
+    let prefs = DisplayPrefs(persistenceKey: persistenceKey)
+    let telemetry = states[persistenceKey]?.telemetryEnabled ?? prefs.oledTelemetry
+    let observing = states[persistenceKey]?.windowObservationEnabled
+      ?? prefs.oledWindowObservation
     return PanelHealthSummary.make(
       map: map,
       observation: latestObservations[persistenceKey],
       ownerHours: owners,
       telemetryEnabled: telemetry,
-      sampleCount: map.sampleCount)
+      observationEnabled: observing)
   }
 
   /// The health view's delete action: the accumulated exposure map, the

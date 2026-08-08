@@ -235,6 +235,72 @@ struct PanelSpaceTransformTests {
     #expect(panel[PanelGrid.cellCount - 1] == 0)
   }
 
+  /// The test above is named for spreading but never exercises it: with a 2×2
+  /// source the boundaries land on exactly 12/24 and 5/10, so no panel cell
+  /// straddles one and every cell takes a single source value. A 3-column
+  /// source puts a boundary at 8/24 and 16/24 — still integral — so this uses
+  /// 7, whose boundaries fall inside panel cells 3, 6, 10, 13, 17 and 20.
+  @Test func aPanelCellStraddlingTwoSourceCellsBlendsThem() {
+    let t = PanelSpaceTransform(
+      displaySize: CGSize(width: 3440, height: 1440), rotation: .standard)
+    // 7×1: first column hot, rest cold. 24/7 = 3.43 panel cells per source
+    // column, so panel column 3 spans the boundary and must land strictly
+    // between the two source values rather than snapping to either.
+    var grid = [Double](repeating: 0, count: 7)
+    grid[0] = 1.0
+    let panel = t.panelNativeGrid(fromDisplayGrid: grid, cols: 7, rows: 1)
+
+    #expect(panel[0] == 1.0)
+    #expect(panel[1] == 1.0)
+    #expect(panel[2] == 1.0)
+    let straddling = panel[3]
+    #expect(straddling > 0.0)
+    #expect(straddling < 1.0)
+    #expect(panel[4] == 0.0)
+  }
+
+  /// Coverage sums to the rect's share of the display in EVERY rotation, not
+  /// just upright. The existing sum test is `.standard` only, so a rotation
+  /// that lost or duplicated area would not show up in it.
+  @Test func coverageSumsToTheRectsShareOfTheDisplayInEveryRotation() {
+    let landscape = CGSize(width: 3440, height: 1440)
+    let portrait = CGSize(width: 1440, height: 3440)
+    let cases: [(DisplayRotation, CGSize)] = [
+      (.standard, landscape), (.ninety, portrait),
+      (.oneEighty, landscape), (.twoSeventy, portrait),
+    ]
+    for (rotation, size) in cases {
+      let t = PanelSpaceTransform(displaySize: size, rotation: rotation)
+      let rect = CGRect(x: 37, y: 91, width: 613, height: 428)
+      let sum = t.coverage(ofDisplayRect: rect).reduce(0, +) / Double(PanelGrid.cellCount)
+      let share = (rect.width * rect.height) / (size.width * size.height)
+      #expect(abs(sum - share) < 1e-12, "rotation \(rotation) lost or duplicated area")
+    }
+  }
+
+  /// `CGRect.intersection` treats NaN as "no constraint" rather than
+  /// propagating it, so a NaN origin intersects the display to a full-width
+  /// strip and an all-NaN rect to the WHOLE display. That window would then
+  /// out-cover every real one in `WindowObserver.observe` and book the interval
+  /// to its owner in a store that never washes out. `isNull` and `isInfinite`
+  /// do not catch it.
+  @Test func aRectWithNonFiniteComponentsCoversNothing() {
+    let t = PanelSpaceTransform(
+      displaySize: CGSize(width: 3440, height: 1440), rotation: .standard)
+    let bad: [CGRect] = [
+      CGRect(x: CGFloat.nan, y: 0, width: 100, height: 100),
+      CGRect(x: 0, y: CGFloat.nan, width: 100, height: 100),
+      CGRect(x: 0, y: 0, width: CGFloat.nan, height: 100),
+      CGRect(x: 0, y: 0, width: 100, height: CGFloat.nan),
+      CGRect(x: CGFloat.nan, y: CGFloat.nan, width: CGFloat.nan, height: CGFloat.nan),
+    ]
+    for rect in bad {
+      let coverage = t.coverage(ofDisplayRect: rect)
+      #expect(coverage.count == PanelGrid.cellCount)
+      #expect(coverage.allSatisfy { $0 == 0 }, "a non-finite rect covered cells")
+    }
+  }
+
   @Test func aMalformedSourceGridRebinsToZeros() {
     let t = PanelSpaceTransform(
       displaySize: CGSize(width: 3440, height: 1440), rotation: .standard)
