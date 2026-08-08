@@ -239,6 +239,22 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(!newValue, forKey: key("oledLockDimOff")) }
   }
 
+  /// Exposure sampling. Requires Screen Recording, so it defaults OFF and is
+  /// never enabled as a side effect of enrollment — the grant is a decision
+  /// the user makes at the toggle, not one the preset makes for them.
+  public var oledTelemetry: Bool {
+    get { defaults.bool(forKey: key("oledTelemetry")) }
+    set { defaults.set(newValue, forKey: key("oledTelemetry")) }
+  }
+
+  /// Window geometry and owner-app observation (OC18). Needs no permission
+  /// and is the degraded no-permission mode's only data source, so it defaults
+  /// ON and stores inverted.
+  public var oledWindowObservation: Bool {
+    get { !defaults.bool(forKey: key("oledWindowObservationOff")) }
+    set { defaults.set(!newValue, forKey: key("oledWindowObservationOff")) }
+  }
+
   public var oledBlackoutEnabled: Bool {
     get { defaults.bool(forKey: key("oledBlackoutEnabled")) }
     set { defaults.set(newValue, forKey: key("oledBlackoutEnabled")) }
@@ -294,6 +310,12 @@ public final class DisplayPrefs: @unchecked Sendable {
       "oledBlackoutEnabled", "oledBlackoutSeconds",
       "oledUnfocusedDimEnabled", "oledUnfocusedDimSeconds", "oledUnfocusedDimLevel",
       "oledHoursTrackingOff",
+      // Note the inverted spelling: clearing "oledWindowObservation" would
+      // clear nothing and leave a disabled observation disabled through a
+      // reset. The accumulated exposure map is NOT cleared here, for the same
+      // reason panel hours are not — it is wear data, not a setting, and it
+      // has its own delete action in the panel health view.
+      "oledTelemetry", "oledWindowObservationOff",
     ] {
       defaults.removeObject(forKey: key(name))
     }

@@ -76,7 +76,15 @@ struct PrefPropagationTests {
     // (precedent: the `forceSw` accessor is named `forceSoftware`).
     #expect(PrefName.oledCareEnrolled.rawValue == "oledCareEnrolled")
     #expect(PrefName.oledLockDim.rawValue == "oledLockDim")
-    #expect(PrefName.allCases.count == 50)
+    // W3b-1 added two: 50 -> 52. `oledWindowObservation` is a third member of
+    // the inverted-storage exception above (`oledWindowObservationOff`).
+    //
+    // The 52 is the UNION of two branches that each counted from 47: W3b-1 saw
+    // 47 -> 49, the settings overhaul saw 47 -> 50, and both landed. Counted
+    // from the enum, not arithmetic on the two claims.
+    #expect(PrefName.oledTelemetry.rawValue == "oledTelemetry")
+    #expect(PrefName.oledWindowObservation.rawValue == "oledWindowObservation")
+    #expect(PrefName.allCases.count == 52)
   }
 
   // MARK: - Rows
@@ -169,7 +177,7 @@ struct PrefPropagationTests {
       .oledCareEnrolled, .oledIdleDimSeconds, .oledIdleDimLevel, .oledLockDim,
       .oledBlackoutEnabled, .oledBlackoutSeconds,
       .oledUnfocusedDimEnabled, .oledUnfocusedDimSeconds, .oledUnfocusedDimLevel,
-      .oledHoursTracking,
+      .oledHoursTracking, .oledTelemetry, .oledWindowObservation,
     ]
     for name in oled {
       #expect(PrefPropagation.effects(forChange: name).contains(.reapplyOledCare), "\(name.rawValue)")

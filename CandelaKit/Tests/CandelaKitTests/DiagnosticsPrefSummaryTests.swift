@@ -78,6 +78,10 @@ struct DiagnosticsPrefSummaryTests {
     prefs.oledUnfocusedDimSeconds = 900
     prefs.oledUnfocusedDimBrightness = 0.4
     prefs.oledHoursTracking = false
+    // W3b-1's two, and their defaults run opposite ways: telemetry is off until
+    // granted, window observation is on because it needs no permission.
+    prefs.oledTelemetry = true
+    prefs.oledWindowObservation = false
     for command in DDCCommand.allCases {
       prefs.setTuning(
         CommandTuning(

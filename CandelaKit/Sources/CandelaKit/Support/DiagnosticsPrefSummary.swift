@@ -85,6 +85,12 @@ public enum DiagnosticsPrefSummary {
       note(.oledUnfocusedDimLevel, "\(prefs.oledUnfocusedDimBrightness) brightness")
     }
     if !prefs.oledHoursTracking { note(.oledHoursTracking, "false") }
+    // W3b-1's two. Opposite defaults, so opposite tests: telemetry is OFF until
+    // the user grants it at the toggle (never as a side effect of enrollment),
+    // while window observation needs no permission, is the degraded mode's only
+    // data source, and so defaults ON and stores inverted.
+    if prefs.oledTelemetry { note(.oledTelemetry, "true") }
+    if !prefs.oledWindowObservation { note(.oledWindowObservation, "false") }
 
     for command in DDCCommand.allCases {
       let tuning = prefs.tuning(for: command)

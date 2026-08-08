@@ -1,19 +1,20 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import IOKit.ps
 import IOKit.pwr_mgt
 
 /// The system readings `OledCareCoordinator` turns into `OledDimSignals`. All
 /// of it is app-target: the engine takes abstract signals so it stays testable,
 /// and every platform call that produces one lives here.
 ///
-/// The isolation is deliberately split. The two per-tick reads are nonisolated
-/// — both platform calls are thread-safe and neither touches stored state, so
-/// they must not be forced through a main-actor hop the 10 Hz tick would pay
-/// for [MEASURED 2026-08-06: sub-microsecond and 0.07 ms per call]. Only
-/// `displaySleepMinutes()` is `@MainActor`, and only because it owns a cache —
-/// it is also 1000× the cost of the other two, which is the other half of the
-/// reason it is not on the tick path.
+/// The isolation is deliberately split. Every reading ahead of the cache is
+/// nonisolated — the platform calls are thread-safe and none touches stored
+/// state, so the two on the 10 Hz tick path must not be forced through a
+/// main-actor hop for it [MEASURED 2026-08-06: sub-microsecond and 0.07 ms per
+/// call]. Only `displaySleepMinutes()` is `@MainActor`, and only because it owns
+/// a cache — it is also 1000× the cost of the tick reads, which is the other
+/// half of the reason it is not on the tick path.
 enum OledCareSignalSources {
   /// Seconds since the last user input, system-wide.
   ///
@@ -49,6 +50,40 @@ enum OledCareSignalSources {
     guard IOPMCopyAssertionsStatus(&assertions) == kIOReturnSuccess,
           let dict = assertions?.takeRetainedValue() as? [String: Int] else { return false }
     return (dict[kIOPMAssertionTypePreventUserIdleDisplaySleep as String] ?? 0) > 0
+  }
+
+  /// Spec §4's "low battery" skip. A threshold has to be a number; 20% is where
+  /// macOS itself starts warning, and the cost of being wrong either way is one
+  /// minute of sampling.
+  private static let lowBatteryPercent: Double = 20
+
+  /// True while any battery power source is at or below `lowBatteryPercent`
+  /// AND actually running on battery, for OLED care's sampling skip (spec §4).
+  ///
+  /// Deliberately NOT `ProcessInfo.isLowPowerModeEnabled`: Low Power Mode is a
+  /// user preference that can be on at 100% charge, and the spec's condition is
+  /// the charge itself. Read at the 60 s decision point only — never on the
+  /// 10 Hz tick, where an IOKit power-source copy would be the most expensive
+  /// thing in the loop.
+  static func onLowBattery() -> Bool {
+    guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+      let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef]
+    else { return false }
+    for source in sources {
+      guard let description = IOPSGetPowerSourceDescription(blob, source)?.takeUnretainedValue()
+        as? [String: Any]
+      else { continue }
+      // On mains power the charge level is irrelevant — the panel is not being
+      // sampled to save a battery that is filling.
+      guard description[kIOPSPowerSourceStateKey] as? String == kIOPSBatteryPowerValue else {
+        continue
+      }
+      guard let current = description[kIOPSCurrentCapacityKey] as? Double,
+        let capacity = description[kIOPSMaxCapacityKey] as? Double, capacity > 0
+      else { continue }
+      if current / capacity * 100 <= lowBatteryPercent { return true }
+    }
+    return false
   }
 
   @MainActor private static var cachedDisplaySleep: (minutes: Int?, at: ContinuousClock.Instant)?

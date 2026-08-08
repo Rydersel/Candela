@@ -9,4 +9,20 @@ long-term goal: a free, open competitor to BetterDisplay.
 - App: `Candela/` (SwiftUI, generated via `xcodegen generate` — never edit the xcodeproj)
 - Hardware smoke test: `cd CandelaKit && swift run candela-probe [list|get|set N|ramp from to step ms]`
 
+## Local setup
+
+Optional, once per clone. It wires a pre-commit hook that runs the two context
+gates locally in about a second, so a bad commit never exists rather than being
+caught later by CI:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+`core.hooksPath` is per-clone config and `git clone` does not carry it, so this
+is a command you run rather than something the repo can do for you — deliberately.
+Skipping it costs nothing but feedback latency: the same gates run in CI on every
+push and pull request, and CI is the enforcing layer. The hook is advisory and
+`git commit --no-verify` skips it, which is a legitimate escape hatch.
+
 Portions transplanted from [MonitorControl](https://github.com/MonitorControl/MonitorControl) (MIT).

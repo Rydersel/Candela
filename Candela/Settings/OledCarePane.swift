@@ -1,4 +1,5 @@
 import CandelaKit
+import CoreGraphics
 import SwiftUI
 
 /// The display a jump into this pane came from, carried as a persistence key
@@ -308,6 +309,10 @@ private struct OledCareDisplaySection: View {
   /// action that changes it from here (Dismiss); the numbers otherwise refresh
   /// whenever anything else re-renders the pane.
   @State private var hoursRevision = 0
+  /// The panel health view is presented FROM this section, never embedded in it
+  /// (OC19): it is a page of its own, and a 24×10 heat map inside a `Form` row
+  /// would read as one more setting.
+  @State private var showingHealth = false
 
   private var persistenceKey: String { state.display.persistenceKey }
   private var writer: DisplayPrefWriter {
@@ -348,10 +353,40 @@ private struct OledCareDisplaySection: View {
         blackoutControls
         unfocusedControls
         hoursControls
+        measurementControls
+        healthRow
       }
     } header: {
       Text(verbatim: name).settingsHeading()
     }
+    .sheet(isPresented: $showingHealth) {
+      PanelHealthView(
+        displayName: name,
+        persistenceKey: persistenceKey,
+        displayID: state.display.id)
+    }
+    // Screenshot validation has no other route into a sheet: Accessibility is
+    // not granted, so nothing can click the row that opens it, and the app has
+    // no URL scheme (that is W4). Same permanent, compiled-out-by-construction
+    // shape as `DebugSettingsHook` and the coordinators' preview observers —
+    // the `#if` wraps the MODIFIER, so Release keeps no residue.
+    //
+    //   CANDELA_DEBUG_PANEL_HEALTH=first            first external display
+    //   CANDELA_DEBUG_PANEL_HEALTH=<persistenceKey> that display
+    //
+    // Only ever opens for an ENROLLED display, because the row it stands in for
+    // only exists there.
+    #if DEBUG
+      .onAppear {
+        guard prefs.oledCareEnrolled,
+          let want = ProcessInfo.processInfo.environment["CANDELA_DEBUG_PANEL_HEALTH"]
+        else { return }
+        let first = model.displays.first?.display.persistenceKey
+        if want == persistenceKey || (want == "first" && first == persistenceKey) {
+          showingHealth = true
+        }
+      }
+    #endif
   }
 
   // MARK: - Status
@@ -529,6 +564,63 @@ private struct OledCareDisplaySection: View {
       }
     }
 
+  }
+
+  // MARK: - Measurement
+
+  /// The two data sources behind the panel health view, in the order they cost
+  /// the user something: the one that needs a system permission first, then the
+  /// one that needs none.
+  @ViewBuilder private var measurementControls: some View {
+    // Spec §4's prompt copy, used verbatim as the toggle's own explanation so
+    // the reason is on screen BEFORE macOS's own dialog — which says "record
+    // the contents of your screen" and can say nothing else. The only
+    // substitution is the product name, which every other caption in this file
+    // interpolates for the same reason (the working name is not final).
+    SettingRow(caption: SettingsCaption("\(AppInfo.productName) measures how bright each part of the display is, at about the resolution of this grid, once a minute. Nothing is recorded or stored as an image, and nothing leaves this Mac.")) {
+      VStack(alignment: .leading, spacing: 8) {
+        Toggle("Measure how bright each part of this display is", isOn: Binding(
+          get: { prefs.oledTelemetry },
+          set: { on in
+            // The ONE place in the app that raises the Screen Recording
+            // prompt. The sampler itself is preflight-only on purpose: a
+            // background loop that raises a TCC dialog on its own schedule is
+            // a permission request with no explanation attached to it.
+            //
+            // The pref is written whether or not the grant arrives. macOS
+            // returns false from the request that merely SHOWS the dialog, so
+            // gating the switch on the return value would leave it stuck off
+            // on the first click; instead the switch records the decision and
+            // the note below says the grant has not landed.
+            if on { _ = CGRequestScreenCaptureAccess() }
+            writer.write(.oledTelemetry) { $0.oledTelemetry = on }
+          }
+        ))
+        // What "the resolution of this grid" means, at the size it means it.
+        PanelGridMark()
+        if prefs.oledTelemetry, !CGPreflightScreenCaptureAccess() {
+          OledInlineNote(Text("macOS has not granted Screen Recording, so no readings are being taken. Grant it in System Settings > Privacy & Security > Screen Recording."))
+        }
+      }
+    }
+
+    SettingRow("Needs no permission. Reads each on-screen window's position and the name of the app that owns it — never window titles, and never their contents. This is what puts an app's name next to an area of the display.") {
+      Toggle("Note which apps are on this display", isOn: Binding(
+        get: { prefs.oledWindowObservation },
+        set: { on in writer.write(.oledWindowObservation) { $0.oledWindowObservation = on } }
+      ))
+    }
+  }
+
+  /// A row that OPENS the health view rather than containing it (OC19).
+  private var healthRow: some View {
+    SettingRow(caption: SettingsCaption("Which areas of this panel have been lit the most, and which apps have been showing them.")) {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Text("Panel health")
+        Spacer(minLength: 0)
+        Button("Show…") { showingHealth = true }
+      }
+    }
   }
 
   /// The hours line, with the counter's own state in it. `oledHoursTracking`
