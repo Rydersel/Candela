@@ -82,6 +82,7 @@ struct DiagnosticsPrefSummaryTests {
     // granted, window observation is on because it needs no permission.
     prefs.oledTelemetry = true
     prefs.oledWindowObservation = false
+    prefs.oledDetectionDimming = true
     for command in DDCCommand.allCases {
       prefs.setTuning(
         CommandTuning(

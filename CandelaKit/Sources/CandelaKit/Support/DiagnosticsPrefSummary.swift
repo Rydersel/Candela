@@ -91,6 +91,11 @@ public enum DiagnosticsPrefSummary {
     // data source, and so defaults ON and stores inverted.
     if prefs.oledTelemetry { note(.oledTelemetry, "true") }
     if !prefs.oledWindowObservation { note(.oledWindowObservation, "false") }
+    // W3b-2's one. Off by default and the only care feature that alters the
+    // screen during active use, so its being ON is exactly the kind of thing a
+    // diagnostics reader needs to see when someone reports the display dimming
+    // patches while they work.
+    if prefs.oledDetectionDimming { note(.oledDetectionDimming, "true") }
 
     for command in DDCCommand.allCases {
       let tuning = prefs.tuning(for: command)

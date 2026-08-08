@@ -53,6 +53,10 @@ public enum PrefName: String, Sendable, CaseIterable {
   // the degraded mode's only data source, so it defaults TRUE and joins the
   // inverted-storage exception above (`oledWindowObservationOff`).
   case oledTelemetry, oledWindowObservation
+  // Per-display — OLED care (W3b-2). Detection-driven region dimming (#20),
+  // off by default: it is the only care feature that alters the screen during
+  // active use.
+  case oledDetectionDimming
   // App-level — display arrangement (#13). `savedArrangements` names a FAMILY
   // of keys, one per topology signature, the way `storedDisplayMode` names one
   // per display identity — a layout is a statement about a display SET, not
@@ -146,7 +150,14 @@ public enum PrefPropagation {
     case .oledCareEnrolled, .oledIdleDimSeconds, .oledIdleDimLevel, .oledLockDim,
          .oledBlackoutEnabled, .oledBlackoutSeconds,
          .oledUnfocusedDimEnabled, .oledUnfocusedDimSeconds, .oledUnfocusedDimLevel,
-         .oledHoursTracking, .oledTelemetry, .oledWindowObservation:
+         .oledHoursTracking, .oledTelemetry, .oledWindowObservation,
+         .oledDetectionDimming:
+      // `.reapplyOledCare` and NOT `.reapplyDimming` (D28): every pref here
+      // changes what the care overlay renders, which is the app's own window,
+      // and none of them touches the DDC or gamma dimming leg that
+      // `BrightnessController.reapplyAfterPrefChange()` exists to re-run.
+      // Adding `.reapplyDimming` would drive a brightness write on a settings
+      // toggle that has nothing to say about brightness.
       [.reapplyOledCare]
     }
     return engine.union([.refreshUI])
