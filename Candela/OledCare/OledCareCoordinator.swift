@@ -2,7 +2,6 @@ import AppKit
 import CandelaKit
 import CoreGraphics
 import Foundation
-import IOKit.ps
 import Observation
 import os
 
@@ -124,11 +123,6 @@ final class OledCareCoordinator {
   /// write per sample would put one on a permanent 60 s timer per panel for a
   /// value that is only ever read by a settings view.
   private static let exposurePersistInterval: Duration = .seconds(300)
-  /// Spec §4's "low battery" skip. A threshold has to be a number; 20% is where
-  /// macOS itself starts warning, and the cost of being wrong either way is one
-  /// minute of sampling.
-  private static let lowBatteryPercent: Double = 20
-
   @ObservationIgnored private weak var model: AppModel?
   @ObservationIgnored private let overlay = OledOverlay()
   @ObservationIgnored private let lockObserver = LockStateObserver()
@@ -825,7 +819,7 @@ final class OledCareCoordinator {
   private func samplingQualifies(dimState: OledDimState, on id: CGDirectDisplayID) -> Bool {
     guard !resetting, dimState == .active, !lockObserver.isLocked else { return false }
     guard CGDisplayIsAsleep(id) == 0 else { return false }
-    return !Self.onLowBattery()
+    return !OledCareSignalSources.onLowBattery()
   }
 
   /// Display geometry for the transform, from `CGDisplayBounds` — the same
@@ -1044,34 +1038,6 @@ final class OledCareCoordinator {
         log.error("OLED care: could not encode the per-app hours for \(key, privacy: .public)")
       }
     }
-  }
-
-  /// Spec §4's low-battery skip.
-  ///
-  /// Deliberately NOT `ProcessInfo.isLowPowerModeEnabled`: Low Power Mode is a
-  /// user preference that can be on at 100% charge, and the spec's condition is
-  /// the charge itself. Read at the 60 s decision point only — never on the
-  /// 10 Hz tick, where an IOKit power-source copy would be the most expensive
-  /// thing in the loop.
-  private static func onLowBattery() -> Bool {
-    guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-      let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef]
-    else { return false }
-    for source in sources {
-      guard let description = IOPSGetPowerSourceDescription(blob, source)?.takeUnretainedValue()
-        as? [String: Any]
-      else { continue }
-      // On mains power the charge level is irrelevant — the panel is not being
-      // sampled to save a battery that is filling.
-      guard description[kIOPSPowerSourceStateKey] as? String == kIOPSBatteryPowerValue else {
-        continue
-      }
-      guard let current = description[kIOPSCurrentCapacityKey] as? Double,
-        let capacity = description[kIOPSMaxCapacityKey] as? Double, capacity > 0
-      else { continue }
-      if current / capacity * 100 <= lowBatteryPercent { return true }
-    }
-    return false
   }
 
   private static func seconds(_ duration: Duration) -> Double {
