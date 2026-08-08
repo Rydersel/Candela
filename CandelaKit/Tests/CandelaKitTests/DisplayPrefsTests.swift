@@ -21,6 +21,55 @@ struct DisplayPrefsTests {
     }
   }
 
+  /// #110's escape hatch defaults ON, so absence must read as guarded — the
+  /// one bug that would make the hatch a hazard rather than a hatch.
+  @Test func theWireTimingGuardIsOnUntilExplicitlyTurnedOff() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "app")
+      #expect(prefs.wireTimingGuard)
+
+      prefs.wireTimingGuard = false
+      #expect(prefs.wireTimingGuard == false)
+      // App-level: stored unsuffixed, so every display sees the same answer.
+      #expect(defaults.object(forKey: "wireTimingGuard") as? Bool == false)
+
+      prefs.wireTimingGuard = true
+      #expect(prefs.wireTimingGuard)
+    }
+  }
+
+  /// A `defaults write` is the only way in, and it has to reach the same
+  /// accessor the engine reads.
+  @Test func theWireTimingGuardHonoursAnExternallyWrittenKey() {
+    withSuite { defaults in
+      defaults.set(false, forKey: "wireTimingGuard")
+      #expect(DisplayPrefs(defaults: defaults, persistenceKey: "app").wireTimingGuard == false)
+      // Read through a per-display instance too: it is not display-scoped.
+      #expect(DisplayPrefs(defaults: defaults, persistenceKey: "AAAA").wireTimingGuard == false)
+    }
+  }
+
+  /// The forms a person actually types. `defaults write … NO` stores a STRING,
+  /// and an escape hatch that ignores the commonest spelling of itself is worse
+  /// than none — the user believes the guard is off while it is still on.
+  @Test func theWireTimingGuardAcceptsEveryFalseSpellingDefaultsWriteProduces() {
+    for stored in ["NO", "no", "false", "0"] as [Any] + [0, false] {
+      withSuite { defaults in
+        defaults.set(stored, forKey: "wireTimingGuard")
+        #expect(
+          DisplayPrefs(defaults: defaults, persistenceKey: "app").wireTimingGuard == false,
+          "\(stored) should read as guard-off")
+      }
+    }
+    // And the true spellings stay guarded.
+    for stored in ["YES", "1"] as [Any] + [1, true] {
+      withSuite { defaults in
+        defaults.set(stored, forKey: "wireTimingGuard")
+        #expect(DisplayPrefs(defaults: defaults, persistenceKey: "app").wireTimingGuard)
+      }
+    }
+  }
+
   @Test func hdrModeRoundTrips() {
     withSuite { defaults in
       let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
@@ -512,6 +561,25 @@ struct DisplayPrefsTests {
     #expect(safe.pollingTries == 0)
   }
 
+  // MARK: - First-sight (SO22)
+
+  @Test func anEmptyDomainHasNoStoredValue() {
+    withSuite { defaults in
+      #expect(!DisplayPrefs.hasAnyStoredValue(forKey: "AAAA-BBBB", defaults: defaults))
+    }
+  }
+
+  @Test func anySeededKeyCountsAsStored() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "AAAA-BBBB")
+      prefs.friendlyName = "Desk"
+      #expect(DisplayPrefs.hasAnyStoredValue(forKey: "AAAA-BBBB", defaults: defaults))
+      // Suffix match, not substring: another display's domain stays fresh.
+      #expect(!DisplayPrefs.hasAnyStoredValue(forKey: "BBBB", defaults: defaults))
+      #expect(!DisplayPrefs.hasAnyStoredValue(forKey: "CCCC-DDDD", defaults: defaults))
+    }
+  }
+
   // MARK: - OLED care (W3a)
 
   @Test func oledDefaultsAreTheRecommendedPreset() {
@@ -519,7 +587,7 @@ struct DisplayPrefsTests {
       let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
       #expect(prefs.oledCareEnrolled == false)
       #expect(prefs.oledIdleDimSeconds == 300)
-      #expect(prefs.oledIdleDimLevel == 0.5)
+      #expect(prefs.oledIdleDimBrightness == 0.5)
       #expect(prefs.oledLockDim == true)
       #expect(prefs.oledBlackoutEnabled == false)
       #expect(prefs.oledBlackoutSeconds == 1200)
@@ -528,7 +596,7 @@ struct DisplayPrefsTests {
       // Lighter than the idle dim's 0.5, because the level IS the black
       // overlay's opacity — higher is darker — and an unfocused display is
       // still in view.
-      #expect(prefs.oledUnfocusedDimLevel == 0.3)
+      #expect(prefs.oledUnfocusedDimBrightness == 0.7)
       #expect(prefs.oledHoursTracking == true)
     }
   }
@@ -620,13 +688,13 @@ struct DisplayPrefsTests {
       let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
       prefs.oledCareEnrolled = true
       prefs.oledIdleDimSeconds = 60
-      prefs.oledIdleDimLevel = 0.9
+      prefs.oledIdleDimBrightness = 0.9
       prefs.oledLockDim = false
       prefs.oledBlackoutEnabled = true
       prefs.oledBlackoutSeconds = 3000
       prefs.oledUnfocusedDimEnabled = true
       prefs.oledUnfocusedDimSeconds = 900
-      prefs.oledUnfocusedDimLevel = 0.4
+      prefs.oledUnfocusedDimBrightness = 0.4
       prefs.oledHoursTracking = false
       prefs.oledTelemetry = true
       prefs.oledWindowObservation = false
@@ -642,13 +710,13 @@ struct DisplayPrefsTests {
 
       #expect(prefs.oledCareEnrolled == false)
       #expect(prefs.oledIdleDimSeconds == 300)
-      #expect(prefs.oledIdleDimLevel == 0.5)
+      #expect(prefs.oledIdleDimBrightness == 0.5)
       #expect(prefs.oledLockDim == true)
       #expect(prefs.oledBlackoutEnabled == false)
       #expect(prefs.oledBlackoutSeconds == 1200)
       #expect(prefs.oledUnfocusedDimEnabled == false)
       #expect(prefs.oledUnfocusedDimSeconds == 600)
-      #expect(prefs.oledUnfocusedDimLevel == 0.3)
+      #expect(prefs.oledUnfocusedDimBrightness == 0.7)
       #expect(prefs.oledHoursTracking == true)
       #expect(prefs.oledTelemetry == false)
       #expect(prefs.oledWindowObservation == true)

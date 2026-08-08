@@ -52,6 +52,16 @@ final class OledCareCoordinator {
   /// launch wiring runs.
   private(set) var chrome: ChromeAutoHideController?
 
+  /// Why a locked display was not dimmed, by persistenceKey. Present ONLY while
+  /// the display is locked and the dim was refused: a stale entry would be a
+  /// sentence about a state the machine is no longer in.
+  ///
+  /// Read by both surfaces that report lock dim, through `OledCareCopy` (the
+  /// OLED Care pane's status row and the display hub's care preview). OC7
+  /// sub-ruling 4 is "recorded, never reported as dimmed", and a record no
+  /// surface reads satisfies only the first half.
+  private(set) var lockDimSkips: [String: LockDimSkip] = [:]
+
   private struct PerDisplay {
     var engine: IdleDimmingEngine
     /// Cached from prefs (refreshed by `reconcileEnrollment`) so the tick can
@@ -99,13 +109,22 @@ final class OledCareCoordinator {
     /// this exists so the observer's ageing state is dropped exactly once,
     /// when the panel stops showing what those ages describe.
     var wasMirrored = false
+    /// Whether THIS coordinator has a temporary dim outstanding on the
+    /// display's controller. Tracked here rather than read back off the
+    /// controller so the disengage is driven by what we engaged, and a dim some
+    /// future caller owns is never ended on our behalf.
+    var lockDimEngaged = false
+    /// The dim-in fade, while it is still running. Cancelled by every path that
+    /// ends the dim. Cancellation is the tidy half only: `endTemporaryDim`
+    /// supersedes an in-flight ramp by token, so a step already suspended when
+    /// the user unlocked cannot land after the restore even if this were nil.
+    var lockDimRamp: Task<Void, Never>?
   }
 
   /// Poll cadence: slow while every enrolled display is `.active`/`.suspended`;
-  /// fast while any overlay is up (restore latency gate is 100 ms, #21) or an
-  /// OC12 verification is pending.
-  private static let slowCadence: Duration = .seconds(2)
-  private static let fastCadence: Duration = .milliseconds(100)
+  /// fast while any dim is up by any delivery (restore latency gate is 100 ms,
+  /// #21) or an OC12 verification is pending. The predicate and both durations
+  /// live in `OledCareCadence`, under test.
   /// After this much CONTINUOUS settling the signal is ignored: the entry gate
   /// exists for a transition window measured in seconds, not for a latch that
   /// never cleared.
@@ -212,9 +231,17 @@ final class OledCareCoordinator {
     chrome = ChromeAutoHideController(writer: SystemChromeWriter())
     guard !model.isSafeMode else { return }
 
+    // Everything below the Safe Mode guard above is what Safe Mode suppresses,
+    // and lock dim rides that gate rather than carrying one of its own: no lock
+    // observer is registered, so no tick ever reaches `.lockDim` and no
+    // brightness is written on our behalf in a safe-mode session (spec section 7).
     lockObserver.onLock = { [weak self] in
       guard let self else { return }
-      for key in states.keys { states[key]?.engine.noteLock() }
+      // Read once and hand the same baseline to every engine: the lock action
+      // itself is input, and the engines must not read its falling idle counter
+      // as input that arrived after the lock.
+      let idleAtLock = OledCareSignalSources.systemIdleSeconds()
+      for key in states.keys { states[key]?.engine.noteLock(idleSeconds: idleAtLock) }
       tick()
     }
     lockObserver.onUnlock = { [weak self] in
@@ -372,6 +399,16 @@ final class OledCareCoordinator {
   /// MUST pair this with `resetDidComplete()` after the wipe.
   func prepareForReset() {
     resetting = true
+    // Before the state below is discarded, and before the domain is wiped: a
+    // reset that clears the OLED prefs must not leave a display sitting at a
+    // dim level whose owner it just deleted (the D29 ordering rule, in the
+    // brightness register instead of the mute one).
+    //
+    // This runs FIRST of the two blocks. Both must precede the wipe and they
+    // are independent, but only this one leaves the panel visibly wrong if it
+    // is skipped; the telemetry teardown below is bookkeeping. Recovery before
+    // bookkeeping, the same ordering D29 states for the mute strand.
+    endAllLockDims()
     // Sampling stops BEFORE the prefs are wiped, never after (D29's ordering
     // applied to this path). The domain wipe removes the exposure keys, so a
     // live accumulator surviving it would write the deleted map back on its
@@ -498,7 +535,19 @@ final class OledCareCoordinator {
   }
 
   private func dropState(for key: String) {
-    guard let state = states.removeValue(forKey: key) else { return }
+    guard var state = states.removeValue(forKey: key) else { return }
+    // Un-enrollment is the case that matters here: the display is still
+    // connected, and dropping the state that remembers the dim without ending
+    // it would strand the panel dark with nothing left to restore it. A display
+    // that has actually departed has no controller to write to; its stored
+    // brightness was never touched, so the next arrival's restore pass is what
+    // puts it back.
+    if let controller = model?.displays.first(
+      where: { $0.display.persistenceKey == key }
+    )?.controller {
+      endLockDim(&state, on: controller)
+    }
+    clearSkip(for: key)
     if let id = state.lastDisplayID {
       overlay.remove(for: id)
       // This removal deletes the state that would carry its OC12 marker, so
@@ -667,6 +716,7 @@ final class OledCareCoordinator {
           state.verifyAttempts += 1
         }
       }
+      deliverLockDim(newState, into: &state, for: key, on: displayState)
       render(newState, into: &state, on: id)
 
       states[key] = state
@@ -677,16 +727,141 @@ final class OledCareCoordinator {
     if published != dimStates { dimStates = published }
   }
 
+  /// A given-up verify drops the fast cadence only when nothing is wanted (the
+  /// strand case); a wanted dim keeps it, whichever way it is delivered.
   private func cadence() -> Duration {
-    // `overlayUp` reads the WANT, not the verified presence, on purpose: the
-    // 100 ms gate is about input lifting a dim the engine believes is up, and
-    // that belief is what needs fast ticks to be corrected. A given-up verify
-    // therefore drops the fast cadence only when nothing is wanted (the
-    // strand case); a wanted overlay keeps it, as any dim does.
-    let overlayUp = states.values.contains { $0.lastAppliedAlpha != nil }
-    let verifying = states.values.contains(where: \.needsVerify)
-      || !pendingRemovalVerifications.isEmpty
-    return overlayUp || verifying ? Self.fastCadence : Self.slowCadence
+    OledCareCadence.interval(
+      anyOverlayUp: states.values.contains { $0.lastAppliedAlpha != nil },
+      anyLockDimEngaged: states.values.contains(where: \.lockDimEngaged),
+      verificationPending: states.values.contains(where: \.needsVerify)
+        || !pendingRemovalVerifications.isEmpty
+    )
+  }
+
+  // MARK: - Lock dim (delivered on the wire, not by an overlay)
+
+  /// THE lock-dim funnel: every engage and disengage in this type goes through
+  /// here, and `.lockDim` is the only state that engages one.
+  ///
+  /// Delivery is a hardware dim because an overlay cannot do this job:
+  /// MEASURED 2026-08-07, a `CGShieldingWindowLevel()` window does not render
+  /// above the lock screen, and it reports itself on screen while it is
+  /// covered. The write goes through `BrightnessController`, so it inherits the
+  /// one DDC writer, the coalescer's pacing, path selection (an HDR display
+  /// dims natively, since live HDR locks the DDC brightness register) and the
+  /// poller's echo suppression. It never touches `brightness` or the store, so
+  /// the restore is the user's own value by construction rather than by a copy
+  /// this object would have to keep correct.
+  private func deliverLockDim(
+    _ dimState: OledDimState, into state: inout PerDisplay,
+    for key: String, on displayState: AppModel.DisplayState
+  ) {
+    guard dimState == .lockDim else {
+      endLockDim(&state, on: displayState.controller)
+      clearSkip(for: key)
+      return
+    }
+    let controller = displayState.controller
+    // Re-asserted every tick rather than engaged once on the edge, and the
+    // scope of what that buys is worth stating exactly, because a comment that
+    // claims more than the code enforces is its own defect:
+    //
+    // - It DOES cover a display that got a REBUILT controller under it while
+    //   locked (a reconfiguration reuses controllers, a replug does not). The
+    //   fresh controller has no factor, so `beginTemporaryDim` applies.
+    // - It does NOT, and cannot, repair a controller that still holds the dim
+    //   but re-applied a leg from the wrong value: the unchanged-factor guard
+    //   makes that call a no-op. That invariant is enforced where it belongs,
+    //   inside `BrightnessController` (`applyPaths` takes no argument and every
+    //   leg derives from one effective value), not by this loop.
+    let decision = LockDimPolicy.decide(
+      path: controller.brightnessPath,
+      brightness: controller.brightness,
+      factor: state.engine.lockDimFactor
+    )
+    switch decision {
+    case let .dim(factor):
+      if !state.lockDimEngaged {
+        // The lock edge: fade in over ~1.2 s rather than stepping, which is the
+        // only place a ramp is wanted. Everything else here jumps.
+        state.lockDimRamp = controller.rampTemporaryDim(to: factor)
+        state.lockDimEngaged = true
+      } else if controller.temporaryDimFactor == nil {
+        // Already engaged as far as this object knows, yet the controller holds
+        // no dim: it was REBUILT under a still-connected display (a replug
+        // rebuilds; a reconfiguration reuses). Re-engage at the target and do
+        // NOT ramp, because this is a correction, not the lock transition. The
+        // ramp's synchronous first step is what keeps this branch from firing
+        // spuriously in the window between starting a ramp and its first write.
+        controller.beginTemporaryDim(factor: factor)
+      }
+      clearSkip(for: key)
+    case let .skip(reason):
+      // A skip ENDS any dim this display already has. The path can change under
+      // a live dim (HDR engaged from System Settings, a command turned off), and
+      // recording "nothing can dim this" while a dim of ours is still on the
+      // wire is a state disagreement: the display would sit dimmed with the
+      // coordinator reporting it skipped.
+      endLockDim(&state, on: controller)
+      // Recorded, never engaged: a display whose brightness nothing can move
+      // must not be remembered as dimmed, or the unlock would "restore" a dim
+      // that never happened. Assigned (and logged) only on a CHANGE: this runs
+      // on every tick, and `lockDimSkips` is observed.
+      if lockDimSkips[key] != reason {
+        lockDimSkips[key] = reason
+        log.info("""
+        OLED care lock dim skipped for display \(displayState.id, privacy: .public): \
+        \(String(describing: reason), privacy: .public)
+        """)
+      }
+    }
+  }
+
+  /// Ends the dim and nothing else. Clearing the recorded skip is deliberately
+  /// NOT folded in: the skip arm calls this and then records a reason, and a
+  /// clear in here would make that record look new on every tick, which is a
+  /// log line and an observation notify at the fast cadence.
+  private func endLockDim(_ state: inout PerDisplay, on controller: BrightnessController) {
+    state.lockDimRamp?.cancel()
+    state.lockDimRamp = nil
+    guard state.lockDimEngaged else { return }
+    controller.endTemporaryDim()
+    state.lockDimEngaged = false
+  }
+
+  /// Only when there is something to clear: this is on the per-tick path and
+  /// `lockDimSkips` is `@Observable`, so an unconditional `removeValue` would
+  /// notify every observer on every tick.
+  private func clearSkip(for key: String) {
+    guard lockDimSkips[key] != nil else { return }
+    lockDimSkips.removeValue(forKey: key)
+  }
+
+  /// Ends every outstanding lock dim, for the teardowns that must not leave a
+  /// panel dark: quit, settings reset, and losing a display's enrollment.
+  /// Displays that have already departed are unreachable by definition; their
+  /// stored brightness is untouched, so the restore pass on the next arrival
+  /// puts the panel back.
+  func endAllLockDims() {
+    guard let model else { return }
+    let live = Dictionary(
+      model.displays.map { ($0.display.persistenceKey, $0) },
+      uniquingKeysWith: { first, _ in first }
+    )
+    for key in Array(states.keys) {
+      guard var state = states[key] else { continue }
+      guard let controller = live[key]?.controller else {
+        state.lockDimRamp?.cancel()
+        state.lockDimRamp = nil
+        state.lockDimEngaged = false
+        states[key] = state
+        lockDimSkips.removeValue(forKey: key)
+        continue
+      }
+      endLockDim(&state, on: controller)
+      clearSkip(for: key)
+      states[key] = state
+    }
   }
 
   // MARK: - Rendering (with the two funcs below, the ONLY overlay callers)

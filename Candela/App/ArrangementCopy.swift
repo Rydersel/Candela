@@ -95,7 +95,7 @@ enum ArrangementCopy {
   /// A `confirm()`/`revert()`/expiry that threw. The preview is still on screen
   /// and nothing auto-retries, so this must invite another attempt.
   static var resolveFailure: LocalizedStringKey {
-    "\(AppInfo.productName) could not complete that change. The displays are still showing the preview — try again."
+    "\(AppInfo.productName) could not complete that change. The displays are still showing the preview. Try again."
   }
 
   /// Said only alongside `resolveFailure`: the countdown is spent, so the user
@@ -150,7 +150,7 @@ enum ArrangementCopy {
   static func notice(_ notice: ArrangementApplyNotice, name: (CGDirectDisplayID) -> String) -> Text {
     switch notice {
     case .adjusted:
-      Text("macOS moved some of the displays to a layout of its own — this is what is on screen now.")
+      Text("macOS moved some of the displays to a layout of its own. This is what is on screen now.")
     case let .mainDisplayUnchanged(display):
       name(display).isEmpty
         ? Text("The menu bar did not move to the display that was asked for.")

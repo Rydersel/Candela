@@ -217,6 +217,13 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
     set { lock.withLock { _revealsHiddenModes = newValue } }
   }
 
+  /// This fake serves modes from a canned list rather than running revelation,
+  /// so no gate — including #110's — ever runs here. Guarded-and-nothing-
+  /// withheld is the honest answer, not a stub.
+  var guardsWireTiming: Bool { true }
+
+  func modesWithheldByWireTimingGuard(for displayID: CGDirectDisplayID) -> Int { 0 }
+
   // MARK: - Rotation
 
   var canRotate: Bool {

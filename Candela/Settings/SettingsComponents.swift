@@ -9,6 +9,10 @@ import SwiftUI
 /// on macOS (measured: no visible change). Putting both in one row is what
 /// actually binds the explanation to the thing it explains, which is how
 /// System Settings tucks its secondary text under a control.
+///
+/// The caption is also published as the control's `accessibilityHint`
+/// (accessibility contract 3) from here rather than per call site, so it cannot
+/// be forgotten on a new row. Both initialisers go through the same seam.
 struct SettingRow<Control: View>: View {
   private let caption: SettingsCaption?
   private let control: Control
@@ -24,7 +28,12 @@ struct SettingRow<Control: View>: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 5) {
-      control
+      // Attached unconditionally, empty when there is no caption: an `if` here
+      // would swap `_ConditionalContent` branches whenever a caption appears or
+      // disappears (`MirroringSection`'s cannot-start reason does), rebuilding
+      // the control and losing its focus and in-progress edits. The
+      // `isEnabled:` overload that would say this directly is macOS 15+.
+      control.accessibilityHint(caption?.text ?? Text(verbatim: ""))
       caption
     }
   }
@@ -38,20 +47,31 @@ struct SettingRow<Control: View>: View {
 /// hand-rolling `Text` with the same three modifiers — is how the styling drifts
 /// one caption at a time.
 struct SettingsCaption: View {
-  private let content: Text
+  /// The unstyled sentence, so `SettingRow` can republish it as a hint.
+  /// Deliberately `Text` and not `String`: a `LocalizedStringKey` cannot be read
+  /// back as a string, and most callers hand one over — several through
+  /// `MirroringCopy`/`RotationCopy`/`DisplayModeCopy`, which are shared with the
+  /// confirmation panels and cannot become `String` for this alone.
+  let text: Text
 
   init(_ text: LocalizedStringKey) {
-    content = Text(text)
+    self.text = Text(text)
   }
 
   init(verbatim text: String) {
-    content = Text(verbatim: text)
+    self.text = Text(verbatim: text)
   }
 
   var body: some View {
-    content
+    text
       .font(.callout)
       .foregroundStyle(.secondary)
       .fixedSize(horizontal: false, vertical: true)
   }
+}
+
+extension View {
+  /// Every settings section header is a VoiceOver heading (accessibility
+  /// contract 4).
+  func settingsHeading() -> some View { accessibilityAddTraits(.isHeader) }
 }

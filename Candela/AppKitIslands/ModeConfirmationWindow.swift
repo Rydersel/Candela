@@ -3,17 +3,18 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// The "Keep this resolution?" surface. **The primary one, for every preview**,
-/// whichever surface started it.
+/// The "Keep this resolution?" surface — the DEFAULT owner of the answer
+/// (SO6). The coordinator presents it for every preview except one whose
+/// `surface` is `.settingsBanner` (a change started from a key settings
+/// window), where the banner region answers instead and this window is never
+/// shown: one answerable surface per preview, decided at start.
 ///
 /// Why it is a window at all, and why its buttons take the first click, are
 /// `ConfirmationPanel`'s to explain — this type owns only the two things that are
 /// specific to a resolution change: where the question goes, and what it says.
 ///
-/// The pane's banner survives only as the recovery surface for when this window
-/// is on screen but unusable (see `DisplayModeSection.previewBanner`). The commit
-/// is still explicit — nothing is committed at session scope without someone
-/// pressing Keep, and doing nothing still reverts.
+/// The commit is still explicit — nothing is committed at session scope without
+/// someone pressing Keep, and doing nothing still reverts.
 @MainActor
 final class ModeConfirmationWindow: ModeConfirmationPresenting {
   private let coordinator: DisplayModeCoordinator
@@ -174,6 +175,6 @@ struct ModeConfirmationView: View {
 
   private func subtitle(_ preview: DisplayModeCoordinator.Preview) -> String {
     let mode = "\(DisplayModeCopy.size(preview.mode)), \(DisplayModeCopy.refresh(preview.mode.refreshHz))"
-    return displayName.isEmpty ? mode : "\(displayName) — \(mode)"
+    return displayName.isEmpty ? mode : "\(displayName): \(mode)"
   }
 }

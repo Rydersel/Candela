@@ -147,7 +147,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       displays, and will not write to them when you quit.
 
       Your sliders and keyboard shortcuts still work, and they still send commands to your displays. \
-      Nothing about your settings has changed — relaunch without holding Shift to leave Safe Mode.
+      Nothing about your settings has changed: relaunch without holding Shift to leave Safe Mode.
       """
       // The one piece of traffic the paragraph above does not cover. Brightness
       // sync is off by default, but when it is on, `BrightnessSync.fanOut`
@@ -164,7 +164,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
 
 
         "Match other displays to the built-in display" is on, so changes to the built-in display's \
-        brightness — including ones macOS makes by itself, such as the ambient light sensor's — are \
+        brightness (including ones macOS makes by itself, such as the ambient light sensor's) are \
         still mirrored out to your other displays. Turn it off in Settings if you need those \
         displays left completely alone.
         """
@@ -336,16 +336,26 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     confirmation.drawableDisplayID = drawableDisplayID
     modeConfirmation = confirmation
     model.displayModes.confirmation = confirmation
-    // D27: the coordinator writes `storedDisplayMode` on a commit, and the seam
-    // has to hear about it whichever surface answered. Wired once here rather
-    // than in each surface — the panel's window has no `SettingsActions`, and a
-    // second copy of this rule is a second thing to forget.
+    // D27: the coordinator writes `storedDisplayMode` when the user PINS one
+    // (SO19 — no longer on a kept preview), and the seam has to hear about it
+    // whichever surface asked. Wired once here rather than in each surface —
+    // the panel's window has no `SettingsActions`, and a second copy of this
+    // rule is a second thing to forget.
     model.displayModes.didStoreMode = { [weak self] displayID in
       guard let self,
             let key = model.allControlledStates
             .first(where: { $0.id == displayID })?.display.persistenceKey
       else { return }
       self.settingsActions.prefDidChange(.storedDisplayMode, persistenceKey: key)
+    }
+    // Spec §7: a failed resolution restore joins the diagnostics event ring.
+    // Wired here for the reason above — a reapply runs unattended at reconnect,
+    // with no view on screen to notice it.
+    model.displayModes.didReportReapply = { [weak self] displayID, notice in
+      guard let self else { return }
+      let name = self.model.allControlledStates
+        .first { $0.id == displayID }?.display.name ?? "a display"
+      self.model.noteDisplayEvent("\(name): \(DiagnosticsCopy.reapplyEvent(notice))")
     }
 
     // Mirroring's own surface. Same argument as the resolution window, plus one
@@ -673,7 +683,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // with the icon right where the arrow points.
     let barAutoHides = UserDefaults.standard.bool(forKey: "_HIHideMenuBar")
     let message = barAutoHides
-      ? "\(AppInfo.productName) lives in the menu bar, which is set to hide itself. Move the pointer to the top of the screen — the icon is right about here."
+      ? "\(AppInfo.productName) lives in the menu bar, which is set to hide itself. Move the pointer to the top of the screen: the icon is right about here."
       : "\(AppInfo.productName) lives up here in the menu bar. Click the icon whenever you need it."
 
     // Plain AppKit, deliberately: an NSHostingView used as a borderless
@@ -770,6 +780,18 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // (no restore ran and no software leg was re-applied on our behalf), so
     // skipping it leaves the monitor exactly where the user last put it.
     guard !isSafeMode else { return }
+    // Ordering, both halves of it. AFTER the gamma reset and shade removal
+    // above, and that is correct rather than incidental: those two tear the
+    // software surfaces down unconditionally, and the restore below re-applies
+    // whatever leg is live, so the final state is the user's value on a clean
+    // surface. Ending the dim first would just have it torn down again.
+    // FIRST, and before the full-range restore below: quitting while a display
+    // is lock-dimmed must hand the panel back to the user's own brightness.
+    // `restoreFullRangeDDC` already writes the undimmed value on the DDC leg,
+    // but it returns early on the native path, which is exactly where an HDR
+    // display's lock dim lives. Safe Mode never starts the dimming loop, so
+    // there is nothing outstanding on the other side of the guard above.
+    model.oledCare.endAllLockDims()
     for state in model.displays {
       // Quitting while DisplayManager is suspended (mid-reconfigure or
       // asleep) silently drops this at the epoch gate — acceptable:
@@ -789,6 +811,17 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// Dock-less reopen (double-clicking the app in Finder, `open -a`): with no
   /// window to restore there is nothing for AppKit to do, so route it to
   /// Settings — never to onboarding, which is a first-run flow.
+  ///
+  /// This is SO24's recovery route, and the Menu Bar pane's hidden-icon caption
+  /// names it ("Open Candela again from Applications to get back to these
+  /// settings"). Deliberately NOT gated on the icon being hidden: the caption
+  /// depends on the hidden case, but a reopen with the icon showing has nothing
+  /// else to do either, and gating would delete a working route to buy nothing.
+  /// It is also the only settings route this app controls — ⌘, is delivered
+  /// straight to SwiftUI's own menu item and never reaches `SettingsOpener`.
+  ///
+  /// Only reaches a RUNNING app. A cold launch with the icon hidden shows
+  /// nothing; the second open is what lands here.
   func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows _: Bool) -> Bool {
     SettingsOpener.open()
     return false
@@ -870,9 +903,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   }
 
   /// D12: full-domain wipe, explicitly confirmed by the caller (the General
-  /// pane owns the confirmation and its copy names everything destroyed —
-  /// including the login item and the stored brightness/volume/contrast, which
-  /// on a write-only panel are the only record of where the display is).
+  /// pane owns the confirmation, and SO20 binds its copy to this function: it
+  /// names the hardware effects below (HDR off, unmute, OLED care torn down
+  /// with the hour counters cleared) as well as what is destroyed, including
+  /// the login item and the stored brightness/volume/contrast, which on a
+  /// write-only panel are the only record of where the display is).
   func performSettingsReset() {
     Task { @MainActor in await runSettingsReset() }
   }
@@ -1025,7 +1060,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       try mediaKeyTap.start(config: config)
       model.noteTapArmed(config)
     } catch {
-      log.error("media-key tap failed to start: \(error) — keys disabled until relaunch")
+      log.error("media-key tap failed to start: \(error); keys disabled until relaunch")
     }
   }
 

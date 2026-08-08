@@ -155,7 +155,7 @@ struct ArrangementCanvasView: View {
       name: label(for: tile),
       pointSize: pointSize(tile),
       mirroredCount: tile.mirroredIDs.count,
-      isMain: displayed.mainDisplayID == tile.id,
+      isMain: isMain(tile.id),
       isSelected: selection == tile.id,
       isFocused: focused == tile.id,
       isInvalid: invalidIDs.contains(tile.id),
@@ -242,9 +242,17 @@ struct ArrangementCanvasView: View {
     "\(label(for: tile)), \(tile.rect.width) by \(tile.rect.height) points"
   }
 
+  /// Mid-drag of the main tile the displayed layout has no tile at (0,0), a
+  /// state the machine cannot be in: moving the main display never changes
+  /// which display is main (the plan re-anchors on it). Fall back to the
+  /// resting layout's main so the badge does not vanish under the pointer.
+  private func isMain(_ id: CGDirectDisplayID) -> Bool {
+    (displayed.mainDisplayID ?? arrangement.mainDisplayID) == id
+  }
+
   private func accessibilityValue(_ tile: ArrangementTile) -> String {
     var parts = ["positioned at x \(tile.rect.x), y \(tile.rect.y)"]
-    if displayed.mainDisplayID == tile.id { parts.append("main display") }
+    if isMain(tile.id) { parts.append("main display") }
     if !tile.mirroredIDs.isEmpty { parts.append("mirrored to \(tile.mirroredIDs.count) more") }
     return parts.joined(separator: ", ")
   }

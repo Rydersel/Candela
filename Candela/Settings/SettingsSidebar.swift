@@ -28,6 +28,11 @@ struct SettingsSymbolTile: View {
 @MainActor
 struct SettingsSidebar: View {
   @Binding var selection: SettingsDestination?
+  /// Clicking the row that is ALREADY selected. Writing the same value to
+  /// `selection` changes nothing, so without this hook the click is a no-op and
+  /// a user sitting in a sub-page has no way back from the sidebar. What the
+  /// re-click means is the root view's to decide.
+  var onReselect: (SettingsDestination) -> Void = { _ in }
 
   @Environment(AppModel.self) private var model
 
@@ -60,8 +65,12 @@ struct SettingsSidebar: View {
         if let builtIn = model.builtIn {
           displayRow(display: builtIn.display, controller: builtIn.controller)
         }
-        ForEach(model.displays) { state in
-          displayRow(display: state.display, controller: state.controller)
+        ForEach(Array(model.displays.enumerated()), id: \.element.id) { index, state in
+          displayRow(
+            display: state.display,
+            controller: state.controller,
+            ordinal: sharedIdentityOrdinal(at: index)
+          )
         }
         if model.displays.isEmpty {
           // Preserves what the deleted Displays pane told the user. Without it,
@@ -118,7 +127,11 @@ struct SettingsSidebar: View {
   private func row(_ destination: SettingsDestination, @ViewBuilder _ content: () -> some View) -> some View {
     let isSelected = selection == destination
     Button {
-      selection = destination
+      if isSelected {
+        onReselect(destination)
+      } else {
+        selection = destination
+      }
     } label: {
       content()
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -143,22 +156,51 @@ struct SettingsSidebar: View {
   /// destination carries the real state, and nothing here is conveyed by color
   /// alone. It is hidden from accessibility for the same reason: a percentage
   /// announced on every row is noise, and it is not actionable from here.
+  /// SO21: two identical units share one persistence key, hence one name and
+  /// one destination — an ordinal by model order is the only live fact that
+  /// tells their rows apart. nil (the near-universal case) appends nothing.
+  private func sharedIdentityOrdinal(at index: Int) -> Int? {
+    let key = model.displays[index].display.persistenceKey
+    guard model.isSharedIdentity(key) else { return nil }
+    return model.displays.prefix(index).count { $0.display.persistenceKey == key } + 1
+  }
+
   @ViewBuilder
-  private func displayRow(display: ExternalDisplay, controller: BrightnessController) -> some View {
+  private func displayRow(
+    display: ExternalDisplay, controller: BrightnessController, ordinal: Int? = nil
+  ) -> some View {
     // The SAME resolution the panel uses, so a rename moves the sidebar, the
     // panel header, the slider's accessibility label and the HUD together. The
     // detail pane's title deliberately does NOT follow — it stays the hardware
     // name, so renaming does not relabel the window you are editing it in.
-    let name = DisplayOrdering.title(
+    let resolved = DisplayOrdering.title(
       friendlyName: DisplayPrefs(persistenceKey: display.persistenceKey).friendlyName,
       hardwareName: display.name
     )
+    let name = ordinal.map { "\(resolved) (\($0))" } ?? resolved
+    let isSelected = selection == .display(display.persistenceKey)
     row(.display(display.persistenceKey)) {
       Label {
         VStack(alignment: .leading, spacing: 3) {
-          Text(verbatim: name) // a display's name — never a lookup key
-            .lineLimit(1)
-            .truncationMode(.tail)
+          HStack(spacing: 5) {
+            Text(verbatim: name) // a display's name — never a lookup key
+              .lineLimit(1)
+              .truncationMode(.tail)
+            // Something happened on this display while nobody was looking and
+            // nobody has read it yet. A dot, not a count: the destination
+            // carries the account, this only says there is one to open. It is
+            // never the sole carrier of the fact either — the notice itself is
+            // inside — so a missed dot costs nothing.
+            if model.displayModes.hasUnreadReport(for: display.id) {
+              Circle()
+                // White on the selected row for the reason the row forces its
+                // foreground: an accent dot on the accent pill is invisible.
+                .fill(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(Color.accentColor))
+                .frame(width: 6, height: 6)
+                .accessibilityElement()
+                .accessibilityLabel("Has an unread notice")
+            }
+          }
           Capsule()
             .fill(.quaternary)
             .frame(height: 3)

@@ -1,10 +1,41 @@
 import CandelaKit
 import SwiftUI
 
+/// Display names for the three DDC commands, in ONE place: the grid's row
+/// labels, its accessibility labels and the Advanced page's VCP Overrides group
+/// all name the same three things.
+///
+/// Never `DDCCommand.rawValue` — those raws are shipped on-disk schema (D22)
+/// that happens to read as English by coincidence (lens-2 m-2).
+enum DDCCommandCopy {
+  /// Mid-sentence form, for accessibility labels and captions.
+  static func name(_ command: DDCCommand) -> String {
+    switch command {
+    case .brightness: "brightness"
+    case .volume: "volume"
+    case .contrast: "contrast"
+    }
+  }
+
+  /// Phrase-initial form, for a row label or a control label.
+  static func title(_ command: DDCCommand) -> String {
+    switch command {
+    case .brightness: "Brightness"
+    case .volume: "Volume"
+    case .contrast: "Contrast"
+    }
+  }
+}
+
 /// Per-command DDC tuning for one display: Enabled / Min / Max / Invert, for
 /// brightness, volume and contrast. D26 shrank the fork's six columns to these
-/// four — the 9-step response curve and the hex control-code remap are cut from
-/// the UI and remain `defaults write` keys with unchanged engine behavior.
+/// four; A1 then promoted the response curve and the hex control-code remap
+/// into the Advanced page's VCP Overrides sub-group, which renders directly
+/// below this grid in the same section.
+///
+/// Rendered inside `AdvancedPage`'s Command Tuning section, which owns the
+/// section header and the SO12 traffic-block explanation — so neither is drawn
+/// here.
 ///
 /// Every edit is a read-modify-write of ONE command's tuning, and the
 /// modify half is `DDCOverrideValidation.applied` in CandelaKit, under test.
@@ -50,6 +81,12 @@ struct CommandTuningGrid: View {
   @State private var drafts: [FocusTarget: String] = [:]
   @FocusState private var focus: FocusTarget?
 
+  /// A hard 60 pt clipped the value at larger text sizes: three digits plus the
+  /// caret do not fit a fixed box once the font grows (accessibility contract
+  /// 10). The base stays 60 so the grid's columns are unchanged at the default
+  /// size.
+  @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 60
+
   private var prefs: DisplayPrefs { writer.prefs }
 
   /// Why no DDC command is reaching this display, if none is — read from the
@@ -65,9 +102,10 @@ struct CommandTuningGrid: View {
   /// Both now come off `BrightnessPath`, so the page gives one answer.
   ///
   /// Disable, don't hide (panel §5.4). The mute recovery affordance that D29
-  /// rule 3 requires for this state lives in
-  /// `DisplayDetailView.recoverFromHardwareMute`, above the grid and never
-  /// disabled.
+  /// rule 3 requires for this state lives on the hub
+  /// (`DisplayHubView.recoverFromHardwareMute`) and is never disabled; the
+  /// Advanced page's DDC toggle, which is the other way out, is gated only by
+  /// live HDR for the same reason.
   private var trafficBlock: DDCTrafficBlock? {
     DisplayCardPolicy.ddcTrafficBlock(for: state.controller.brightnessPath)
   }
@@ -76,9 +114,11 @@ struct CommandTuningGrid: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Text("Command tuning")
-        .font(.callout.weight(.semibold))
       Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+        // Visible column headers are an ADDITION (spec §6). The per-control
+        // accessibility labels below stay exactly as they were — a11y contract
+        // 9 makes them load-bearing, and a visible header does not reach
+        // VoiceOver from inside a `Grid` cell.
         GridRow {
           Color.clear.frame(width: 1, height: 1)
           columnHeader("On")
@@ -86,20 +126,36 @@ struct CommandTuningGrid: View {
           columnHeader("Max")
           columnHeader("Invert")
         }
+        // No row-level accessibility group: a modifier applied to a `GridRow`
+        // distributes onto EACH CELL, so the old `.accessibilityElement(
+        // children: .contain)` + row label pair wrapped every cell in its own
+        // container named after the command (the T15 concern, confirmed by the
+        // combined pass's D5). The per-control labels below carry the command
+        // name themselves, so a11y contract 9's per-control clause holds; the
+        // row-as-group clause is traded away because no spelling of it
+        // survives `GridRow`'s modifier distribution.
         ForEach(DDCCommand.allCases, id: \.self) { command in
           GridRow {
-            Text(rowLabel(command))
+            Text(verbatim: DDCCommandCopy.title(command))
             Toggle("", isOn: enabledBinding(command))
               .labelsHidden()
+              // Without it the toggle takes the column's full width and draws
+              // its switch at the trailing edge, which no header placement can
+              // sit above. Fixed size makes the cell the switch.
+              .fixedSize()
               .accessibilityLabel(Text("\(rowName(command)) enabled"))
             overrideField(.minimum(command))
             overrideField(.maximum(command))
             Toggle("", isOn: invertBinding(command))
               .labelsHidden()
+              .fixedSize()
               .accessibilityLabel(Text("Invert \(rowName(command))"))
           }
         }
       }
+      // Belt to the section-level disable `AdvancedPage` applies (SO12): this
+      // grid is the thing a traffic block actually voids, so it states the
+      // condition itself rather than trusting its container.
       .disabled(isInert)
       captions
     }
@@ -111,42 +167,44 @@ struct CommandTuningGrid: View {
 
   // MARK: - Cells
 
+  /// The `Grid` is built `.leading`, which put every header at the left edge of
+  /// a column wider than the header itself: "On" sat left of its switch and
+  /// "Min"/"Max" left of their fields. `gridColumnAlignment` set on a cell
+  /// governs the whole COLUMN, so declaring it here centers header and control
+  /// on one axis. The command-name column is not a header cell and keeps the
+  /// grid's leading alignment.
   private func columnHeader(_ title: LocalizedStringKey) -> some View {
     Text(title)
       .font(.caption)
       .foregroundStyle(.secondary)
+      .gridColumnAlignment(.center)
   }
 
-  private func rowLabel(_ command: DDCCommand) -> LocalizedStringKey {
-    switch command {
-    case .brightness: "Brightness"
-    case .volume: "Volume"
-    case .contrast: "Contrast"
-    }
-  }
-
-  /// The `String` sibling of `rowLabel`. Interpolating a `LocalizedStringKey`
-  /// INTO a `LocalizedStringKey` literal has no matching interpolation
-  /// overload — the accessibility labels above would not compile (lens-1 M4) —
-  /// and the same names are needed mid-sentence in the captions. Never
-  /// `DDCCommand.rawValue`: those raws are shipped on-disk schema (D22) that
-  /// happens to read as English by coincidence (lens-2 m-2).
-  private func rowName(_ command: DDCCommand) -> String {
-    switch command {
-    case .brightness: "brightness"
-    case .volume: "volume"
-    case .contrast: "contrast"
-    }
-  }
+  /// A `String`, not a `LocalizedStringKey`: interpolating a
+  /// `LocalizedStringKey` INTO a `LocalizedStringKey` literal has no matching
+  /// interpolation overload, so the accessibility labels above would not
+  /// compile (lens-1 M4), and the same names are needed mid-sentence in the
+  /// captions.
+  private func rowName(_ command: DDCCommand) -> String { DDCCommandCopy.name(command) }
 
   private func overrideField(_ target: FocusTarget) -> some View {
     TextField("", text: Binding(
       get: { focus == target ? (drafts[target] ?? storedText(target)) : storedText(target) },
       set: { drafts[target] = $0 }
     ))
+    // A grouped `Form` styles a bare `TextField` borderless, and with an empty
+    // value that renders as NOTHING: no border, no focus ring, no way to know
+    // a field is there (combined pass D4), under a caption inviting people to
+    // leave the boxes empty. The explicit border is what makes the box a box.
+    .textFieldStyle(.roundedBorder)
+    // The grid sits inside a `Form`, which splits a `TextField` into a label
+    // column and a field: the empty label still took its share of the
+    // cell, so the bezel drew at the trailing edge and no column header could
+    // sit over it. Hiding the label gives the bezel the whole cell.
+    .labelsHidden()
     .focused($focus, equals: target)
     .onSubmit { commit(target) }
-    .frame(width: 60)
+    .frame(width: fieldWidth)
     .accessibilityLabel(Text(accessibilityLabel(for: target)))
   }
 
@@ -224,18 +282,13 @@ struct CommandTuningGrid: View {
   // MARK: - Captions
 
   @ViewBuilder private var captions: some View {
-    if let trafficBlock {
-      switch trafficBlock {
-      // This grid renders only under an EXTERNAL display (`DisplayDetailView`),
-      // and `BrightnessPathPolicy.usesNative` has exactly one way to answer yes
-      // for an external: HDR is live, whoever engaged it (#52). So the sentence
-      // can name HDR rather than shrugging at "macOS is doing it".
-      case .macOSDrivesBrightness:
-        SettingsCaption("This display is in HDR mode. macOS is setting its brightness directly and no hardware commands are reaching it, so these settings have no effect until HDR turns off.")
-      case .hardwareControlOff:
-        SettingsCaption("Hardware (DDC) control is off for this display, so these settings have no effect.")
-      }
-    } else {
+    // SO12: the block's explanation is stated ONCE for the page, by
+    // `AdvancedPage` at the foot of Control Method — the section above the
+    // first section a block greys out. It used to be repeated here, which is
+    // the duplication SO12 exists to remove; what stays is the silence, because
+    // the captions below describe controls that are not currently doing
+    // anything.
+    if trafficBlock == nil {
       SettingsCaption("Most displays need none of this. Use it when a display bottoms out or tops out early, or runs backwards. Leave a box empty to use the display's own range.")
       brightnessLegCaption
       let ignored = ignoredMaxCommands

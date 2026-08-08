@@ -17,12 +17,20 @@ enum DisplayModeCopy {
   /// WHICH way a mode is inexact, and it reads as evasive next to a picker
   /// labelled Size.
   ///
-  /// RM11 is now carried by the Native / HiDPI / Scaled badges
-  /// (`DisplayModeCoordinator.Catalog.badges(for:)`), which state the same fact
-  /// precisely and per mode. **Every surface that offers a size to choose from
-  /// must show them**; a bare size on such a surface is the regression this
-  /// note exists to prevent. Surfaces that merely NAME the mode already in
-  /// force — the confirmation window's subtitle, the reapply reports, the
+  /// RM11 is carried by badges on the surfaces that offer EVERY mode, because
+  /// there the size alone says nothing about which duplicate is which. The All
+  /// Sizes & Refresh Rates page states it under SO14 —
+  /// `fullListTags(for:isLowResolutionDuplicate:)`: "HiDPI" retired, the 1x
+  /// duplicate tagged "low resolution" instead. The menu-bar list still shows
+  /// "HiDPI" through `DisplayModeCoordinator.Catalog.badges(for:)`, which SO14
+  /// retires from copy; that is pre-existing panel copy left alone by the
+  /// settings overhaul (spec §11) and TRACKED, not a blessed exception.
+  ///
+  /// The settings hub's curated Size picker is the ruled
+  /// exception (SO14/SO18): it is deduplicated by logical size, "HiDPI" is
+  /// retired from copy, and the row states its OUTCOME (the caps-at marker)
+  /// instead of its catalog entry. Surfaces that merely NAME the mode already
+  /// in force — the confirmation window's subtitle, the reapply reports, the
   /// panel's collapsed Resolution summary — carry the size alone, because there
   /// the claim is "this is the mode", not "this size is what the panel is".
   static func size(_ mode: DisplayMode) -> String {
@@ -47,6 +55,28 @@ enum DisplayModeCopy {
     seconds == 1
       ? "Reverting to the previous resolution in 1 second."
       : "Reverting to the previous resolution in \(seconds) seconds."
+  }
+
+  /// The NON-owning surface's whole rendering (SO6): status plus a pointer to
+  /// where the buttons are. Never shown beside buttons — a passive line that
+  /// named a deadline without saying where to answer would read as a countdown
+  /// to nothing.
+  static func passiveCountdown(_ seconds: Int) -> String {
+    seconds == 1
+      ? "Reverting in 1 second. Answer in the confirmation window."
+      : "Reverting in \(seconds) seconds. Answer in the confirmation window."
+  }
+
+  /// A11y contract 8: the announcement posted when the answerable banner
+  /// appears. Names the new mode in spoken form and the deadline; the 10- and
+  /// 3-second re-announcements reuse `countdown(_:)`.
+  static func previewAnnouncement(mode: DisplayMode, seconds: Int) -> String {
+    let spoken = ModeSpeech.spoken(
+      logicalWidth: mode.logicalWidth,
+      logicalHeight: mode.logicalHeight,
+      refreshHz: mode.refreshHz
+    )
+    return "Display changed to \(spoken). Keep this resolution? \(countdown(seconds))"
   }
 
   // The three sentences below are shown by two surfaces each and are stated
@@ -86,7 +116,7 @@ enum DisplayModeCopy {
   /// A `confirm()`/`revert()`/expiry that threw. The preview is still on the
   /// display and nothing auto-retries, so this must invite another attempt.
   static var resolveFailure: LocalizedStringKey {
-    "\(AppInfo.productName) could not complete that change. The display is still showing the preview — try again."
+    "\(AppInfo.productName) could not complete that change. The display is still showing the preview. Try again."
   }
 
   /// Said only alongside `resolveFailure`: the countdown is spent, so the user
@@ -108,20 +138,20 @@ enum DisplayModeCopy {
   static func reapplySubstituted(
     requested: DisplayModeDescriptor, applied: DisplayMode
   ) -> LocalizedStringKey {
-    "The resolution saved for this display — \(size(requested)), \(refresh(requested.refreshHz)) — is no longer available. \(AppInfo.productName) used \(size(applied)), \(refresh(applied.refreshHz)) instead."
+    "The resolution saved for this display (\(size(requested)), \(refresh(requested.refreshHz))) is no longer available. \(AppInfo.productName) used \(size(applied)), \(refresh(applied.refreshHz)) instead."
   }
 
   /// Nothing close enough existed, so nothing was changed. Says so explicitly:
   /// "we left it alone" is information, and its absence reads as a silent
   /// failure of the whole feature.
   static func reapplyUnavailable(requested: DisplayModeDescriptor) -> LocalizedStringKey {
-    "The resolution saved for this display — \(size(requested)), \(refresh(requested.refreshHz)) — is no longer available, and nothing close enough to use in its place. \(AppInfo.productName) left this display as it found it."
+    "The resolution saved for this display (\(size(requested)), \(refresh(requested.refreshHz))) is no longer available, and nothing close enough to use in its place. \(AppInfo.productName) left this display as it found it."
   }
 
   /// The apply itself failed. Distinct from `reapplyUnavailable` because the
   /// mode still exists — trying again, from the list, is worth doing.
   static func reapplyFailed(requested: DisplayModeDescriptor) -> LocalizedStringKey {
-    "\(AppInfo.productName) could not restore the resolution saved for this display — \(size(requested)), \(refresh(requested.refreshHz)). Nothing was changed."
+    "\(AppInfo.productName) could not restore the resolution saved for this display (\(size(requested)), \(refresh(requested.refreshHz))). Nothing was changed."
   }
 
   /// One sentence for whichever of the three happened, so both surfaces make

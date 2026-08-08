@@ -46,6 +46,19 @@ enum DisplayModeFixtures {
     m(1720, 720, 3440, 1440, native: true),
   ]
 
+  /// The MAG's 1x ladder, where the rates it really offers survive. `mag`
+  /// above is the HiDPI ladder and carries one rate per size, because curation
+  /// collapses the rest — so nothing there can exercise a question about
+  /// refresh rates at a size.
+  static let magRateLadder: [DisplayMode] = [
+    m(3440, 1440, 3440, 1440, hz: 175, native: true),
+    m(3440, 1440, 3440, 1440, hz: 120),
+    m(3440, 1440, 3440, 1440, hz: 60),
+    m(2560, 1080, 2560, 1080, hz: 60),
+    m(1920, 1080, 1920, 1080, hz: 120),
+    m(1920, 1080, 1920, 1080, hz: 60),
+  ]
+
   static func mode(
     _ id: Int32, logical: (Int, Int), pixels: (Int, Int), hz: Double = 60
   ) -> DisplayMode {

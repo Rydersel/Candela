@@ -137,11 +137,27 @@ case "modes":
   let configurator = CoreGraphicsDisplayConfigurator()
   print(
     "hidden-mode revelation: \(configurator.revealsHiddenModes ? "available" : "UNAVAILABLE")")
+  // The probe reads its OWN defaults domain, not the app's, so this is the
+  // guard's default rather than whatever the app is running with (#110).
+  print("wire-timing guard: \(configurator.guardsWireTiming ? "on" : "OFF")")
   for display in online where displayFilter == nil || display.id == displayFilter {
     let all = configurator.modes(for: display.id)
     let published = all.filter { $0.provenance == .coreGraphics }
     let revealed = all.filter { $0.provenance == .coreGraphicsServices }
-    print("\n\(display.name)  published \(published.count)  revealed \(revealed.count)")
+    let withheld = configurator.modesWithheldByWireTimingGuard(for: display.id)
+    print(
+      "\n\(display.name)  published \(published.count)  revealed \(revealed.count)"
+        + (withheld > 0 ? "  withheld-wire-timing \(withheld)" : ""))
+    if withheld > 0 {
+      let parents = CGSModeRevelation.nativeParentRefreshes(
+        in: published,
+        nativePixelWidth: published.first(where: \.isNative)?.pixelWidth ?? 0,
+        nativePixelHeight: published.first(where: \.isNative)?.pixelHeight ?? 0)
+      print(
+        "  native-width timings: "
+          + parents.sorted(by: >).map { String(format: "%g", $0) }.joined(separator: ", ")
+          + " Hz — revealed modes at any other rate are withheld")
+    }
     for mode in revealed.sorted(by: {
       ($0.logicalWidth, $0.refreshHz) > ($1.logicalWidth, $1.refreshHz)
     }) {
@@ -206,7 +222,7 @@ case "modeapply":
     print("after:  \(after.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID)" } ?? "unknown")")
     print("scope: \(applyScope); holding \(holdSeconds)s...")
     sleep(holdSeconds)
-    print("exiting — preview scope reverts now.")
+    print("exiting: preview scope reverts now.")
   } catch {
     print("apply FAILED: \(error)")
     exit(4)
@@ -346,7 +362,7 @@ case "gamma":
     }
     let holdSeconds = arguments.count > 2 ? Double(arguments[2]) ?? 15 : 15
     print("gamma: scale \(scale), holding \(holdSeconds) s.")
-    print("gamma: CAVEAT — gamma set by this process is restored the moment the process exits;")
+    print("gamma: CAVEAT. Gamma set by this process is restored the moment the process exits;")
     print("       observe the display during the hold, not after.")
     for display in online {
       print("\(display.name): scale \(scale) -> \(applyGammaScale(scale, to: display.id) ? "ok" : "FAILED")")

@@ -2,6 +2,26 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
+/// The display a jump into this pane came from, carried as a persistence key
+/// and consumed ONCE: the hub's "All OLED Care Settings…" link sets it, this
+/// pane scrolls to that display's section on appear and clears it there, so an
+/// ordinary sidebar visit still opens at the top.
+///
+/// A `Binding` rather than a value so the consumer can do the clearing. The
+/// value lives as `@State` on `SettingsRootView`, which is where the selection
+/// it travels with lives; the default is `.constant(nil)`, whose setter is a
+/// no-op, so any view rendered outside that injection simply never scrolls.
+private struct OledCareScrollTargetKey: EnvironmentKey {
+  static let defaultValue: Binding<String?> = .constant(nil)
+}
+
+extension EnvironmentValues {
+  var oledCareScrollTarget: Binding<String?> {
+    get { self[OledCareScrollTargetKey.self] }
+    set { self[OledCareScrollTargetKey.self] = newValue }
+  }
+}
+
 /// OLED care: the two global screen-chrome switches, then one section per
 /// connected external display (spec §5).
 ///
@@ -34,18 +54,33 @@ struct OledCarePane: View {
   @State private var menuBarRefused: Bool?
   @State private var dockRefused: Bool?
 
+  /// Set by the hub's link, cleared by this pane the first time it appears.
+  @Environment(\.oledCareScrollTarget) private var scrollTarget
+
   var body: some View {
+    ScrollViewReader { proxy in
+      pane(proxy: proxy)
+    }
+  }
+
+  /// The pane's own content. Split out of `body` only because the whole thing
+  /// now hangs off a `ScrollViewReader`'s proxy; the sections still sit
+  /// directly in this `Form`'s builder, which a grouped `Form` needs.
+  private func pane(proxy: ScrollViewProxy) -> some View {
     // Prefs are plain `UserDefaults` and not observable, so this is the only
     // thing that re-reads them after a write from anywhere — including the
     // per-display sections below, which write through `DisplayPrefWriter`.
     let _ = model.prefsRevision
-    Form {
+    return Form {
       Section {
         // One row, not two: a `SettingsCaption` placed as its own `Form` row
         // gets a divider above it, so two paragraphs of the same introduction
         // read as two settings.
         VStack(alignment: .leading, spacing: 6) {
-          SettingsCaption("Software can do two things about OLED wear: show fewer bright pixels, and show them for less time. \(AppInfo.productName) dims a display that has been idle, and can turn on macOS's own auto-hiding for the menu bar and the Dock. Enrolling a display applies the recommended settings; every value can be tuned below.")
+          // Two sentences, not three (SO15/SO16): "enrolling applies the
+          // recommended settings" already lives on every enrollment toggle's
+          // own caption, where the control is.
+          SettingsCaption("Software can do two things about OLED wear: show fewer bright pixels, and show them for less time. \(AppInfo.productName) dims an enrolled display that has been idle, and can turn on macOS's own auto-hiding for the menu bar and the Dock.")
           SettingsCaption("OLED care applies to external displays.")
         }
         if model.isSafeMode {
@@ -61,12 +96,20 @@ struct OledCarePane: View {
       // dock cycle — and `ForEach` keyed on a reused id hands the OLD view
       // instance, with its `@State`, to the OTHER panel: an in-progress slider
       // drag would then write its draft level to the wrong display's prefs.
+      // The `id:` here is also the scroll anchor `scrollToTarget` aims at.
+      // A `ForEach`'s element identity is what `ScrollViewProxy.scrollTo`
+      // resolves against, inside a grouped `Form` as well [MEASURED
+      // 2026-08-07: an explicit `.id()` on a row of the section was tried
+      // first and is not needed], so the anchor and the identity cannot drift
+      // apart.
       ForEach(model.displays, id: \.display.persistenceKey) { state in
         OledCareDisplaySection(state: state, displaySleepMinutes: displaySleepMinutes)
       }
       if model.displays.isEmpty {
-        Section("Displays") {
+        Section {
           SettingsCaption("Connect an external display to enroll it in OLED care.")
+        } header: {
+          Text("Displays").settingsHeading()
         }
       }
     }
@@ -79,6 +122,7 @@ struct OledCarePane: View {
     // nobody is looking at. (The same poll covers the menu bar, so it needs no
     // screen-parameters observer of its own.)
     .task {
+      await scrollToTarget(proxy)
       displaySleepMinutes = OledCareSignalSources.displaySleepMinutes()
       while !Task.isCancelled {
         // Resolved inside the loop, never captured before it: the coordinator
@@ -108,9 +152,9 @@ struct OledCarePane: View {
         // Symbol AND text — never state by colour alone.
         Image(systemName: "exclamationmark.triangle")
           .foregroundStyle(.secondary)
-        Text("Safe Mode is on for this session, so no display is being dimmed and no panel hours are being counted.")
+        Text("Safe Mode is on for this session, so no display is being dimmed and no hours of use are being counted.")
       }
-      SettingsCaption("Shift was held at launch. The two Screen chrome settings below still work, and the settings you make here are saved for the next normal launch.")
+      SettingsCaption("Shift was held at launch. The two Screen Chrome settings below still work, and the settings you make here are saved for the next normal launch.")
     }
   }
 
@@ -121,13 +165,16 @@ struct OledCarePane: View {
   /// the menu bar and the Dock stops driving those pixels rather than merely
   /// dimming them.
   @ViewBuilder private var chromeSection: some View {
-    Section("Screen chrome") {
+    Section {
       if let chrome = model.oledCare.chrome {
         // The refusal note lives INSIDE the switch's own row, like the
         // displaysleep warning below: a note in a `Form` row of its own gets a
         // divider and full padding, which reads as a separate setting rather
         // than as this switch failing.
-        SettingRow(caption: SettingsCaption("The menu bar and the Dock are the most static bright areas on a Mac screen. Hiding them stops those pixels being driven at all. The trade-off is real: the clock, status items and menus then take a trip to the edge of the screen.")) {
+        // One sentence (SO15): consequence plus its trade-off, and the
+        // mechanism ("most static bright areas") stays because it IS the
+        // consequence — hiding stops those pixels being driven (OC11).
+        SettingRow(caption: SettingsCaption("The menu bar and the Dock are the most static bright areas on a Mac screen, and hiding them stops those pixels being driven (at the cost of the clock, status items and menus taking a trip to the screen's edge).")) {
           VStack(alignment: .leading, spacing: 6) {
             Toggle("Automatically hide the menu bar", isOn: Binding(
               get: { chrome.menuBarAutoHide },
@@ -161,7 +208,36 @@ struct OledCarePane: View {
       } else {
         SettingsCaption("These settings are not available yet. Reopen this window in a moment.")
       }
+    } header: {
+      Text("Screen Chrome").settingsHeading()
     }
+  }
+
+  /// Consumes the jump's scroll target: land on the section for the display
+  /// the user came from, once, then forget it so the next sidebar visit opens
+  /// at the top.
+  private func scrollToTarget(_ proxy: ScrollViewProxy) async {
+    guard let key = scrollTarget.wrappedValue else { return }
+    // A display named by a jump but absent from this pane (unplugged between
+    // the click and the appear) consumes the target and leaves the page at the
+    // top: no error, and nothing left over for the next visit to inherit.
+    guard model.displays.contains(where: { $0.display.persistenceKey == key }) else {
+      scrollTarget.wrappedValue = nil
+      return
+    }
+    // The delay is load-bearing, not defensive [MEASURED 2026-08-07]: a
+    // `scrollTo` issued on the first tick of this `.task` is accepted and does
+    // nothing, and the pane stays at the top. The grouped `Form` has not
+    // finished sizing its rows by then.
+    try? await Task.sleep(for: .milliseconds(100))
+    guard !Task.isCancelled else { return }
+    // No animation: this is where the page opens, not a move the user made.
+    proxy.scrollTo(key, anchor: .top)
+    // Cleared only once a scroll has actually gone out, never before the
+    // sleep. This task is cancelled and restarted during launch (measured), so
+    // clearing up front spent the target on the run that never reached the
+    // scroll and the surviving run found nothing to do.
+    scrollTarget.wrappedValue = nil
   }
 
   /// Clears a recorded refusal once the system reports the value that was
@@ -254,9 +330,12 @@ private struct OledCareDisplaySection: View {
   var body: some View {
     let _ = model.prefsRevision
     let _ = hoursRevision
-    Section(name) {
-      SettingRow("Off by default. Enrolling applies the recommended settings; nothing on the display changes until it has been idle for a while.") {
-        // OC11: software cannot protect a panel from burn-in — it can reduce
+    Section {
+      // One sentence (SO15) — "off by default" is the toggle's own visible
+      // state, and the same caption rides the hub's enrollment toggle so the
+      // two surfaces cannot describe enrollment differently.
+      SettingRow("Enrolling applies the recommended settings; nothing changes until this display has been idle for a while.") {
+        // OC11: software cannot protect a display from burn-in — it can reduce
         // luminance and time at luminance, and that limit is the point of the
         // rule. "Enroll" is also the word the intro and the empty state
         // already use, so the pane's primary control now contains the verb its
@@ -277,6 +356,8 @@ private struct OledCareDisplaySection: View {
         measurementControls
         healthRow
       }
+    } header: {
+      Text(verbatim: name).settingsHeading()
     }
     .sheet(isPresented: $showingHealth) {
       PanelHealthView(
@@ -327,10 +408,14 @@ private struct OledCareDisplaySection: View {
     // blank row.
     switch model.oledCare.dimStates[persistenceKey] {
     case .active: return "Not dimming"
-    case .idleDim: return "Dimmed — the display has been idle"
-    case .blackout: return "Screen off — the display has been idle"
-    case .lockDim: return "Dimmed — the screen is locked"
-    case .unfocusedDim: return "Dimmed — no window in focus on this display"
+    case .idleDim: return "Dimmed: the display has been idle"
+    case .blackout: return "Screen off: the display has been idle"
+    // OC7 sub-ruling 4: a lock dim the policy refused is RECORDED and must
+    // never be reported as dimmed. `lockDimSkips` carries only live refusals
+    // (the coordinator clears the entry the moment the dim engages), so
+    // reading it here cannot outlive the state it describes.
+    case .lockDim: return OledCareCopy.lockDimStatus(model.oledCare.lockDimSkips[persistenceKey])
+    case .unfocusedDim: return "Dimmed: no window in focus on this display"
     case .suspended: return "Paused while this display is mirrored"
     // Between enrolling and the first tick, and for a display the coordinator
     // has not reconciled yet. Says what is true rather than guessing.
@@ -341,7 +426,7 @@ private struct OledCareDisplaySection: View {
   // MARK: - Idle dim
 
   @ViewBuilder private var idleControls: some View {
-    SettingRow(caption: SettingsCaption("Counted from the last keyboard or mouse activity anywhere on the Mac. Video playback, calls and anything else holding the screen awake postpone it.")) {
+    SettingRow(caption: SettingsCaption("Counted from the last keyboard or mouse activity anywhere on the Mac; video playback, calls and anything else holding the screen awake postpone it.")) {
       VStack(alignment: .leading, spacing: 6) {
         Stepper(value: idleMinutesBinding, in: Self.idleMinuteRange) {
           Text(verbatim: "Dim after \(Self.minutesPhrase(minutes(prefs.oledIdleDimSeconds))) of inactivity")
@@ -354,20 +439,20 @@ private struct OledCareDisplaySection: View {
     }
 
     levelRow(
-      label: "Dim by",
-      caption: "\(AppInfo.productName) draws a dark overlay over the display; the display's own brightness setting is untouched, and any key or click restores the picture immediately.",
+      label: "Dim to",
+      caption: "How bright the display is while dimmed: \(AppInfo.productName) draws a dark overlay over it, the display's own brightness setting is untouched, and any key or click restores the picture immediately.",
       draft: $idleLevelDraft,
-      value: prefs.oledIdleDimLevel,
-      accessibilityName: "Idle dim amount"
-    ) { level in
-      writer.write(.oledIdleDimLevel) { $0.oledIdleDimLevel = level }
+      value: prefs.oledIdleDimBrightness,
+      accessibilityName: "Idle dim brightness"
+    ) { brightness in
+      writer.write(.oledIdleDimLevel) { $0.oledIdleDimBrightness = brightness }
     }
   }
 
   // MARK: - Lock dim
 
   private var lockControls: some View {
-    SettingRow("Uses the same amount as the idle dim. Any key or click lifts it while the screen stays locked, and it comes back after the idle time above.") {
+    SettingRow("Dims the display to the same brightness as the idle dim; any key or click lifts it while the screen stays locked, and it comes back after the idle time above.") {
       Toggle("Dim while the screen is locked", isOn: Binding(
         get: { prefs.oledLockDim },
         set: { on in writer.write(.oledLockDim) { $0.oledLockDim = on } }
@@ -378,7 +463,10 @@ private struct OledCareDisplaySection: View {
   // MARK: - Blackout
 
   @ViewBuilder private var blackoutControls: some View {
-    SettingRow("Goes fully black after a longer idle period. The click that wakes it is discarded, so nothing is clicked by accident. A key press wakes it too, but reaches whichever app you were using.") {
+    // TWO sentences by design: SO15's safety budget names the blank display,
+    // and OC15's honesty rule needs the second sentence — a key wakes the
+    // blackout but is NOT discarded, and copy must never promise it is.
+    SettingRow("Goes fully black after a longer idle period; the click that wakes it is discarded, so nothing is clicked by accident. A key press wakes it too, but reaches whichever app you were using.") {
       Toggle("Turn the screen black after longer", isOn: Binding(
         get: { prefs.oledBlackoutEnabled },
         set: { on in writer.write(.oledBlackoutEnabled) { $0.oledBlackoutEnabled = on } }
@@ -404,7 +492,7 @@ private struct OledCareDisplaySection: View {
   // MARK: - Unfocused dim
 
   @ViewBuilder private var unfocusedControls: some View {
-    SettingRow("For a second display you look at less. It dims while no window on it is in focus, even while you are working on another display — so only clicking into this display brings it back, not typing elsewhere.") {
+    SettingRow("Dims while no window on this display is in focus, even while you are working on another display: only clicking into this display brings it back, not typing elsewhere.") {
       Toggle("Dim while this display has nothing in focus", isOn: Binding(
         get: { prefs.oledUnfocusedDimEnabled },
         set: { on in writer.write(.oledUnfocusedDimEnabled) { $0.oledUnfocusedDimEnabled = on } }
@@ -415,13 +503,13 @@ private struct OledCareDisplaySection: View {
         Text(verbatim: "Dim after \(Self.minutesPhrase(minutes(prefs.oledUnfocusedDimSeconds))) without focus")
       }
       levelRow(
-        label: "Dim by",
-        caption: "Usually lighter than the idle dim — the display is still in view.",
+        label: "Dim to",
+        caption: "How bright an unfocused display is while dimmed. Usually higher than the idle dim, because the display is still in view.",
         draft: $unfocusedLevelDraft,
-        value: prefs.oledUnfocusedDimLevel,
-        accessibilityName: "Unfocused dim amount"
-      ) { level in
-        writer.write(.oledUnfocusedDimLevel) { $0.oledUnfocusedDimLevel = level }
+        value: prefs.oledUnfocusedDimBrightness,
+        accessibilityName: "Unfocused dim brightness"
+      ) { brightness in
+        writer.write(.oledUnfocusedDimLevel) { $0.oledUnfocusedDimBrightness = brightness }
       }
     }
   }
@@ -434,16 +522,20 @@ private struct OledCareDisplaySection: View {
     // its next write-through.
     let tracker = model.oledCare.hoursTracker(for: persistenceKey)
 
+    // "Hours of use", never "panel hours", in every visible string (SO14: the
+    // hardware is a display; "panel" survives only in type names like
+    // `PanelHoursTracker` and in comments).
+    //
     // The second sentence is the honest limit of the number (#94): macOS reports
     // a DPMS-blanked panel as awake, at full resolution, with no reconfiguration,
     // so a panel held in soft standby is indistinguishable from a lit one.
-    // "can still be counted" is deliberately hedged — whether the monitor's own
+    // "can still be counted" is deliberately hedged. Whether the monitor's own
     // power button reaches soft standby or instead deasserts hot-plug detect
     // (a real departure, handled correctly) is untested per monitor (#23).
-    // Display sleep, system sleep and mirroring are all handled correctly —
+    // Display sleep, system sleep and mirroring are all handled correctly, so
     // don't let the caption imply otherwise in either direction.
-    SettingRow("Counted while the display is awake and not mirrored, and kept per display even when it is unplugged. A display switched off at the monitor itself can still be counted — macOS reports a blanked panel as awake.") {
-      Toggle("Count panel-on hours", isOn: Binding(
+    SettingRow("Counted while the display is awake and not mirrored, and kept per display even when it is unplugged. A display switched off at the monitor itself can still be counted, because macOS reports a blanked display as awake.") {
+      Toggle("Count hours of use", isOn: Binding(
         get: { prefs.oledHoursTracking },
         set: { on in writer.write(.oledHoursTracking) { $0.oledHoursTracking = on } }
       ))
@@ -454,13 +546,13 @@ private struct OledCareDisplaySection: View {
     // can be read. With counting off the numbers stay on screen (they are the
     // accumulated total, not a live reading) but they stop moving, and two
     // frozen figures with nothing saying so read as a broken counter.
-    LabeledContent("Panel on time") {
+    LabeledContent("Hours of use") {
       Text(verbatim: hoursLine(tracker))
         .foregroundStyle(.secondary)
     }
 
     if tracker.shouldShowStandbyNote {
-      SettingRow(caption: SettingsCaption("Most OLED panels run their own compensation cycle when they go into standby, and skip it while they are in use. Anything that puts the panel to sleep counts — the monitor's own power button, or leaving the Mac idle.")) {
+      SettingRow(caption: SettingsCaption("Most OLED displays run their own compensation cycle when they go into standby, and skip it while they are in use. Anything that puts the display to sleep counts: the monitor's own power button, or leaving the Mac idle.")) {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
           Text("This display has not been in standby for a while.")
           Spacer(minLength: 0)
@@ -636,10 +728,11 @@ private struct OledCareDisplaySection: View {
 
   // MARK: - Levels
 
-  /// The dim-amount row, shared by the idle and unfocused levels so the two
-  /// cannot drift into different shapes. The range comes from
-  /// `OledDimConfig.levelRange` — the config sanitises to exactly that, and a
-  /// slider that could express more would be a slider that lies.
+  /// The dim-brightness row, shared by the idle and unfocused settings so the
+  /// two cannot drift into different shapes. The number is HOW BRIGHT the
+  /// display is left, so lower is darker; the range comes from
+  /// `OledDimConfig.brightnessRange`: the config sanitises to exactly that,
+  /// and a slider that could express more would be a slider that lies.
   private func levelRow(
     label: LocalizedStringKey,
     caption: LocalizedStringKey,
@@ -660,10 +753,10 @@ private struct OledCareDisplaySection: View {
         }
         Slider(
           value: Binding(get: { live }, set: { draft.wrappedValue = $0 }),
-          in: OledDimConfig.levelRange,
+          in: OledDimConfig.brightnessRange,
           // 10% steps: SwiftUI draws a tick per step on macOS, and a finer
           // step turned the row into a comb of seventeen marks. Ten percent is
-          // also the smallest change anyone can see on a dim overlay.
+          // also the smallest change anyone can see in a dim.
           step: 0.1,
           onEditingChanged: { editing in
             guard !editing else { return }
@@ -695,8 +788,8 @@ private struct OledCareDisplaySection: View {
 
   // MARK: - Formatting
 
-  private static func percent(_ level: Double) -> String {
-    "\(Int((level * 100).rounded()))%"
+  private static func percent(_ brightness: Double) -> String {
+    "\(Int((brightness * 100).rounded()))%"
   }
 
   /// English only (D25), and singular matters: the idle threshold's floor is

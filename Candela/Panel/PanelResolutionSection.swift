@@ -20,7 +20,7 @@ import SwiftUI
 /// outside the tracking session, because a `.task` here would be starved while
 /// the menu is open and the section would be missing on the open that wanted it.
 ///
-/// `@MainActor` for the same reason as `DisplayModeSection`: it stores
+/// `@MainActor` for the same reason as `DisplayHubView`: it stores
 /// main-actor types and reads them from computed properties, which are
 /// nonisolated on a plain `View` under complete concurrency checking.
 @MainActor
@@ -50,7 +50,7 @@ struct PanelResolutionSection: View {
   private var isAwaitingAnswer: Bool { coordinator.preview?.displayID == displayID }
 
   private var report: DisplayModeCoordinator.ReapplyReport? {
-    coordinator.reapplyReports[displayID]
+    coordinator.report(for: displayID)
   }
 
   var body: some View {
@@ -110,13 +110,34 @@ struct PanelResolutionSection: View {
       // offer. It reports what the display is running, which is the same kind
       // of statement the confirmation window and the reapply reports make with
       // a bare size; the badges are one click away on the rows this expands to.
-      detail: catalog.current.map(DisplayModeCopy.size),
+      //
+      // The RATE does ride along (#86): "resolution" is a size and a refresh
+      // rate, and this row is the only place the menu bar states either — a
+      // 175 Hz panel quietly running at 60 is exactly what someone opens this
+      // to find out. It costs 50 pt of the row's slack (measured at 12 pt
+      // system: 72.4 → 122.2, against the 161.6 that truncated), so the
+      // badges' verdict is unchanged.
+      detail: catalog.current.map(summary),
+      spokenDetail: catalog.current.map(spokenSummary),
       accessibilityName: displayName,
       accessibilityRole: "resolution",
       isExpanded: isExpanded
     ) {
       expanded = isExpanded ? nil : PanelDisclosureID(displayID, .resolution)
     }
+  }
+
+  private func summary(_ mode: DisplayMode) -> String {
+    "\(DisplayModeCopy.size(mode)) · \(DisplayModeCopy.refresh(mode.refreshHz))"
+  }
+
+  /// The same statement in words. "×" and "·" are read inconsistently at most
+  /// verbosities, and unseparated digits are read one at a time.
+  private func spokenSummary(_ mode: DisplayMode) -> String {
+    ModeSpeech.spoken(
+      logicalWidth: mode.logicalWidth, logicalHeight: mode.logicalHeight,
+      refreshHz: mode.refreshHz
+    )
   }
 
   /// Says where the rest are. The panel shows the top few by design, and a
@@ -150,14 +171,16 @@ struct PanelResolutionSection: View {
 
   /// What reapply could not do on this display, at launch or when it
   /// reconnected. Nobody was watching then, so this is the first moment the
-  /// user can be told — it stays until they dismiss it, pick a resolution
-  /// themselves, or unplug the display.
+  /// user can be told — it stays until they dismiss it or pick a resolution
+  /// themselves. An unplug no longer takes it away (SO8).
   @ViewBuilder private var reapplyReport: some View {
     if let report {
       PanelReportRow(
         text: Text(DisplayModeCopy.reapply(requested: report.requested, notice: report.notice))
       ) {
-        coordinator.dismissReapplyReport(for: displayID)
+        // The same call the settings banner's OK makes, against the same key —
+        // one dismissal clears the notice on every surface.
+        coordinator.dismissReport(forKey: report.key)
       }
       .padding(.horizontal, 4)
     }
@@ -176,7 +199,7 @@ struct PanelResolutionSection: View {
     // tracking session that ends on Escape, on a menu-bar click, and possibly
     // on the reconfiguration this very call performs, so the coordinator puts
     // the Keep/Revert surface in a window of its own.
-    coordinator.select(mode, on: displayID, from: .panel)
+    coordinator.select(mode, on: displayID, from: .panel, surface: .floatingPanel)
     // Ending tracking is the point of this line, not a courtesy.
     //
     // Everything `select` queues — the reconfiguration, the countdown, the

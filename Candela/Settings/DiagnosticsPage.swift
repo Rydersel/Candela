@@ -1,9 +1,16 @@
+import AppKit
 import CandelaKit
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// One `Section("Diagnostics")` under a connected display: what this display
-/// is, how its brightness is being driven, what it told us, what is
-/// unavailable and why, and what is true right now.
+/// The Diagnostics sub-page (spec §7): what this display is, how its brightness
+/// is being driven, what it told us, what is unavailable and why, and what is
+/// true right now — plus the two report actions.
+///
+/// It replaces `DisplayDiagnosticsSection`, whose five caption-headed
+/// pseudo-groups are now real `Section` headers, and it leads with a
+/// plain-English verdict so the answer to "is this working?" is the first thing
+/// on the page rather than something to be assembled from six rows.
 ///
 /// The feature is the HONESTY RULES (DT30), not the rows:
 /// - every "unavailable" row states a REASON drawn from a typed value;
@@ -17,7 +24,7 @@ import SwiftUI
 /// and the rules above are what make that worth doing rather than merely
 /// possible. "Why can't hardware control reach my laptop screen?" is a real
 /// question this feature exists to answer, and it is answered here, once, in
-/// the brightness group. Every row that describes a data cable, an EDID or a
+/// the brightness section. Every row that describes a data cable, an EDID or a
 /// DDC answer is OMITTED for the built-in rather than rendered against a fact
 /// that will never arrive: `DisplayDiscovery` is external-only by construction,
 /// so a "Connection: not enumerated yet" on the built-in would be a permanent
@@ -27,19 +34,22 @@ import SwiftUI
 /// other than `body` are nonisolated under complete concurrency, and this one
 /// constructs and reads main-actor types.
 ///
-/// It WRITES NOTHING (DT31) — no `PrefName` case, no `DisplayPrefWriter`, no
-/// button. D29 does not bind it today and binds the moment a control is added:
-/// a "re-probe now" control would fall under D29 rule 3 immediately.
+/// The page WRITES NO PREF (DT31). Its two buttons touch the pasteboard and the
+/// filesystem, and the one chevron row is navigation. D29 does not bind it, and
+/// binds the moment a control that can disable a command is added.
 @MainActor
-struct DisplayDiagnosticsSection: View {
+struct DiagnosticsPage: View {
   let state: AppModel.DisplayState
+  @Binding var path: [DisplaySubPage]
+  let displays: [(key: String, name: String)]
+  let onSwitch: (String) -> Void
 
   @Environment(AppModel.self) private var model
 
   private var persistenceKey: String { state.display.persistenceKey }
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: persistenceKey) }
   private var facts: DisplayHardwareFacts? { model.hardwareFacts[persistenceKey] }
-  private var path: BrightnessPath { state.controller.brightnessPath }
+  private var brightnessPath: BrightnessPath { state.controller.brightnessPath }
 
   /// Asked of the model's own slot rather than of the persistence key: the
   /// model is the thing that decides which display is the built-in, and a
@@ -49,33 +59,102 @@ struct DisplayDiagnosticsSection: View {
 
   var body: some View {
     // MANDATORY. `DisplayPrefs` is plain `UserDefaults` and is not observable;
-    // `prefsRevision` is the ONLY invalidation signal, and this section reads
-    // prefs in four of its five groups. Omitting it yields a silently stale
+    // `prefsRevision` is the ONLY invalidation signal, and this page reads
+    // prefs in four of its five sections. Omitting it yields a silently stale
     // page.
     let _ = model.prefsRevision
 
-    Section("Diagnostics") {
-      thisDisplayGroup
-      brightnessGroup
-      // Every row in group 3 is about a DDC answer, and the built-in never
+    Form {
+      SubPageHeader(
+        title: DisplaySubPage.diagnostics.title,
+        currentKey: persistenceKey,
+        displays: displays,
+        onSwitch: onSwitch
+      )
+
+      // Spec §7: one sentence, above everything. Composed from the same state
+      // the "Last brightness command" and "Reading values back" rows below
+      // render, so the summary cannot disagree with its own evidence.
+      Section {
+        Text(verbatim: verdictText)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      Section {
+        thisDisplayRows
+      } header: {
+        Text("This Display").settingsHeading()
+      }
+
+      Section {
+        brightnessRows
+      } header: {
+        Text("Brightness Control").settingsHeading()
+      }
+
+      // Every row in this section is about a DDC answer, and the built-in never
       // gives one — it has no wire and `probeVolumeCapabilities` walks
       // `model.displays`, which is external-only. Rendering it there would put
       // "Not asked yet" under a heading promising an answer that can never
       // arrive (DT30 rule (e)); the built-in's DDC story is already stated
-      // once, in group 2, where it is true.
+      // once, in Brightness Control, where it is true.
       if !isBuiltIn {
-        whatTheDisplaySaidGroup
+        Section {
+          reportedCapabilitiesRows
+        } header: {
+          Text("Reported Capabilities").settingsHeading()
+        }
       }
-      unavailableGroup
-      rightNowGroup
+
+      Section {
+        availabilityRows
+      } header: {
+        Text("Availability").settingsHeading()
+      }
+
+      Section {
+        rightNowRows
+      } header: {
+        Text("Right Now").settingsHeading()
+      }
+
+      actionsSection
+    }
+    .formStyle(.grouped)
+  }
+
+  // MARK: - Verdict
+
+  /// The most actionable true sentence, in the order a person would want to
+  /// hear them. It claims nothing the rows below do not: `lastApplyFailed`,
+  /// `lastAppliedTarget` and the worst-of-three read evidence are the same
+  /// three values "Last brightness command" and "Reading values back" render.
+  private var verdictText: String {
+    if isBuiltIn {
+      return "macOS controls this display's brightness directly, so there is nothing for \(AppInfo.productName) to send over a cable."
+    }
+    if case .unavailable = brightnessPath {
+      return "Nothing is moving this display's brightness. See Availability below."
+    }
+    if state.controller.lastApplyFailed() {
+      return "The last brightness command was not accepted. Try a different cable or port."
+    }
+    guard state.controller.lastAppliedTarget() != nil else {
+      return "\(AppInfo.productName) has not sent anything to this display yet."
+    }
+    return switch readEvidence {
+    case .answered, .notAttempted:
+      "Brightness is being sent to this display and accepted."
+    case .allZeros:
+      "Brightness is being sent to this display and accepted, but it never answers a read."
+    case .noReply:
+      "Brightness is being sent to this display and accepted, but it is not answering reads."
     }
   }
 
-  // MARK: - 1. This display
+  // MARK: - This Display
 
-  @ViewBuilder private var thisDisplayGroup: some View {
-    SettingsCaption("This display")
-
+  @ViewBuilder private var thisDisplayRows: some View {
     LabeledContent("Reported name") {
       Text(verbatim: state.display.name).foregroundStyle(.secondary)
     }
@@ -88,7 +167,8 @@ struct DisplayDiagnosticsSection: View {
     }
 
     // The cable-and-EDID rows. Omitted wholesale for the built-in panel — see
-    // the type comment.
+    // the type comment. The hub's identity block deliberately does NOT carry
+    // "Connection" (T12); it lives here, where the rest of the cable's story is.
     if !isBuiltIn {
       SettingRow("Which cable this display is connected through.") {
         LabeledContent("Connection") {
@@ -120,7 +200,7 @@ struct DisplayDiagnosticsSection: View {
       }
 
       if let width = facts?.physicalWidthCm, let height = facts?.physicalHeightCm {
-        LabeledContent("Panel size") {
+        LabeledContent("Display size") {
           Text(verbatim: "\(width) × \(height) cm").foregroundStyle(.secondary)
         }
       }
@@ -129,7 +209,7 @@ struct DisplayDiagnosticsSection: View {
     if let native = model.displayModes.catalogs[state.id], native.nativeKnown,
        let current = native.current {
       LabeledContent("Current mode") {
-        Text(verbatim: modeText(current)).foregroundStyle(.secondary)
+        Text(verbatim: DiagnosticsCopy.mode(current)).foregroundStyle(.secondary)
       }
     }
 
@@ -156,6 +236,35 @@ struct DisplayDiagnosticsSection: View {
         Text(verbatim: additionalResolutionsText(revealed: revealedCount))
           .foregroundStyle(.secondary)
       }
+
+      wireTimingRow(withheld: catalog.withheldForWireTiming)
+    }
+  }
+
+  /// #110. Says what WE did and why, never what the display or macOS did — the
+  /// same DT30 rule (d) the two rows above follow. Silent when the guard is on
+  /// and had nothing to withhold, which is the ordinary case on most panels.
+  @ViewBuilder private func wireTimingRow(withheld: Int) -> some View {
+    if !model.displayModes.guardsWireTiming {
+      LabeledContent("Unsupported-timing check") {
+        Text(verbatim: "Off").foregroundStyle(.secondary)
+      }
+      .help(
+        """
+        Turned off by the wireTimingGuard setting. Resolutions the display has \
+        no matching timing for are offered again, and some displays scan those \
+        out letterboxed or cropped.
+        """)
+    } else if withheld > 0 {
+      LabeledContent("Not offered — no matching timing") {
+        Text(verbatim: "\(withheld)").foregroundStyle(.secondary)
+      }
+      .help(
+        """
+        These resolutions run at refresh rates this display advertises no \
+        full-width timing for. Displays bind them to a different timing \
+        instead, which can letterbox or crop the desktop.
+        """)
     }
   }
 
@@ -170,7 +279,7 @@ struct DisplayDiagnosticsSection: View {
     return revealed == 0 ? "None for this display" : "\(revealed)"
   }
 
-  /// The two keys this display's settings hang off. Split out of the group so
+  /// The two keys this display's settings hang off. Split out of the section so
   /// the IOReg tooltip can be attached for externals and left off the built-in,
   /// whose IOReg facts are never read at all — a tooltip there would be
   /// reporting a lookup that never ran.
@@ -225,19 +334,13 @@ struct DisplayDiagnosticsSection: View {
     return "System port path: \(location)"
   }
 
-  /// Rendered as the kernel spelled it. The `Transport` dictionary's vocabulary
-  /// is macOS's, not ours, and no real panel's spelling has been observed — so
-  /// this maps nothing and prettifies nothing. A pane that invents a vocabulary
-  /// lies the moment the kernel's changes.
+  /// "Not enumerated yet" and "reported nothing" are different facts, and the
+  /// report's `connection:` field only distinguishes present from absent — so
+  /// the page keeps the distinction that `DiagnosticsCopy.transport` collapses
+  /// to nil.
   private var transportText: String {
-    guard let facts else { return "Not enumerated yet" }
-    switch (facts.transportUpstream, facts.transportDownstream) {
-    case let (up?, down?) where up == down: return up
-    case let (up?, down?): return "\(up) → \(down)"
-    case let (up?, nil): return up
-    case let (nil, down?): return down
-    case (nil, nil): return "This display does not report its connection type"
-    }
+    if let transport = DiagnosticsCopy.transport(facts) { return transport }
+    return facts == nil ? "Not enumerated yet" : "This display does not report its connection type"
   }
 
   private var manufacturerText: String {
@@ -252,18 +355,12 @@ struct DisplayDiagnosticsSection: View {
     return "Not reported"
   }
 
-  private func modeText(_ mode: DisplayMode) -> String {
-    "\(mode.logicalWidth) × \(mode.logicalHeight) at \(Int(mode.refreshHz.rounded())) Hz"
-  }
+  // MARK: - Brightness Control
 
-  // MARK: - 2. How brightness is controlled
-
-  @ViewBuilder private var brightnessGroup: some View {
-    SettingsCaption("How brightness is controlled")
-
+  @ViewBuilder private var brightnessRows: some View {
     SettingRow(brightnessPathCaption) {
       LabeledContent("Brightness path") {
-        Text(verbatim: brightnessPathText).foregroundStyle(.secondary)
+        Text(verbatim: DiagnosticsCopy.brightnessPath(brightnessPath)).foregroundStyle(.secondary)
       }
     }
 
@@ -271,7 +368,7 @@ struct DisplayDiagnosticsSection: View {
       LabeledContent("Native brightness") {
         Text(DisplayServices.isAvailable
           ? "Available on this Mac"
-          : "Unavailable — macOS did not load the framework \(AppInfo.productName) needs for it")
+          : "Unavailable: macOS did not load the framework \(AppInfo.productName) needs for it")
           .foregroundStyle(.secondary)
       }
     }
@@ -280,9 +377,9 @@ struct DisplayDiagnosticsSection: View {
     // It is not a failure, a preference, or something a future release fixes,
     // so it is not phrased as any of those.
     if isBuiltIn {
-      SettingRow("macOS drives the built-in panel's backlight itself, so there is nothing for \(AppInfo.productName) to send and nothing that can be turned back on.") {
+      SettingRow("macOS drives the built-in display's backlight itself, so there is nothing for \(AppInfo.productName) to send and nothing that can be turned back on.") {
         LabeledContent("Hardware control") {
-          Text("Does not apply — this panel has no data cable to carry hardware commands")
+          Text("Does not apply: this display has no data cable to carry hardware commands")
             .foregroundStyle(.secondary)
         }
       }
@@ -291,12 +388,12 @@ struct DisplayDiagnosticsSection: View {
     // Gamma interference is a fight over ONE backend, and the row is shown
     // only to a display actually using it.
     //
-    // Two claims the shipped row could not support, both fixed here. First,
-    // the counter is only ever touched inside `checkBeforeApply`, which runs
-    // one statement before a GAMMA apply — a display on the hardware, native
-    // or overlay path is never looked at, so its permanent 0 rendered as
-    // "None this session" asserted absence on the strength of a probe that
-    // never ran. Omit rather than blank (DT45). Second, the window was wrong:
+    // Two claims an earlier version of this row could not support. First, the
+    // counter is only ever touched inside `checkBeforeApply`, which runs one
+    // statement before a GAMMA apply — a display on the hardware, native or
+    // overlay path is never looked at, so its permanent 0 rendered as "None
+    // this session" asserted absence on the strength of a probe that never
+    // ran. Omit rather than blank (DT45). Second, the window was wrong:
     // `resetCounter()` fires on EVERY display reconfiguration
     // (`StatusItemController`), so "this session" told a user who had watched
     // a conflict happen, then woken the Mac, that there had been none.
@@ -316,7 +413,7 @@ struct DisplayDiagnosticsSection: View {
   /// Whether the gamma backend is the one carrying this display's software
   /// leg — the only configuration in which anything checks for a clobber.
   private var usesGammaLeg: Bool {
-    switch path {
+    switch brightnessPath {
     case .software(.gamma), .combined(_, .gamma), .softwareOnly(.gamma, _, _):
       true
     case .native, .hardware, .software, .combined, .softwareOnly, .unavailable:
@@ -327,45 +424,17 @@ struct DisplayDiagnosticsSection: View {
   private func gammaConflictText(_ count: Int) -> String {
     count == 0
       ? "None noticed"
-      : "\(count) — another app keeps taking this display's color profile back"
+      : "\(count): another app keeps taking this display's color profile back"
   }
 
   /// Both limits of the number are stated, because neither is guessable from
   /// it: WHEN the count restarts, and that it only counts what was looked at.
   private var gammaConflictCaption: LocalizedStringKey {
-    "\(AppInfo.productName) only looks while it is dimming this display through its color profile, and the count starts again whenever your displays are reconfigured — a resolution change, a display plugged or unplugged, or the Mac waking."
-  }
-
-  /// The engine's own answer, put into the user's words. `BrightnessPath` gained
-  /// a `.softwareOnly` case after this section was specified, and it is the one
-  /// case where PART of the slider works — so it gets its own sentence rather
-  /// than being folded in with plain software dimming, which would overstate
-  /// what moves.
-  private var brightnessPathText: String {
-    switch path {
-    case .native:
-      "macOS native brightness"
-    case .hardware:
-      "Hardware commands over the data cable"
-    case .software(.gamma):
-      "Software, through the display's color profile"
-    case .software(.overlay):
-      "Software, through a dark overlay"
-    case let .combined(switching, .gamma):
-      "Split at \(SliderSnap.percentText(switching)) — software below, the data cable above"
-    case let .combined(switching, .overlay):
-      "Split at \(SliderSnap.percentText(switching)) — overlay below, the data cable above"
-    case let .softwareOnly(.gamma, .ddcTurnedOff, dimsBelow):
-      "Software only below \(SliderSnap.percentText(dimsBelow)), through the display's color profile"
-    case let .softwareOnly(.overlay, .ddcTurnedOff, dimsBelow):
-      "Software only below \(SliderSnap.percentText(dimsBelow)), through a dark overlay"
-    case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
-      "Nothing is moving this display's brightness"
-    }
+    "\(AppInfo.productName) only looks while it is dimming this display through its color profile, and the count starts again whenever your displays are reconfigured: a resolution change, a display plugged or unplugged, or the Mac waking."
   }
 
   private var brightnessPathCaption: LocalizedStringKey {
-    switch path {
+    switch brightnessPath {
     case .native:
       "macOS sets this display's brightness directly. No hardware commands are sent over the cable."
     case .hardware:
@@ -381,30 +450,40 @@ struct DisplayDiagnosticsSection: View {
     }
   }
 
-  // MARK: - 3. What the display told us
+  // MARK: - Reported Capabilities
 
   private var capabilities: String? { model.capabilityString[persistenceKey] }
 
-  /// Three states, never two, and the middle one is deliberately not a
-  /// verdict. The probe not having run is not the same fact as the display
-  /// having stayed silent, and collapsing them would let the pane accuse a
-  /// panel that was never asked.
-  ///
-  /// The middle state is also as far as the evidence goes. `capabilityString`
-  /// is stored only on a successful read, and `readCapabilityString` returns
-  /// nil both when nothing came back and when what came back could not be
-  /// reassembled — so a display that answered BADLY lands in the same bucket
-  /// as one that stayed quiet, and the sentence must not pick between them.
+  /// nil means the description did not parse end to end (D24), which is a
+  /// DIFFERENT answer from "the display listed no codes". A partially parsed
+  /// list must never be shown as though it were the display's advertised list.
+  private var advertisedCodes: Set<UInt8>? {
+    capabilities.flatMap { CapabilityString.codes(in: $0) }
+  }
+
+  /// SO5 applied to capabilities: answered, answered-but-unreadable, asked-and-
+  /// unanswered, and never-asked are FOUR facts and each gets its own sentence.
+  /// The probe not having run is not the same fact as the display having stayed
+  /// silent, and a display whose description arrived but would not parse is not
+  /// the same fact as either — collapsing any pair lets the page accuse a panel
+  /// that was never asked, or credit one whose answer we could not read.
   private var capabilityAnswerText: String {
-    if capabilities != nil { return "The display answered" }
+    if capabilities != nil {
+      return advertisedCodes == nil
+        ? "The display answered, but \(AppInfo.productName) could not read its description"
+        : "The display answered"
+    }
     if model.volumeSupport[persistenceKey] != nil {
-      return "No answer \(AppInfo.productName) could read"
+      return "\(AppInfo.productName) asked and the display sent nothing it could read"
     }
     return "Not asked yet"
   }
 
   private var capabilityAnswerCaption: LocalizedStringKey {
     if capabilities != nil {
+      if advertisedCodes == nil {
+        return "The display's description is shown below exactly as it arrived. It is unbalanced, carries no command list, or lists no codes, so nothing on this page claims what the display supports."
+      }
       return "\(AppInfo.productName) asks each display to describe itself once after it is plugged in."
     }
     if model.volumeSupport[persistenceKey] != nil {
@@ -414,27 +493,18 @@ struct DisplayDiagnosticsSection: View {
       // replug hands out a fresh `IOAVService` and an old answer is not
       // evidence about the new wire. So the window is the plug, not the
       // session, and unplugging re-asks.
-      return "\(AppInfo.productName) asked once since this display was plugged in. Either the display sent nothing or it sent something that could not be put back together — from here the two look the same."
+      return "\(AppInfo.productName) asked once since this display was plugged in. Either the display sent nothing or it sent something that could not be put back together. From here the two look the same."
     }
     // The one skip that is not "hasn't got round to it yet": DDC is dead under
     // HDR, so `CapabilityProbePolicy` refuses to probe and refuses to cache a
     // verdict that would outlive its cause.
     if state.controller.isHDREngaged {
-      return "\(AppInfo.productName) does not ask a display that is in HDR mode — hardware commands do not reach it — and will ask once HDR turns off."
+      return "\(AppInfo.productName) does not ask a display that is in HDR mode (hardware commands do not reach it) and will ask once HDR turns off."
     }
     return "\(AppInfo.productName) asks each display to describe itself once after it is plugged in. It has not asked this one yet."
   }
 
-  /// nil means the description did not parse end to end (D24), which is a
-  /// DIFFERENT answer from "the display listed no codes". A partially parsed
-  /// list must never be shown as though it were the display's advertised list.
-  private var advertisedCodes: Set<UInt8>? {
-    capabilities.flatMap { CapabilityString.codes(in: $0) }
-  }
-
-  @ViewBuilder private var whatTheDisplaySaidGroup: some View {
-    SettingsCaption("What the display told us")
-
+  @ViewBuilder private var reportedCapabilitiesRows: some View {
     SettingRow(capabilityAnswerCaption) {
       LabeledContent("Capability request") {
         Text(verbatim: capabilityAnswerText).foregroundStyle(.secondary)
@@ -451,7 +521,7 @@ struct DisplayDiagnosticsSection: View {
         Text(verbatim: CapabilityString.tag("model", in: capabilities) ?? "Not stated")
           .foregroundStyle(.secondary)
       }
-      LabeledContent("Panel type") {
+      LabeledContent("Display type") {
         Text(verbatim: CapabilityString.tag("type", in: capabilities) ?? "Not stated")
           .foregroundStyle(.secondary)
       }
@@ -490,8 +560,8 @@ struct DisplayDiagnosticsSection: View {
   /// display on the native path or with the brightness command turned off, and
   /// the pass may simply not have run yet — in all of those it leaves the flag
   /// false without ever having asked. "The display did not report one" there is
-  /// an absence claim about a probe that never ran, and it rendered directly
-  /// above this same group's "\(AppInfo.productName) has not read from this
+  /// an absence claim about a probe that never ran, and it renders directly
+  /// above this same section's "\(AppInfo.productName) has not read from this
   /// display".
   ///
   /// The brightness controller's OWN evidence, not the folded `readEvidence`:
@@ -502,9 +572,9 @@ struct DisplayDiagnosticsSection: View {
       return "This display reported a maximum of \(state.controller.maxDDCValue)"
     }
     if state.controller.readEvidence == .notAttempted {
-      return "Assumed 100 — \(AppInfo.productName) has not asked this display for its scale"
+      return "Assumed 100: \(AppInfo.productName) has not asked this display for its scale"
     }
-    return "Assumed 100 — the display did not report one"
+    return "Assumed 100: the display did not report one"
   }
 
   /// The four commands this app speaks, and which of them this display
@@ -548,7 +618,7 @@ struct DisplayDiagnosticsSection: View {
     switch readEvidence {
     case .notAttempted: "\(AppInfo.productName) has not read from this display"
     case .answered: "This display answers reads"
-    case .allZeros: "Write-only — this display takes commands but never answers a read"
+    case .allZeros: "Write-only: this display takes commands but never answers a read"
     case .noReply: "This display did not reply to a read"
     }
   }
@@ -564,12 +634,12 @@ struct DisplayDiagnosticsSection: View {
     }
   }
 
-  /// The old sentence — "startup behaviour for THIS DISPLAY is not set to read
-  /// values back" — asserted a cause it could not know, at a scope that does
-  /// not exist. `startupAction` is app-level (`DisplayPrefs` reads it straight
-  /// off the `startupAction` default, unkeyed), and `.notAttempted` also
-  /// arises from Safe Mode, from all three commands being turned off for this
-  /// display, and simply from the first read not having happened yet.
+  /// An earlier sentence — "startup behaviour for THIS DISPLAY is not set to
+  /// read values back" — asserted a cause it could not know, at a scope that
+  /// does not exist. `startupAction` is app-level (`DisplayPrefs` reads it
+  /// straight off the `startupAction` default, unkeyed), and `.notAttempted`
+  /// also arises from Safe Mode, from all three commands being turned off for
+  /// this display, and simply from the first read not having happened yet.
   ///
   /// So the two causes that ARE knowable from here are named, in the order
   /// that matches how they mask each other — under Safe Mode the
@@ -587,9 +657,9 @@ struct DisplayDiagnosticsSection: View {
     return "Nothing has been read from this display yet. The values shown elsewhere in this window come from your saved settings, not from the display."
   }
 
-  // MARK: - 4. What is unavailable, and why
+  // MARK: - Availability
 
-  /// DT30 rule (a) lives here: no row in this group may read just
+  /// DT30 rule (a) lives here: no row in this section may read just
   /// "Unavailable" or "Not supported". Every one of them names the thing that
   /// took the feature away, and every reason comes off a typed value rather
   /// than being composed from prefs at the point of display.
@@ -601,9 +671,7 @@ struct DisplayDiagnosticsSection: View {
   /// hardwired false that would render as "this display reports no HDR modes"
   /// about a panel whose HDR macOS drives perfectly well. Both are omitted
   /// rather than answered wrongly.
-  @ViewBuilder private var unavailableGroup: some View {
-    SettingsCaption("What is unavailable, and why")
-
+  @ViewBuilder private var availabilityRows: some View {
     LabeledContent("Brightness") {
       Text(verbatim: brightnessAvailabilityText).foregroundStyle(.secondary)
     }
@@ -634,11 +702,11 @@ struct DisplayDiagnosticsSection: View {
   /// one where PART of the slider works, and reporting it as either available
   /// or unavailable would be false in the half that matters.
   private var brightnessAvailabilityText: String {
-    switch path {
+    switch brightnessPath {
     case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
-      "Unavailable — combined dimming is off for this display and its hardware brightness command is turned off"
+      "Unavailable: combined dimming is off for this display and its hardware brightness command is turned off"
     case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
-      "Partly available — the hardware brightness command is turned off, so only the part of the slider below \(SliderSnap.percentText(dimsBelow)) moves anything"
+      "Partly available: the hardware brightness command is turned off, so only the part of the slider below \(SliderSnap.percentText(dimsBelow)) moves anything"
     case .native, .software, .hardware, .combined:
       "Available"
     }
@@ -646,16 +714,16 @@ struct DisplayDiagnosticsSection: View {
 
   /// DT30 rule (b), the row that rule exists for. `.unknown` is NOT
   /// "unsupported": `.unsupported` is reachable ONLY from a description that
-  /// parsed cleanly end to end and did not list the code. A pane that
+  /// parsed cleanly end to end and did not list the code. A page that
   /// flattened three states to two would grey a working control on a display
   /// that merely stayed silent — D24's doctrine is that unknown resolves to
   /// enabled, and this is that doctrine said out loud.
   private var volumeAvailabilityText: String {
     switch prefs.audioSinkOverride {
     case .forceNone:
-      return "Unavailable — you set this display's volume slider to always off"
+      return "Unavailable: you set this display's volume slider to always off"
     case .forcePresent:
-      return "Available — you set this display's volume slider to always on"
+      return "Available: you set this display's volume slider to always on"
     case .auto:
       break
     }
@@ -664,16 +732,16 @@ struct DisplayDiagnosticsSection: View {
     // the display said nothing usable; an absent entry means nobody has asked
     // yet. Folding the two with `?? .unknown` put "this display did not
     // answer" against a display that was never spoken to — the same
-    // never-looked-reported-as-nothing-found defect this section exists to
+    // never-looked-reported-as-nothing-found defect this page exists to
     // remove, one row away from the row that states it.
     guard let support = model.volumeSupport[persistenceKey] else {
-      return "Available — \(AppInfo.productName) has not asked this display yet, so the control stays on"
+      return "Available: \(AppInfo.productName) has not asked this display yet, so the control stays on"
     }
     switch support {
     case .supported:
-      return "Available — this display lists the volume command"
+      return "Available: this display lists the volume command"
     case .unsupported:
-      return "Unavailable — this display's description parsed cleanly and does not list the volume command"
+      return "Unavailable: this display's description parsed cleanly and does not list the volume command"
     case .unknown:
       // A stored `.unknown` has TWO producers
       // (`AppModel.probeVolumeCapabilities`): `readCapabilityString()` came
@@ -683,15 +751,15 @@ struct DisplayDiagnosticsSection: View {
       //
       // In the second, `capabilityString` IS populated — and saying "this
       // display did not answer" there contradicts, three rows apart, this same
-      // group's "The display answered", its verbatim copy of what the display
+      // section's "The display answered", its verbatim copy of what the display
       // sent, and "The description did not parse, so \(AppInfo.productName)
       // makes no claim about it" (`codes(in:)` fails on exactly the same three
       // gates, in the same order). The capability row above already draws this
       // distinction; the row that decides whether a control stays on has more
       // reason to draw it, not less.
       return capabilities == nil
-        ? "Available — this display sent no answer \(AppInfo.productName) could read, so the control stays on"
-        : "Available — \(AppInfo.productName) could not read a command list out of this display's description, so the control stays on"
+        ? "Available: this display sent no answer \(AppInfo.productName) could read, so the control stays on"
+        : "Available: \(AppInfo.productName) could not read a command list out of this display's description, so the control stays on"
     }
   }
 
@@ -701,7 +769,7 @@ struct DisplayDiagnosticsSection: View {
 
   private var muteAvailabilityText: String {
     if !prefs.enableMuteUnmute {
-      return "Unavailable — muting with the display's own mute command is turned off"
+      return "Unavailable: muting with the display's own mute command is turned off"
     }
     return state.volume.isAvailable ? "Available" : ddcOffReason(command: "volume")
   }
@@ -713,9 +781,9 @@ struct DisplayDiagnosticsSection: View {
   /// and a row that shrugs.
   private func ddcOffReason(command: String) -> String {
     if prefs.forceSoftware {
-      return "Unavailable — hardware control is turned off for this display"
+      return "Unavailable: hardware control is turned off for this display"
     }
-    return "Unavailable — the \(command) command is turned off for this display"
+    return "Unavailable: the \(command) command is turned off for this display"
   }
 
   /// `supportsHDR` is `cachedSupportsHDR`, and it is false in three different
@@ -736,27 +804,25 @@ struct DisplayDiagnosticsSection: View {
   /// the guard first.
   private var hdrAvailabilityText: String {
     guard DisplayServices.isAvailable else {
-      return "Unavailable — macOS did not load the framework \(AppInfo.productName) needs for HDR brightness"
+      return "Unavailable: macOS did not load the framework \(AppInfo.productName) needs for HDR brightness"
     }
     guard state.controller.supportsHDR else {
-      return "Unavailable — \(AppInfo.productName) has no HDR answer for this display: either it lists no HDR modes, or macOS did not load the framework \(AppInfo.productName) asks. From here the two look the same."
+      return "Unavailable: \(AppInfo.productName) has no HDR answer for this display. Either it lists no HDR modes, or macOS did not load the framework \(AppInfo.productName) asks. From here the two look the same."
     }
     return "Available"
   }
 
-  // MARK: - 5. Right now
+  // MARK: - Right Now
 
   /// State, not settings. Everything here can be different a second from now,
-  /// and every one of them has words — nothing in this group is carried by a
+  /// and every one of them has words — nothing in this section is carried by a
   /// colour or an icon alone.
   ///
   /// The HDR and sound-output rows are external-only for the same reasons as
-  /// in group 4: the built-in has no HDR backend in this app and no volume
+  /// in Availability: the built-in has no HDR backend in this app and no volume
   /// command, so both would answer from a hardwired default rather than from
   /// anything observed.
-  @ViewBuilder private var rightNowGroup: some View {
-    SettingsCaption("Right now")
-
+  @ViewBuilder private var rightNowRows: some View {
     if !isBuiltIn {
       LabeledContent("HDR") {
         Text(verbatim: state.controller.isHDREngaged ? "Engaged" : "Off").foregroundStyle(.secondary)
@@ -791,7 +857,7 @@ struct DisplayDiagnosticsSection: View {
     // gates rather than picking one — which of them is holding is not visible
     // from here, and all of them are necessary conditions.
     if watchedKeyFamilies.isEmpty, model.lastArmedTapConfig != nil {
-      SettingRow("\(AppInfo.productName) watches a family of keys only while something can act on it: brightness while an external display is connected, volume while the sound output matches a display it controls — and either one only while that family is set to use the media keys. Keys it does not watch go straight to macOS.") {
+      SettingRow("\(AppInfo.productName) watches a family of keys only while something can act on it: brightness while an external display is connected, volume while the sound output matches a display it controls, and either one only while that family is set to use the media keys. Keys it does not watch go straight to macOS.") {
         LabeledContent("Keys being watched") {
           Text(verbatim: watchedKeysText).foregroundStyle(.secondary)
         }
@@ -816,7 +882,7 @@ struct DisplayDiagnosticsSection: View {
       Text(verbatim: lastWriteText).foregroundStyle(.secondary)
     }
 
-    if let report = model.displayModes.reapplyReports[state.id] {
+    if let report = model.displayModes.report(for: state.id) {
       LabeledContent("Last resolution problem") {
         Text(verbatim: reapplyText(report.notice)).foregroundStyle(.secondary)
       }
@@ -839,11 +905,11 @@ struct DisplayDiagnosticsSection: View {
   /// exactly when a rearm failed — which is the case this row is for (B9).
   private var watchedKeysText: String {
     guard model.lastArmedTapConfig != nil else {
-      return "None — the media-key tap is not running"
+      return "None: the media-key tap is not running"
     }
     let families = watchedKeyFamilies
     return families.isEmpty
-      ? "None — every media key is going straight to macOS"
+      ? "None: every media key is going straight to macOS"
       : families.joined(separator: ", ")
   }
 
@@ -872,8 +938,8 @@ struct DisplayDiagnosticsSection: View {
       nameOverride: prefs.audioDeviceNameOverride
     )
     return matches
-      ? "\(device.name) — matched to this display"
-      : "\(device.name) — not matched to this display"
+      ? "\(device.name): matched to this display"
+      : "\(device.name): not matched to this display"
   }
 
   private var lastWriteText: String {
@@ -894,7 +960,7 @@ struct DisplayDiagnosticsSection: View {
   private func reapplyText(_ notice: ModeReapplyNotice) -> String {
     switch notice {
     case let .substituted(mode):
-      "\(AppInfo.productName) could not restore your saved resolution and used \(modeText(mode)) instead"
+      "\(AppInfo.productName) could not restore your saved resolution and used \(DiagnosticsCopy.mode(mode)) instead"
     case .unavailable:
       "Your saved resolution is not offered by this display right now"
     case .failed:
@@ -905,9 +971,7 @@ struct DisplayDiagnosticsSection: View {
   /// `CGDisplayMirrorsDisplay` names the display whose contents this one is
   /// SHOWING. It is not a membership test — a mirror MASTER reports null, and
   /// so does a standalone display — so this row claims only what that call can
-  /// actually support. Mirror-set membership arrives with #12, and this row
-  /// should be revisited then: it will be able to tell a master from a
-  /// standalone display, which it cannot today.
+  /// actually support.
   private var mirrorText: String {
     guard let configured = model.displayModes.catalogs[state.id]?.display else {
       return "Not enumerated yet"
@@ -915,5 +979,181 @@ struct DisplayDiagnosticsSection: View {
     return configured.isMirrorSlave
       ? "Showing another display's contents"
       : "Showing its own contents"
+  }
+
+  // MARK: - Actions
+
+  @ViewBuilder private var actionsSection: some View {
+    Section {
+      SettingRow("Covers every display. The report doesn't include serial numbers.") {
+        DiagnosticsReportActions()
+      }
+
+      // A link, not a setting — the page stays read-only in content (spec §7).
+      // Offered only where there is something on the other end: the built-in's
+      // destination has no Advanced sub-page, because it has no hardware
+      // control to method.
+      if !isBuiltIn {
+        NavigationRow(title: "Hardware control not responding?", value: "Control Method") {
+          // Replaces the stack rather than pushing onto it, so Back from
+          // Control Method returns to the display's own page. The user came
+          // here for an answer and is being sent to the control that acts on
+          // it; the diagnostics page is not a step they need to walk back
+          // through.
+          path = [.advanced]
+        }
+      }
+    }
+  }
+}
+
+/// The Copy/Save pair and the transient confirmation, in one component because
+/// they exist in two places: here and in About, which survives every display's
+/// departure (spec §7). Two copies of a clipboard write and an `NSSavePanel` is
+/// two things to keep in agreement.
+@MainActor
+struct DiagnosticsReportActions: View {
+  @Environment(AppModel.self) private var model
+
+  @State private var justCopied = false
+  /// Cancelled and replaced on every copy, so a second click restarts the two
+  /// seconds instead of letting the first click's timer clear the label early.
+  @State private var confirmationTask: Task<Void, Never>?
+  @State private var saveError: String?
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Button("Copy Report") { copyReport() }
+      Button("Save Report…") { saveReport() }
+      if justCopied {
+        Text("Copied")
+          .foregroundStyle(.secondary)
+          .transition(.opacity)
+          .accessibilityLabel("Report copied to the clipboard")
+      }
+    }
+    .alert(
+      "The report could not be saved.",
+      isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })
+    ) {
+      Button("OK") { saveError = nil }
+    } message: {
+      Text(verbatim: saveError ?? "")
+    }
+  }
+
+  private func copyReport() {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(DiagnosticsReport.render(model.diagnosticsSnapshot()), forType: .string)
+    withAnimation { justCopied = true }
+    confirmationTask?.cancel()
+    confirmationTask = Task {
+      try? await Task.sleep(for: .seconds(2))
+      guard !Task.isCancelled else { return }
+      withAnimation { justCopied = false }
+    }
+  }
+
+  /// The snapshot is taken AFTER the panel is dismissed, not before it opens:
+  /// the file should describe the machine at the moment it was written, and a
+  /// save panel can sit open for minutes across a replug.
+  private func saveReport() {
+    let panel = NSSavePanel()
+    panel.allowedContentTypes = [.plainText]
+    panel.nameFieldStringValue = "\(AppInfo.productName) Diagnostics.txt"
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    do {
+      try DiagnosticsReport.render(model.diagnosticsSnapshot())
+        .write(to: url, atomically: true, encoding: .utf8)
+    } catch {
+      // Silence here would look exactly like success. The report exists to be
+      // handed to somebody, so a save that did not happen has to say so.
+      saveError = error.localizedDescription
+    }
+  }
+}
+
+/// The strings the diagnostics page and the diagnostics REPORT share.
+///
+/// One vocabulary on purpose: the page and the report describe the same facts,
+/// and a second set of sentences for the report is a second set to keep true.
+/// The report's field values are therefore the page's own words, capitalised
+/// the way the page capitalises them — `readback: Answers reads`, not
+/// `readback: answers reads`. That is the casing ruling this file owns.
+enum DiagnosticsCopy {
+  /// The engine's own answer, put into the user's words. `BrightnessPath` gained
+  /// a `.softwareOnly` case after the diagnostics rows were specified, and it is
+  /// the one case where PART of the slider works — so it gets its own sentence
+  /// rather than being folded in with plain software dimming, which would
+  /// overstate what moves.
+  static func brightnessPath(_ path: BrightnessPath) -> String {
+    switch path {
+    case .native:
+      "macOS native brightness"
+    case .hardware:
+      "Hardware commands over the data cable"
+    case .software(.gamma):
+      "Software, through the display's color profile"
+    case .software(.overlay):
+      "Software, through a dark overlay"
+    case let .combined(switching, .gamma):
+      "Split at \(SliderSnap.percentText(switching)): software below, the data cable above"
+    case let .combined(switching, .overlay):
+      "Split at \(SliderSnap.percentText(switching)): overlay below, the data cable above"
+    case let .softwareOnly(.gamma, .ddcTurnedOff, dimsBelow):
+      "Software only below \(SliderSnap.percentText(dimsBelow)), through the display's color profile"
+    case let .softwareOnly(.overlay, .ddcTurnedOff, dimsBelow):
+      "Software only below \(SliderSnap.percentText(dimsBelow)), through a dark overlay"
+    case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
+      "Nothing is moving this display's brightness"
+    }
+  }
+
+  /// The SHORT verdict — the hub's chevron preview and the report's `readback:`
+  /// field. The page's own row says the same thing at length; both come off the
+  /// same worst-of-three evidence, so they cannot disagree.
+  static func readbackVerdict(_ evidence: DDCReadEvidence) -> String {
+    switch evidence {
+    case .notAttempted: "Not asked yet"
+    case .answered: "Answers reads"
+    case .allZeros: "Write-only"
+    case .noReply: "Not answering"
+    }
+  }
+
+  static func mode(_ mode: DisplayMode) -> String {
+    "\(mode.logicalWidth) × \(mode.logicalHeight) at \(Int(mode.refreshHz.rounded())) Hz"
+  }
+
+  /// One line for the diagnostics event ring. Terser than the page's row: the
+  /// ring is a sequence and reads as one.
+  static func reapplyEvent(_ notice: ModeReapplyNotice) -> String {
+    switch notice {
+    case let .substituted(applied):
+      "saved resolution unavailable, used \(mode(applied))"
+    case .unavailable:
+      "saved resolution not offered"
+    case .failed:
+      "restoring the saved resolution failed"
+    }
+  }
+
+  /// Rendered as the kernel spelled it. The `Transport` dictionary's vocabulary
+  /// is macOS's, not ours, and no real panel's spelling has been observed — so
+  /// this maps nothing and prettifies nothing. Copy that invents a vocabulary
+  /// lies the moment the kernel's changes.
+  ///
+  /// nil covers BOTH "not enumerated yet" and "reported nothing". The page
+  /// distinguishes them; the report's field cannot, so it says `not reported`
+  /// for either — which is true of both.
+  static func transport(_ facts: DisplayHardwareFacts?) -> String? {
+    guard let facts else { return nil }
+    switch (facts.transportUpstream, facts.transportDownstream) {
+    case let (up?, down?) where up == down: return up
+    case let (up?, down?): return "\(up) → \(down)"
+    case let (up?, nil): return up
+    case let (nil, down?): return down
+    case (nil, nil): return nil
+    }
   }
 }

@@ -4,3 +4,4 @@
 .build/
 *.xcuserstate
 /Candela/Info.plist
+/build/

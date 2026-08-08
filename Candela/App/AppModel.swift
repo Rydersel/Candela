@@ -2,6 +2,7 @@ import CandelaKit
 import CoreGraphics
 import Foundation
 import Observation
+import ServiceManagement
 
 @MainActor @Observable
 final class AppModel {
@@ -172,6 +173,31 @@ final class AppModel {
   /// ONLY for reporting — nothing here drives it.
   @ObservationIgnored var gammaInterference: GammaInterferenceMonitor?
 
+  /// The last 20 display arrivals, departures and failed resolution restores,
+  /// newest first, for the diagnostics report (spec §7 — churn bugs are about
+  /// displays that just left, and by the time anyone copies a report the
+  /// display in question is usually gone).
+  ///
+  /// Stamped HERE, at append, because `DiagnosticsReport.render` is pure by
+  /// contract: the same snapshot must render to the same bytes forever, which
+  /// is what makes two pasted reports diffable.
+  private(set) var recentDisplayEvents: [String] = []
+
+  /// A controller rebuild empties both slots and re-discovers, so every display
+  /// looks like an arrival to `performRefresh` — see `rebuildControllers`. That
+  /// is a settings reset, not a topology change, and recording it would fill the
+  /// ring with events that never happened at the wire.
+  @ObservationIgnored private var suppressDisplayEvents = false
+
+  func noteDisplayEvent(_ description: String) {
+    guard !suppressDisplayEvents else { return }
+    let stamp = Date.now.formatted(date: .omitted, time: .shortened)
+    recentDisplayEvents.insert("\(stamp) \(description)", at: 0)
+    if recentDisplayEvents.count > 20 {
+      recentDisplayEvents.removeLast(recentDisplayEvents.count - 20)
+    }
+  }
+
   @ObservationIgnored private var capabilityProbesInFlight: Set<String> = []
 
   /// D11: session-only hardware gate, injected once and never re-read from
@@ -200,6 +226,18 @@ final class AppModel {
 
   func notePrefsChanged() {
     prefsRevision &+= 1
+  }
+
+  /// First-sight lines dismissed this session (SO22), by persistence key.
+  /// In-memory ON PURPOSE — never a marker pref: the line renders while the
+  /// display's pref domain is empty, and writing anything to dismiss it would
+  /// defeat the emptiness check it is gated on. Dying with the process is the
+  /// intended lifetime for an informational line about a display that is,
+  /// definitionally, about to acquire stored values or stay untouched.
+  private(set) var dismissedFirstSightKeys: Set<String> = []
+
+  func dismissFirstSight(_ persistenceKey: String) {
+    dismissedFirstSightKeys.insert(persistenceKey)
   }
 
   /// Software-dimming islands (AppKit lives in the app target behind
@@ -236,6 +274,96 @@ final class AppModel {
   /// poller ticks must not replicate onto a departed controller.
   var allControlledStates: [DisplayState] {
     (builtIn.map { [$0] } ?? []) + displays
+  }
+
+  /// SO21: two connected displays resolving to ONE persistence key — identical
+  /// units reporting no serial — share every pref, and the surfaces that show
+  /// those prefs say so. Computed from the live display list at every read,
+  /// never persisted: the state exists exactly while both units are attached.
+  func isSharedIdentity(_ persistenceKey: String) -> Bool {
+    displays.count { $0.display.persistenceKey == persistenceKey } > 1
+  }
+
+  // MARK: - Diagnostics report
+
+  /// Everything the diagnostics report says, gathered at the moment the button
+  /// was pressed (spec §7). EVERY controlled display, built-in included — the
+  /// report is copied into an issue about one display and read by someone who
+  /// needs to know what else was attached.
+  ///
+  /// No serial VALUE enters it, only `hasSerial`. The other half of the scrub
+  /// contract — bare pref names, never composed `UserDefaults` keys — is
+  /// `DiagnosticsPrefSummary`'s, in CandelaKit, where a test pins it over every
+  /// line it emits.
+  func diagnosticsSnapshot() -> DiagnosticsReportSnapshot {
+    DiagnosticsReportSnapshot(
+      appVersion: "\(AppInfo.version) (\(AppInfo.build))",
+      osVersion: osVersionText,
+      safeMode: safeMode,
+      accessibilityGranted: accessibility.isGranted,
+      launchAtLogin: launchAtLoginText,
+      displays: allControlledStates.map(diagnosticsEntry),
+      recentEvents: recentDisplayEvents
+    )
+  }
+
+  private func diagnosticsEntry(_ state: DisplayState) -> DiagnosticsReportSnapshot.DisplayEntry {
+    let persistenceKey = state.display.persistenceKey
+    let prefs = DisplayPrefs(persistenceKey: persistenceKey)
+    let facts = hardwareFacts[persistenceKey]
+    let isBuiltIn = builtIn?.id == state.id
+    return DiagnosticsReportSnapshot.DisplayEntry(
+      name: DisplayOrdering.title(
+        friendlyName: prefs.friendlyName, hardwareName: state.display.name
+      ),
+      hardwareName: state.display.name,
+      // The built-in never passes through `DisplayDiscovery`, so its facts are
+      // permanently absent and "not reported" would read as a failed lookup
+      // rather than as a panel with no cable.
+      connection: isBuiltIn ? "None: built-in display" : DiagnosticsCopy.transport(facts),
+      manufacturer: isBuiltIn ? nil : facts?.manufacturerID,
+      hasSerial: facts?.numericSerialNumber != nil || facts?.alphanumericSerialNumber != nil,
+      // Never `catalogs[...]?.current` directly: the catalog exists only for
+      // displays something has already shown, so the built-in's entry depends
+      // on which pages were visited this session (combined pass D8).
+      currentMode: displayModes.currentMode(for: state.id).map(DiagnosticsCopy.mode),
+      controlMethod: DiagnosticsCopy.brightnessPath(state.controller.brightnessPath),
+      readbackVerdict: isBuiltIn
+        ? "Not applicable: no data cable"
+        : DiagnosticsCopy.readbackVerdict(DDCReadEvidence.worst([
+          state.controller.readEvidence,
+          state.volume.readEvidence,
+          state.contrast.readEvidence,
+        ])),
+      hdrEngaged: state.controller.isHDREngaged,
+      nonDefaultPrefs: DiagnosticsPrefSummary.nonDefaultPrefs(
+        prefs, remembersMode: displayModes.isRemembering(state.id)
+      )
+    )
+  }
+
+  /// `operatingSystemVersionString` is "Version 26.0 (Build 25A100)" today. The
+  /// build number is what identifies an exact OS to whoever triages the paste,
+  /// so it is kept rather than recomposed from `operatingSystemVersion`; the
+  /// prefix swap degrades to the raw string if Apple changes the wording.
+  private var osVersionText: String {
+    let raw = ProcessInfo.processInfo.operatingSystemVersionString
+    guard raw.hasPrefix("Version ") else { return raw }
+    return "macOS " + raw.dropFirst("Version ".count)
+  }
+
+  /// D10: a LIVE read of the one source of truth, never a mirrored bool. The
+  /// three non-enabled states are distinct answers — "requires approval" is the
+  /// one a user can act on, and folding it into "not registered" is what makes
+  /// a login-item report useless.
+  private var launchAtLoginText: String {
+    switch SMAppService.mainApp.status {
+    case .enabled: "enabled"
+    case .notRegistered: "not registered"
+    case .requiresApproval: "requires approval"
+    case .notFound: "not found"
+    @unknown default: "unknown"
+    }
   }
 
   /// Fork `!display.isDisabled` (per-display "disable keyboard control",
@@ -518,7 +646,10 @@ final class AppModel {
     }
     displays = []
     builtIn = nil
+    // Every display re-enters as an "arrival" below; none of them moved.
+    suppressDisplayEvents = true
     await refresh()
+    suppressDisplayEvents = false
   }
 
   /// Reconciles `displays` against discovery, keyed by `CGDirectDisplayID`:
@@ -611,6 +742,13 @@ final class AppModel {
       return state
     }
     refreshBuiltIn()
+    // The diagnostics ring's one insertion point for externals: `appeared` and
+    // whatever is LEFT in `existing` are exactly this pass's arrivals and
+    // departures, already computed above for the controller reconciliation.
+    // Recorded here rather than from a second observer, which would have to
+    // re-derive the same difference and could disagree with it.
+    for state in appeared { noteDisplayEvent("\(state.display.name) arrived") }
+    for state in existing.values { noteDisplayEvent("\(state.display.name) departed") }
     // Every controller — kept and appeared — gets the live epoch pair, so
     // each submit is stamped with the current epoch and the drain refuses
     // targets stamped before a reconfiguration/sleep.
@@ -681,6 +819,9 @@ final class AppModel {
   /// writer is a permanent `NoopDDCWriter`.
   private func refreshBuiltIn() {
     guard let found = BuiltInDisplayDiscovery.discover() else {
+      // Clamshell is a real churn source and the ring would otherwise show the
+      // externals renegotiating around a departure it never mentioned.
+      if let departed = builtIn { noteDisplayEvent("\(departed.display.name) departed") }
       builtIn = nil
       return
     }
@@ -692,6 +833,7 @@ final class AppModel {
       )
       return
     }
+    noteDisplayEvent("\(display.name) arrived")
     let controller = BrightnessController(
       writer: NoopDDCWriter(), // no DDC wire; always-fails stub (re-review T10-D)
       backends: BrightnessBackends(

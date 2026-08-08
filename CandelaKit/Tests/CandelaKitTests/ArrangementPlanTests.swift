@@ -194,6 +194,75 @@ struct ArrangementPlanTests {
     #expect(ArrangementPlan(applying: tooFar, to: baseline) == nil)
   }
 
+  // MARK: - Moving the main display (the anchoring rule)
+
+  /// Measured live on CoreGraphics (2026-08-07): a layout with no tile at
+  /// (0,0) is not a request CG can honour. The global space is anchored on the
+  /// main display, so a write to the main display's own origin is silently
+  /// dropped; every stage and the complete return success and nothing moves
+  /// (the #53 accept-and-ignore class). Moving the main display must therefore
+  /// be expressed re-anchored on the baseline's main: the same relative
+  /// layout, with every OTHER display moved by the inverse delta.
+  @Test func movingTheMainDisplayReanchorsThePlanOnTheBaselineMain() throws {
+    let baseline = ArrangementFixtures.pair
+    // The user drags the main display up; nothing sits at (0,0) any more.
+    let dragged = baseline.moving(1, to: DisplayPoint(x: 0, y: -1080))
+    let plan = try #require(ArrangementPlan(applying: dragged, to: baseline))
+    #expect(plan.requestedMain == 1)
+    #expect(plan.changes == [
+      DisplayOriginChange(id: 1, origin: .zero),
+      DisplayOriginChange(id: 2, origin: DisplayPoint(x: 1920, y: 1080)),
+    ])
+    #expect(plan.arrangement.relativeLayout == dragged.relativeLayout)
+  }
+
+  /// An unanchored translation of the whole layout moves nothing relative to
+  /// anything and names no new main, so once it is re-anchored it IS the
+  /// baseline: no plan. Contrast with `aPureTranslationOfTheBaselineIsStillAPlan`,
+  /// whose translation puts a DIFFERENT display at (0,0) and so asks for a main
+  /// change.
+  @Test func anUnanchoredTranslationOfTheBaselineIsANoOp() {
+    let baseline = ArrangementFixtures.pair
+    #expect(ArrangementPlan(applying: baseline.translated(dx: 640, dy: -480), to: baseline) == nil)
+  }
+
+  /// No tile at (0,0) on either side: there is nothing to anchor the request
+  /// on, so it cannot be expressed to CG at all. A baseline like this comes
+  /// from a read that skipped the main display's unreadable bounds.
+  @Test func aRequestThatCannotBeAnchoredIsRefused() {
+    let baseline = ArrangementFixtures.arrangement([
+      (1, ArrangementFixtures.rect(100, 0, 1920, 1080)),
+      (2, ArrangementFixtures.rect(2020, 0, 1920, 1080)),
+    ])
+    let wanted = baseline.moving(2, to: DisplayPoint(x: 2020, y: 1080))
+    #expect(ArrangementPlan(applying: wanted, to: baseline) == nil)
+  }
+
+  /// The invariant over randomized main-display moves: every plan that exists
+  /// names a tile at (0,0) and preserves the requested relative layout. This is
+  /// the property the live apply needs; a plan violating the first half is one
+  /// CoreGraphics accepts and ignores.
+  @Test func everyPlanForAMovedMainDisplayIsAnchoredAndPreservesTheRelativeLayout() throws {
+    var seed: UInt64 = 0x9E3779B97F4A7C15
+    func next(_ bound: Int) -> Int {
+      seed = seed &* 6364136223846793005 &+ 1442695040888963407
+      return Int(seed >> 33) % bound
+    }
+    for _ in 0 ..< 2000 {
+      let baseline = ArrangementFixtures.arrangement([
+        (1, ArrangementFixtures.rect(0, 0, 1800, 1169)),
+        (2, ArrangementFixtures.rect(1800, next(2400) - 1200, 1296, 2304)),
+        (3, ArrangementFixtures.rect(3096, next(2000) - 1000, 3440, 1440)),
+      ])
+      let dragged = baseline.moving(
+        1, to: DisplayPoint(x: next(8000) - 4000, y: next(6000) - 3000)
+      )
+      guard let plan = ArrangementPlan(applying: dragged, to: baseline) else { continue }
+      #expect(plan.requestedMain != nil)
+      #expect(plan.arrangement.relativeLayout == dragged.relativeLayout)
+    }
+  }
+
   // MARK: - AR4: a plan cannot be partial
 
   @Test func aPlanCoversEveryDisplay() throws {

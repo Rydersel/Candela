@@ -32,11 +32,14 @@ public enum CGSModeRevelation {
     public var implausible = 0
     public var notHiDPI = 0
     public var offAspect = 0
+    /// Withheld by the wire-timing guard (#110) — no native-width parent timing
+    /// at this refresh, so the panel would scan it out on some other timing.
+    public var noNativeParentTiming = 0
 
     public init() {}
 
     public var total: Int {
-      alreadyKnown + unusable + implausible + notHiDPI + offAspect
+      alreadyKnown + unusable + implausible + notHiDPI + offAspect + noNativeParentTiming
     }
   }
 
@@ -99,17 +102,46 @@ public enum CGSModeRevelation {
     }[0]
   }
 
+  /// The refreshes at which this panel advertises a NATIVE-WIDTH wire timing.
+  ///
+  /// A mode whose framebuffer exactly equals the panel's native pixel count is
+  /// scanned out with no DCP downscale, so its refresh IS an advertised
+  /// native-width timing. That makes the CoreGraphics list a public-API window
+  /// onto the panel's timing inventory, which is otherwise reachable only
+  /// through IORegistry — and, more to the point, the DRIVEN timing is not
+  /// exposed anywhere at all (#110).
+  ///
+  /// Empty when the panel's own timing is not in `existing`: with no evidence
+  /// about what the panel advertises, the guard has nothing to admit against.
+  public static func nativeParentRefreshes(
+    in existing: [DisplayMode], nativePixelWidth: Int, nativePixelHeight: Int
+  ) -> Set<Double> {
+    guard nativePixelWidth > 0, nativePixelHeight > 0 else { return [] }
+    return Set(
+      existing
+        .filter { $0.pixelWidth == nativePixelWidth && $0.pixelHeight == nativePixelHeight }
+        .map { DisplayMode.quantizedRefresh($0.refreshHz) })
+  }
+
   /// The one entry point. Gates run in a fixed order, and each drop is counted
   /// against the FIRST gate that rejected it — so the counts partition the
   /// input rather than double-counting it.
+  ///
+  /// - Parameter guardsWireTiming: the #110 guard. Not defaulted: the one
+  ///   production caller and every test must say which behaviour they mean,
+  ///   because the difference is whether a user can reach a mode measured to
+  ///   crop a quarter of the desktop off the glass.
   public static func reveal(
     cgs: [CGSModeDescriptor],
     existing: [DisplayMode],
     nativePixelWidth: Int,
-    nativePixelHeight: Int
+    nativePixelHeight: Int,
+    guardsWireTiming: Bool
   ) -> RevelationResult {
     let knownIDs = Set(existing.map(\.ioModeID))
     let knownRefreshes = Array(Set(existing.map(\.refreshHz)))
+    let nativeRefreshes = nativeParentRefreshes(
+      in: existing, nativePixelWidth: nativePixelWidth, nativePixelHeight: nativePixelHeight)
     let nativeAspect =
       nativePixelHeight > 0
       ? Double(nativePixelWidth) / Double(nativePixelHeight)
@@ -149,6 +181,34 @@ public enum CGSModeRevelation {
         continue
       }
 
+      let refresh = DisplayMode.quantizedRefresh(
+        resolveRefresh(truncated: descriptor.refreshHz, against: knownRefreshes))
+
+      // 6. THE WIRE-TIMING GUARD (#110). Last, so it counts only modes that
+      //    were otherwise worth offering.
+      //
+      //    A revealed mode is scaled by definition (gate 4), so the DCP must
+      //    bind it to some real wire timing. MEASURED on the MAG 341C: when no
+      //    native-width timing exists at the mode's refresh, it gets bound to
+      //    an arbitrary same-refresh timing instead — the 120 Hz rung scanned
+      //    out at 2560x1440 (desktop pillarboxed, rightmost ~880 logical
+      //    columns cropped away) and the 75 Hz rung at 1280x1024.
+      //
+      //    NOTHING IN SOFTWARE CAN SEE THIS. `CGDisplayCopyDisplayMode`, the
+      //    capture size, `CGDisplayBounds`, `backingScaleFactor` and this
+      //    package's own post-commit achieved-state check are all clean in the
+      //    broken state, and no IORegistry property records the driven timing
+      //    (searched live while broken). Prediction is the only defence, and
+      //    the keep/revert countdown is the only detector — see
+      //    docs/spikes/2026-08-07-exact-2to1-camera-gate.md §1.
+      //
+      //    The rule was validated by PREDICTION: 75 Hz was called broken from
+      //    the advertised-timing inventory before it was ever applied.
+      if guardsWireTiming, !nativeRefreshes.contains(refresh) {
+        counts.noNativeParentTiming += 1
+        continue
+      }
+
       revealed.append(
         DisplayMode(
           ioModeID: descriptor.modeNumber,
@@ -156,8 +216,7 @@ public enum CGSModeRevelation {
           logicalHeight: descriptor.logicalHeight,
           pixelWidth: descriptor.pixelWidth,
           pixelHeight: descriptor.pixelHeight,
-          refreshHz: DisplayMode.quantizedRefresh(
-            resolveRefresh(truncated: descriptor.refreshHz, against: knownRefreshes)),
+          refreshHz: refresh,
           // A revealed mode is a SCALED mode, never the panel's own timing.
           isNative: false,
           provenance: .coreGraphicsServices

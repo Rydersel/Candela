@@ -24,9 +24,21 @@
   ///   CANDELA_DEBUG_SETTINGS=pane:general    Candela.app/Contents/MacOS/Candela
   ///   CANDELA_DEBUG_SETTINGS=pane:menuBar    (also: pane:arrangement,
   ///                                           pane:keyboard, pane:about)
+  ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/first        (also /<persistenceKey>
+  ///                                           : opens OLED Care already
+  ///                                           scrolled to that display's
+  ///                                           section, as the hub's "All OLED
+  ///                                           Care Settings…" link does)
   ///   CANDELA_DEBUG_SETTINGS=display:builtIn
   ///   CANDELA_DEBUG_SETTINGS=display:first
   ///   CANDELA_DEBUG_SETTINGS=display:<persistenceKey>
+  ///   CANDELA_DEBUG_SETTINGS=display:first/allModes   (also: /advanced,
+  ///                                           /diagnostics — opens the display
+  ///                                           destination with that sub-page
+  ///                                           already pushed; Task 9's stack
+  ///                                           has no pushing rows until the
+  ///                                           hub lands, and later capture
+  ///                                           runs want sub-pages directly)
   ///
   /// Both id spaces are CASE-SENSITIVE and camelCase: `pane:menuBar`, not
   /// `pane:menubar`; `display:builtIn`, not `display:builtin`. The valid pane
@@ -53,13 +65,22 @@
     /// The root view owns its selection as `@State`, so there is nothing to
     /// write to from outside until the view exists.
     static var pendingSelection: SettingsDestination?
+    /// Only ever set alongside a `.display` `pendingSelection`; the root view
+    /// seeds that display's navigation path with it.
+    static var pendingSubPage: DisplaySubPage?
+    /// Only ever set alongside `pane:oledCare`: the persistence key of the
+    /// display whose section the pane should open on, standing in for the hub
+    /// link that sets it in a real session. The link cannot be clicked from a
+    /// capture run (no Accessibility grant), so without this the landing
+    /// position has no route to a screenshot at all.
+    static var pendingScrollTarget: String?
 
     /// A parse that carries its own reason for failing. The reason is the whole
     /// point: `SettingsDestination?` cannot distinguish "you typo'd the pane
     /// id" from "the display you asked for is not plugged in", and those want
     /// opposite responses from whoever is driving the capture.
     enum Resolution {
-      case resolved(SettingsDestination)
+      case resolved(SettingsDestination, subPage: DisplaySubPage?, scrollTarget: String?)
       case rejected(String)
     }
 
@@ -76,41 +97,75 @@
     static func resolve(_ value: String, externalKeys: [String]) -> Resolution {
       let parts = value.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
       guard parts.count == 2 else {
-        return .rejected("\(quoted(value)) is not <kind>:<id> — expected pane:<id> or display:<key>")
+        return .rejected("\(quoted(value)) is not <kind>:<id>; expected pane:<id> or display:<key>")
       }
       let body = String(parts[1])
       switch parts[0] {
       case "pane":
-        guard let id = PaneID(rawValue: body) else {
+        // Optional `/<displayKey>` suffix, accepted on `oledCare` alone: that
+        // is the only pane a link jumps INTO carrying a display. Rejected
+        // elsewhere rather than ignored, because a suffix that silently did
+        // nothing would capture the top of a pane and look like evidence that
+        // the landing position was tested.
+        let segments = body.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let id = PaneID(rawValue: String(segments[0])) else {
           let known = PaneID.allCases.map(\.rawValue).joined(separator: ", ")
-          return .rejected("unknown pane \(quoted(body)) — ids are case-sensitive: \(known)")
+          return .rejected("unknown pane \(quoted(String(segments[0]))); ids are case-sensitive: \(known)")
         }
-        return .resolved(.pane(id))
+        guard segments.count == 2 else { return .resolved(.pane(id), subPage: nil, scrollTarget: nil) }
+        guard id == .oledCare else {
+          return .rejected("pane \(quoted(id.rawValue)) takes no /<displayKey> suffix; only 'oledCare' does")
+        }
+        let targetBody = String(segments[1])
+        if targetBody == "first" {
+          guard let key = externalKeys.first else {
+            return .rejected("pane:oledCare/first found no external display connected")
+          }
+          return .resolved(.pane(id), subPage: nil, scrollTarget: key)
+        }
+        guard externalKeys.contains(targetBody) else {
+          let list = externalKeys.map(quoted).joined(separator: ", ")
+          return .rejected("unknown display key \(quoted(targetBody)); connected externals: \(list)")
+        }
+        return .resolved(.pane(id), subPage: nil, scrollTarget: targetBody)
       case "display":
+        // Optional `/subPage` suffix pushes that sub-page onto the display's
+        // navigation stack. Validated like everything else here: a typo'd
+        // sub-page must not silently capture the hub.
+        let segments = body.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+        let keyBody = String(segments[0])
+        var subPage: DisplaySubPage?
+        if segments.count == 2 {
+          guard let page = DisplaySubPage(rawValue: String(segments[1])) else {
+            let known = DisplaySubPage.allCases.map(\.rawValue).joined(separator: ", ")
+            return .rejected("unknown sub-page \(quoted(String(segments[1]))); ids are case-sensitive: \(known)")
+          }
+          subPage = page
+        }
         // The built-in is not in `externalKeys` (AppModel keeps it in its own
         // slot), but it IS a real destination — `SettingsRootView` routes the
         // literal key "builtIn" to `BuiltInDisplayPane`.
         let known = ["builtIn"] + externalKeys
-        if body == "first" {
+        if keyBody == "first" {
           guard let key = externalKeys.first else {
-            return .rejected("display:first — no external display connected; try display:builtIn")
+            return .rejected("display:first found no external display connected; try display:builtIn")
           }
-          return .resolved(.display(key))
+          return .resolved(.display(key), subPage: subPage, scrollTarget: nil)
         }
-        guard known.contains(body) else {
+        guard known.contains(keyBody) else {
           let list = known.map(quoted).joined(separator: ", ")
-          return .rejected("unknown display key \(quoted(body)) — connected: \(list)")
+          return .rejected("unknown display key \(quoted(keyBody)); connected: \(list)")
         }
-        return .resolved(.display(body))
+        return .resolved(.display(keyBody), subPage: subPage, scrollTarget: nil)
       default:
-        return .rejected("unknown kind \(quoted(String(parts[0]))) — expected pane or display")
+        return .rejected("unknown kind \(quoted(String(parts[0]))); expected pane or display")
       }
     }
 
     /// Kept as the brief's named interface, and as the shape most callers want.
     /// `resolve` is the one that can say why.
     static func destination(from value: String, externalKeys: [String]) -> SettingsDestination? {
-      guard case let .resolved(destination) = resolve(value, externalKeys: externalKeys) else {
+      guard case let .resolved(destination, _, _) = resolve(value, externalKeys: externalKeys) else {
         return nil
       }
       return destination
@@ -125,21 +180,27 @@
         return
       }
       switch resolve(value, externalKeys: externalKeys) {
-      case let .resolved(destination):
-        log("opening \(describe(destination))")
+      case let .resolved(destination, subPage, scrollTarget):
+        log("opening \(describe(destination, subPage: subPage, scrollTarget: scrollTarget))")
         // Set BEFORE opening: `SettingsRootView.onAppear` runs as part of the
         // window coming up, so a later assignment would miss it entirely.
         pendingSelection = destination
+        pendingSubPage = subPage
+        pendingScrollTarget = scrollTarget
         SettingsOpener.open()
       case let .rejected(reason):
         log("ignored: \(reason)")
       }
     }
 
-    private static func describe(_ destination: SettingsDestination) -> String {
+    private static func describe(
+      _ destination: SettingsDestination, subPage: DisplaySubPage?, scrollTarget: String?
+    ) -> String {
       switch destination {
-      case let .pane(id): "pane \(quoted(id.rawValue))"
-      case let .display(key): "display \(quoted(key))"
+      case let .pane(id):
+        "pane \(quoted(id.rawValue))" + (scrollTarget.map { ", scrolled to \(quoted($0))" } ?? "")
+      case let .display(key):
+        "display \(quoted(key))" + (subPage.map { ", sub-page \(quoted($0.rawValue))" } ?? "")
       }
     }
 

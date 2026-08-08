@@ -57,6 +57,8 @@ struct CGSModeRevelationGateTests {
     #expect(counts.implausible == 0)
     #expect(counts.notHiDPI == 0)
     #expect(counts.offAspect == 0)
+    #expect(counts.noNativeParentTiming == 0)
+    #expect(counts.total == 0)
   }
 }
 
@@ -67,7 +69,8 @@ struct CGSModeRevelationMergeTests {
       cgs: cgs,
       existing: RevealedModeFixtures.magExistingCG(),
       nativePixelWidth: CGSModeFixtures.magNativePixels.0,
-      nativePixelHeight: CGSModeFixtures.magNativePixels.1)
+      nativePixelHeight: CGSModeFixtures.magNativePixels.1,
+      guardsWireTiming: true)
   }
 
   /// CR1 — the built-in trap. Same geometry, refresh 59 vs 60, SAME id.
@@ -76,7 +79,8 @@ struct CGSModeRevelationMergeTests {
     let result = CGSModeRevelation.reveal(
       cgs: [CGSModeFixtures.builtInDuplicate],
       existing: RevealedModeFixtures.builtInExistingCG(),
-      nativePixelWidth: 3024, nativePixelHeight: 1964)
+      nativePixelWidth: 3024, nativePixelHeight: 1964,
+      guardsWireTiming: true)
     #expect(result.modes.isEmpty)
     #expect(result.dropped.alreadyKnown == 1)
   }
@@ -93,8 +97,13 @@ struct CGSModeRevelationMergeTests {
   }
 
   /// A revealed mode is never the panel's own timing.
+  ///
+  /// Uses the 100 Hz rung deliberately: the 120 Hz one is withheld by the
+  /// wire-timing guard, and `allSatisfy` over an empty list is vacuously true —
+  /// this test would then pass without testing anything.
   @Test func revealedModesAreNeverNative() {
-    let result = revealMag([CGSModeFixtures.magRevealedNativeAt2x])
+    let result = revealMag([CGSModeFixtures.magRevealedNativeAt2x100])
+    #expect(result.modes.count == 1)
     #expect(result.modes.allSatisfy { !$0.isNative })
   }
 
@@ -160,17 +169,38 @@ struct CGSModeRevelationMergeTests {
 
   @Test func emptyInputsReturnEmpty() {
     #expect(revealMag([]).modes.isEmpty)
+  }
+
+  /// Fail CLOSED with no CoreGraphics list to judge against: an empty list is
+  /// no evidence about what the panel advertises, and #110 is a hazard we can
+  /// only avoid provoking, never detect after the fact.
+  ///
+  /// Unreachable in production — `CoreGraphicsDisplayConfigurator` derives the
+  /// native pixel size from a member of this very list, so it is non-empty
+  /// wherever revelation runs — but the behaviour is pinned rather than left
+  /// to whichever branch happens to execute.
+  @Test func noCoreGraphicsListMeansNoRevealedModes() {
     let noExisting = CGSModeRevelation.reveal(
       cgs: [CGSModeFixtures.magRevealed1920x804], existing: [],
-      nativePixelWidth: 3440, nativePixelHeight: 1440)
-    #expect(noExisting.modes.count == 1)
+      nativePixelWidth: 3440, nativePixelHeight: 1440,
+      guardsWireTiming: true)
+    #expect(noExisting.modes.isEmpty)
+    #expect(noExisting.dropped.noNativeParentTiming == 1)
+
+    // And the gate is what did it — unguarded, the same input reveals.
+    let unguarded = CGSModeRevelation.reveal(
+      cgs: [CGSModeFixtures.magRevealed1920x804], existing: [],
+      nativePixelWidth: 3440, nativePixelHeight: 1440,
+      guardsWireTiming: false)
+    #expect(unguarded.modes.count == 1)
   }
 
   @Test func zeroNativePixelsRevealsNothingRatherThanCrashing() {
     let result = CGSModeRevelation.reveal(
       cgs: [CGSModeFixtures.magRevealed1920x804],
       existing: RevealedModeFixtures.magExistingCG(),
-      nativePixelWidth: 0, nativePixelHeight: 0)
+      nativePixelWidth: 0, nativePixelHeight: 0,
+      guardsWireTiming: true)
     #expect(result.modes.isEmpty)
   }
 
@@ -178,13 +208,14 @@ struct CGSModeRevelationMergeTests {
     let result = revealMag([
       CGSModeFixtures.magRevealed1920x804,
       CGSModeFixtures.magRevealed2048x858,
-      CGSModeFixtures.magRevealedNativeAt2x,
+      CGSModeFixtures.magRevealedNativeAt2x100,
       CGSModeFixtures.magLegacy4x3,
       CGSModeFixtures.magOneX,
     ])
     #expect(result.modes.count == 3)
     #expect(result.dropped.offAspect == 1)
     #expect(result.dropped.alreadyKnown == 1)
+    #expect(result.dropped.noNativeParentTiming == 0)
     #expect(result.modes.allSatisfy { $0.provenance == .coreGraphicsServices })
   }
 }

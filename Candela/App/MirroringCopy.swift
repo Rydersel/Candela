@@ -66,7 +66,7 @@ enum MirroringCopy {
   /// `.nothingToMirror`. The named master is fine; there is nothing that can
   /// join it.
   static var nothingToMirror: LocalizedStringKey {
-    "No other display can be mirrored onto this one — macOS keeps the rest locked to the displays they are already showing."
+    "No other display can be mirrored onto this one: macOS keeps the rest locked to the displays they are already showing."
   }
 
   /// `.alreadyMirrored`. The named master's set already holds everything that
@@ -164,7 +164,9 @@ enum MirroringCopy {
   // speaks on three surfaces and a sentence written in one of them is a sentence
   // the other two cannot reuse and cannot be checked against.
 
-  static var statusLabel: LocalizedStringKey { "Status" }
+  /// The row carries the topic word since Task 13: the control sits inline in
+  /// the hub's Display section, where a bare "Status" would not say of what.
+  static var statusLabel: LocalizedStringKey { "Mirroring" }
   static var pickMaster: LocalizedStringKey { "Show the picture from" }
 
   /// What Start does when nothing on the machine is locked into a set.
@@ -212,7 +214,7 @@ enum MirroringCopy {
   }
 
   static var resolveFailure: LocalizedStringKey {
-    "Mirroring could not be undone. Nothing retries this on its own — try again."
+    "Mirroring could not be undone. Nothing retries this on its own. Try again."
   }
 
   /// A break that LEFT SOMETHING BEHIND.
