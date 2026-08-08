@@ -57,6 +57,11 @@ class InMemoryDefaults: UserDefaults, @unchecked Sendable {
   /// a silent fall-through to the superclass would read the real defaults
   /// domain rather than this instance's dictionary.
   override func data(forKey key: String) -> Data? { object(forKey: key) as? Data }
+  /// Added when `WearSignalTracker` became the first type to store an array.
+  /// Without it this call fell through to the superclass and read the
+  /// developer's real preferences domain, which is precisely what this class
+  /// exists to prevent and what nothing would have reported.
+  override func array(forKey key: String) -> [Any]? { object(forKey: key) as? [Any] }
 
   /// This instance's dictionary, not the superclass's merged domains — the
   /// same reason every accessor above is overridden (the superclass would

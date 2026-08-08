@@ -149,6 +149,10 @@ final class OledCareCoordinator {
   /// Keyed by persistenceKey; created lazily and kept for the app's lifetime —
   /// hours are persistent facts about a panel, not about a connection.
   @ObservationIgnored private var trackers: [String: PanelHoursTracker] = [:]
+  /// OC20's wear signal, one per panel, keyed and reset exactly like `trackers`
+  /// because it measures the same thing about the same glass: how long, and now
+  /// also at what level.
+  @ObservationIgnored private var wearTrackers: [String: WearSignalTracker] = [:]
   @ObservationIgnored private let sampler = LuminanceSampler()
   /// Accumulated exposure per panel, by persistenceKey, restored from disk on
   /// first touch and kept for the app's lifetime — wear is a fact about a
@@ -319,6 +323,44 @@ final class OledCareCoordinator {
     return tracker
   }
 
+  /// Same single-instance rule as `hoursTracker`, for the same reason: two live
+  /// trackers over one key double-book every tick, and this one feeds a
+  /// multi-week soak where a 2× error is indistinguishable from a real result.
+  func wearTracker(for persistenceKey: String) -> WearSignalTracker {
+    if let existing = wearTrackers[persistenceKey] { return existing }
+    let tracker = WearSignalTracker(persistenceKey: persistenceKey)
+    wearTrackers[persistenceKey] = tracker
+    return tracker
+  }
+
+  /// The proxy OC20 accumulates against: the fraction of full output the panel
+  /// is left at, composing the overlay's retained fraction with the brightness
+  /// setting.
+  ///
+  /// `.lockDim` reads its factor explicitly rather than through `alpha(for:)`,
+  /// which answers nil there by design: the lock dim is delivered on the wire
+  /// and deliberately never writes `controller.brightness` or the store, so the
+  /// controller reports the user's own setting for the whole locked span. Using
+  /// the alpha path would book every locked hour at full brightness.
+  ///
+  /// Reasoned, not measured. It ignores the panel's EOTF and any local dimming,
+  /// which is why OC20 also stores the dim-state axis as an independent,
+  /// model-free answer to OC17's gate.
+  static func effectiveLevel(
+    state: OledDimState, engine: IdleDimmingEngine, brightness: Double
+  ) -> Double {
+    guard brightness.isFinite else { return 0 }
+    switch state {
+    case .blackout: return 0
+    case .lockDim: return brightness * engine.lockDimFactor
+    case .idleDim, .unfocusedDim:
+      // `alpha` is how much we cover the panel with; what is left is its
+      // complement, which is the config's own "how bright it is LEFT" number.
+      return brightness * (1 - (engine.alpha(for: state) ?? 0))
+    case .active, .suspended: return brightness
+    }
+  }
+
   /// The health view's one door (W3b-1 Task 9). Safe for a display that is not
   /// enrolled, not connected, or has never been sampled: the map is restored
   /// from disk on first touch and `.empty` answers everything honestly.
@@ -450,6 +492,9 @@ final class OledCareCoordinator {
     states = [:]
     dimStates = [:]
     for tracker in trackers.values { tracker.reset() }
+    // Same reason, same moment: a live wear tracker's debounced write-through
+    // would re-persist the histogram the wipe just removed.
+    for tracker in wearTrackers.values { tracker.reset() }
   }
 
   /// The post-wipe half of the reset contract (paired with
@@ -694,9 +739,21 @@ final class OledCareCoordinator {
       if state.hoursTracking {
         if state.wasAwake, !awake { hoursTracker(for: key).noteStandby() }
         if awake, !isMirrored, let last = state.hoursLastTick {
+          let elapsed = Self.seconds(now - last)
           hoursTracker(for: key).noteTick(
-            displayAwake: true, secondsSinceLastTick: Self.seconds(now - last)
+            displayAwake: true, secondsSinceLastTick: elapsed
           )
+          // OC20 rides the SAME gate and the SAME delta as panel hours, so the
+          // two counters cannot disagree about how long a panel was on. That is
+          // also why `.suspended` never accumulates here: a mirrored display
+          // books nothing in either counter (OC13), and the slot exists only so
+          // the on-disk state ordering stays stable.
+          wearTracker(for: key).noteTick(
+            dimState: newState,
+            effectiveLevel: Self.effectiveLevel(
+              state: newState, engine: state.engine,
+              brightness: displayState.controller.brightness),
+            secondsSinceLastTick: elapsed)
         }
       }
       state.wasAwake = awake
@@ -1245,8 +1302,14 @@ final class OledCareCoordinator {
   }
 
   /// The undebounced write: termination, system sleep, and a display leaving.
+  ///
+  /// OC20's histogram rides the same three moments. It debounces on the same
+  /// 60 s as panel hours, so without this a quit loses up to a minute per
+  /// display per launch, which over a multi-week soak is a systematic
+  /// undercount rather than noise.
   private func flushExposureHistory() {
     for key in unsavedExposureKeys { saveExposureHistory(for: key) }
+    for tracker in wearTrackers.values { tracker.flush() }
   }
 
   /// Both halves of a panel's exposure history — the per-cell map and the
