@@ -647,6 +647,29 @@ private struct OledCareDisplaySection: View {
         set: { on in writer.write(.oledWindowObservation) { $0.oledWindowObservation = on } }
       ))
     }
+
+    // #20. Last in the group and off by default, and the copy leads with what
+    // it does to the screen rather than with what it protects.
+    //
+    // Every other control in this pane acts while the user is away or the
+    // screen is locked. This one changes what they are looking at, so a wrong
+    // nomination is visible as a defect rather than felt as protection, and the
+    // honest framing is the one that lets someone decline. It also depends on
+    // BOTH measurements above: the conjunction that keeps a playing video out
+    // of the set needs luminance from one and staticness from the other, so the
+    // caption says so instead of leaving the switch to do nothing silently.
+    // NOT claimed here: "eases off where you are pointing". The spec's §4 wants
+    // pointer-proximity falloff and it is NOT built: the pointer is not an
+    // input to `StaticRegionDetector`, which is pure, and nothing in the
+    // coordinator supplies it either. Writing it into the caption would be the
+    // fifth instance this wave of copy outrunning its producer (A-16, A-17,
+    // OC17's gate, the stale `hottestOwner`). It goes back in when it exists.
+    SettingRow("Areas that stay bright and unchanged, like a toolbar or a sidebar, are dimmed a little while you work. Full-screen video is never dimmed. This needs both measurements above: without them nothing is dimmed.") {
+      Toggle("Dim parts of the display that never change", isOn: Binding(
+        get: { prefs.oledDetectionDimming },
+        set: { on in writer.write(.oledDetectionDimming) { $0.oledDetectionDimming = on } }
+      ))
+    }
   }
 
   /// A row that OPENS the health view rather than containing it (OC19).

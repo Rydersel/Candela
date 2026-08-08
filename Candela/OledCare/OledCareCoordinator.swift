@@ -80,6 +80,15 @@ final class OledCareCoordinator {
     /// applied state). nil = no overlay wanted. This is what OC12 verifies.
     var lastAppliedAlpha: Double?
     var lastAppliedBlackout = false
+    var lastAppliedMask: OverlayMask.Oriented?
+    /// #20. Off by default, so an enrolled display that never opts in pays
+    /// nothing past the flag test in `render`.
+    var detectionDimmingEnabled = false
+    /// The current nomination in PANEL space, recomputed only when a new
+    /// luminance sample lands. Nil means "nothing qualifies", which is
+    /// deliberately distinguishable from an all-zero mask: the render then
+    /// skips the mask path entirely and keeps the cheaper scalar one.
+    var nominatedMask: OverlayMask?
     /// OC12: the last render mutated window-server state; verify it on a
     /// LATER tick than the one that mutated.
     var needsVerify = false
@@ -571,6 +580,13 @@ final class OledCareCoordinator {
         existing.hoursTracking = tracking
         existing.telemetryEnabled = prefs.oledTelemetry
         existing.windowObservationEnabled = prefs.oledWindowObservation
+        // Turning #20 off must drop the nomination, not merely stop consulting
+        // it. A retained mask would come straight back on the next re-enable
+        // built from a screen the user has since changed, and until then it
+        // would sit in the state as a live-looking value nothing updates: the
+        // same shape as the stale `hottestOwner` this wave already had to fix.
+        existing.detectionDimmingEnabled = prefs.oledDetectionDimming
+        if !existing.detectionDimmingEnabled { existing.nominatedMask = nil }
         states[key] = existing
       } else {
         states[key] = PerDisplay(
@@ -579,7 +595,8 @@ final class OledCareCoordinator {
           hoursTracking: prefs.oledHoursTracking,
           telemetryEnabled: prefs.oledTelemetry,
           windowObservationEnabled: prefs.oledWindowObservation,
-          lastDisplayID: displayState.id
+          lastDisplayID: displayState.id,
+          detectionDimmingEnabled: prefs.oledDetectionDimming
         )
       }
     }
@@ -939,24 +956,79 @@ final class OledCareCoordinator {
   // MARK: - Rendering (with the two funcs below, the ONLY overlay callers)
 
   /// THE render funnel: every overlay apply in this type goes through here.
+  ///
+  /// **The mask carries ABSOLUTE per-cell opacity, and `alpha` goes to 1 when
+  /// one is present.** `contentView.alphaValue` multiplies the layer, mask
+  /// included, so passing the dim state's own alpha alongside a mask would
+  /// scale every nominated cell down by it: an idle dim of 0.5 with a 0.15
+  /// nomination would render 0.075 in the region and, worse, **zero everywhere
+  /// else**, silently deleting the uniform dim the user actually asked for.
+  /// Composing to absolutes and handing the whole thing over as the mask is the
+  /// only arrangement where both survive.
   private func render(_ dimState: OledDimState, into state: inout PerDisplay, on id: CGDirectDisplayID) {
-    let alpha = state.engine.alpha(for: dimState)
+    let stateAlpha = state.engine.alpha(for: dimState)
     let blackout = dimState == .blackout
-    guard overlay.apply(alpha: alpha, blackout: blackout, on: id) else {
+    // Blackout is excluded (OC17's rule, and there is no luminance left to
+    // spend). Everything else composes, INCLUDING `.active`: #20 is the one
+    // care feature that runs while the user is working, so it can require an
+    // overlay in a state whose own alpha is nil and which would otherwise have
+    // no window at all.
+    let nomination = (state.detectionDimmingEnabled && !blackout) ? state.nominatedMask : nil
+
+    var alpha = stateAlpha
+    var mask: OverlayMask.Oriented?
+    if let nomination, let transform = Self.transform(for: id) {
+      let composed = OverlayMask.uniform(stateAlpha ?? 0).darkened(by: nomination)
+      mask = composed.displayOriented(through: transform)
+      alpha = 1.0
+    }
+
+    guard overlay.apply(alpha: alpha, mask: mask, blackout: blackout, on: id) else {
       // No NSScreen matched: nothing reached the screen, so there is nothing
       // to verify and no state to memoise — the next tick retries, and the
       // overlay rate-limits its own warning.
       state.lastAppliedAlpha = nil
       state.lastAppliedBlackout = false
+      state.lastAppliedMask = nil
       return
     }
-    if alpha != state.lastAppliedAlpha || blackout != state.lastAppliedBlackout {
+    if alpha != state.lastAppliedAlpha || blackout != state.lastAppliedBlackout
+      || mask != state.lastAppliedMask {
       // The window server actually moved (or will, a run-loop turn from now).
+      // The mask is in this test because `write` re-orders the window on every
+      // state change, mask included, so a mask-only change is still something
+      // OC12 has to verify landed.
       state.needsVerify = true
       state.verifyAttempts = 0
       state.lastAppliedAlpha = alpha
       state.lastAppliedBlackout = blackout
+      state.lastAppliedMask = mask
     }
+  }
+
+  /// Recomputes #20's nomination for one display. Called when a new luminance
+  /// sample lands, which is the only thing that can change the answer.
+  ///
+  /// Stored in PANEL space, not display space: the render composes it with the
+  /// uniform dim and orients the result, so keeping it panel-side means one
+  /// orientation per render instead of one here plus a re-orientation whenever
+  /// the display rotates under a cached mask.
+  private func renominate(
+    for key: String, grid: [Double], cols: Int, rows: Int, through transform: PanelSpaceTransform
+  ) {
+    guard states[key]?.detectionDimmingEnabled == true else {
+      states[key]?.nominatedMask = nil
+      return
+    }
+    guard let observation = latestObservations[key] else {
+      // No window list means no staticness prior, and the conjunction is the
+      // feature: nominating on brightness alone is what dims a playing video.
+      states[key]?.nominatedMask = nil
+      return
+    }
+    let panelGrid = transform.panelNativeGrid(fromDisplayGrid: grid, cols: cols, rows: rows)
+    states[key]?.nominatedMask = StaticRegionDetector.nominate(
+      recentGrid: panelGrid, observation: observation, thresholds: .default)
   }
 
   /// OC12 reconcile, one tick after a mutation. True when the window server
@@ -1193,6 +1265,11 @@ final class OledCareCoordinator {
     }
     accumulators[key] = accumulator
     unsavedExposureKeys.insert(key)
+    // #20 nominates off the sampling clock, not the 10 Hz tick: the grid it
+    // reads changes once a minute, so re-nominating per tick would burn CPU to
+    // reach the same answer 600 times.
+    renominate(for: key, grid: sample.grid, cols: sample.cols, rows: sample.rows,
+               through: transform)
     log.debug("""
     OLED care: exposure sample accepted for display \(id, privacy: .public) \
     (\(accumulator.map.sampleCount, privacy: .public) total)
