@@ -3,9 +3,14 @@ import Foundation
 
 /// The fixed grid every panel's exposure history is stored in.
 ///
-/// 24×10 for a 16:9-ish panel is ~143 px cells on a 3440-wide MAG: coarse
-/// enough that a one-shot capture stays cheap, fine enough to separate a menu
-/// bar from the content under it.
+/// 24:10 is 2.4:1, which is the MAG's ultrawide aspect, so its cells come out
+/// almost square (143×144 px on 3440×1440): coarse enough that a one-shot
+/// capture stays cheap, fine enough to separate a menu bar from the content
+/// under it. **Cells are square only on that panel.** The grid is fixed rather
+/// than per-panel so one stored shape serves every display, which means a 16:9
+/// or 16:10 panel gets cells taller than they are wide (160×216 px on the Dell,
+/// 35% taller). Harmless for accumulation, which is area-weighted, but anything
+/// DRAWING the grid must use the display's own aspect and not 24:10.
 public struct PanelGrid: Equatable, Sendable {
   public static let cols = 24
   public static let rows = 10
@@ -19,12 +24,28 @@ public struct PanelGrid: Equatable, Sendable {
 /// us 2160×3840; everything accumulates into panel-native cells so that
 /// rotating a monitor does not scramble its wear history.
 ///
-/// **Rotation convention:** `rotation` is a `CGDisplayRotation` reading, taken
-/// as degrees counterclockwise, so it names how far the desktop image is turned
-/// counterclockwise on the glass. 270° therefore puts the display's top-left
-/// corner at the panel's top-right. NOT hardware-verified — the whole
-/// convention lives in `panelPoint`/`displayPoint` below, and flipping it is a
-/// two-case edit if the rotated Dell says otherwise.
+/// **Rotation convention: `CGDisplayRotation` is degrees CLOCKWISE.** Apple's
+/// header says so outright (`CGDisplayConfiguration.h`, macOS 26 SDK): "Return
+/// the rotation angle of a display in degrees clockwise. A display rotation of
+/// 90° implies the display is rotated clockwise 90°, such that what was the
+/// physical bottom of the display is now the left side, and what was the
+/// physical top is now the right side."
+///
+/// At 270° the glass is therefore turned 90° anticlockwise in the world frame:
+/// the manufactured top edge faces left and the manufactured right edge faces
+/// up, so the display's top-left corner is the panel's **top-right**. That is
+/// what `panelPoint`/`displayPoint` below implement, and
+/// `ExposureAccumulatorTests.accumulationIsStableAcrossARotationChange` pins
+/// it with a value that differs between this convention and its inverse.
+///
+/// This comment previously said the reading was taken as degrees
+/// *counterclockwise* and that the mapping was unverified. The mapping was
+/// always right; the stated premise was backwards, and the two errors cancelled
+/// because the sentence went on to describe the rotation of the image within
+/// the frame, which is the inverse of the glass's rotation in the world. Left
+/// as it was, the next reader to check it against Apple would have "fixed" a
+/// correct transform. Settled from documentation 2026-08-07, so this no longer
+/// needs the rotated Dell to confirm it.
 public struct PanelSpaceTransform: Equatable, Sendable {
   public let displaySize: CGSize
   public let rotation: DisplayRotation

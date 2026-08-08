@@ -179,6 +179,12 @@ final class OledCareCoordinator {
   @ObservationIgnored private var observers: [String: WindowObserver] = [:]
   /// Displays whose accumulated map has changed since the last write-through.
   @ObservationIgnored private var unsavedExposureKeys: Set<String> = []
+  /// Keys whose stored wear history this build could not interpret but which
+  /// are NOT junk: a newer schema, or a different `PanelGrid`. Nothing is
+  /// written back for them, so a later build can still migrate the bytes.
+  /// Cleared only by the user's own delete, which is the one action that means
+  /// "I do not want this history".
+  @ObservationIgnored private var unwritableExposureKeys: Set<String> = []
   @ObservationIgnored private var lastExposurePersist: SuspendingClock.Instant?
   /// Bumped by anything that destroys accumulated exposure. A capture issued
   /// before the bump lands after it, and would otherwise re-book an interval
@@ -355,6 +361,9 @@ final class OledCareCoordinator {
     ownerHours[persistenceKey] = OwnerHoursAccumulator()
     forgetWindowObservation(for: persistenceKey)
     unsavedExposureKeys.remove(persistenceKey)
+    // The bytes were held back precisely because destroying them was not the
+    // user's call. It is now.
+    unwritableExposureKeys.remove(persistenceKey)
     UserDefaults.standard.removeObject(forKey: Self.exposureKeyName(persistenceKey))
     UserDefaults.standard.removeObject(forKey: Self.ownerHoursKeyName(persistenceKey))
   }
@@ -417,6 +426,10 @@ final class OledCareCoordinator {
     // which would otherwise land in a fresh map after the wipe.
     exposureEpoch += 1
     unsavedExposureKeys.removeAll()
+    // The wipe removes the stored bytes the quarantine existed to protect, so
+    // holding the flag past it would leave a display recording nothing forever
+    // over a file that is already gone.
+    unwritableExposureKeys.removeAll()
     accumulators.removeAll()
     ownerHours.removeAll()
     observers.removeAll()
@@ -991,6 +1004,24 @@ final class OledCareCoordinator {
   /// display with `oledLockDim` off sits at `.active`, and spec §4 skips it
   /// regardless. Sleep and battery are the two conditions the engine takes no
   /// input from at all.
+  ///
+  /// **`CGDisplayIsAsleep` cannot see a panel blanked at the monitor itself,
+  /// and this gate inherits that hole (#94, MEASURED).** A DPMS-off panel stays
+  /// in both display lists, keeps `CGDisplayIsAsleep` false and reports full
+  /// resolution, so the check below passes over a dark panel and a capture
+  /// returns the still-composited framebuffer. The hours counter has the same
+  /// hole and documents it ~300 lines above; the consequence here is worse in
+  /// kind rather than in degree. Hours over-count by a scalar, while the
+  /// exposure map and the per-app attribution book wear against SPECIFIC cells
+  /// and SPECIFIC apps that emitted nothing, and both are persisted.
+  ///
+  /// Bounded, not fixed, because §2 says a blanked panel is indistinguishable
+  /// at every layer we can observe and does not self-recover. What bounds it is
+  /// HID idle time: with nobody typing, the engine leaves `.active` at the idle
+  /// threshold and sampling stops. **The uncovered case is a second display**,
+  /// where the user works on one panel while the other sits blanked, holding
+  /// idle at zero and this one at `.active` indefinitely. Do not "fix" this
+  /// with a readback or a DPMS probe; see #94 and §2.
   private func samplingQualifies(dimState: OledDimState, on id: CGDirectDisplayID) -> Bool {
     guard !resetting, dimState == .active, !lockObserver.isLocked else { return false }
     guard CGDisplayIsAsleep(id) == 0 else { return false }
@@ -1143,12 +1174,25 @@ final class OledCareCoordinator {
   /// BY DESIGN — decoding it would hand the health view a map that traps the
   /// first time it is indexed — so an unreadable store starts over rather than
   /// propagating.
+  ///
+  /// **Starting over is destructive, so what it may start over FROM is
+  /// narrow.** Returning `.empty` here does not merely lose the history in
+  /// memory: the next accepted sample marks the key dirty and
+  /// `saveExposureHistory` encodes the empty map straight over the stored one,
+  /// inside a minute. That is correct for malformed JSON, which is junk. It is
+  /// not correct for a store written by a newer build or laid out for a
+  /// different grid, which is intact history a later build could migrate, so
+  /// `OledStoreDecodeFailure` quarantines the key instead and nothing is
+  /// written back for it.
   private func loadExposureMap(for key: String) -> ExposureMap {
     guard let data = UserDefaults.standard.data(forKey: Self.exposureKeyName(key)) else {
       return .empty
     }
     do {
       return try JSONDecoder().decode(ExposureMap.self, from: data)
+    } catch let failure as OledStoreDecodeFailure {
+      quarantine(key, reason: "exposure map", failure: failure)
+      return .empty
     } catch {
       log.error("""
       OLED care: stored exposure map for \(key, privacy: .public) is unreadable \
@@ -1160,13 +1204,19 @@ final class OledCareCoordinator {
 
   /// Reads back as `.empty` on anything unreadable, `loadExposureMap`'s reason
   /// scaled down: a per-owner total nobody can decode is not worth propagating
-  /// a failure over, and starting the series again is honest.
+  /// a failure over, and starting the series again is honest. The quarantine
+  /// split is NOT scaled down — the two stores share one dirty set and one
+  /// write, so holding one back while overwriting the other would leave a
+  /// display's history half-migrable.
   private func loadOwnerHours(for key: String) -> OwnerHours {
     guard let data = UserDefaults.standard.data(forKey: Self.ownerHoursKeyName(key)) else {
       return .empty
     }
     do {
       return try JSONDecoder().decode(OwnerHours.self, from: data)
+    } catch let failure as OledStoreDecodeFailure {
+      quarantine(key, reason: "per-app hours", failure: failure)
+      return .empty
     } catch {
       log.error("""
       OLED care: stored per-app hours for \(key, privacy: .public) are unreadable \
@@ -1174,6 +1224,15 @@ final class OledCareCoordinator {
       """)
       return .empty
     }
+  }
+
+  private func quarantine(_ key: String, reason: String, failure: OledStoreDecodeFailure) {
+    unwritableExposureKeys.insert(key)
+    log.error("""
+    OLED care: stored \(reason, privacy: .public) for \(key, privacy: .public) was written by a \
+    schema this build does not read (\(String(describing: failure), privacy: .public)); keeping \
+    the stored bytes and recording nothing new for this display until its history is deleted
+    """)
   }
 
   private func persistExposureHistoryIfDue(at now: SuspendingClock.Instant) {
@@ -1199,6 +1258,10 @@ final class OledCareCoordinator {
     // cannot be encoded now cannot be encoded on the next pass either, and
     // leaving the key dirty would retry it forever.
     guard unsavedExposureKeys.remove(key) != nil else { return }
+    // Quarantined: the stored bytes are history this build cannot read but a
+    // later one might. The dirty flag is still cleared above, so this display
+    // simply records nothing until the user deletes its history.
+    guard !unwritableExposureKeys.contains(key) else { return }
     if let map = accumulators[key]?.map {
       if let data = try? JSONEncoder().encode(map) {
         UserDefaults.standard.set(data, forKey: Self.exposureKeyName(key))

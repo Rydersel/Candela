@@ -180,9 +180,9 @@ struct WindowObservationTests {
     let rotated = PanelSpaceTransform(
       displaySize: CGSize(width: 2160, height: 3840), rotation: .twoSeventy)
     // Under 270°, top-left in DISPLAY space is the panel's TOP-RIGHT. See the
-    // rotation-convention note in PanelSpaceTransform — the direction is
-    // reasoned from CGDisplayRotation's counter-clockwise sign and is NOT yet
-    // hardware-verified.
+    // rotation-convention note in PanelSpaceTransform: settled from Apple's own
+    // header, which states CGDisplayRotation is degrees CLOCKWISE. No longer
+    // reasoned, and no longer waiting on the rotated Dell.
     let w = window(1, "Slack", CGRect(x: 0, y: 0, width: 200, height: 200))
     let result = observer.observe([w], through: rotated, at: Date())
     #expect(result.dominantOwnerByCell[PanelGrid.cols - 1] == "Slack")
