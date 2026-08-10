@@ -1,5 +1,28 @@
 import AppKit
+import CandelaKit
 import SwiftUI
+
+/// Marks every confirmation window as one, so a newcomer can see the questions
+/// already on screen without any surface knowing about another surface. It is
+/// the app's own window list being read, not cross-feature state (#126).
+private let confirmationPanelIdentifier = NSUserInterfaceItemIdentifier(
+  "com.rydersel.Candela.confirmation"
+)
+
+/// The frames of the confirmation windows currently up on `screen`, excluding
+/// the one being placed.
+///
+/// Same-screen only: windows on different displays cannot overlap, and treating
+/// them as obstacles would push a lone question off its own centre.
+@MainActor
+private func occupiedConfirmationFrames(on screen: NSScreen, excluding panel: NSWindow) -> [CGRect] {
+  NSApp.windows
+    .filter {
+      $0 !== panel && $0.isVisible && $0.identifier == confirmationPanelIdentifier
+        && $0.screen?.displayID == screen.displayID
+    }
+    .map(\.frame)
+}
 
 /// The window a keep-or-revert question is asked in, shared by every feature
 /// that asks one.
@@ -31,10 +54,16 @@ import SwiftUI
 /// the secondary reverted. No override is needed. The result depends on the style
 /// mask and on `becomesKeyOnlyIfNeeded`; re-measure if either changes.
 ///
-/// Placement is the caller's business, not this type's: which display a question
-/// belongs on differs per feature (a mode preview asks on its own display, a
-/// mirror preview must ask on the master), and resolving that needs topology this
-/// island deliberately holds none of.
+/// WHICH DISPLAY is the caller's business, not this type's: it differs per
+/// feature (a mode preview asks on its own display, a mirror preview must ask on
+/// the master), and resolving it needs topology this island deliberately holds
+/// none of.
+///
+/// Where on that display is this type's business, and has to be: every surface
+/// centred its own window, so two questions resolving to one display landed on
+/// exactly the same point and neither ever moved (#126). Deciding it here is
+/// what lets a newcomer step clear of the questions already up without any
+/// surface learning about another surface.
 @MainActor
 final class ConfirmationPanel<Content: View> {
   /// Drawn nowhere (`titleVisibility` is hidden) — it exists so assistive
@@ -81,11 +110,14 @@ final class ConfirmationPanel<Content: View> {
     hosting.layoutSubtreeIfNeeded()
     panel.setContentSize(hosting.fittingSize)
 
-    let frame = panel.frame
-    let visible = screen.visibleFrame
-    panel.setFrameOrigin(NSPoint(
-      x: visible.midX - frame.width / 2,
-      y: visible.midY - frame.height / 2
+    // Centred when this is the only question up, and clear of the others when
+    // it is not (#126). Placement runs once per content identity, never on a
+    // countdown tick, so the incumbent keeps the place it was given and a
+    // window the user dragged is left where they put it.
+    panel.setFrameOrigin(ConfirmationPlacement.origin(
+      size: panel.frame.size,
+      in: screen.visibleFrame,
+      avoiding: occupiedConfirmationFrames(on: screen, excluding: panel)
     ))
     // Never `makeKeyAndOrderFront`: an accessory-policy app cannot be activated
     // from inside a menu tracking session anyway (see `SettingsOpener`), and
@@ -125,6 +157,7 @@ final class ConfirmationPanel<Content: View> {
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
     panel.isReleasedWhenClosed = false
     panel.title = accessibilityTitle
+    panel.identifier = confirmationPanelIdentifier
     return panel
   }
 }
