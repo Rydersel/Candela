@@ -280,8 +280,10 @@ struct DisplayHeroView: View {
         mutedSystemImage: "speaker.slash.fill"
       )
       .disabled(!enabled)
-      // D24: greyed by the MONITOR's own denial, never by CoreAudio.
-      .help(enabled ? "" : "\(name) reports no volume control over DDC")
+      // D24: never greyed by CoreAudio. But the monitor's own denial is only
+      // ONE of the two causes, and this said so for both until 2026-08-10; the
+      // reason now comes from the policy that made the decision.
+      .help(model.volumeSliderDisabledReason(state, displayName: name) ?? "")
     }
   }
 
