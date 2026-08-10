@@ -227,15 +227,15 @@ struct DiagnosticsPage: View {
   /// the ordinary case on most panels.
   @ViewBuilder private func wireTimingRow(withheld: Int) -> some View {
     if !model.displayModes.guardsWireTiming {
-      LabeledContent("Unsupported-timing check") {
+      LabeledContent(DiagnosticsCopy.wireTimingCheckLabel) {
         Text(verbatim: "Off").foregroundStyle(.secondary)
       }
-      .help(DiagnosticsPageCopy.wireTimingGuardOff)
+      .help(DiagnosticsCopy.wireTimingGuardOff)
     } else if withheld > 0 {
-      LabeledContent("Not offered — no matching timing") {
+      LabeledContent(DiagnosticsCopy.wireTimingWithheldLabel) {
         Text(verbatim: "\(withheld)").foregroundStyle(.secondary)
       }
-      .help(DiagnosticsPageCopy.wireTimingWithheld)
+      .help(DiagnosticsCopy.wireTimingWithheld)
     }
   }
 

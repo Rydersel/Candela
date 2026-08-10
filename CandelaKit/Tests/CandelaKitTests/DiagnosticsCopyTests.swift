@@ -301,6 +301,21 @@ struct DiagnosticsCopyTests {
 
   // MARK: - Verdict
 
+  /// The arms are an ORDER, not a set, and each was previously tested only with
+  /// the others neutral, so swapping two of them changed no test. Added after a
+  /// review mutation swapped `.unavailable` past `lastApplyFailed` and all 39
+  /// tests still passed: a display with DDC turned off AND a failed apply would
+  /// have said "try a different cable" about a path that sends nothing over a
+  /// cable at all. The HDR precedence below was already pinned this way, so the
+  /// omission was an oversight rather than a decision.
+  @Test func unavailableOutranksAFailedApplyWhenBothAreTrue() {
+    #expect(
+      DiagnosticsCopy.verdict(
+        isBuiltIn: false, path: .unavailable(.ddcTurnedOffWithNoSoftwareLeg),
+        lastApplyFailed: true, hasAppliedTarget: true, evidence: .answered, app: Self.app)
+        == "Nothing is moving this display's brightness. See Availability below.")
+  }
+
   @Test func theVerdictSaysTheMostActionableTrueThing() {
     #expect(
       DiagnosticsCopy.verdict(
@@ -349,6 +364,17 @@ struct DiagnosticsCopyTests {
   /// "Not enumerated yet" and "reported nothing" are different facts, and this
   /// row used to collapse them, saying the display reported nothing when nothing
   /// had been READ.
+  /// `notStated` is a tag the capabilities string does not CARRY, which is not
+  /// the display answering with an empty one. Its own docstring forbids "None"
+  /// for exactly that reason, and nothing enforced it: a review mutation
+  /// changed it to "None" and all 39 tests passed, because it appeared only
+  /// inside the everySentence sweep and never in an equality. Its neighbour
+  /// `notEnumerated` was pinned below from the start, so this was an asymmetry
+  /// rather than a decision.
+  @Test func aTagTheDescriptionLacksIsNeverReportedAsNone() {
+    #expect(DiagnosticsCopy.notStated == "Not stated")
+  }
+
   @Test func nothingLookedForIsNeverReportedAsNothingFound() {
     #expect(DiagnosticsCopy.connection(nil) == "Not enumerated yet")
     #expect(DiagnosticsCopy.manufacturer(nil) == "Not enumerated yet")
@@ -625,9 +651,12 @@ struct DiagnosticsCopyTests {
     }
   }
 
-  /// §6: no em dashes in user-visible copy. The ONE exception in the diagnostics
-  /// surface, "Not offered — no matching timing", is a row LABEL and lives in
-  /// the view, not here; nothing this type produces carries one.
+  /// §6: no em dashes in user-visible copy. The one exception used to be the
+  /// row label "Not offered - no matching timing", which lived inline in the
+  /// view where no test could reach it, and shipped with an em dash from the
+  /// day it was written until #129. It is now `wireTimingWithheldLabel` here,
+  /// so this guard covers it and the class of defect is closed rather than
+  /// documented.
   @Test func noProducedStringContainsAnEmDash() {
     for produced in Self.everySentence() {
       #expect(!produced.contains("—"), "em dash: \(produced)")
@@ -667,6 +696,10 @@ struct DiagnosticsCopyTests {
     var out: [String] = [
       DiagnosticsCopy.notEnumerated,
       DiagnosticsCopy.notStated,
+      DiagnosticsCopy.wireTimingWithheldLabel,
+      DiagnosticsCopy.wireTimingCheckLabel,
+      DiagnosticsCopy.wireTimingGuardOff,
+      DiagnosticsCopy.wireTimingWithheld,
       DiagnosticsCopy.builtInHardwareControl,
       DiagnosticsCopy.safeModeState,
       DiagnosticsCopy.noDefaultOutputDevice,

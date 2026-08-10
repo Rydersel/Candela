@@ -35,23 +35,7 @@ enum DiagnosticsPageCopy {
     "This display reports no serial number. Two identical units would share one set of saved settings."
   }
 
-  /// #110. Says what WE did and why, never what the display or macOS did, the
-  /// same DT30 rule (d) the resolution-count rows follow.
-  static var wireTimingGuardOff: LocalizedStringKey {
-    """
-    Turned off by the wireTimingGuard setting. Resolutions the display has \
-    no matching timing for are offered again, and some displays scan those \
-    out letterboxed or cropped.
-    """
-  }
 
-  static var wireTimingWithheld: LocalizedStringKey {
-    """
-    These resolutions run at refresh rates this display advertises no \
-    full-width timing for. Displays bind them to a different timing \
-    instead, which can letterbox or crop the desktop.
-    """
-  }
 
   /// The caption has to survive the case where the two keys are IDENTICAL,
   /// which is what the built-in shows (`builtIn` / `builtIn`). The original

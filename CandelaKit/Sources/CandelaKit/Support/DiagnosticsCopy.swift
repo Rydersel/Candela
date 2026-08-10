@@ -47,6 +47,36 @@ public enum DiagnosticsCopy {
   /// with an empty one.
   public static let notStated = "Not stated"
 
+  // MARK: - Wire-timing guard (#110)
+
+  /// The row label when the guard is on and withheld something. Here rather
+  /// than in the view so the em-dash and key-name guards below cover it: it
+  /// carried an em dash from the day it shipped until #129, precisely because
+  /// a label sitting inline in a 1159-line view was reachable by no test.
+  public static let wireTimingWithheldLabel = "Not offered: no matching timing"
+
+  /// The row label when the guard is off. `docs/ADVANCED-SETTINGS.md` quotes
+  /// this exact wording, so it is shipped documentation as well as copy.
+  public static let wireTimingCheckLabel = "Unsupported-timing check"
+
+  /// Says what WE did and why, never what the display or macOS did (DT30 rule
+  /// (d)). Names no pref key: `wireTimingGuard` is a `defaults write` escape
+  /// hatch with no control in the interface (D26), so naming it in a tooltip
+  /// told the user nothing they could act on and broke D25.
+  public static let wireTimingGuardOff = """
+    Turned off by an advanced setting. Resolutions the display has no matching \
+    timing for are offered again, and some displays scan those out letterboxed \
+    or cropped.
+    """
+
+  /// The tooltip on the withheld-count row. Describes the display's behaviour,
+  /// which is why it is phrased about displays rather than about the guard.
+  public static let wireTimingWithheld = """
+    These resolutions run at refresh rates this display advertises no \
+    full-width timing for. Displays bind them to a different timing \
+    instead, which can letterbox or crop the desktop.
+    """
+
   // MARK: - Verdict
 
   /// The most actionable true sentence, in the order a person would want to
