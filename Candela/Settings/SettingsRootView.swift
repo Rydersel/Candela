@@ -110,6 +110,23 @@ struct SettingsRootView: View {
           .accessibilityHidden(true)
         }
     }
+    // The toolbar has to PAINT, or scrolled content is simply visible in the
+    // titlebar (#124). Both columns are scroll views in a full-size-content
+    // window, so their content passes under the chrome by design and the
+    // chrome's own background is the thing that hides it. Without this the
+    // hero's volume slider rode up beside the traffic lights and the centred
+    // title was drawn over it.
+    //
+    // Declared on the split view, not on a column: `.unifiedCompact` merges the
+    // toolbar into the titlebar across the WHOLE window width, so the sidebar
+    // needs the same band the detail column does.
+    // `.visible` alone is NOT enough and was tried first: it makes the band
+    // paint, but the material it paints is translucent, so scrolled rows came
+    // through it greyed and half-cut. The opaque window background is what
+    // actually hides them, and it is the same choice the rest of this window
+    // already makes (no materials anywhere; a solid fill has no key state and
+    // cannot dim when the window loses focus).
+    .toolbarBackground(.background, for: .windowToolbar)
     // Replaces the fork-era fixed `.frame(width: 620)`.
     //
     // The maxima are load-bearing, not decoration: a bare `minWidth/minHeight`
