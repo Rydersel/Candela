@@ -39,12 +39,16 @@ final class KeyActionExecutor {
         if mode == .allScreens {
           // Fork getAffectedDisplays(.allScreens): every display, built-in
           // included — so this is NOT the same as the `.allExternal` scope.
-          stepAllExternal(isUp: isUp, isFine: isFine)
-          if let (id, name, newValue) = model.stepBrightnessBuiltIn(
-            isUp: isUp, isFine: isFine
-          ) {
-            showHUD(id: id, name: name, value: newValue)
+          //
+          // Both step paths are announced TOGETHER, in one call. A built-in
+          // mirroring an external shares that master's pill, so announcing the
+          // two paths separately would let the second overwrite the first
+          // (#123, the same collapse the loops below avoid).
+          var stepped = model.stepBrightnessAllExternal(isUp: isUp, isFine: isFine)
+          if let builtInStep = model.stepBrightnessBuiltIn(isUp: isUp, isFine: isFine) {
+            stepped.append(builtInStep)
           }
+          showBrightnessHUDs(for: stepped)
           return
         }
         // Focus mode falls back to the pointer when no window resolves (a
@@ -58,9 +62,7 @@ final class KeyActionExecutor {
           displayIDs: affected, isUp: isUp, isFine: isFine
         )
         if !stepped.isEmpty {
-          for (id, name, newValue) in stepped {
-            showHUD(id: id, name: name, value: newValue)
-          }
+          showBrightnessHUDs(for: stepped)
         } else if !model.controlsAnyDisplay(in: affected) {
           // Nothing resolved AT ALL: pointer on an uncontrolled display, or
           // no screen claimed it — fall back to stepping every external
@@ -75,10 +77,8 @@ final class KeyActionExecutor {
       case .builtInOnly:
         // Ctrl-directed steps drive the built-in panel through its
         // native-path controller. HUD on the built-in display.
-        if let (id, name, newValue) = model.stepBrightnessBuiltIn(
-          isUp: isUp, isFine: isFine
-        ) {
-          showHUD(id: id, name: name, value: newValue)
+        if let builtInStep = model.stepBrightnessBuiltIn(isUp: isUp, isFine: isFine) {
+          showBrightnessHUDs(for: [builtInStep])
         }
       }
     case let .toggleMirroringOrStepDown(isFine):
@@ -99,25 +99,31 @@ final class KeyActionExecutor {
     case let .stepVolume(isUp, isFine):
       // Feedback sound deliberately absent here — it plays on key RELEASE
       // (.volumeKeyUp), fork parity.
+      var stepped: [(state: AppModel.DisplayState, value: Double)] = []
       for state in resolveVolumeTargets() {
         guard let newValue = state.volume.step(isUp: isUp, isFine: isFine) else { continue }
-        showVolumeHUD(state: state, value: newValue)
+        stepped.append((state, newValue))
       }
+      showVolumeHUDs(stepped)
     case .toggleMute:
       // Fresh-press only, twice over: the router swallows repeats and the
       // controller consumes isFresh (backlog #12b).
       var playedOnce = false
+      var toggled: [(state: AppModel.DisplayState, value: Double)] = []
       for state in resolveVolumeTargets() {
         let muted = state.volume.toggleMute(isFresh: isFresh)
         guard state.volume.isAvailable else { continue }
-        showVolumeHUD(state: state, value: muted ? 0 : state.volume.value)
+        toggled.append((state, muted ? 0 : state.volume.value))
         // Fork rule: mute plays feedback on key DOWN, once per event, only
-        // when the resulting state is unmuted.
+        // when the resulting state is unmuted. It stays inside this loop: it
+        // answers the WRITES, which every target takes, and not the pills,
+        // which a mirror set shares.
         if !playedOnce, !muted {
           feedback.play()
           playedOnce = true
         }
       }
+      showVolumeHUDs(toggled)
     case .volumeKeyUp:
       // Fork rule: volume steps play feedback on key release, once per event,
       // only when some affected display has volume enabled.
@@ -132,13 +138,12 @@ final class KeyActionExecutor {
       let affected = Self.pointerDisplayID().map(expandToMirrorSet) ?? []
       var targets = affected.compactMap { id in model.displays.first { $0.id == id } }
       if targets.isEmpty { targets = model.displays }
+      var stepped: [(state: AppModel.DisplayState, value: Double)] = []
       for state in model.keyEnabledStates(targets) {
         guard let newValue = state.contrast.step(isUp: isUp, isFine: isFine) else { continue }
-        hud?.showHUD(
-          displayID: hudDisplayID(state.id), type: .contrast,
-          name: hudName(for: state), value: Float(newValue)
-        )
+        stepped.append((state, newValue))
       }
+      showStateHUDs(stepped) { _ in .contrast }
     case .openSoundSettings:
       NSWorkspace.shared.open(
         URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension")!
@@ -149,12 +154,6 @@ final class KeyActionExecutor {
       )
     case .none:
       break
-    }
-  }
-
-  private func stepAllExternal(isUp: Bool, isFine: Bool) {
-    for (id, name, newValue) in model.stepBrightnessAllExternal(isUp: isUp, isFine: isFine) {
-      showHUD(id: id, name: name, value: newValue)
     }
   }
 
@@ -185,13 +184,11 @@ final class KeyActionExecutor {
   /// left alone (#59: an active head-insert tap froze the machine twice).
   private func stepEveryControlledDisplay(isUp: Bool, isFine: Bool) {
     let stepped = model.stepBrightnessAllExternal(isUp: isUp, isFine: isFine)
-    for (id, name, newValue) in stepped {
-      showHUD(id: id, name: name, value: newValue)
-    }
+    showBrightnessHUDs(for: stepped)
     guard stepped.isEmpty,
-          let (id, name, newValue) = model.stepBrightnessBuiltIn(isUp: isUp, isFine: isFine)
+          let builtInStep = model.stepBrightnessBuiltIn(isUp: isUp, isFine: isFine)
     else { return }
-    showHUD(id: id, name: name, value: newValue)
+    showBrightnessHUDs(for: [builtInStep])
   }
 
   /// Volume-key target set per multiKeyboardVolume (D4). Every branch runs
@@ -222,33 +219,79 @@ final class KeyActionExecutor {
     }
   }
 
-  private func showVolumeHUD(state: AppModel.DisplayState, value: Double) {
+  private func showVolumeHUDs(_ stepped: [(state: AppModel.DisplayState, value: Double)]) {
     // Fork hideOsd parity (R1): per-display volume-OSD suppression gates the
     // VOLUME/MUTE pills only — brightness/contrast pills ignore it (the fork
     // consults it solely on the volume paths). The write itself still lands.
-    guard !DisplayPrefs(persistenceKey: state.display.persistenceKey).hideOsd else { return }
-    hud?.showHUD(
-      displayID: hudDisplayID(state.id),
-      type: state.volume.isMuted ? .volumeMuted : .volume,
-      name: hudName(for: state),
-      value: Float(value)
-    )
+    //
+    // Filtered BEFORE the grouping, so the pref keeps exactly the meaning it
+    // had per display: a suppressed display shows no pill and is not counted
+    // among the others sharing one.
+    showStateHUDs(
+      stepped.filter { !DisplayPrefs(persistenceKey: $0.state.display.persistenceKey).hideOsd }
+    ) { $0.volume.isMuted ? .volumeMuted : .volume }
   }
 
-  private func showHUD(id: CGDirectDisplayID, name: String, value: Double) {
-    // Backlog #11 (D6): the HUD mirrors the badge's LIVENESS predicate
-    // (isHDREngaged — HDR live however it got there), not the policy
-    // (hdrMode). One predicate for both surfaces, decided deliberately.
-    //
-    // The NAME and the HDR suffix stay keyed on the display that was STEPPED;
-    // only the placement resolves. A pill on the master naming the panel whose
-    // brightness moved is the honest reading of a mirror set.
-    hud?.showBrightness(
-      displayID: hudDisplayID(id),
-      name: hudName(id: id, hardwareName: name),
-      value: value,
-      nameSuffix: hdrSuffix(for: id)
-    )
+  /// ONE pill per placement display, not one per stepped display (#123).
+  ///
+  /// Every member of a mirror set draws on the master, and `BrightnessHUD` keys
+  /// its windows by that ID, so announcing members one at a time wrote the same
+  /// window repeatedly and the last write won. `HUDGrouping` decides which
+  /// display each pill reports; the count it returns is what keeps a pill from
+  /// implying the members it cannot name stood still.
+  ///
+  /// Backlog #11 (D6): the HDR marker mirrors the badge's LIVENESS predicate
+  /// (`isHDREngaged`, HDR live however it got there), not the policy
+  /// (`hdrMode`). One predicate for both surfaces, decided deliberately.
+  ///
+  /// Placement is resolved HERE rather than inside the island, which holds no
+  /// judgement (DT16): a mirrored panel is absent from `NSScreen.screens`, so
+  /// an unresolved ID makes the island show nothing at all, silently, while the
+  /// DDC write lands and the panel visibly changes.
+  ///
+  /// ONE topology sample serves the whole announcement, so the pills of a
+  /// single keypress cannot disagree about the rig. A sample that lags a mirror
+  /// BREAKING resolves an ex-slave to its ex-master, which is a real screen:
+  /// the pill lands on the wrong display for the moment before the next
+  /// screen-parameters notification. That is the one-directional half of the
+  /// store's guarantee, and a misplaced pill is the cheapest place in the app
+  /// to pay it.
+  private func showBrightnessHUDs(
+    for stepped: [(id: CGDirectDisplayID, name: String, newValue: Double)]
+  ) {
+    let topology = model.mirrorTopology.topology()
+    for pill in HUDGrouping.pills(forStepped: stepped.map { $0.id }, topology: topology) {
+      guard let named = stepped.first(where: { $0.id == pill.named }) else { continue }
+      hud?.showBrightness(
+        displayID: pill.placement,
+        name: hudName(id: named.id, hardwareName: named.name),
+        value: named.newValue,
+        nameSuffix: HUDGrouping.nameSuffix(
+          isHDREngaged: isHDREngaged(named.id), othersInSet: pill.othersInSet
+        )
+      )
+    }
+  }
+
+  /// The volume/contrast half of the same rule. These pills have never carried
+  /// the HDR marker (it reports a brightness-path fact), so only the set count
+  /// reaches their suffix.
+  private func showStateHUDs(
+    _ stepped: [(state: AppModel.DisplayState, value: Double)],
+    type: (AppModel.DisplayState) -> HUDType
+  ) {
+    let topology = model.mirrorTopology.topology()
+    for pill in HUDGrouping.pills(forStepped: stepped.map { $0.state.id }, topology: topology) {
+      guard let named = stepped.first(where: { $0.state.id == pill.named }) else { continue }
+      hud?.showHUD(
+        displayID: pill.placement,
+        type: type(named.state),
+        name: hudName(for: named.state),
+        value: Float(named.value),
+        maxValue: 1,
+        nameSuffix: HUDGrouping.nameSuffix(isHDREngaged: false, othersInSet: pill.othersInSet)
+      )
+    }
   }
 
   /// What the HUD calls a display. The model hands every step path the RAW
@@ -272,10 +315,10 @@ final class KeyActionExecutor {
     return hudName(for: state)
   }
 
-  private func hdrSuffix(for id: CGDirectDisplayID) -> String? {
+  private func isHDREngaged(_ id: CGDirectDisplayID) -> Bool {
     let controller = model.displays.first(where: { $0.id == id })?.controller
       ?? (model.builtIn?.id == id ? model.builtIn?.controller : nil)
-    return controller?.isHDREngaged == true ? " · HDR" : nil
+    return controller?.isHDREngaged == true
   }
 
   /// The display under the mouse pointer (fork: `getCurrentDisplay(byFocus:
@@ -314,24 +357,4 @@ final class KeyActionExecutor {
     model.mirrorTopology.topology().expand(displayID)
   }
 
-  /// Where this display's HUD belongs: its own screen, or its mirror MASTER's.
-  ///
-  /// A mirrored panel is absent from `NSScreen.screens`, so `BrightnessHUD`'s
-  /// lookup returns nil and it shows nothing at all — silently, while the DDC
-  /// write lands and the panel visibly changes. Resolving here rather than
-  /// inside the island keeps the island free of judgement (DT16).
-  ///
-  /// A stepped set therefore shows ONE pill, on the master: every member
-  /// resolves to the same ID, and `BrightnessHUD` keys its windows by ID. Only
-  /// the PLACEMENT resolves — the name and the HDR suffix stay keyed on the
-  /// display that was stepped.
-  ///
-  /// A sample that lags a mirror BREAKING resolves an ex-slave to its
-  /// ex-master, which is a real screen: the pill lands on the wrong display for
-  /// the moment before the next screen-parameters notification. That is the
-  /// one-directional half of the store's guarantee, and a misplaced pill is the
-  /// cheapest place in the app to pay it.
-  private func hudDisplayID(_ displayID: CGDirectDisplayID) -> CGDirectDisplayID {
-    model.mirrorTopology.drawableDisplayID(for: displayID)
-  }
 }
