@@ -267,6 +267,37 @@ struct DiagnosticsPrefSummaryTests {
     #expect(summary(prefs).isEmpty)
   }
 
+  /// #125. `oledIdleDimBrightness` is `1 - stored`, and `1 - 0.9` is
+  /// `0.09999999999999998` in binary floating point. The report is the artifact
+  /// a user pastes into a bug report, so binary noise in it reads as a bug in
+  /// the app to anyone who does not already know it is a display artifact.
+  @Test func aDimLevelCarriesNoFloatingPointNoise() {
+    let prefs = prefs()
+    prefs.oledIdleDimBrightness = 0.1
+    prefs.oledUnfocusedDimBrightness = 0.1
+
+    for line in summary(prefs) {
+      #expect(!line.contains("0.0999"), "raw floating-point noise in the report: \(line)")
+      #expect(!line.contains("9999"), "raw floating-point noise in the report: \(line)")
+    }
+  }
+
+  /// #125's second half. The line is named for the storage key, which holds the
+  /// dim AMOUNT, so a reader cross-checking `defaults read` must find that
+  /// number under it. The brightness the pane showed is its complement and is
+  /// what the report is usually about, so both are stated and each is named.
+  /// Printing one under the other's name is what made a reader conclude the
+  /// report and the domain disagreed.
+  @Test func aDimLevelStatesBothTheStoredAmountAndTheResultingBrightness() {
+    let prefs = prefs()
+    prefs.oledIdleDimBrightness = 0.1
+    prefs.oledUnfocusedDimBrightness = 0.25
+
+    let lines = summary(prefs)
+    #expect(lines.contains("oledIdleDimLevel = 90% (leaves 10% brightness)"))
+    #expect(lines.contains("oledUnfocusedDimLevel = 75% (leaves 25% brightness)"))
+  }
+
   @Test func remapCodesRenderAsHexRatherThanDecimal() {
     let prefs = prefs()
     var tuning = CommandTuning.unset

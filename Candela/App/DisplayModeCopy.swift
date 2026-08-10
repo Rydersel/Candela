@@ -17,14 +17,13 @@ enum DisplayModeCopy {
   /// WHICH way a mode is inexact, and it reads as evasive next to a picker
   /// labelled Size.
   ///
-  /// RM11 is carried by badges on the surfaces that offer EVERY mode, because
-  /// there the size alone says nothing about which duplicate is which. The All
-  /// Sizes & Refresh Rates page states it under SO14 —
-  /// `fullListTags(for:isLowResolutionDuplicate:)`: "HiDPI" retired, the 1x
-  /// duplicate tagged "low resolution" instead. The menu-bar list still shows
-  /// "HiDPI" through `DisplayModeCoordinator.Catalog.badges(for:)`, which SO14
-  /// retires from copy; that is pre-existing panel copy left alone by the
-  /// settings overhaul (spec §11) and TRACKED, not a blessed exception.
+  /// RM11 is carried by tags on the surfaces that OFFER a size, because there
+  /// the size alone says nothing about which duplicate is which. Every one of
+  /// them now states it in SO14's vocabulary, from the single
+  /// `DisplayModeCoordinator.Catalog.tags(for:isLowResolutionDuplicate:)`:
+  /// "HiDPI" retired, the 1x duplicate tagged "low resolution" instead. The
+  /// menu-bar list was the last surface still saying "HiDPI", left alone by the
+  /// settings overhaul (spec §11) and closed as #96.
   ///
   /// The settings hub's curated Size picker is the ruled
   /// exception (SO14/SO18): it is deduplicated by logical size, "HiDPI" is

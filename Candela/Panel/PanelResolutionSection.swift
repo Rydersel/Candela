@@ -63,11 +63,12 @@ struct PanelResolutionSection: View {
         if isExpanded {
           ForEach(catalog.rows.prefix(Self.maximumRows)) { row in
             PanelModeRow(
-              // Badged, like every other surface that OFFERS a size to choose
+              // Tagged, like every other surface that OFFERS a size to choose
               // from: the size label is bare now, so these words are the whole
-              // of RM11 here. Measured at 280pt: the longest real label,
-              // "1440 × 2560 (HiDPI, Scaled)" on the Dell, fits with room to
-              // spare. (The disclosure summary above does not — see there.)
+              // of RM11 here. Measured at 280pt: the longest real label then,
+              // "1440 × 2560 (HiDPI, Scaled)" on the Dell, fit with room to
+              // spare, and retiring "HiDPI" (#96) only shortened it. (The
+              // disclosure summary above does not fit; see there.)
               title: catalog.badgedSize(row.mode),
               accessibilityName: displayName,
               isCurrent: catalog.isCurrentSize(row.mode)
@@ -103,13 +104,14 @@ struct PanelResolutionSection: View {
       // be checked: they differ when the current size fell below the curation
       // floor, and the summary must describe the display, not our list.
       //
-      // The only place in the app that offers a size WITHOUT its badges, and
-      // deliberately: this shares a 280pt row with the word "Resolution" and a
-      // chevron, and "1296 × 2304 (HiDPI, Scaled)" truncates to
-      // "1296 × 2304 (HiDPI, Sc…" — measured on the Dell. It is also not an
-      // offer. It reports what the display is running, which is the same kind
-      // of statement the confirmation window and the reapply reports make with
-      // a bare size; the badges are one click away on the rows this expands to.
+      // The only place in the app that offers a size WITHOUT its tags, and
+      // deliberately: it is not an offer. It reports what the display is
+      // running, which is the same kind of statement the confirmation window
+      // and the reapply reports make with a bare size; the tags are one click
+      // away on the rows this expands to. Width says the same thing: this
+      // shares a 280pt row with the word "Resolution" and a chevron, and
+      // "1296 × 2304 (HiDPI, Scaled)" truncated to "1296 × 2304 (HiDPI, Sc…"
+      // (measured on the Dell, before #96 shortened the label).
       //
       // The RATE does ride along (#86): "resolution" is a size and a refresh
       // rate, and this row is the only place the menu bar states either — a

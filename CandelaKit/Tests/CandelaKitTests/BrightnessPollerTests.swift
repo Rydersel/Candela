@@ -205,20 +205,31 @@ private func makePoller(
   #expect(got)
   let reads = probe.reads
   guard reads.count >= 5 else { return }
-  // Four idle intervals would be 2 s; four fast ones ~40 ms.
-  #expect(reads[4].at - reads[0].at < .milliseconds(300))
+  // Four idle intervals would be 2 s; four fast ones ~40 ms. The bound sits an
+  // order of magnitude above the fast cadence and a factor of two below the
+  // idle one, because the quantity here is ELAPSED TIME and no amount of
+  // awaiting shortens it: a starved scheduler stretches the real loop, and at
+  // 300 ms this failed on spans of 387 ms and 512 ms that were still nowhere
+  // near the idle cadence (#115). Under 1 s means fast; idle cannot get there.
+  #expect(reads[4].at - reads[0].at < .seconds(1))
 }
 
 @Test func echoStaysOnIdleCadence() async {
   let probe = Probe(expected: 0.5, generation: 1, hardware: 0.5)
   let poller = makePoller(probe, fast: .milliseconds(5), idle: .milliseconds(200))
   let task = Task { await poller.run() }
+  // Await the first read rather than betting 250 ms produces one: a starved
+  // scheduler can delay the poller's first timeslice, and "it ran at all" is
+  // not the claim under test. Same shape as #114's fix, applied before it was
+  // observed failing (#115).
+  let started = await waitUntil { !probe.reads.isEmpty }
   try? await Task.sleep(for: .milliseconds(250))
   task.cancel()
-  let count = probe.reads.count
-  // Idle cadence over 250 ms: 2 reads. Fast cadence would be ~50.
-  #expect(count >= 1)
-  #expect(count <= 4)
+  #expect(started)
+  // Idle cadence over the window: 2 reads. Fast cadence would be ~50, so only
+  // the upper bound can indicate the wrong cadence, and starvation moves the
+  // count the safe way.
+  #expect(probe.reads.count <= 4)
 }
 
 // MARK: - Lifecycle

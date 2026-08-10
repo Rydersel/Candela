@@ -242,9 +242,9 @@ struct DisplayHubView: View {
   /// The row's OUTCOME, not its catalog entry (SO18): a size whose applied mode
   /// cannot hold the rate now in use says so on the item.
   ///
-  /// The Native/HiDPI/Scaled badges deliberately do NOT ride along: SO14
-  /// retires "HiDPI" from copy, and the distinction words move to the full
-  /// list, which tags low-resolution duplicates instead (Task 14).
+  /// The Native/Scaled tags deliberately do NOT ride along: this picker is
+  /// deduplicated by logical size, so the distinction words belong to the
+  /// surfaces that show the duplicates (SO14/SO18, Task 14).
   ///
   /// `currentHz` is `outcome`'s contract, not a hint: when the display has no
   /// current mode the caps warning is SUPPRESSED entirely — a placeholder 0
