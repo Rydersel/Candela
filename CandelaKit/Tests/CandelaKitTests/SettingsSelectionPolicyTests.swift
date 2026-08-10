@@ -62,3 +62,100 @@ struct SettingsSelectionPolicyTests {
     #expect(SettingsSelectionPolicy.restoration(lastDisplayKey: nil, arrivedKeys: ["mag"], currentIsDisplay: false) == nil)
   }
 }
+
+@Suite("Settings detail presentation")
+struct SettingsDetailPresentationTests {
+  /// Stands in for the app target's `DisplaySubPage`, which CandelaKit cannot
+  /// see. Only its identity matters here.
+  private enum Page: String, Sendable { case allModes, advanced, diagnostics }
+
+  @Test func aConnectedDisplayPresentsItsRetainedPath() {
+    #expect(
+      SettingsSelectionPolicy.present(
+        selectedDisplayKey: "dell", retainedPath: [Page.advanced], connectedKeys: ["builtIn", "dell"]
+      ) == .display(key: "dell", path: [.advanced])
+    )
+  }
+
+  @Test func aPaneSelectionPresentsNothingPushed() {
+    // A pane has no stack. The retained path belongs to whichever display the
+    // user was last on and must not follow them onto a pane.
+    #expect(
+      SettingsSelectionPolicy.present(
+        selectedDisplayKey: nil, retainedPath: [Page.advanced], connectedKeys: ["dell"]
+      ) == .pane
+    )
+  }
+
+  @Test func aDisconnectedDisplayPresentsThePaneFallbackAndNoPushedPage() {
+    // The defect this exists to make impossible (#124): the title and the
+    // content each answered this question on their own, and the presented path
+    // did not answer it at all. A display that left the list while a sub-page
+    // was pushed therefore kept a page in the stack that could not render, so
+    // the detail column went blank and declared no toolbar title.
+    #expect(
+      SettingsSelectionPolicy.present(
+        selectedDisplayKey: "dell", retainedPath: [Page.advanced], connectedKeys: ["builtIn"]
+      ) == .pane
+    )
+  }
+
+  @Test func aDisconnectedDisplayWithNothingPushedIsStillThePaneFallback() {
+    // Same answer whether or not a page was pushed: the presentation names one
+    // destination, so the title and the content cannot disagree about it.
+    #expect(
+      SettingsSelectionPolicy.present(
+        selectedDisplayKey: "dell", retainedPath: [Page](), connectedKeys: []
+      ) == .pane
+    )
+  }
+
+  @Test func retentionIsNotTheSameAsPresentation() {
+    // Presenting nothing for an absent display must not be read as clearing
+    // what is retained: the same key with the display back presents the same
+    // path again (SO23). This function is pure, so that is a property of it
+    // rather than of the caller's storage.
+    let path = [Page.diagnostics]
+    #expect(
+      SettingsSelectionPolicy.present(
+        selectedDisplayKey: "dell", retainedPath: path, connectedKeys: []
+      ) == .pane
+    )
+    #expect(
+      SettingsSelectionPolicy.present(
+        selectedDisplayKey: "dell", retainedPath: path, connectedKeys: ["dell"]
+      ) == .display(key: "dell", path: path)
+    )
+  }
+
+  @Test func theDepthMatchesWhatIsPresentedNotWhatIsRetained() {
+    // The window configurator re-runs on this number, so a depth taken from
+    // retained storage would claim a push that is not on screen.
+    #expect(
+      SettingsSelectionPolicy.present(
+        selectedDisplayKey: "dell", retainedPath: [Page.advanced], connectedKeys: []
+      ).pathDepth == 0
+    )
+    #expect(
+      SettingsSelectionPolicy.present(
+        selectedDisplayKey: "dell", retainedPath: [Page.advanced], connectedKeys: ["dell"]
+      ).pathDepth == 1
+    )
+  }
+
+  @Test func theSelectedDisplayKeyIsOnlyReportedWhenItIsPresentable() {
+    // The convenience the view reads to decide whether a banner region, a hero
+    // and a hub exist at all. It must never name a display the detail column is
+    // not showing.
+    #expect(
+      SettingsSelectionPolicy.present(
+        selectedDisplayKey: "dell", retainedPath: [Page](), connectedKeys: ["dell"]
+      ).displayKey == "dell"
+    )
+    #expect(
+      SettingsSelectionPolicy.present(
+        selectedDisplayKey: "dell", retainedPath: [Page](), connectedKeys: []
+      ).displayKey == nil
+    )
+  }
+}

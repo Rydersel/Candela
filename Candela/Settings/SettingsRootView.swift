@@ -120,8 +120,12 @@ struct SettingsRootView: View {
     // CandelaApp). The minimum keeps the sidebar and a grouped form from
     // crushing each other.
     .frame(
-      minWidth: 720, idealWidth: 900, maxWidth: .infinity,
-      minHeight: 480, idealHeight: 560, maxHeight: .infinity
+      minWidth: SettingsWindowMetrics.minWidth,
+      idealWidth: SettingsWindowMetrics.idealWidth,
+      maxWidth: .infinity,
+      minHeight: SettingsWindowMetrics.minHeight,
+      idealHeight: SettingsWindowMetrics.idealHeight,
+      maxHeight: .infinity
     )
     // `navigationToken` re-runs the configurator on every push and pop.
     // Measured in the Task 9 spike: a push flips `titleVisibility` back to
@@ -224,19 +228,56 @@ struct SettingsRootView: View {
     }
   }
 
-  /// The title shown centred in the toolbar. Resolved here rather than read
-  /// back from the panes, so every destination titles itself the same way.
+  /// The selected display's key, or nil for a pane. Never a claim that the
+  /// display exists: `presentation` is what decides that.
+  private var selectedDisplayKey: String? {
+    guard case let .display(key) = selection else { return nil }
+    return key
+  }
+
+  /// THE resolution of what the detail column is showing (#124). The title, the
+  /// content, the pushed path and the window configurator all read this one
+  /// value; before it, each answered the question separately from the same
+  /// inputs and they could disagree within a frame.
+  ///
+  /// The case that used to diverge: the selected display drops out of
+  /// `allControlledStates` for a pass, which a display reconfiguration under an
+  /// open window routinely produces. `currentTitle` and `detailRoot` both fell
+  /// back to General, but the path went on presenting a sub-page for a display
+  /// nothing could look up, so the stack rendered an empty destination over the
+  /// fallback: no content and no toolbar title. Resolving it once makes that
+  /// state unrepresentable rather than caught at three sites.
+  ///
+  /// It reads `subPagePaths` and never writes it, so SO23 retention is
+  /// untouched: not presenting a path is not forgetting one.
+  private var presentation: SettingsDetailPresentation<DisplaySubPage> {
+    SettingsSelectionPolicy.present(
+      selectedDisplayKey: selectedDisplayKey,
+      retainedPath: selectedDisplayKey.flatMap { subPagePaths[$0] } ?? [],
+      connectedKeys: model.allControlledStates.map(\.display.persistenceKey)
+    )
+  }
+
+  /// The title shown centred in the toolbar. Resolved from `presentation`
+  /// rather than read back from the panes, so every destination titles itself
+  /// the same way and the title always names what is on screen.
   /// Display destinations use the display's own name, not a pane label.
   private var currentTitle: String {
-    switch selection {
-    case let .pane(id):
-      SettingsRegistry.descriptor(for: id).title
-    case let .display(key):
+    switch presentation {
+    case let .display(key, _):
+      // The `??` is the same-frame race, not a second policy: `presentation`
+      // has already established the key is connected.
       model.allControlledStates
         .first { $0.display.persistenceKey == key }
-        .map(\.display.name) ?? "General"
-    case .none:
-      "General"
+        .map(\.display.name) ?? SettingsRegistry.descriptor(for: .general).title
+    case .pane:
+      if case let .pane(id) = selection {
+        SettingsRegistry.descriptor(for: id).title
+      } else {
+        // A pane presentation with a display selection is the fallback case,
+        // and `detailRoot` renders General for it. Same words, same source.
+        SettingsRegistry.descriptor(for: .general).title
+      }
     }
   }
 
@@ -265,17 +306,19 @@ struct SettingsRootView: View {
   }
 
   @ViewBuilder private var detailRoot: some View {
-    switch selection {
-    case let .pane(id):
-      SettingsRegistry.descriptor(for: id).content()
-    case let .display(key):
+    switch presentation {
+    case let .display(key, path):
       if let state = model.allControlledStates.first(where: { $0.display.persistenceKey == key }) {
-        displayRoot(key: key, state: state)
+        displayRoot(key: key, state: state, hasPushedPage: !path.isEmpty)
       } else {
         generalFallback
       }
-    case .none:
-      generalFallback
+    case .pane:
+      if case let .pane(id) = selection {
+        SettingsRegistry.descriptor(for: id).content()
+      } else {
+        generalFallback
+      }
     }
   }
 
@@ -287,13 +330,18 @@ struct SettingsRootView: View {
   /// per-display root state (scroll, focus) on a switch, without giving each
   /// display its own stack identity, which is the orphaned-page defect `detail`
   /// documents.
-  private func displayRoot(key: String, state: AppModel.DisplayState) -> some View {
+  private func displayRoot(
+    key: String, state: AppModel.DisplayState, hasPushedPage: Bool
+  ) -> some View {
     VStack(spacing: 0) {
       // The root stays in the stack behind a pushed page and keeps rendering,
       // so both placements would draw the SAME answerable countdown. The pushed
       // page is the one the reader is looking at, so it owns the answer; this
-      // one yields while the path is non-empty and keeps every passive banner.
-      BannerRegion(state: state, ownsAnswerableCountdown: (subPagePaths[key] ?? []).isEmpty)
+      // one yields while a page is PRESENTED and keeps every passive banner.
+      // Presented, not retained: a page held for a display that cannot be shown
+      // is not on screen to own anything, and reading `subPagePaths` directly
+      // here handed the answer to a page nobody could see.
+      BannerRegion(state: state, ownsAnswerableCountdown: !hasPushedPage)
       if key == "builtIn" {
         BuiltInDisplayPane(selection: $selection, path: pathBinding(for: key))
       } else {
@@ -307,28 +355,38 @@ struct SettingsRootView: View {
   /// shared, so a page is only ever presented for the selected display. The
   /// guard goes empty for the frame in which a pane selection is still popping
   /// the outgoing display's page.
-  @ViewBuilder private func pushedPage(_ page: DisplaySubPage) -> some View {
-    if case let .display(key) = selection,
-       let state = model.allControlledStates.first(where: { $0.display.persistenceKey == key }) {
-      VStack(spacing: 0) {
-        BannerRegion(state: state)
-        subPage(page, key: key, state: state)
+  private func pushedPage(_ page: DisplaySubPage) -> some View {
+    Group {
+      if case let .display(key, _) = presentation,
+         let state = model.allControlledStates.first(where: { $0.display.persistenceKey == key }) {
+        VStack(spacing: 0) {
+          BannerRegion(state: state)
+          subPage(page, key: key, state: state)
+        }
+        // `.id(key)` on the pushed CONTENT, mirroring `displayRoot`, and never
+        // on the stack (that re-keying is the orphaned-page defect `detail`
+        // documents). The switcher keeps this page presented while `state`
+        // re-resolves to the new display, so without the re-key the sub-page's
+        // `@State` (drafts, focus, list filters) survived the switch and
+        // rendered against the new display's prefs; a draft typed on one
+        // display could then commit into another's tuning (SO10).
+        .id(key)
       }
-      // `.id(key)` on the pushed CONTENT, mirroring `displayRoot`, and never on
-      // the stack (that re-keying is the orphaned-page defect `detail`
-      // documents). The switcher keeps this page presented while `state`
-      // re-resolves to the new display, so without the re-key the sub-page's
-      // `@State` (drafts, focus, list filters) survived the switch and rendered
-      // against the new display's prefs; a draft typed on one display could
-      // then commit into another's tuning (SO10).
-      .id(key)
-      // The root's principal title does NOT survive a push (measured in the
-      // Task 9 spike: the toolbar came up empty but for Back), so every
-      // pushed page re-declares it. Still the DISPLAY's name: the sub-page
-      // names itself in its header, and the toolbar keeps answering "which
-      // display am I configuring".
-      .toolbar { SettingsPrincipalTitle(title: currentTitle) }
     }
+    // The root's principal title does NOT survive a push (measured in the
+    // Task 9 spike: the toolbar came up empty but for Back), so every pushed
+    // page re-declares it. Still the DISPLAY's name: the sub-page names itself
+    // in its header, and the toolbar keeps answering "which display am I
+    // configuring".
+    //
+    // OUTSIDE the guard above, and that placement is the point (#124). Inside
+    // it, a frame where the display was momentarily unresolvable contributed no
+    // principal item at all, and a window with no title of its own is a window
+    // AppKit titles itself: it flips `titleVisibility` back and draws
+    // `window.title` at the leading edge. The empty case is now a page with a
+    // title and no content, which is recoverable by looking at it; the other
+    // was not.
+    .toolbar { SettingsPrincipalTitle(title: currentTitle) }
   }
 
   /// The persistent stack's path: the selected display's retained sub-page
@@ -337,21 +395,32 @@ struct SettingsRootView: View {
   /// stack survives.
   ///
   /// The key is resolved ONCE, when the binding is built, and the setter drops
-  /// any write made after the selection stops matching it. The stack can flush
-  /// a transition's write-back through a binding built before the selection
-  /// moved; a setter that re-read the selection at write time landed that
-  /// write under whatever was selected by then, which on a display-to-display
-  /// switch cleared the NEW display's retained path (SO23). The pane branch
-  /// keeps the old rule as its degenerate case: reads are empty and every
-  /// write is dropped.
+  /// any write made after the presentation stops matching it. The stack can
+  /// flush a transition's write-back through a binding built before the
+  /// selection moved; a setter that re-read the selection at write time landed
+  /// that write under whatever was selected by then, which on a
+  /// display-to-display switch cleared the NEW display's retained path (SO23).
+  /// The pane branch keeps the old rule as its degenerate case: reads are empty
+  /// and every write is dropped.
+  ///
+  /// Matching against the PRESENTATION rather than the selection is what makes
+  /// a display leaving the list pop its page (#124) without losing it: the
+  /// getter reports empty, the stack pops and writes `[]` back, and that write
+  /// is dropped by the same guard, so the retained path is still there when the
+  /// display returns.
   private var currentPathBinding: Binding<[DisplaySubPage]> {
-    guard case let .display(boundKey) = selection else {
+    guard let boundKey = presentation.displayKey else {
       return Binding(get: { [] }, set: { _ in })
     }
     return Binding(
       get: { subPagePaths[boundKey] ?? [] },
+      // Against the PRESENTATION, not the selection: it is the stronger of the
+      // two (a presented display is a selected one), and it is what drops the
+      // `[]` the stack writes back as it pops a display that has left the list.
+      // Dropping that write is the point: the path stays retained (SO23) while
+      // nothing presents it.
       set: { newPath in
-        guard case let .display(current) = selection, current == boundKey else { return }
+        guard presentation.displayKey == boundKey else { return }
         subPagePaths[boundKey] = newPath
       }
     )
@@ -407,10 +476,11 @@ struct SettingsRootView: View {
 
   /// Feeds the window configurator's `navigationToken`: any push or pop must
   /// re-run it (see the call site). Panes have no stack and sit at depth 0.
-  private var currentPathDepth: Int {
-    guard case let .display(key) = selection else { return 0 }
-    return subPagePaths[key]?.count ?? 0
-  }
+  ///
+  /// What is PRESENTED, never what is retained: a depth read from storage
+  /// claimed a push for a display that had left the list, so the token stopped
+  /// moving on the pop that actually happened.
+  private var currentPathDepth: Int { presentation.pathDepth }
 
   /// Sidebar render order — registry panes, then built-in, then externals
   /// (`allControlledStates` is exactly that order). ⌘1–⌘9 index into this.
@@ -433,17 +503,17 @@ struct SettingsRootView: View {
   /// the selection this guard has just matched, so its stale-write check
   /// compares a key against itself and passes.
   private func returnToHub(_ destination: SettingsDestination) {
-    guard case let .display(key) = selection, destination == selection,
-          !(subPagePaths[key] ?? []).isEmpty
+    guard destination == selection,
+          case let .display(_, path) = presentation, !path.isEmpty
     else { return }
     currentPathBinding.wrappedValue = []
   }
 
+  /// ⌘[ pops what is on screen. Gated on the PRESENTED path, so the shortcut
+  /// cannot quietly edit a stack that is not being shown.
   private func popCurrentSubPage() {
-    guard case let .display(key) = selection,
-          var path = subPagePaths[key], !path.isEmpty else { return }
-    path.removeLast()
-    subPagePaths[key] = path
+    guard case let .display(key, path) = presentation, !path.isEmpty else { return }
+    subPagePaths[key] = Array(path.dropLast())
   }
 
   /// Every connected display, named the way the sidebar names it, so the
@@ -498,6 +568,24 @@ private struct SettingsPrincipalTitle: ToolbarContent {
   }
 }
 
+/// The settings window's size floor, declared once.
+///
+/// It used to live only in the SwiftUI content frame, which made it advisory:
+/// `.windowResizability(.contentMinSize)` stops the USER shrinking the window
+/// past it, and stops nothing else. A window AppKit re-fits (a display
+/// reconfiguration moving the window's screen out from under it) can land below
+/// the floor, and SwiftUI answers that by clipping the content rather than by
+/// keeping the size, which is #124's clipped window. `SettingsWindowConfigurator`
+/// enforces the same numbers on the `NSWindow`, so both layers read one source.
+enum SettingsWindowMetrics {
+  static let minWidth: CGFloat = 720
+  static let idealWidth: CGFloat = 900
+  static let minHeight: CGFloat = 480
+  static let idealHeight: CGFloat = 560
+
+  static var minContentSize: NSSize { NSSize(width: minWidth, height: minHeight) }
+}
+
 /// Adds the `.resizable` style mask that a `Settings` scene omits.
 ///
 /// No SwiftUI modifier restores it: `.windowResizability(.contentMinSize)` on
@@ -517,48 +605,88 @@ private struct SettingsPrincipalTitle: ToolbarContent {
 /// the Window menu and accessibility have a name to report, and is not drawn
 /// because AppKit would place it at the LEADING edge of a full-size-content
 /// window with a sidebar, giving a second, misaligned copy.
+///
+/// **The whole contract is re-asserted, never written once** (#124). Every
+/// property below is one AppKit or SwiftUI can change back, and the previous
+/// shape wrote them from a `DispatchQueue.main.async` hop off `updateNSView`:
+/// a hop that found no window silently dropped the write with nothing to retry
+/// it, so `window.title` could sit on the words of a destination the user had
+/// long since left. That is a title that disagrees with the pane, which is only
+/// invisible for as long as `titleVisibility` stays hidden.
 private struct SettingsWindowConfigurator: NSViewRepresentable {
   let title: String
-  /// Unused in `configure` — its whole job is being a dependency that changes
-  /// on push/pop so `updateNSView` fires then. A push flips `titleVisibility`
-  /// back to visible and draws the scene title leading (measured, Task 9
-  /// spike); this is what re-hides it.
+  /// A dependency that changes on push/pop so `updateNSView` fires then, which
+  /// re-asserts the contract promptly rather than on the next window update
+  /// pass. A push flips `titleVisibility` back to visible and draws the window
+  /// title leading (measured, Task 9 spike).
   let navigationToken: Int
 
   func makeNSView(context: Context) -> NSView {
-    let view = NSView(frame: .zero)
-    // The view is not in a window yet during `makeNSView`.
     let coordinator = context.coordinator
-    DispatchQueue.main.async { configure(view.window, coordinator: coordinator) }
+    coordinator.desiredTitle = title
+    let view = WindowAttachedView()
+    // The view has no window during `makeNSView`, and asking again after a
+    // `DispatchQueue.main.async` hop was a guess: it answered nil whenever the
+    // hop lost the race, and nothing retried. Being told is not a guess.
+    view.onAttach = { [weak coordinator] window in coordinator?.apply(to: window) }
     return view
   }
 
   func updateNSView(_ view: NSView, context: Context) {
     let coordinator = context.coordinator
-    DispatchQueue.main.async { configure(view.window, coordinator: coordinator) }
+    coordinator.desiredTitle = title
+    if let window = view.window { coordinator.apply(to: window) }
   }
 
   func makeCoordinator() -> Coordinator { Coordinator() }
 
-  /// Holds the `didUpdateNotification` observation that re-hides the window
-  /// title whenever AppKit flips `titleVisibility` back to visible.
+  /// Reports the moment it actually has a window, so the contract is applied
+  /// then rather than after a hop that may find none.
+  final class WindowAttachedView: NSView {
+    var onAttach: (NSWindow) -> Void = { _ in }
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      if let window { onAttach(window) }
+    }
+  }
+
+  /// Holds the desired title and the `didUpdateNotification` observation that
+  /// re-asserts the window contract whenever AppKit changes it back.
   ///
-  /// `navigationToken` catches the flips that ride on a push or a pop, but two
-  /// measured cases flip it with NO dependency of `updateNSView` changing: Back
-  /// out of a pushed page whose selection had already moved (the pop leaves the
-  /// depth-keyed token where a stale render had it), and the banner region
-  /// appearing over the hub. Rather than enumerating flip sources one defect at
-  /// a time, the enforcement rides `NSWindow.didUpdateNotification`, which
-  /// AppKit posts on every window update pass; the check is two loads and a
-  /// compare, and the write happens only when a flip actually occurred, so the
-  /// notification cannot feed back on itself.
+  /// `navigationToken` catches the flips that ride on a push or a pop, but
+  /// measured cases flip `titleVisibility` with NO dependency of `updateNSView`
+  /// changing: Back out of a pushed page whose selection had already moved, and
+  /// the banner region appearing over the hub. Rather than enumerating flip
+  /// sources one defect at a time, the enforcement rides
+  /// `NSWindow.didUpdateNotification`, which AppKit posts on every window update
+  /// pass. Every write below is guarded by a comparison, so an already-correct
+  /// window is a few loads and no writes, and the notification cannot feed back
+  /// on itself.
+  ///
+  /// The title is re-asserted alongside the visibility, not only the visibility.
+  /// Re-hiding a title that says the wrong thing only hides the disagreement;
+  /// the frame where AppKit wins the race then shows a window named for a pane
+  /// that is not on screen.
   final class Coordinator {
     // Nonisolated storage so `deinit` can remove the observer (a `@MainActor`
     // property is unreachable from a nonisolated deinit under Swift 6).
     // `removeObserver` is thread-safe; both properties are only ever WRITTEN
-    // from `enforceTitleHidden`, which is main-actor.
+    // from `apply(to:)`, which is main-actor.
     private var observer: NSObjectProtocol?
     private weak var observedWindow: NSWindow?
+    private var title = ""
+
+    /// Written by the representable on every update; re-applied to the window
+    /// the moment it changes, so a dropped write cannot outlive one update.
+    @MainActor var desiredTitle: String {
+      get { title }
+      set {
+        guard title != newValue else { return }
+        title = newValue
+        if let observedWindow { apply(to: observedWindow) }
+      }
+    }
 
     /// The one way to hand the window into the `@Sendable` notification
     /// closure. `@unchecked Sendable` is justified by confinement: the box is
@@ -568,11 +696,93 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
       weak var window: NSWindow?
     }
 
-    @MainActor func enforceTitleHidden(on window: NSWindow) {
+    /// The same trick for the coordinator itself, and the same justification:
+    /// opened only inside `MainActor.assumeIsolated` on the `.main` queue, which
+    /// is the only place this object is ever touched. Weak, so the observation
+    /// cannot keep a torn-down coordinator alive.
+    private struct WeakCoordinatorBox: @unchecked Sendable {
+      weak var coordinator: Coordinator?
+    }
+
+    @MainActor func apply(to window: NSWindow) {
+      observe(window)
+      if !window.styleMask.contains(.resizable) {
+        window.styleMask.insert(.resizable)
+      }
+      // Named but not drawn: the visible title is the principal toolbar item, so
+      // letting AppKit draw this one too is what produced two copies of the pane
+      // name. `title` still feeds the Window menu and accessibility.
+      if window.titleVisibility != .hidden {
+        window.titleVisibility = .hidden
+      }
+      // The default style puts the toolbar in its own band BELOW the titlebar,
+      // which dropped the pane title 24 pt under the window controls and opened
+      // a strip of dead space across the top of both columns (measured: title at
+      // y=162 against controls at y=138). `.unifiedCompact` merges the two rows,
+      // so the title sits on the same line as the controls.
+      if window.toolbarStyle != .unifiedCompact {
+        window.toolbarStyle = .unifiedCompact
+      }
+      // Empty only before the first update, and a window briefly named "" is
+      // worse than one still named by the scene.
+      if !title.isEmpty, window.title != title {
+        window.title = title
+      }
+      pinMinimumSize(on: window)
+    }
+
+    /// The floor SwiftUI declares, pinned where it can actually hold (#124).
+    ///
+    /// It RAISES `contentMinSize` and never lowers it: SwiftUI computes its own
+    /// answer from the content, and clamping that down would be this type
+    /// overruling a measurement it did not take. Idempotent either way, which is
+    /// what lets it sit on a per-update-pass notification.
+    @MainActor private func pinMinimumSize(on window: NSWindow) {
+      let floor = SettingsWindowMetrics.minContentSize
+      var minimum = window.contentMinSize
+      minimum.width = max(minimum.width, floor.width)
+      minimum.height = max(minimum.height, floor.height)
+      if window.contentMinSize != minimum {
+        window.contentMinSize = minimum
+      }
+    }
+
+    /// Grows a window that is already under the floor back up to it.
+    ///
+    /// Raising `contentMinSize` does not move a window that is already smaller,
+    /// and the reported state was a window well under it: the content was
+    /// clipped rather than scrolled, so what was cut off could not be reached at
+    /// all. AppKit clamps a live user resize itself, so this only ever fires for
+    /// a size something else chose.
+    ///
+    /// Called from the update-pass notification and never from `updateNSView`:
+    /// resizing a window from inside SwiftUI's own update is a re-entrant layout
+    /// nobody needs, and the notification lands a moment later anyway.
+    ///
+    /// Capped at the screen, because a window taller than the display it is on
+    /// is not an improvement on a clipped one.
+    @MainActor private func restoreMinimumSize(on window: NSWindow) {
+      let minimum = window.contentMinSize
+      let content = window.contentRect(forFrameRect: window.frame).size
+      guard content.width < minimum.width - 0.5 || content.height < minimum.height - 0.5
+      else { return }
+      let available = window.screen?.visibleFrame.size
+      let chrome = max(window.frame.height - content.height, 0)
+      window.setContentSize(NSSize(
+        width: min(max(content.width, minimum.width), available?.width ?? .greatestFiniteMagnitude),
+        height: min(
+          max(content.height, minimum.height),
+          (available?.height ?? .greatestFiniteMagnitude) - chrome
+        )
+      ))
+    }
+
+    @MainActor private func observe(_ window: NSWindow) {
       guard observedWindow !== window else { return }
       if let observer { NotificationCenter.default.removeObserver(observer) }
       observedWindow = window
       let box = WeakWindowBox(window: window)
+      let owner = WeakCoordinatorBox(coordinator: self)
       observer = NotificationCenter.default.addObserver(
         forName: NSWindow.didUpdateNotification, object: window, queue: .main
       ) { _ in
@@ -580,39 +790,15 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
         // the assumeIsolated is the bridge from the nonisolated notification
         // closure to the AppKit calls below.
         MainActor.assumeIsolated {
-          guard let window = box.window, window.titleVisibility != .hidden else { return }
-          window.titleVisibility = .hidden
+          guard let coordinator = owner.coordinator, let window = box.window else { return }
+          coordinator.apply(to: window)
+          coordinator.restoreMinimumSize(on: window)
         }
       }
     }
 
     deinit {
       if let observer { NotificationCenter.default.removeObserver(observer) }
-    }
-  }
-
-  private func configure(_ window: NSWindow?, coordinator: Coordinator) {
-    guard let window else { return }
-    coordinator.enforceTitleHidden(on: window)
-    if !window.styleMask.contains(.resizable) {
-      window.styleMask.insert(.resizable)
-    }
-    // Named but not drawn: the visible title is the principal toolbar item, so
-    // letting AppKit draw this one too is what produced two copies of the pane
-    // name. `title` still feeds the Window menu and accessibility.
-    if window.titleVisibility != .hidden {
-      window.titleVisibility = .hidden
-    }
-    // The default style puts the toolbar in its own band BELOW the titlebar,
-    // which dropped the pane title 24 pt under the window controls and opened
-    // a strip of dead space across the top of both columns (measured: title at
-    // y=162 against controls at y=138). `.unifiedCompact` merges the two rows,
-    // so the title sits on the same line as the controls.
-    if window.toolbarStyle != .unifiedCompact {
-      window.toolbarStyle = .unifiedCompact
-    }
-    if window.title != title {
-      window.title = title
     }
   }
 }

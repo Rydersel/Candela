@@ -10,6 +10,36 @@ public enum SettingsSelectionResolution: Equatable, Sendable {
   case fallbackToPane
 }
 
+/// What the settings window's detail column is actually showing, right now.
+///
+/// ONE value, deliberately, and it is the whole point of the type: the window
+/// title, the detail content, the navigation stack's path and the AppKit window
+/// configurator each used to answer "which destination is on screen" for
+/// themselves, from the same three inputs, with nothing making them agree.
+/// #124 is what that costs when the answers diverge.
+public enum SettingsDetailPresentation<Page: Equatable & Sendable>: Equatable, Sendable {
+  /// A display destination, with the sub-pages that are actually presentable
+  /// over it. Never a display the caller cannot render.
+  case display(key: String, path: [Page])
+  /// Not a display: either a pane is selected, or the selected display is not
+  /// there and the caller shows its fallback pane. Nothing is pushed either
+  /// way, because a pushed page belongs to a display.
+  case pane
+
+  /// The selected display, but only when the detail column can show it.
+  public var displayKey: String? {
+    guard case let .display(key, _) = self else { return nil }
+    return key
+  }
+
+  /// What is pushed on screen, which is not the same as what is retained for
+  /// later (SO23). The window configurator re-runs on this number.
+  public var pathDepth: Int {
+    guard case let .display(_, path) = self else { return 0 }
+    return path.count
+  }
+}
+
 /// Whether a selected display destination is still valid.
 ///
 /// Lives in CandelaKit rather than the view because it is the only part of the
@@ -34,6 +64,27 @@ public enum SettingsSelectionPolicy {
     if connectedKeys.contains(selectedDisplayKey) { return .keep(selectedDisplayKey) }
     if let sibling = connectedKeys.first { return .fallbackToSibling(sibling) }
     return .fallbackToPane
+  }
+
+  /// Resolves what the detail column shows, in one answer that the title, the
+  /// content, the pushed path and the window configurator all read.
+  ///
+  /// `retainedPath` is what the caller is HOLDING for that display (SO23), not
+  /// what it may show. A display that is not in `connectedKeys` presents
+  /// nothing pushed and falls back to a pane, which is the rule the three
+  /// separate answers used to disagree about: the title said "General", the
+  /// content rendered the General pane, and the navigation path went on
+  /// presenting a sub-page for a display nothing could look up. The caller's
+  /// retained storage is untouched by this: presenting nothing is not
+  /// forgetting, so the display coming back presents the same path again.
+  ///
+  /// `selectedDisplayKey` is nil when a pane is selected. Keys are
+  /// `DisplayPrefs` persistence keys, for `resolveDestination`'s reason.
+  public static func present<Page: Equatable & Sendable>(
+    selectedDisplayKey: String?, retainedPath: [Page], connectedKeys: [String]
+  ) -> SettingsDetailPresentation<Page> {
+    guard let selectedDisplayKey, connectedKeys.contains(selectedDisplayKey) else { return .pane }
+    return .display(key: selectedDisplayKey, path: retainedPath)
   }
 
   /// The key to re-select when a remembered display returns while the window is
