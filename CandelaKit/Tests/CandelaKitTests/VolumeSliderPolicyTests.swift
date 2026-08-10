@@ -33,4 +33,57 @@ struct VolumeSliderPolicyTests {
     // panel waits on DDC.
     #expect(VolumeSliderPolicy.isEnabled(override: .auto, volumeSupport: .unknown))
   }
+
+  // MARK: - The tooltip (Checkpoint 1 item 81)
+
+  /// The bug this pins: one hardcoded sentence blamed the DISPLAY for every
+  /// grey. A user who set the slider to always off was told their monitor
+  /// reports no volume control, which sends them to check a cable.
+  @Test func aUserSetGreyBlamesTheSettingAndNotTheDisplay() {
+    let reason = VolumeSliderPolicy.disabledReason(
+      displayName: "MAG 341C OLED", override: .forceNone, volumeSupport: .unknown)
+    #expect(reason == "The volume slider for MAG 341C OLED is set to always off.")
+  }
+
+  @Test func aDisplayDeniedGreyBlamesTheDisplay() {
+    let reason = VolumeSliderPolicy.disabledReason(
+      displayName: "DELL U2725QE", override: .auto, volumeSupport: .unsupported)
+    #expect(reason == "DELL U2725QE lists no volume command in its description.")
+  }
+
+  /// The two greys must never share a sentence. This is the whole defect.
+  @Test func theTwoCausesNeverProduceTheSameSentence() {
+    let setting = VolumeSliderPolicy.disabledReason(
+      displayName: "Same Display", override: .forceNone, volumeSupport: .unsupported)
+    let display = VolumeSliderPolicy.disabledReason(
+      displayName: "Same Display", override: .auto, volumeSupport: .unsupported)
+    #expect(setting != display)
+    #expect(setting != nil && display != nil)
+  }
+
+  /// An enabled slider explains nothing, and the invariant that keeps the
+  /// tooltip from outliving its cause: `disabledReason` is non-nil exactly when
+  /// `isEnabled` is false, across every combination.
+  @Test func aReasonExistsExactlyWhenTheSliderIsDisabled() {
+    for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
+      for support in [VCPSupport.supported, .unsupported, .unknown] {
+        let enabled = VolumeSliderPolicy.isEnabled(override: override, volumeSupport: support)
+        let reason = VolumeSliderPolicy.disabledReason(
+          displayName: "D", override: override, volumeSupport: support)
+        #expect(enabled == (reason == nil), "override \(override), support \(support)")
+      }
+    }
+  }
+
+  /// SO14: hardware is always "display" in copy, never "panel".
+  @Test func noReasonCallsTheHardwareAPanel() {
+    for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
+      for support in [VCPSupport.supported, .unsupported, .unknown] {
+        let reason = VolumeSliderPolicy.disabledReason(
+          displayName: "D", override: override, volumeSupport: support) ?? ""
+        #expect(!reason.lowercased().contains("panel"))
+        #expect(!reason.contains("\u{2014}"))
+      }
+    }
+  }
 }

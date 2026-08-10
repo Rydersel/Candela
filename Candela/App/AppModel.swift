@@ -480,6 +480,17 @@ final class AppModel {
     )
   }
 
+  /// The tooltip for a greyed volume slider, from the same two inputs the
+  /// enablement reads, so the explanation can never describe a cause other than
+  /// the one that applied.
+  func volumeSliderDisabledReason(_ state: DisplayState, displayName: String) -> String? {
+    VolumeSliderPolicy.disabledReason(
+      displayName: displayName,
+      override: DisplayPrefs(persistenceKey: state.display.persistenceKey).audioSinkOverride,
+      volumeSupport: volumeSupport[state.display.persistenceKey] ?? .unknown
+    )
+  }
+
   /// Starts a capabilities probe for every display `CapabilityProbePolicy` says
   /// is eligible.
   ///

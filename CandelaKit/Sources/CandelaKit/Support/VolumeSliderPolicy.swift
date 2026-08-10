@@ -21,4 +21,34 @@ public enum VolumeSliderPolicy {
       volumeSupport != .unsupported
     }
   }
+
+  /// Why the slider is refusing input, for the panel's tooltip. `nil` when it
+  /// is enabled: a working control has nothing to explain.
+  ///
+  /// Lives beside `isEnabled` so the two cannot drift. A tooltip that outlives
+  /// the condition it describes is worse than none, and these are the same
+  /// switch read twice.
+  ///
+  /// **Two different facts reach here and the old tooltip collapsed them.** It
+  /// said "<name> reports no volume control over DDC" for every grey, so a
+  /// user who had turned the slider off themselves was told their monitor had
+  /// refused, which sends them to check a cable. On a write-only panel it was
+  /// false twice over: that display reports nothing at all, and D24 resolves
+  /// its unknown to ENABLED, so the only way it could grey was the override
+  /// the sentence denied. Found on hardware 2026-08-10, Checkpoint 1 item 81.
+  public static func disabledReason(
+    displayName: String, override: AudioSinkOverride, volumeSupport: VCPSupport
+  ) -> String? {
+    guard !isEnabled(override: override, volumeSupport: volumeSupport) else { return nil }
+    switch override {
+    case .forceNone:
+      return "The volume slider for \(displayName) is set to always off."
+    case .auto:
+      return "\(displayName) lists no volume command in its description."
+    case .forcePresent:
+      // Unreachable: forcePresent always enables, so the guard above returned.
+      // Stated rather than defaulted so a new case is a compile error here.
+      return nil
+    }
+  }
 }

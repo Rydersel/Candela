@@ -98,9 +98,11 @@ struct PanelView: View {
                 mutedSystemImage: "speaker.slash.fill"
               )
               .disabled(!volumeEnabled)
-              // The reason changed with the signal: this is the monitor
-              // declining the feature, not macOS failing to find a speaker.
-              .help(volumeEnabled ? "" : "\(name) reports no volume control over DDC")
+              // The reason comes from the policy that made the decision, so the
+              // tooltip cannot describe a cause other than the one that applied
+              // (D24). It used to be one hardcoded sentence blaming the display
+              // for every grey, including the greys the user caused.
+              .help(model.volumeSliderDisabledReason(state, displayName: name) ?? "")
             }
             if showsContrastSlider(for: state) {
               ValueSliderRow(
