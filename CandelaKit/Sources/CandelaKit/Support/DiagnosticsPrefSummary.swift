@@ -67,12 +67,8 @@ public enum DiagnosticsPrefSummary {
     // at 60 s" is the line that explains everything.
     if prefs.oledCareEnrolled { note(.oledCareEnrolled, "true") }
     if prefs.oledIdleDimSeconds != 300 { note(.oledIdleDimSeconds, "\(prefs.oledIdleDimSeconds)") }
-    // Reported as the BRIGHTNESS-while-dimmed the user set (0.1 darkest), not
-    // as the overlay opacity the key stores, which is its complement. A report
-    // read next to `defaults read` will disagree with it by design; the number
-    // here is the one the pane showed, which is what a bug report is about.
     if prefs.oledIdleDimBrightness != 0.5 {
-      note(.oledIdleDimLevel, "\(prefs.oledIdleDimBrightness) brightness")
+      note(.oledIdleDimLevel, dimLevel(brightness: prefs.oledIdleDimBrightness))
     }
     if !prefs.oledLockDim { note(.oledLockDim, "false") }
     if prefs.oledBlackoutEnabled { note(.oledBlackoutEnabled, "true") }
@@ -82,7 +78,7 @@ public enum DiagnosticsPrefSummary {
       note(.oledUnfocusedDimSeconds, "\(prefs.oledUnfocusedDimSeconds)")
     }
     if prefs.oledUnfocusedDimBrightness != 0.7 {
-      note(.oledUnfocusedDimLevel, "\(prefs.oledUnfocusedDimBrightness) brightness")
+      note(.oledUnfocusedDimLevel, dimLevel(brightness: prefs.oledUnfocusedDimBrightness))
     }
     if !prefs.oledHoursTracking { note(.oledHoursTracking, "false") }
     // W3b-1's two. Opposite defaults, so opposite tests: telemetry is OFF until
@@ -124,5 +120,22 @@ public enum DiagnosticsPrefSummary {
     }
 
     return lines
+  }
+
+  /// A dim setting, stated as BOTH numbers a reader may be holding.
+  ///
+  /// The line is named for the storage key, which holds the dim amount, so that
+  /// is the number a reader cross-checking `defaults read` has to find under it.
+  /// The brightness the panel is LEFT at is its complement, and it is the number
+  /// the pane showed and the one a bug report is usually about. Reporting one
+  /// under the other's name is what made a reader conclude the report and the
+  /// domain disagreed (#125); stating both, each named, is what closed it.
+  ///
+  /// Percent-formatted through the same helper as every other percentage in the
+  /// app, because the accessor derives its value as `1 - stored`: a stored 0.9
+  /// gives 0.09999999999999998, and raw binary noise in the artifact people
+  /// paste into bug reports reads as a bug in the app.
+  private static func dimLevel(brightness: Double) -> String {
+    "\(SliderSnap.percentText(1 - brightness)) (leaves \(SliderSnap.percentText(brightness)) brightness)"
   }
 }
