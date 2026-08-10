@@ -117,8 +117,11 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   /// bar is the master's — and is not a thing to "fix" back.
   ///
   /// The name is a separate question from the placement and is deliberately NOT
-  /// resolved: a pill on the master naming the panel whose brightness moved is
-  /// the honest reading of a mirror set.
+  /// resolved here either. Note what that costs the CALLER: because the windows
+  /// are keyed by `displayID`, every member of a mirror set addresses ONE
+  /// window, and calling this once per member leaves the last call's name and
+  /// value on screen. `HUDGrouping` exists so that choice is made once and on
+  /// purpose rather than by iteration order (#123).
   func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String, value: Float, maxValue: Float = 1, nameSuffix: String? = nil) {
     guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
       return
