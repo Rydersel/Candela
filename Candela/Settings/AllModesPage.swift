@@ -300,7 +300,7 @@ struct AllModesPage: View {
     )
     let caps = catalog.current != nil && outcome?.lowersCurrentRate == true
     let hz = outcome?.appliedHz ?? DisplayMode.quantizedRefresh(row.mode.refreshHz)
-    let tags = catalog.fullListTags(for: row.mode, isLowResolutionDuplicate: false)
+    let tags = catalog.tags(for: row.mode, isLowResolutionDuplicate: false)
     // A mode with no rate has no rate: nil, never 0, because "at 0 hertz" is a
     // claim and "0 Hz" is a value nobody can act on. The row then names the
     // size alone, which is all it knows.
@@ -333,7 +333,7 @@ struct AllModesPage: View {
     _ mode: DisplayMode, in catalog: DisplayModeCoordinator.Catalog,
     lowResolution: Set<Int32>
   ) -> some View {
-    let tags = catalog.fullListTags(
+    let tags = catalog.tags(
       for: mode, isLowResolutionDuplicate: lowResolution.contains(mode.ioModeID)
     )
     // nil, never 0 — see `recommendedRow`.

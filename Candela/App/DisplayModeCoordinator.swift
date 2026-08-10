@@ -1110,40 +1110,34 @@ protocol ModeConfirmationPresenting: AnyObject {
 }
 
 extension DisplayModeCoordinator.Catalog {
-  /// Native / HiDPI / Scaled for one mode of THIS panel — the same logical
-  /// size is native on one display and an oversized render on another.
+  /// The words that name one mode of THIS panel: the same logical size is
+  /// native on one display and an oversized render on another.
   ///
   /// **RM11 rests on this now.** The size label used to hedge ("Looks like
   /// 2560 × 1440") because a bare size can be read as a claim that the panel
   /// really is that many pixels. The hedge is gone; these words carry the
   /// claim instead, so every surface that offers a size has to wear them, and
-  /// they have to be computed in ONE place — three private copies is how the
+  /// they have to be computed in ONE place: three private copies is how the
   /// rule drifts.
   ///
   /// Words, not a formatted string: a popup item is a single label and
   /// parenthesises them, a two-column row separates them with a dot. The words
   /// are the statement; the punctuation is layout.
   ///
-  /// "Scaled" is suppressed rather than guessed when the panel's native size is
-  /// unknown, and is never said about the native mode itself.
-  func badges(for mode: DisplayMode) -> [String] {
-    var badges: [String] = []
-    if mode.isNative { badges.append("Native") }
-    if mode.isHiDPI { badges.append("HiDPI") }
-    if isScaled(mode) { badges.append("Scaled") }
-    return badges
-  }
-
-  /// The same words for the All Sizes & Refresh Rates page, where SO14 retires
-  /// "HiDPI": the sharp mode says nothing, and the 1x duplicate it used to be
-  /// distinguished FROM carries "low resolution" instead — macOS's own
-  /// vocabulary. Native and Scaled are unchanged, and share `isScaled` with
-  /// `badges` so the one rule that decides them cannot fork.
+  /// SO14 retires "HiDPI" from copy, and this is the one place it was still
+  /// said (the menu-bar list, left alone by the settings overhaul and tracked
+  /// as #96 rather than blessed). The inversion is macOS's own: the sharp mode
+  /// says nothing, and the 1x duplicate it used to be distinguished FROM
+  /// carries "low resolution" instead.
   ///
   /// `isLowResolutionDuplicate` is asked of `DisplayModeCatalog`, once per
   /// catalog rather than once per row: the answer depends on the mode's
-  /// siblings at the same logical size, and this page renders hundreds of rows.
-  func fullListTags(for mode: DisplayMode, isLowResolutionDuplicate: Bool) -> [String] {
+  /// siblings at the same logical size, and the full list renders hundreds of
+  /// rows. Curated surfaces pass `false`; see `badgedSize`.
+  ///
+  /// "Scaled" is suppressed rather than guessed when the panel's native size is
+  /// unknown, and is never said about the native mode itself.
+  func tags(for mode: DisplayMode, isLowResolutionDuplicate: Bool) -> [String] {
     var tags: [String] = []
     if mode.isNative { tags.append("Native") }
     if isScaled(mode) { tags.append("Scaled") }
@@ -1160,12 +1154,20 @@ extension DisplayModeCoordinator.Catalog {
     )
   }
 
-  /// The size and its badges as one label, for surfaces that draw a single
-  /// string — a popup item, a panel row, a disclosure summary.
+  /// The size and its tags as one label, for surfaces that draw a single
+  /// string: a popup item, a panel row, a disclosure summary.
+  ///
+  /// `isLowResolutionDuplicate: false`, deliberately and for the same reason
+  /// the Recommended list passes it (`AllModesPage.recommendedRow`): its caller
+  /// renders the CURATED list, one row per logical size, and a curated row is a
+  /// 1x mode with a sharp twin only when that mode is the panel's NATIVE one
+  /// (`representativeRanking` rule 1 outranks rule 2). Tagging a display's own
+  /// native resolution "low resolution" would be an insult rather than a
+  /// distinction, and the twin is not on screen here to be distinguished from.
   func badgedSize(_ mode: DisplayMode) -> String {
-    let badges = badges(for: mode)
-    guard !badges.isEmpty else { return DisplayModeCopy.size(mode) }
-    return "\(DisplayModeCopy.size(mode)) (\(badges.joined(separator: ", ")))"
+    let tags = tags(for: mode, isLowResolutionDuplicate: false)
+    guard !tags.isEmpty else { return DisplayModeCopy.size(mode) }
+    return "\(DisplayModeCopy.size(mode)) (\(tags.joined(separator: ", ")))"
   }
 
   /// The mode to apply for a curated row: the chosen SIZE at the refresh rate
