@@ -46,25 +46,9 @@ struct DDCCommandApplierTests {
     // accidental short-circuit (`allOK && await write`) would still pass both
     // assertions. Failing 0x10 pins BOTH halves of the contract — the failure
     // propagates AND the fan-out continues to 0x2F.
-    let fake = PartialFailDDC(failingCommand: 0x10)
+    let fake = FakeDDC(readResult: nil, failingCommands: [0x10])
     let applier = DDCCommandApplier(writer: fake, command: VCP.contrast, remapCodes: [0x10, 0x2F])
     #expect(await applier.apply(.ddc(raw: 7)) == false)
     #expect(await fake.recordedWrites().map(\.command) == [0x10, 0x2F]) // no short-circuit past the failure
   }
-}
-
-/// Fails writes to one specific code; records everything.
-actor PartialFailDDC: DDCWriting {
-  private(set) var writes: [(command: UInt8, value: UInt16)] = []
-  private let failingCommand: UInt8
-
-  init(failingCommand: UInt8) { self.failingCommand = failingCommand }
-
-  func write(command: UInt8, value: UInt16) async -> Bool {
-    writes.append((command, value))
-    return command != failingCommand
-  }
-
-  func read(command _: UInt8) async -> (current: UInt16, max: UInt16)? { nil }
-  func recordedWrites() -> [(command: UInt8, value: UInt16)] { writes }
 }

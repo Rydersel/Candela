@@ -3,46 +3,6 @@ import Foundation
 import Testing
 @testable import CandelaKit
 
-/// A shade that can be told to fail, so the engine's reaction to a failure is
-/// testable at all — which it was not, because the protocol returned void.
-@MainActor
-final class ReportingShade: ShadeRendering {
-  var succeeds = true
-  private(set) var alphaCalls: [(alpha: Double, id: CGDirectDisplayID)] = []
-  private(set) var removed: [CGDirectDisplayID] = []
-
-  @discardableResult
-  func setShadeAlpha(_ alpha: Double, on displayID: CGDirectDisplayID) -> Bool {
-    alphaCalls.append((alpha, displayID))
-    return succeeds
-  }
-
-  func removeShade(for displayID: CGDirectDisplayID) { removed.append(displayID) }
-  func removeAllShades() {}
-  func repinFrames() {}
-}
-
-/// The gamma twin of `ReportingShade`, recording BOTH IDs of every call: the
-/// separation of the write target from the enforcer target is the thing under
-/// test, so a fake that collapsed them could not see the defect.
-@MainActor
-final class ReportingGamma: GammaApplying {
-  var succeeds = true
-  private(set) var calls: [(scale: Double, write: CGDirectDisplayID, enforcer: CGDirectDisplayID)] = []
-
-  @discardableResult
-  func applyGammaScale(
-    _ scale: Double, on displayID: CGDirectDisplayID, enforcerOn drawableDisplayID: CGDirectDisplayID
-  ) -> Bool {
-    calls.append((scale, displayID, drawableDisplayID))
-    return succeeds
-  }
-
-  func verifyTableIntact(on _: CGDirectDisplayID) -> Bool { true }
-  func recaptureDefaultTable(on _: CGDirectDisplayID) {}
-  func resetAllGamma() {}
-}
-
 @Suite("Software dimming reports failure instead of faking success (DT17)")
 @MainActor
 struct SoftwareDimmingReportingTests {
@@ -59,7 +19,7 @@ struct SoftwareDimmingReportingTests {
   }
 
   private func controller(
-    shade: ReportingShade, gamma: ReportingGamma, store: MirrorTopologyStore,
+    shade: RecordingShade, gamma: RecordingGamma, store: MirrorTopologyStore,
     configure: (DisplayPrefs) -> Void
   ) -> BrightnessController {
     let defaults = InMemoryDefaults()
@@ -80,8 +40,8 @@ struct SoftwareDimmingReportingTests {
   /// slave's panel is what we want dimmed — while the activity enforcer goes to
   /// the display that actually has a compositor.
   @Test func theGammaWriteStaysOnThePanelWhileTheEnforcerMovesToTheMaster() {
-    let shade = ReportingShade()
-    let gamma = ReportingGamma()
+    let shade = RecordingShade()
+    let gamma = RecordingGamma()
     let controller = controller(shade: shade, gamma: gamma, store: mirroredStore()) { prefs in
       prefs.forceSoftware = true
       prefs.avoidGamma = false
@@ -95,8 +55,8 @@ struct SoftwareDimmingReportingTests {
   /// framebuffer every panel in the set is showing, and a shade keyed to a
   /// display with no desktop is a window nothing ever dims.
   @Test func theShadeIsAppliedToTheDisplayThatOwnsThePixels() {
-    let shade = ReportingShade()
-    let gamma = ReportingGamma()
+    let shade = RecordingShade()
+    let gamma = RecordingGamma()
     let controller = controller(shade: shade, gamma: gamma, store: mirroredStore()) { prefs in
       prefs.forceSoftware = true
       prefs.avoidGamma = true
@@ -110,8 +70,8 @@ struct SoftwareDimmingReportingTests {
   /// the identical value is deduped away forever and the display never dims
   /// again — while the engine reports a brightness it never achieved.
   @Test func aFailedShadeWriteIsRetriedRatherThanMemoisedAsApplied() {
-    let shade = ReportingShade()
-    let gamma = ReportingGamma()
+    let shade = RecordingShade()
+    let gamma = RecordingGamma()
     shade.succeeds = false
     let controller = controller(shade: shade, gamma: gamma, store: mirroredStore()) { prefs in
       prefs.forceSoftware = true
@@ -130,8 +90,8 @@ struct SoftwareDimmingReportingTests {
   }
 
   @Test func aFailedGammaWriteIsRetriedRatherThanMemoisedAsApplied() {
-    let shade = ReportingShade()
-    let gamma = ReportingGamma()
+    let shade = RecordingShade()
+    let gamma = RecordingGamma()
     gamma.succeeds = false
     let controller = controller(shade: shade, gamma: gamma, store: mirroredStore()) { prefs in
       prefs.forceSoftware = true
@@ -145,8 +105,8 @@ struct SoftwareDimmingReportingTests {
   /// An engine nobody wired a topology into behaves exactly as it does today:
   /// the identity function, not a crash and not a guess.
   @Test func anUnwiredEngineResolvesEveryDisplayToItself() {
-    let shade = ReportingShade()
-    let gamma = ReportingGamma()
+    let shade = RecordingShade()
+    let gamma = RecordingGamma()
     let controller = controller(shade: shade, gamma: gamma, store: MirrorTopologyStore()) { prefs in
       prefs.forceSoftware = true
       prefs.avoidGamma = true

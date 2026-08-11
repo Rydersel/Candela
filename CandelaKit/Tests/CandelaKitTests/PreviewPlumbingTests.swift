@@ -155,6 +155,79 @@ struct PreviewPlumbingTests {
   }
 }
 
+/// The clock the Mode, Mirror and Arrangement sessions each held a copy of (#68).
+@Suite("Preview countdown (#68)")
+struct PreviewCountdownTests {
+  @Test func anArmedClockSpendsItselfExactlyOnce() {
+    var clock = PreviewCountdown()
+    clock.arm(seconds: 3)
+
+    // Hoisted out of `#expect`: the macro captures its expression immutably, so
+    // a mutating call cannot be made inside one.
+    var fired = clock.tick(); #expect(fired == false)
+    fired = clock.tick(); #expect(fired == false)
+    #expect(clock.remaining == 1)
+    fired = clock.tick(); #expect(fired, "the tick that spends it")
+    #expect(clock.remaining == 0)
+    #expect(clock.isArmed == false)
+  }
+
+  /// THE reason this is a type and not an `Int`. A failed expiry revert disarms
+  /// rather than re-attempting from every later tick; re-attempting is
+  /// `revert()`'s job, on a person's say-so. If `isArmed` were derived from
+  /// `remaining > 0` the two facts would collapse and a spent clock would fire
+  /// again the moment anything nudged it.
+  @Test func aSpentClockNeverFiresAgainHoweverOftenItIsTicked() {
+    var clock = PreviewCountdown()
+    clock.arm(seconds: 1)
+    var fired = clock.tick(); #expect(fired)
+
+    for _ in 0 ..< 5 {
+      fired = clock.tick(); #expect(fired == false)
+    }
+    #expect(clock.remaining == 0, "and it does not run negative")
+  }
+
+  @Test func aClockThatWasNeverArmedDoesNothing() {
+    var clock = PreviewCountdown()
+    #expect(clock.isArmed == false)
+    let fired = clock.tick(); #expect(fired == false)
+    #expect(clock.remaining == 0)
+  }
+
+  /// Disarming is how every non-expiry ending is spelled: an answer, a discard,
+  /// a departure. It must stop the clock without firing it.
+  @Test func disarmingStopsTheClockWithoutFiringIt() {
+    var clock = PreviewCountdown()
+    clock.arm(seconds: 30)
+    clock.disarm()
+
+    #expect(clock.isArmed == false)
+    #expect(clock.remaining == 0)
+    let fired = clock.tick(); #expect(fired == false, "disarming is not a deferred expiry")
+  }
+
+  /// A second preview supersedes the first rather than nesting, so re-arming
+  /// restarts rather than adding time.
+  @Test func armingAgainRestartsRatherThanExtending() {
+    var clock = PreviewCountdown()
+    clock.arm(seconds: 30)
+    _ = clock.tick()
+    clock.arm(seconds: 30)
+
+    #expect(clock.remaining == 30)
+    #expect(clock.isArmed)
+  }
+
+  /// A one-second clock fires on its first tick. Off by one here would either
+  /// revert a preview immediately or leave it up a second past its deadline.
+  @Test func aOneSecondClockFiresOnTheFirstTick() {
+    var clock = PreviewCountdown()
+    clock.arm(seconds: 1)
+    let fired = clock.tick(); #expect(fired)
+  }
+}
+
 /// The other half of #68's consolidation: the five-term geometry match that was
 /// spelled out in `ModeReapplyPolicy` and in the apply cross-check.
 @Suite("Mode geometry matching (#68)")
