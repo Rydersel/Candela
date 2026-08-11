@@ -1,0 +1,63 @@
+import candelaC from '../assets/candela-c.svg'
+import { useRef, useState } from 'react'
+import menubarStrip from '../assets/menubar-strip.png'
+import panelWindow from '../assets/panel-window.png'
+
+const BREW_CMD = 'brew install --cask rydersel/tap/candela'
+
+function BrewInstall() {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<number>(undefined)
+  const copy = () => {
+    navigator.clipboard.writeText(BREW_CMD).then(() => {
+      setCopied(true)
+      window.clearTimeout(timer.current)
+      timer.current = window.setTimeout(() => setCopied(false), 2000)
+    })
+  }
+  return (
+    <button className="brew" type="button" onClick={copy} aria-label={`Copy ${BREW_CMD}`}>
+      <span className="brew-cmd">
+        <span className="brew-dollar">$ </span>
+        {BREW_CMD}
+      </span>
+      <span className={`brew-hint${copied ? ' copied' : ''}`}>{copied ? 'copied!' : 'click to copy'}</span>
+    </button>
+  )
+}
+
+export default function Hero() {
+  return (
+    <section id="hero">
+      <img src={candelaC} alt="" aria-hidden="true" className="hero-bgc" />
+      <div className="hero-inner wrap">
+        <div className="hero-copy">
+          <h1>
+            The display control<br className="h1br" /> macOS forgot to ship.
+          </h1>
+          <p className="sub">
+            Candela gives your external monitor everything it should have come with — Retina-sharp
+            scaling at any resolution, real brightness control, and virtual displays.
+          </p>
+          <div className="cta">
+            <a className="btn btn-primary" href="https://github.com/Rydersel/Candela/releases/latest">Download for macOS</a>
+            <a className="btn btn-quiet" href="https://github.com/Rydersel/Candela">View on GitHub</a>
+          </div>
+          <BrewInstall />
+          <p className="fineprint">Free &amp; open source&ensp;·&ensp;macOS 14+&ensp;·&ensp;Apple Silicon</p>
+        </div>
+        <div className="stage">
+          <div className="glowbed" aria-hidden="true" />
+          <img className="mb-strip" src={menubarStrip} width={324} height={24} alt="" aria-hidden="true" />
+          <img
+            className="shot"
+            src={panelWindow}
+            width={280}
+            height={459}
+            alt="The Candela menu bar panel controlling three displays, with brightness and volume sliders and per-display resolution and mirroring controls"
+          />
+        </div>
+      </div>
+    </section>
+  )
+}
