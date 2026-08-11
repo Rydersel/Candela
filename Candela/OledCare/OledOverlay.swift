@@ -29,9 +29,14 @@ final class OledOverlay {
   /// to catch. Recovery: a detected strand needs a lever, and only the window
   /// itself can be closed again.
   ///
-  /// The number is captured at close time rather than read back from the panel:
-  /// `windowNumber` is only meaningful while the window has a device, so a
-  /// closed panel cannot be asked what it used to be.
+  /// The number is captured at close time rather than read back from the panel,
+  /// but NOT because a closed panel has forgotten it: measured on macOS 26,
+  /// `windowNumber` is still the same value after `close()`. The reason is the
+  /// contract rather than the observation. `NSWindow.windowNumber` is documented
+  /// to return a value `<= 0` for a window with no device, and `CGWindowID(_:)`
+  /// traps on a negative, so reading it back later would convert a documented
+  /// return value into a crash. Capturing while the window is still on screen
+  /// means the guard at the call site is the only place that has to know.
   private struct ClosedOverlay {
     let panel: NSPanel
     let number: CGWindowID
@@ -116,13 +121,31 @@ final class OledOverlay {
     // one. Collapsing a uniform mask back to a scalar is the caller's job,
     // where both values are set together (`OledCareCoordinator.render`).
     let state = AppliedState(
-      alpha: min(max(alpha, 0), 1), blackout: blackout, mask: mask)
+      alpha: Self.sanitized(alpha), blackout: blackout, mask: mask)
     guard !existed || self.lastApplied[displayID] != state else {
       return true
     }
     self.lastApplied[displayID] = state
     self.write(state, to: window)
     return true
+  }
+
+  /// A clamp alone is not enough: `min(max(NaN, 0), 1)` is NaN in Swift, since
+  /// every comparison against NaN is false and both functions fall through to
+  /// the original value. A NaN alpha would then make `AppliedState` compare
+  /// unequal to itself, so the change-only-write guard below would miss every
+  /// time and `apply` would write to the window server on every tick, silently.
+  ///
+  /// Unreachable from the current callers, which sanitise at `OledDimConfig`
+  /// construction. Kept because the failure is invisible: a per-tick write looks
+  /// exactly like a working overlay.
+  ///
+  /// Non-finite resolves to 0, the transparent end. The overlay is the mechanism
+  /// that can darken a panel, so its one unforced choice belongs on the side
+  /// that cannot black out a display nobody asked to dim.
+  private static func sanitized(_ alpha: Double) -> Double {
+    guard alpha.isFinite else { return 0 }
+    return min(max(alpha, 0), 1)
   }
 
   /// Re-asserts the overlay's last applied state: the recovery lever for an
