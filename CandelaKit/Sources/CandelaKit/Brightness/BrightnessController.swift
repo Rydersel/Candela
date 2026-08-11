@@ -830,6 +830,54 @@ public final class BrightnessController {
     }
   }
 
+  /// Puts back HDR that was live before a reset and that Candela did not turn
+  /// on (#83), recording no mode for it.
+  ///
+  /// The reset paths drop HDR first so the DDC register is unlocked for the
+  /// D29 unmute below them. That is not negotiable; what is, is whether the
+  /// display stays out of HDR afterwards. Ruling: it does not, when the user
+  /// engaged HDR in System Settings. A reset clears **Candela's** settings, and
+  /// the display's HDR was never one of them.
+  ///
+  /// Which is also why this is not `setHDRMode(.alwaysOn)`: that persists
+  /// `.alwaysOn`, so a reset promising to clear settings would end by writing
+  /// one, and the app would then claim an opinion the user expressed somewhere
+  /// else. Leaving `hdrMode` at `.off` under live HDR is the honest record, and
+  /// it is a state the brightness path already handles (`usesNative` routes
+  /// native under externally-engaged HDR).
+  ///
+  /// Otherwise the engage arm's machinery exactly: C1 clearing, the settle
+  /// window with the poller gated off, and the measured check (#65). There is
+  /// no rollback, because there is no mode to roll back to. A restore that does
+  /// not take leaves the display where the disengage left it and says so.
+  public func restoreExternalHDR() async {
+    guard role == .external else { return }
+    clearSoftwareLeg()
+    beginHDRTransition()
+    let generation = hdrTransitionGeneration
+    let issued = await backends.hdr?.setHDR(displayID: displayID, enabled: true) ?? false
+    guard hdrTransitionGeneration == generation else { return }
+    if issued {
+      cachedHDRActive = true
+      try? await Task.sleep(for: settleDelay)
+      guard hdrTransitionGeneration == generation else { return }
+    }
+    settleInProgress = false
+    await refreshHDRCaches(measured: true)
+    guard hdrTransitionGeneration == generation else { return }
+    if cachedHDRActive {
+      assertNativeEntryBrightness()
+    } else {
+      pathLog.error(
+        "restoreExternalHDR did not take: display=\(self.displayID) was in HDR before the reset and is not now"
+      )
+      // The C1 clearing above took the software leg down for an HDR entry that
+      // did not happen, so the screen would otherwise sit un-dimmed under a low
+      // slider. Same recovery as the engage-failure arm.
+      applyPaths()
+    }
+  }
+
   /// Re-evaluates the cached HDR state (Task 4's topology loop calls this for
   /// every surviving display after `HDRToggling.displaysReconfigured()`).
   /// Detecting an externally-toggled HDR entry runs the C1 clearing.

@@ -934,8 +934,23 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //         doors, while the prefs that describe that state still exist.
     //         (D30: the controllers holding this state are about to be dropped,
     //         so nothing downstream can undo it for us.)
+    // Displays whose HDR the USER engaged in System Settings (#83). Keyed by
+    // `persistenceKey` and not `CGDirectDisplayID`, because step 5 rebuilds
+    // every controller and the display list is re-derived on the far side of
+    // that; the EDID key is the only identity that survives it.
+    var restoreHDRAfterRebuild: Set<String> = []
+
     for state in model.displays {
       let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
+
+      // Two different things, asked before the disengage: `isHDREngaged` is the
+      // display's state, `hdrMode` is Candela's opinion. Live HDR with no
+      // opinion behind it came from System Settings and goes back at the end;
+      // live HDR under `.alwaysOn` is a Candela setting, and clearing it is
+      // what this button is for.
+      if state.controller.isHDREngaged, state.controller.hdrMode == .off {
+        restoreHDRAfterRebuild.insert(state.display.persistenceKey)
+      }
 
       // HDR first. The controller mirrors `hdrMode` behind a state machine and
       // `setHDRMode` opens with `guard mode != previous else { return }` (D22:
@@ -1007,6 +1022,18 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // Post-reset state IS first-run state: prefsSchemaVersion is gone, so
     // onboarding re-runs (wired by Task 15; default no-op until then).
     settingsActions.postReset()
+
+    // ---- 6. LAST (#83). The reset dropped HDR so the DDC register was
+    //         unlocked for the D29 unmute in step 1, and re-engaging locks it
+    //         again, so this cannot run before the rebuilt controllers have
+    //         taken their own opening writes. It restores the display's state,
+    //         NOT a mode: `restoreExternalHDR` deliberately persists nothing,
+    //         because a reset that promises to clear Candela's settings must
+    //         not end by writing one.
+    for state in model.displays
+      where restoreHDRAfterRebuild.contains(state.display.persistenceKey) {
+      await state.controller.restoreExternalHDR()
+    }
     // OLED care's latch is cleared by the `defer` at the top of this function,
     // which runs here — after every statement above.
   }
