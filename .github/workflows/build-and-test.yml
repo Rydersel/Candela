@@ -1,0 +1,222 @@
+# The first workflow in this repository that compiles a line of Swift (#139).
+# The other three all check the CONTEXT layer (docs, skills, router, issue
+# tracker), so until now the engine's 1397 tests were guarded on the honour
+# system: green meant somebody remembered to run `swift test` locally and read
+# the output.
+#
+# Two jobs, and only the first one is load-bearing:
+#   test       CandelaKit's suite, the project's only automated coverage
+#   app-build  the app target compiles, which the suite cannot tell you
+#
+# Why a hosted runner is a valid environment for the suite and not a degraded
+# one: CandelaKit is hardware-free by design (CLAUDE.md §5), imports no AppKit
+# or SwiftUI, and needs no attached panel, no Accessibility grant and no signing
+# identity. Everything that touches a display sits behind a protocol and is
+# faked in the tests, so a machine with no monitors runs the whole suite rather
+# than a subset of it. Nothing here verifies display BEHAVIOUR, and nothing here
+# ever will: that is what candela-probe and the hardware passes are for.
+name: Build and test
+
+on:
+  # push is restricted to main while pull_request carries everything else, and
+  # the split is deliberate rather than copied. A workflow triggered by an
+  # unrestricted push AND by pull_request runs twice on every commit to an open
+  # PR's branch. The three context workflows can absorb that on ubuntu; this one
+  # should not, because the repository is private and macOS runner minutes bill
+  # at 10x the Linux rate. The duplicate would be the most expensive thing in
+  # the pipeline and would buy no signal at all.
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# No `paths:` filter, and unlike context.yml that is a decision rather than an
+# oversight waiting to be tuned. context.yml documents at length how its path
+# lists had to be widened by hand once a check grew, and how six citations sat
+# unguarded until somebody noticed. The same maintenance here would fail worse:
+# the engine's tests cover types the app target consumes, so a filter that
+# misses a path lets a real break through as green. The suite is well under a
+# minute; always running it is both simpler and safer.
+
+permissions:
+  contents: read
+
+# A newer push makes the older run's verdict worthless, and on a 10x-billed
+# runner there is no reason to pay for the answer to a superseded question.
+concurrency:
+  group: build-and-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Pinned to macos-26, not macos-latest, and matched to the dev machine's
+    # major version on purpose. The label decides which Swift compiler runs, and
+    # a compiler older than the one the code is written against produces reds
+    # that describe the runner rather than the diff. macos-15 carries Xcode 16
+    # (Swift 6.0/6.1) against Xcode 26 locally, which is a real gap to gamble on
+    # for no benefit. `latest` is the same gamble with the added property that it
+    # moves without a commit.
+    #
+    # The cost of pinning is that this line needs a bump when the image is
+    # retired, which GitHub announces and which fails loudly rather than
+    # silently. That is the cheaper failure.
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Printed, never asserted. Pinning an exact Xcode build here would redden
+      # the pipeline the day the image rolls forward, a standing maintenance
+      # cost with no matching risk: the package declares swift-tools 6.0 and a
+      # macOS 14 floor, so it builds on any toolchain new enough for both. What
+      # this step buys is attribution. When a run fails for a reason the diff
+      # does not explain, the first question asked is which toolchain it ran on,
+      # and the answer should already be in the log.
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Run the suite
+        working-directory: CandelaKit
+        shell: bash
+        run: |
+          set -euo pipefail
+          # pipefail is load-bearing here, not boilerplate. A pipeline reports
+          # the exit status of its LAST command, so `swift test | tee` without it
+          # reports tee's status, and tee succeeds whatever swift test did. Every
+          # failing suite would be published as green. That is the same
+          # report-a-success-you-did-not-achieve defect CLAUDE.md §2 catalogues,
+          # one layer up from the hardware.
+          swift test 2>&1 | tee "$RUNNER_TEMP/kit-tests.log"
+
+      # A gate nobody has seen fail is a gate nobody should trust, which is the
+      # discipline both context.yml and issue-hygiene.yml already apply to
+      # themselves. The failure mode worth guarding is not a red build; it is a
+      # GREEN one that exercised nothing, and reaching it takes no bug at all.
+      # A test target dropped from Package.swift, a filter matching no test, a
+      # build that produced an empty bundle: each exits 0 having run zero tests,
+      # and the step above cannot tell that apart from a pass.
+      #
+      # So the run's own summary line is read back out of the log. Absence of
+      # that line is a failure in its own right: it means either nothing ran or
+      # the output format moved, and under both readings the zero-exit above has
+      # stopped being evidence of anything.
+      #
+      # Both halves were demonstrated failing on this runner before the workflow
+      # merged [MEASURED 2026-08-11], because a gate whose red path nobody has
+      # watched is a gate nobody should trust:
+      #   run 31542488117  one expectation flipped to a wrong value. `swift test`
+      #                    exited 1, the status survived the pipe into tee, and
+      #                    the job went red at "Run the suite".
+      #   run 31542654491  the suite filtered down to a name matching nothing.
+      #                    `swift test` printed "Test run with 0 tests in 0
+      #                    suites passed" and exited 0, so "Run the suite" was
+      #                    GREEN; this step is what failed the job. That is the
+      #                    exact vacuous pass the floor exists for, and it needed
+      #                    no bug to produce.
+      - name: Positive control (the run discovered the suite)
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/kit-tests.log"
+
+          # The floor is a collapse detector, not a ratchet. It sits far below
+          # the 1397 tests present when this was written so ordinary churn
+          # (deleting a suite, folding two together, moving coverage into the
+          # app target) never has to touch it, and far enough above zero that a
+          # run discovering nothing cannot slip past. If it ever stops
+          # discriminating, raise it; do not track the real count with it.
+          floor=1000
+
+          line="$(grep -E 'Test run with [0-9]+ tests' "$log" | tail -1 || true)"
+          if [ -z "$line" ]; then
+            echo "::error::swift test printed no run summary. Either it executed no tests, or the summary format changed and this control has gone blind. Under both readings the green exit code from the previous step is not evidence that anything was exercised."
+            exit 1
+          fi
+
+          count="$(printf '%s\n' "$line" | sed -E 's/.*Test run with ([0-9]+) tests.*/\1/')"
+          echo "Reported by the run: $line"
+
+          if [ "$count" -lt "$floor" ]; then
+            echo "::error::Only $count tests ran, under the floor of $floor. The suite has collapsed or is being filtered, and a pass over $count tests is not the gate this job exists to be."
+            exit 1
+          fi
+          echo "Positive control OK: $count tests discovered and run, above the floor of $floor."
+
+  # Added on evidence, not on principle. The open question in #139 was whether a
+  # hosted image can compile this app at all: the app target is macOS 14 at its
+  # deployment floor but calls at least one macOS 26 SDK symbol behind an
+  # `#available` check (`sharedBackgroundVisibility`, SettingsRootView.swift),
+  # which needs a macOS 26 SDK to compile even though it needs macOS 26 only to
+  # RUN. GitHub's images do not always carry the newest Xcode, and a build job
+  # that cannot compile the tree is worse than none.
+  #
+  # Measured on the runner, 2026-08-11: macos-26-arm64 image 20260728.0273 runs
+  # macOS 26.5.2 on arm64 with Xcode 26.6 (17F113) selected, Swift 6.3.3, and the
+  # macOS 26.5 SDK. Every Xcode from 26.0.1 to 26.6 is installed. That is AHEAD
+  # of the dev machine (Xcode 26.4, Swift 6.3), same major version and same
+  # architecture, so the job compiles what a developer compiles. It built clean
+  # in 49 seconds.
+  #
+  # What this job is for: the test suite cannot see the app target at all. There
+  # is no app test target (D21), CandelaKit is barred from importing SwiftUI, and
+  # so every SwiftUI view, every AppKit island and every use of the engine's API
+  # from the app side is currently uncompiled by CI. A signature change in the
+  # Kit that breaks a call site in Candela/ passes `swift test` and always will.
+  app-build:
+    # Not `needs: test`. They are independent questions and running them in
+    # parallel answers both on every push, where chaining would hide a build
+    # break behind an unrelated test failure and cost a second round trip to
+    # find it. Neither job is long enough for the sequencing to save anything.
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # Not preinstalled on the image (verified: `which xcodegen` finds nothing).
+      # Unpinned, because Homebrew has no ergonomic way to pin a formula version
+      # and the generator's output is checked by the build that follows it: if a
+      # newer xcodegen emitted a broken project, this job goes red rather than
+      # quietly shipping one. The project file itself is generated and gitignored
+      # (CLAUDE.md §3), so there is nothing to compare against anyway.
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      # project.yml is the source of truth and Candela.xcodeproj is gitignored,
+      # so CI has to generate it exactly as a developer does.
+      - name: Generate the project
+        run: xcodegen generate
+
+      # An explicit -derivedDataPath for the same reason CLAUDE.md §3 requires
+      # one in the deploy loop: it puts the product somewhere known, so the check
+      # below is looking at THIS build's output and not at whatever a shared
+      # location happened to hold.
+      - name: Build the app
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project Candela.xcodeproj -scheme Candela \
+            -configuration Debug -derivedDataPath "$RUNNER_TEMP/dd" build
+
+      # `** BUILD SUCCEEDED **` is a claim about the build, not about a product.
+      # Treating it as proof that an app exists is the same mistake as treating a
+      # DDC write ACK as proof a monitor changed (CLAUDE.md §2): check the
+      # achieved state. A misconfigured scheme or a target that compiled to
+      # nothing can both exit 0, so the binary is looked for by name.
+      - name: Positive control (a product actually came out)
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/dd/Build/Products/Debug/Candela.app"
+          if [ ! -x "$app/Contents/MacOS/Candela" ]; then
+            echo "::error::xcodebuild reported success but produced no executable at $app/Contents/MacOS/Candela. The build is not building what this job claims it is."
+            exit 1
+          fi
+          echo "Positive control OK: $(file -b "$app/Contents/MacOS/Candela")"
