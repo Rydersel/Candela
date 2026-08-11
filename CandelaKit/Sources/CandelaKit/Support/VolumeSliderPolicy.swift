@@ -51,4 +51,29 @@ public enum VolumeSliderPolicy {
       return nil
     }
   }
+
+  /// The same two causes, worded for the menu bar's panel (#130).
+  ///
+  /// Shorter because of WHERE it renders, not to save characters. The panel
+  /// draws this in a 280 pt column directly under the display's own name header,
+  /// so naming the display again repeats a word already on screen one row up and
+  /// wraps a one-line caption onto three. The settings page keeps the long form,
+  /// which does name the display, because that page can show several at once.
+  ///
+  /// Nil exactly when the slider is enabled, the same invariant the long form
+  /// holds: the panel binds the caption's existence to this, so a reason can
+  /// never outlive the grey that caused it.
+  public static func compactDisabledReason(
+    override: AudioSinkOverride, volumeSupport: VCPSupport
+  ) -> String? {
+    guard !isEnabled(override: override, volumeSupport: volumeSupport) else { return nil }
+    switch override {
+    case .forceNone:
+      return "Volume slider set to always off."
+    case .auto:
+      return "This display lists no volume command."
+    case .forcePresent:
+      return nil
+    }
+  }
 }

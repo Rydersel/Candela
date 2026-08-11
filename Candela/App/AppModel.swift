@@ -491,6 +491,15 @@ final class AppModel {
     )
   }
 
+  /// The same reason worded for the menu bar's panel, which renders it under the
+  /// display's own name header and so must not repeat that name (#130).
+  func volumeSliderCompactReason(_ state: DisplayState) -> String? {
+    VolumeSliderPolicy.compactDisabledReason(
+      override: DisplayPrefs(persistenceKey: state.display.persistenceKey).audioSinkOverride,
+      volumeSupport: volumeSupport[state.display.persistenceKey] ?? .unknown
+    )
+  }
+
   /// Starts a capabilities probe for every display `CapabilityProbePolicy` says
   /// is eligible.
   ///

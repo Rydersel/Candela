@@ -98,11 +98,15 @@ struct PanelView: View {
                 mutedSystemImage: "speaker.slash.fill"
               )
               .disabled(!volumeEnabled)
-              // The reason comes from the policy that made the decision, so the
-              // tooltip cannot describe a cause other than the one that applied
-              // (D24). It used to be one hardcoded sentence blaming the display
-              // for every grey, including the greys the user caused.
-              .help(model.volumeSliderDisabledReason(state, displayName: name) ?? "")
+              // The reason comes from the policy that made the decision, so it
+              // cannot describe a cause other than the one that applied (D24).
+              // It used to be one hardcoded sentence blaming the display for
+              // every grey, including the greys the user caused.
+              //
+              // Revealed on hover rather than as a tooltip: no tooltip is
+              // delivered anywhere in this panel (#130). The short form, because
+              // this renders under the display's own header.
+              .panelHoverReason(model.volumeSliderCompactReason(state))
             }
             if showsContrastSlider(for: state) {
               ValueSliderRow(
@@ -400,7 +404,10 @@ private struct DisplayHeaderRow: View {
     // is observation-tracked, so the button enables live once the async
     // capability refresh lands.
     .disabled(!controller.supportsHDR)
-    .help("Toggle HDR for \(displayName)")
+    // No `.help`: the panel delivers no tooltip at all (#130), on this ENABLED
+    // control least of all, since measuring it here is what proved the cause is
+    // menu tracking rather than the greying next door. The accessibility label
+    // below is what actually names this control.
     .accessibilityLabel("\(displayName) HDR mode")
     .accessibilityValue(modeLabel)
   }
