@@ -88,28 +88,60 @@ struct CandelaSlider: View {
     // `.repeat` included so holding an arrow ramps the value, which is what a
     // 5%-per-press step needs to be usable across the whole range.
     .onKeyPress(keys: [.leftArrow, .rightArrow], phases: [.down, .repeat]) { press in
-      let step = press.modifiers.contains(.option) ? 0.01 : 0.05
+      let step = press.modifiers.contains(.option) ? 0.01 : Self.step
       adjust(by: press.key == .leftArrow ? -step : step)
       return .handled
     }
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel(accessibilityLabel)
-    .accessibilityValue(SliderSnap.percentText(value))
-    .accessibilityAdjustableAction { direction in
-      switch direction {
-      case .increment: adjust(by: 0.05)
-      case .decrement: adjust(by: -0.05)
-      @unknown default: break
+    // Every pixel here is ours, so the platform has nothing to infer a role
+    // from: a label, a value and an adjustable action on a custom element still
+    // reached the accessibility layer as AXUnknown with no value at all (#138),
+    // because SwiftUI has no "this is a slider" trait to attach. Standing in a
+    // real `Slider` is the supported route to a slider role, and it replaces
+    // only the accessibility tree: nothing about the drawing, the drag gesture
+    // or the arrow keys goes through it.
+    //
+    // The percent readout beside the track keeps its own `.accessibilityHidden`
+    // for the same reason as before, and the caption `panelHoverReason` draws
+    // below the row is a sibling of this view, so it stays a separate element.
+    .accessibilityRepresentation {
+      // The label goes on twice on purpose: `.accessibilityLabel` is the one
+      // that wins, and the label view underneath it means the control is still
+      // named if a future SwiftUI drops the modifier across the representation
+      // boundary. Measured: naming it both ways yields ONE slider element with
+      // no extra children, so the redundancy costs nothing.
+      Slider(value: adjustmentProxy, in: 0...1, step: Self.step) {
+        Text(verbatim: accessibilityLabel)
       }
+      .accessibilityLabel(accessibilityLabel)
+      // Our own text, so a screen reader speaks the number the panel draws.
+      // It lands in AXValueDescription, which is what VoiceOver announces;
+      // AXValue stays the raw 0...1 fraction, which is what a script reads.
+      .accessibilityValue(SliderSnap.percentText(value))
+      // Belt and braces: an unavailable control must announce as unavailable
+      // even if the environment stops at the representation's boundary.
+      .disabled(!isEnabled)
     }
   }
 
-  /// THE clamp — arrow keys and the VoiceOver adjustable action are both
+  /// VoiceOver step, and the arrow keys' unmodified step. One constant, because
+  /// the two routes moving by different amounts would be a bug nobody sees.
+  private static let step: Double = 0.05
+
+  /// The representation sets an absolute value; `adjust(by:)` is the only clamp.
+  /// Converting back to a delta here keeps VoiceOver on exactly the arrow keys'
+  /// path: the same snapping, the same keyboard floor, the same "Minimum"
+  /// announcement, and volume's zero-free stops (D29) rather than a raw write
+  /// that could land on 0 and hardware-mute the display.
+  private var adjustmentProxy: Binding<Double> {
+    Binding(get: { value }, set: { adjust(by: $0 - value) })
+  }
+
+  /// THE clamp: the arrow keys and the accessibility representation are both
   /// callers, so a floor cannot be honoured on one route and missed on the
   /// other.
   ///
-  /// Snapping is kept for PARITY with the stepping the panel's adjustable
-  /// action already does, not as a safety measure. It protects nothing at 0:
+  /// Snapping is kept for PARITY with the stepping the accessibility route
+  /// already does, not as a safety measure. It protects nothing at 0:
   /// with `stopsWithoutZero` the nearest stop to 0 is 0.25, outside
   /// `tolerance`, so `snapped` hands 0 straight back exactly as a bare clamp
   /// would. Dropping it would only change how far one VoiceOver step moves a
