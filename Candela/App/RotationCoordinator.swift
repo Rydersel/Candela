@@ -197,12 +197,12 @@ final class RotationCoordinator {
   }
 
   @discardableResult
-  func confirm(_ answered: Preview) async -> ModePreviewOutcome {
+  func confirm(_ answered: Preview) async -> PreviewOutcome {
     await queue.enqueueReturning { await self.resolve(answered, keeping: true) }
   }
 
   @discardableResult
-  func revert(_ answered: Preview) async -> ModePreviewOutcome {
+  func revert(_ answered: Preview) async -> PreviewOutcome {
     await queue.enqueueReturning { await self.resolve(answered, keeping: false) }
   }
 
@@ -230,7 +230,7 @@ final class RotationCoordinator {
   // The queue itself is `PreviewQueue` in CandelaKit (#68): four coordinators
   // held four byte-identical copies of it, and the countdown driver beside it.
 
-  private func resolve(_ answered: Preview, keeping: Bool) async -> ModePreviewOutcome {
+  private func resolve(_ answered: Preview, keeping: Bool) async -> PreviewOutcome {
     let outcome = keeping
       ? await session.confirm(answered.request)
       : await session.revert(answered.request)

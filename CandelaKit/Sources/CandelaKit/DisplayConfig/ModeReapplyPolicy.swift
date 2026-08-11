@@ -127,17 +127,11 @@ public enum ModeReapplyPolicy {
     }
   }
 
-  /// Compared on the DESCRIPTOR, never on `ioModeID`: the ID is a positional
-  /// handle that is reassigned across reconfiguration, so two equal IDs are not
-  /// evidence of the same mode and two different IDs are not evidence of
-  /// different ones. Refresh carries the usual tolerance — CoreGraphics reports
-  /// 59.997, and an exact comparison would decide the display is never already
-  /// where it is.
+  /// The predicate is `DisplayMode.matchesGeometry(of:)`, shared with the apply
+  /// cross-check (#68); this name is kept because "is the display already
+  /// running this" is the question, and the shared predicate is the rule that
+  /// answers it.
   private static func isAlreadyRunning(_ mode: DisplayMode, _ current: DisplayMode) -> Bool {
-    current.logicalWidth == mode.logicalWidth
-      && current.logicalHeight == mode.logicalHeight
-      && current.pixelWidth == mode.pixelWidth
-      && current.pixelHeight == mode.pixelHeight
-      && ModePersistence.refreshMatches(current.refreshHz, mode.refreshHz)
+    current.matchesGeometry(of: mode)
   }
 }

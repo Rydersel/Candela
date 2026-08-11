@@ -155,6 +155,61 @@ struct PreviewPlumbingTests {
   }
 }
 
+/// The other half of #68's consolidation: the five-term geometry match that was
+/// spelled out in `ModeReapplyPolicy` and in the apply cross-check.
+@Suite("Mode geometry matching (#68)")
+struct ModeGeometryMatchTests {
+  private func mode(
+    id: Int32 = 1, logical: (Int, Int) = (2560, 1440), pixels: (Int, Int) = (5120, 2880),
+    hz: Double = 60, native: Bool = false
+  ) -> DisplayMode {
+    DisplayMode(
+      ioModeID: id, logicalWidth: logical.0, logicalHeight: logical.1,
+      pixelWidth: pixels.0, pixelHeight: pixels.1, refreshHz: hz, isNative: native
+    )
+  }
+
+  /// The reason the rule exists at all: `ioModeID` is a positional handle
+  /// reassigned across reconfiguration, so it is evidence of nothing in either
+  /// direction. Comparing modes with `==` would get this backwards twice.
+  @Test func theModeIdIsIgnoredInBothDirections() {
+    #expect(mode(id: 3).matchesGeometry(of: mode(id: 91)))
+    #expect(!mode(id: 3).matchesGeometry(of: mode(id: 3, logical: (1920, 1080))))
+  }
+
+  /// CoreGraphics reports 59.997 for what everything else calls 60. An exact
+  /// comparison would decide the display is never already where it is, which on
+  /// the reapply path means re-applying a mode on every single wake.
+  @Test func refreshComparesWithTheTolerance() {
+    #expect(mode(hz: 59.997).matchesGeometry(of: mode(hz: 60)))
+    #expect(!mode(hz: 60).matchesGeometry(of: mode(hz: 120)))
+  }
+
+  /// Excluded deliberately: it is a fact about the panel, not part of a mode's
+  /// identity. Folding it in would make the apply cross-check throw on a mode it
+  /// had just correctly resolved.
+  @Test func nativenessIsNotPartOfTheIdentity() {
+    #expect(mode(native: true).matchesGeometry(of: mode(native: false)))
+  }
+
+  /// All four size terms are load-bearing. Point size alone would call a HiDPI
+  /// mode and its 1x twin the same mode, which is the entire distinction the
+  /// revealed-modes feature exists to offer.
+  @Test func everySizeTermIsChecked() {
+    let base = mode()
+    #expect(!base.matchesGeometry(of: mode(logical: (2560, 1441))))
+    #expect(!base.matchesGeometry(of: mode(logical: (2561, 1440))))
+    #expect(!base.matchesGeometry(of: mode(pixels: (2560, 1440))), "the 1x twin")
+    #expect(!base.matchesGeometry(of: mode(pixels: (5120, 2881))))
+    #expect(base.matchesGeometry(of: base))
+  }
+
+  @Test func theRelationIsSymmetric() {
+    #expect(mode(hz: 59.997).matchesGeometry(of: mode(hz: 60)))
+    #expect(mode(hz: 60).matchesGeometry(of: mode(hz: 59.997)))
+  }
+}
+
 /// Records which thread the clock ticked on. Never spends itself, so the clock
 /// keeps running until the test stops it.
 private actor ThreadWitness {
@@ -173,7 +228,7 @@ private actor ThreadWitness {
 private actor Counter {
   private(set) var count = 0
 
-  func next(spendingAfter limit: Int) -> ModePreviewOutcome? {
+  func next(spendingAfter limit: Int) -> PreviewOutcome? {
     count += 1
     return count >= limit ? .reverted : nil
   }

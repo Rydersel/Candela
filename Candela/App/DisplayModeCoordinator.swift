@@ -722,12 +722,12 @@ final class DisplayModeCoordinator {
   /// makes "an answer only ever resolves the preview it was given for" a
   /// property of the type, and demotes queue ordering to an optimisation.
   @discardableResult
-  func confirm(_ answered: Preview) async -> ModePreviewOutcome {
+  func confirm(_ answered: Preview) async -> PreviewOutcome {
     await queue.enqueueReturning { await self.performResolve(answered, keeping: true) }
   }
 
   @discardableResult
-  func revert(_ answered: Preview) async -> ModePreviewOutcome {
+  func revert(_ answered: Preview) async -> PreviewOutcome {
     await queue.enqueueReturning { await self.performResolve(answered, keeping: false) }
   }
 
@@ -849,7 +849,7 @@ final class DisplayModeCoordinator {
     refreshCatalog(for: displayID)
   }
 
-  private func performResolve(_ answered: Preview, keeping: Bool) async -> ModePreviewOutcome {
+  private func performResolve(_ answered: Preview, keeping: Bool) async -> PreviewOutcome {
     let intent = PreviewedMode(displayID: answered.displayID, mode: answered.mode)
     let outcome = keeping ? await session.confirm(intent) : await session.revert(intent)
     switch outcome {

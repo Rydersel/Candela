@@ -323,12 +323,12 @@ final class ArrangementCoordinator {
   /// preview — so an answer can only ever resolve what the user was reading, and
   /// queue ordering is demoted to an optimisation.
   @discardableResult
-  func confirm(_ answered: Preview) async -> ModePreviewOutcome {
+  func confirm(_ answered: Preview) async -> PreviewOutcome {
     await queue.enqueueReturning { await self.resolve(answered, keeping: true) }
   }
 
   @discardableResult
-  func revert(_ answered: Preview) async -> ModePreviewOutcome {
+  func revert(_ answered: Preview) async -> PreviewOutcome {
     await queue.enqueueReturning { await self.resolve(answered, keeping: false) }
   }
 
@@ -596,7 +596,7 @@ final class ArrangementCoordinator {
     log.error("An arrangement apply diverged; holding the previous layout so it can be restored")
   }
 
-  private func resolve(_ answered: Preview, keeping: Bool) async -> ModePreviewOutcome {
+  private func resolve(_ answered: Preview, keeping: Bool) async -> PreviewOutcome {
     let outcome = keeping
       ? await session.confirm(answered.value)
       : await session.revert(answered.value)

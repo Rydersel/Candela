@@ -316,12 +316,12 @@ final class MirroringCoordinator {
   }
 
   @discardableResult
-  func confirm(_ answered: Preview) async -> ModePreviewOutcome {
+  func confirm(_ answered: Preview) async -> PreviewOutcome {
     await queue.enqueueReturning { await self.resolve(answered, keeping: true) }
   }
 
   @discardableResult
-  func revert(_ answered: Preview) async -> ModePreviewOutcome {
+  func revert(_ answered: Preview) async -> PreviewOutcome {
     await queue.enqueueReturning { await self.resolve(answered, keeping: false) }
   }
 
@@ -501,7 +501,7 @@ final class MirroringCoordinator {
     }
   }
 
-  private func resolve(_ answered: Preview, keeping: Bool) async -> ModePreviewOutcome {
+  private func resolve(_ answered: Preview, keeping: Bool) async -> PreviewOutcome {
     let outcome = keeping
       ? await session.confirm(answered.value)
       : await session.revert(answered.value)
