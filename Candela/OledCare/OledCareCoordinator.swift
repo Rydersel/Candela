@@ -276,13 +276,15 @@ final class OledCareCoordinator {
     lockObserver.start()
 
     // queue: nil, matching the app's own sleep observers at the wiring site
-    // (StatusItemController.swift:265): the block then runs SYNCHRONOUSLY at
+    // (the sleep/wake loop in `StatusItemController.applicationDidFinishLaunching`):
+    // the block then runs SYNCHRONOUSLY at
     // post time, inside AppKit's bounded pre-sleep window. A `.main`-queued
     // operation is merely ENQUEUED, and can land after the wake — tearing
     // overlays down into a machine that already slept and booking the standby
     // edge on the wrong side of it. AppKit posts these on the main thread;
     // `assumeIsolated` asserts (and would trap on) exactly that — the same
-    // documented trade as the KVO observer at StatusItemController.swift:225.
+    // documented trade as the status-item visibility KVO observer in that same
+    // method.
     let center = NSWorkspace.shared.notificationCenter
     sleepWakeObservers.append(center.addObserver(
       forName: NSWorkspace.willSleepNotification, object: nil, queue: nil
