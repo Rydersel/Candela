@@ -131,6 +131,38 @@ struct RotationPreviewSessionTests {
     #expect(await session.tick() == nil)
   }
 
+  /// The seam threw something with no case of its own. That is a different fact
+  /// from a CoreGraphics refusal, and the code the session invents has to say
+  /// so: `CGError.failure` (1000) is what a real platform refusal reports, so
+  /// reusing it here would make the two unreadable apart. `-1` is what the three
+  /// sibling sessions use.
+  @Test func anUntypedThrowFromTheSeamReportsTheSentinelAndNotAPlatformCode() async {
+    let fake = FakeConfigurator()
+    fake.rotations = [2: .standard]
+    fake.throwsUntypedRotationError = true
+    let session = session(fake)
+
+    let result = await session.begin(request())
+    guard case let .failure(error) = result else {
+      Issue.record("an untyped throw must fail the begin")
+      return
+    }
+    #expect(error == DisplayConfigError(cgErrorCode: -1))
+    #expect(error.cgErrorCode != CGError.failure.rawValue)
+  }
+
+  @Test func anUntypedThrowOnTheRevertReportsTheSameSentinel() async {
+    let fake = FakeConfigurator()
+    fake.rotations = [2: .standard]
+    let session = session(fake)
+    _ = await session.begin(request())
+    fake.throwsUntypedRotationError = true
+
+    #expect(await session.revert(request()) == .failed(DisplayConfigError(cgErrorCode: -1)))
+    #expect(await session.previewed == nil)
+    #expect(await session.isCountingDown == false)
+  }
+
   @Test func aDepartedDisplayLeavesNoOutstandingRequest() async {
     let fake = FakeConfigurator()
     fake.rotations = [2: .standard]
