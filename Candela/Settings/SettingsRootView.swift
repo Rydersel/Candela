@@ -365,6 +365,7 @@ struct SettingsRootView: View {
         DisplayDetailView(state: state, selection: $selection, path: pathBinding(for: key))
       }
     }
+    .modifier(BannerColumnHeight())
     .id(key)
   }
 
@@ -380,6 +381,7 @@ struct SettingsRootView: View {
           BannerRegion(state: state)
           subPage(page, key: key, state: state)
         }
+        .modifier(BannerColumnHeight())
         // `.id(key)` on the pushed CONTENT, mirroring `displayRoot`, and never
         // on the stack (that re-keying is the orphaned-page defect `detail`
         // documents). The switcher keeps this page presented while `state`
@@ -594,6 +596,32 @@ private struct SettingsPrincipalTitle: ToolbarContent {
 /// the floor, and SwiftUI answers that by clipping the content rather than by
 /// keeping the size, which is #124's clipped window. `SettingsWindowConfigurator`
 /// enforces the same numbers on the `NSWindow`, so both layers read one source.
+/// Stops a banner from making the WINDOW taller instead of the page shorter
+/// (#124).
+///
+/// A display's page is a grouped `Form`, and a grouped `Form` reports a minimum
+/// height near its content rather than the small one a scroll view usually has.
+/// Stacking a banner above it added that banner's height to a minimum already
+/// close to the window's, and once the total passed what the window could show,
+/// the whole SwiftUI root was laid out taller than the window and clipped from
+/// the TOP: both columns rode up, the sidebar lost its first five rows behind
+/// the traffic lights, and the detail column was cut mid-row. Every symptom
+/// #124 was filed for is that one clip.
+///
+/// A minimum of 0 is what breaks the chain: the column then accepts whatever
+/// height the window has and the `Form` scrolls inside it, which is what a
+/// banner appearing is supposed to cost. **`.safeAreaInset` does NOT do this**
+/// and was measured doing nothing here: inset content contributes to the
+/// container's minimum exactly like a stacked sibling does.
+///
+/// A modifier rather than two copies of one line, because the root and every
+/// pushed page need the same treatment and the reason is too easy to lose.
+private struct BannerColumnHeight: ViewModifier {
+  func body(content: Content) -> some View {
+    content.frame(minHeight: 0, maxHeight: .infinity)
+  }
+}
+
 enum SettingsWindowMetrics {
   static let minWidth: CGFloat = 720
   static let idealWidth: CGFloat = 900
