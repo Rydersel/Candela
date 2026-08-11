@@ -149,14 +149,31 @@ final class RotationCoordinator {
       lastRefusal = refusal
       syncConfirmation()
     case let .rotate(request):
-      enqueue { await self.begin(request) }
+      // Raised HERE, synchronously, and not inside `enqueue`, which is what the
+      // other three coordinators do. Two reasons, and the second is the defect
+      // that motivated the move: a control that queues main-actor work and only
+      // then disables itself is a control two clicks get through; and `enqueue`
+      // also carries the countdown's per-second `adopt` and the departure
+      // discard, neither of which is an apply, so raising the flag inside it
+      // greyed Keep and Revert once a second for the whole preview. Counted
+      // rather than boolean, so two queued rotations do not have the first
+      // one's completion clear the flag for the second.
+      inFlight += 1
+      isApplying = true
+      enqueue {
+        await self.begin(request)
+        self.inFlight -= 1
+        if self.inFlight == 0 { self.isApplying = false }
+      }
     }
   }
 
   private func begin(_ request: RotationRequest) async {
-    lastRefusal = nil
-    lastFailure = nil
-    blockedBy = nil
+    // Through the syncing funnel rather than three bare assignments: the
+    // `gate.claim` below suspends, and a window still rendering a report that
+    // has just been cleared is the empty-floating-panel defect `syncConfirmation`
+    // documents.
+    dismissReport()
     // AR12, asked BEFORE the apply: `SLSSetDisplayRotation` blocks for 0.4–1.1
     // seconds and does not come back until the panel has moved, so a refusal
     // after it would be a refusal of something that already happened.
@@ -210,15 +227,15 @@ final class RotationCoordinator {
 
   // MARK: - Serialisation
 
+  /// Ordering only. `isApplying` is raised by the command that applies
+  /// something, never here: everything else that queues work (a countdown tick,
+  /// a departure discard, an answer) reconfigures nothing on its own and must
+  /// not grey out the answer buttons.
   private func enqueue(_ operation: @escaping @MainActor () async -> Void) {
     let previous = pending
-    inFlight += 1
-    isApplying = true
     pending = Task { @MainActor in
       _ = await previous?.value
       await operation()
-      inFlight -= 1
-      if inFlight == 0 { isApplying = false }
     }
   }
 
@@ -226,15 +243,12 @@ final class RotationCoordinator {
     _ operation: @escaping @MainActor () async -> T
   ) async -> T {
     let previous = pending
-    inFlight += 1
-    isApplying = true
     let task = Task { @MainActor in
       _ = await previous?.value
-      let value = await operation()
-      inFlight -= 1
-      if inFlight == 0 { isApplying = false }
-      return value
+      return await operation()
     }
+    // The chain is Void-typed, so the next operation waits on this one through
+    // an erased wrapper rather than on its result.
     pending = Task { @MainActor in _ = await task.value }
     return await task.value
   }

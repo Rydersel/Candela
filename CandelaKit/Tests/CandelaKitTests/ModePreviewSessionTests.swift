@@ -40,6 +40,7 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
   private var _appliedRotations: [(display: CGDirectDisplayID, rotation: DisplayRotation)] = []
   private var _swallowRotations = false
   private var _failRotationWith: DisplayConfigError?
+  private var _throwsUntypedRotationError = false
 
   var applied: [Applied] { lock.withLock { _applied } }
   /// Kept alongside rather than inside `Applied` so the scope assertions stay
@@ -259,6 +260,7 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
 
   func applyRotation(_ rotation: DisplayRotation, to displayID: CGDirectDisplayID) throws {
     try lock.withLock {
+      if _throwsUntypedRotationError { throw UntypedSeamError() }
       if let _failRotationWith { throw _failRotationWith }
       _appliedRotations.append((displayID, rotation))
       guard !_swallowRotations else { return }
@@ -270,7 +272,20 @@ final class FakeConfigurator: DisplayConfiguring, @unchecked Sendable {
     get { lock.withLock { _failRotationWith } }
     set { lock.withLock { _failRotationWith = newValue } }
   }
+
+  /// Throws something that is NOT a `DisplayConfigError`, which is the only way
+  /// to reach a session's untyped-catch arm and read back the sentinel it
+  /// invents. Separate from `failRotationWith` because that knob can only ever
+  /// exercise the typed arm.
+  var throwsUntypedRotationError: Bool {
+    get { lock.withLock { _throwsUntypedRotationError } }
+    set { lock.withLock { _throwsUntypedRotationError = newValue } }
+  }
 }
+
+/// Stands in for anything the configurator seam could throw that the session
+/// does not have a case for.
+struct UntypedSeamError: Error {}
 
 // `Result<Void, _>` is not `Equatable`, so `begin`'s failures are compared
 // through their error. The extension that does it lives beside `MirrorFixtures`

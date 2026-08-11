@@ -49,7 +49,12 @@ public actor RotationPreviewSession {
     } catch let error as DisplayConfigError {
       return .failure(error)
     } catch {
-      return .failure(DisplayConfigError(cgErrorCode: CGError.failure.rawValue))
+      // `-1`, the sentinel the three sibling sessions use for this arm, and not
+      // `CGError.failure` (1000): 1000 is what a genuine CoreGraphics refusal
+      // reports, so reusing it here makes "the seam threw something that was
+      // not a `DisplayConfigError`" indistinguishable from a real platform
+      // failure in the diagnostics that read the code back.
+      return .failure(DisplayConfigError(cgErrorCode: -1))
     }
     outstanding = request
     remaining = timeoutSeconds
@@ -99,7 +104,8 @@ public actor RotationPreviewSession {
     } catch {
       outstanding = nil
       remaining = 0
-      return .failed(DisplayConfigError(cgErrorCode: CGError.failure.rawValue))
+      // The `-1` sentinel, for the reason `begin` states.
+      return .failed(DisplayConfigError(cgErrorCode: -1))
     }
     outstanding = nil
     remaining = 0
