@@ -424,6 +424,53 @@ struct PathSelectionTests {
     #expect(h.controller.isHDREngaged)
   }
 
+  // MARK: #83, putting back HDR a reset dropped and Candela never owned
+
+  /// The ruling: a reset clears Candela's settings, and HDR the user engaged in
+  /// System Settings was never one of them. It goes back, and no mode is
+  /// recorded for it, or the reset would end by writing the very kind of thing
+  /// it promises to clear.
+  @Test func restoringExternalHDRReEngagesWithoutRecordingAMode() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+
+    await h.controller.restoreExternalHDR()
+
+    #expect(await h.hdr!.recordedSetCalls() == [true])
+    #expect(h.controller.isHDREngaged)
+    #expect(h.controller.hdrMode == .off, "the display's state, not Candela's opinion")
+    #expect(h.prefs.hdrMode == .off, "and nothing persisted for the next launch")
+  }
+
+  /// A restore that does not take leaves the display where the disengage left
+  /// it. What must NOT happen is the software leg staying down: the C1 clearing
+  /// runs for an HDR entry that then did not happen, so without the recovery the
+  /// screen sits at full brightness under a low slider.
+  @Test func aRestoreThatDoesNotTakeStillGetsTheSoftwareLegBack() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    h.controller.setBrightness(0.25)
+    #expect(approx(h.gamma.scales.last ?? -1, 0.575))
+    await h.hdr!.stubAchieves(false)
+
+    await h.controller.restoreExternalHDR()
+
+    #expect(!h.controller.isHDREngaged)
+    #expect(h.controller.hdrMode == .off)
+    #expect(approx(h.gamma.scales.last ?? -1, 0.575), "the dim is back")
+  }
+
+  /// The same role fence `setHDRMode` carries: HDR is external-display
+  /// machinery, and the built-in is constitutively native already.
+  @Test func restoringExternalHDRIsANoOpOnTheBuiltIn() async {
+    let h = Harness(settle: .milliseconds(5), role: .builtIn)
+    await h.prime()
+
+    await h.controller.restoreExternalHDR()
+
+    #expect(await h.hdr!.recordedSetCalls().isEmpty)
+  }
+
   /// The decision has to be taken from a read that goes past the backend's 2 s
   /// cache. Pinned structurally rather than by timing: the seed's TTL used to
   /// equal `settleDelay`, so the confirmation read sat exactly on the boundary

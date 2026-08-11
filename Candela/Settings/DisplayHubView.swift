@@ -694,6 +694,14 @@ struct DisplayHubView: View {
       //    below — including the D29 unmute — ran against a register the
       //    monitor still had locked. `setHDRMode` owns the "is there anything
       //    to do" question now, so the condition cannot drift from it here.
+      //
+      //    Captured BEFORE the disengage, and it is a question about two
+      //    different things: `isHDREngaged` is the display's state, `hdrMode`
+      //    is Candela's opinion. Live HDR with no opinion behind it was
+      //    engaged in System Settings, so step 5 puts it back; live HDR under
+      //    `.alwaysOn` is a Candela setting, and clearing it is what this
+      //    button is for.
+      let restoreHDR = state.controller.isHDREngaged && state.controller.hdrMode == .off
       await state.controller.setHDRMode(.off)
 
       // 2. Every pref except the mute strategy, in ONE batch whose fan-out is
@@ -766,6 +774,13 @@ struct DisplayHubView: View {
       // 4. Only now retire the strategy. Its row is UI-only, so this second
       //    fan-out costs a re-render and nothing else.
       writer.write(.enableMuteUnmute) { $0.enableMuteUnmute = false }
+
+      // 5. LAST, after every DDC write above has gone out (#83): re-engaging
+      //    locks the register again, so anything sent after this would be
+      //    swallowed exactly as it was before the fix.
+      if restoreHDR {
+        await state.controller.restoreExternalHDR()
+      }
 
       nameDraft = ""
       audioNameDraft = ""
