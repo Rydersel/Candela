@@ -52,8 +52,8 @@ final class RotationCoordinator {
   /// nobody.
   @ObservationIgnored private let gate: DisplayReconfigurationGate
   @ObservationIgnored private let session: RotationPreviewSession
-  @ObservationIgnored private var pending: Task<Void, Never>?
-  @ObservationIgnored private var countdown: Task<Void, Never>?
+  @ObservationIgnored private let queue = PreviewQueue()
+  @ObservationIgnored private let countdown = PreviewCountdownDriver()
   @ObservationIgnored private var inFlight = 0
   @ObservationIgnored private let log = Logger(
     subsystem: "com.rydersel.Candela", category: "rotation"
@@ -149,7 +149,7 @@ final class RotationCoordinator {
       lastRefusal = refusal
       syncConfirmation()
     case let .rotate(request):
-      // Raised HERE, synchronously, and not inside `enqueue`, which is what the
+      // Raised HERE, synchronously, and not inside the queue, which is what the
       // other three coordinators do. Two reasons, and the second is the defect
       // that motivated the move: a control that queues main-actor work and only
       // then disables itself is a control two clicks get through; and `enqueue`
@@ -160,7 +160,7 @@ final class RotationCoordinator {
       // one's completion clear the flag for the second.
       inFlight += 1
       isApplying = true
-      enqueue {
+      queue.enqueue {
         await self.begin(request)
         self.inFlight -= 1
         if self.inFlight == 0 { self.isApplying = false }
@@ -198,12 +198,12 @@ final class RotationCoordinator {
 
   @discardableResult
   func confirm(_ answered: Preview) async -> ModePreviewOutcome {
-    await enqueueReturning { await self.resolve(answered, keeping: true) }
+    await queue.enqueueReturning { await self.resolve(answered, keeping: true) }
   }
 
   @discardableResult
   func revert(_ answered: Preview) async -> ModePreviewOutcome {
-    await enqueueReturning { await self.resolve(answered, keeping: false) }
+    await queue.enqueueReturning { await self.resolve(answered, keeping: false) }
   }
 
   func dismissReport() {
@@ -219,39 +219,16 @@ final class RotationCoordinator {
   func displaysChanged() {
     let present = Set(configurator.displays().map(\.id))
     guard let preview, !present.contains(preview.request.display) else { return }
-    enqueue {
+    queue.enqueue {
       await self.session.discardOnDeparture()
       await self.adopt(.clear)
     }
   }
 
   // MARK: - Serialisation
-
-  /// Ordering only. `isApplying` is raised by the command that applies
-  /// something, never here: everything else that queues work (a countdown tick,
-  /// a departure discard, an answer) reconfigures nothing on its own and must
-  /// not grey out the answer buttons.
-  private func enqueue(_ operation: @escaping @MainActor () async -> Void) {
-    let previous = pending
-    pending = Task { @MainActor in
-      _ = await previous?.value
-      await operation()
-    }
-  }
-
-  private func enqueueReturning<T: Sendable>(
-    _ operation: @escaping @MainActor () async -> T
-  ) async -> T {
-    let previous = pending
-    let task = Task { @MainActor in
-      _ = await previous?.value
-      return await operation()
-    }
-    // The chain is Void-typed, so the next operation waits on this one through
-    // an erased wrapper rather than on its result.
-    pending = Task { @MainActor in _ = await task.value }
-    return await task.value
-  }
+  //
+  // The queue itself is `PreviewQueue` in CandelaKit (#68): four coordinators
+  // held four byte-identical copies of it, and the countdown driver beside it.
 
   private func resolve(_ answered: Preview, keeping: Bool) async -> ModePreviewOutcome {
     let outcome = keeping
@@ -320,29 +297,22 @@ final class RotationCoordinator {
   /// synchronous reconfiguration callback must not be able to stop the expiry.
   /// The expiry is what rescues a display nobody meant to rotate.
   private func startCountdown() {
-    countdown?.cancel()
     let session = session
-    countdown = Task.detached { [weak self] in
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .seconds(1))
-        if Task.isCancelled { return }
-        let outcome = await session.tick()
-        Task { @MainActor [weak self] in
-          guard let self else { return }
-          if case let .failed(error) = outcome {
-            enqueue { await self.adopt(.set(error)) }
-          } else {
-            enqueue { await self.adopt(.keep) }
-          }
-        }
-        if outcome != nil { return }
+    countdown.start(tick: { await session.tick() }) { [weak self] outcome in
+      guard let self else { return }
+      // Through the queue, never straight to `adopt`: a tick that landed
+      // mid-apply would otherwise publish a picture the apply is about to
+      // replace.
+      if case let .failed(error) = outcome {
+        queue.enqueue { await self.adopt(.set(error)) }
+      } else {
+        queue.enqueue { await self.adopt(.keep) }
       }
     }
   }
 
   private func stopCountdown() {
-    countdown?.cancel()
-    countdown = nil
+    countdown.stop()
   }
 }
 

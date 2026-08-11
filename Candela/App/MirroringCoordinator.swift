@@ -8,7 +8,7 @@ import os
 /// App-side owner of the mirror topology, the toggle, and the preview
 /// countdown. `DisplayModeCoordinator`'s shape, for its reasons:
 ///
-/// 1. **Every session-touching operation is serialised** through `pending`.
+/// 1. **Every session-touching operation is serialised** through `queue`.
 ///    Without it two fast clicks both suspend inside `begin()`, the actor
 ///    serialises them, and their main-actor continuations resume in an order
 ///    unrelated to the actor's.
@@ -116,8 +116,8 @@ final class MirroringCoordinator {
   /// narrow guarantee is the one the code delivers.
   @ObservationIgnored private let gate: DisplayReconfigurationGate
   @ObservationIgnored private let session: MirrorPreviewSession
-  @ObservationIgnored private var pending: Task<Void, Never>?
-  @ObservationIgnored private var countdown: Task<Void, Never>?
+  @ObservationIgnored private let queue = PreviewQueue()
+  @ObservationIgnored private let countdown = PreviewCountdownDriver()
   @ObservationIgnored private var screenObserver: (any NSObjectProtocol)?
   /// Counted rather than boolean, for `DisplayModeCoordinator.select`'s reason:
   /// two queued operations must not have the first one's completion clear the
@@ -219,8 +219,8 @@ final class MirroringCoordinator {
   /// object lives as long as the app and the blocks hold `self` weakly, so a
   /// surviving registration is inert rather than dangling.
   deinit {
-    countdown?.cancel()
-    pending?.cancel()
+    countdown.stop()
+    queue.cancel()
   }
 
   // MARK: - Topology
@@ -263,7 +263,7 @@ final class MirroringCoordinator {
     // `adoptTopology`, so re-entering it here would spin whenever the revert
     // keeps failing. A successful revert reconfigures displays and the
     // screen-parameters notification brings the next sample in on its own.
-    enqueue {
+    queue.enqueue {
       guard let outstanding = await self.session.previewedTopology else { return }
       let live = Set(sample.displays.map(\.id))
       let members = Set([outstanding.confirmationDisplayID] + outstanding.applied.map(\.display))
@@ -317,12 +317,12 @@ final class MirroringCoordinator {
 
   @discardableResult
   func confirm(_ answered: Preview) async -> ModePreviewOutcome {
-    await enqueueReturning { await self.resolve(answered, keeping: true) }
+    await queue.enqueueReturning { await self.resolve(answered, keeping: true) }
   }
 
   @discardableResult
   func revert(_ answered: Preview) async -> ModePreviewOutcome {
-    await enqueueReturning { await self.resolve(answered, keeping: false) }
+    await queue.enqueueReturning { await self.resolve(answered, keeping: false) }
   }
 
   /// THE only place the report is cleared, for the same reason `adopt` is the
@@ -337,28 +337,9 @@ final class MirroringCoordinator {
   }
 
   // MARK: - Serialisation
-
-  private func enqueue(_ operation: @escaping @MainActor () async -> Void) {
-    let previous = pending
-    pending = Task { @MainActor in
-      _ = await previous?.value
-      await operation()
-    }
-  }
-
-  private func enqueueReturning<T: Sendable>(
-    _ operation: @escaping @MainActor () async -> T
-  ) async -> T {
-    let previous = pending
-    let task = Task { @MainActor () -> T in
-      _ = await previous?.value
-      return await operation()
-    }
-    // The chain is Void-typed, so the next operation waits on this one through
-    // an erased wrapper rather than on its result.
-    pending = Task { @MainActor in _ = await task.value }
-    return await task.value
-  }
+  //
+  // The queue itself is `PreviewQueue` in CandelaKit (#68): four coordinators
+  // held four byte-identical copies of it, and the countdown driver beside it.
 
   // MARK: - Operations (always inside the queue)
 
@@ -367,7 +348,7 @@ final class MirroringCoordinator {
     // work and only then disables itself is a control two clicks get through.
     inFlight += 1
     isApplying = true
-    enqueue {
+    queue.enqueue {
       defer {
         self.inFlight -= 1
         if self.inFlight == 0 { self.isApplying = false }
@@ -607,30 +588,22 @@ final class MirroringCoordinator {
   /// lands mid-`begin()` must reconcile after it, not against a session that is
   /// half-way through changing.
   private func startCountdown() {
-    countdown?.cancel()
     let session = session
-    countdown = Task.detached { [weak self] in
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .seconds(1))
-        if Task.isCancelled { return }
-        let outcome = await session.tick()
-        Task { @MainActor [weak self] in
-          guard let self else { return }
-          if case let .failed(error) = outcome {
-            enqueue { await self.adopt(.set(error)) }
-          } else {
-            enqueue { await self.adopt(.keep) }
-          }
-        }
-        // The countdown fires at most once; whatever it returned, it is spent.
-        if outcome != nil { return }
+    countdown.start(tick: { await session.tick() }) { [weak self] outcome in
+      guard let self else { return }
+      // Through the queue, never straight to `adopt`: a tick that landed
+      // mid-apply would otherwise publish a picture the apply is about to
+      // replace.
+      if case let .failed(error) = outcome {
+        queue.enqueue { await self.adopt(.set(error)) }
+      } else {
+        queue.enqueue { await self.adopt(.keep) }
       }
     }
   }
 
   private func stopCountdown() {
-    countdown?.cancel()
-    countdown = nil
+    countdown.stop()
   }
 }
 
