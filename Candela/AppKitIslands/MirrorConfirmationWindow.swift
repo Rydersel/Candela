@@ -29,18 +29,9 @@ final class MirrorConfirmationWindow: MirrorConfirmationPresenting {
   // MARK: - MirrorConfirmationPresenting
 
   func presentMirrorConfirmation(_ content: MirrorConfirmationContent) {
-    // A report is not about a display, so it goes on the main display — the one
-    // the user is certainly looking at.
-    let target: CGDirectDisplayID = switch content {
-    case let .preview(displayID): drawableDisplayID(displayID)
-    case .report: CGMainDisplayID()
-    }
-    // No screen even after resolving: the display has departed, or the list has
-    // not caught up with the reconfiguration yet. Hide rather than leave a
-    // window naming the previous state up — a preview retries this on every
-    // countdown tick, so a momentarily stale screen list self-heals a second
-    // later.
-    guard let screen = NSScreen.screens.first(where: { $0.displayID == target }) else {
+    guard let screen = ConfirmationScreen.resolve(
+      for: content, drawable: drawableDisplayID
+    ) else {
       dismissMirrorConfirmation()
       return
     }

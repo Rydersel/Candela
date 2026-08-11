@@ -32,16 +32,9 @@ final class ArrangementConfirmationWindow: ArrangementConfirmationPresenting {
   }
 
   func presentArrangementConfirmation(_ content: ArrangementConfirmationContent) {
-    // A report is not about one display that changed, so it goes on the main
-    // display — the one the user is certainly looking at.
-    let target: CGDirectDisplayID = switch content {
-    case let .preview(displayID): drawableDisplayID(displayID)
-    case .report: CGMainDisplayID()
-    }
-    // No screen even after resolving: the display departed, or the list has not
-    // caught up with the reconfiguration. A preview retries this on every
-    // countdown tick, so a momentarily stale screen list self-heals.
-    guard let screen = NSScreen.screens.first(where: { $0.displayID == target }) else {
+    guard let screen = ConfirmationScreen.resolve(
+      for: content, drawable: drawableDisplayID
+    ) else {
       dismissArrangementConfirmation()
       return
     }
