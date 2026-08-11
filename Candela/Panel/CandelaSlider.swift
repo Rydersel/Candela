@@ -88,8 +88,10 @@ struct CandelaSlider: View {
     // `.repeat` included so holding an arrow ramps the value, which is what a
     // 5%-per-press step needs to be usable across the whole range.
     .onKeyPress(keys: [.leftArrow, .rightArrow], phases: [.down, .repeat]) { press in
-      let step = press.modifiers.contains(.option) ? 0.01 : Self.step
-      adjust(by: press.key == .leftArrow ? -step : step)
+      // ⌥ is the escape from a coarse grid, so it steps by 1% even where the
+      // snapping pref is on. It does NOT escape the zero-free floor: that one
+      // is D29, not a convenience.
+      adjust(up: press.key == .rightArrow, fine: press.modifiers.contains(.option))
       return .handled
     }
     // Every pixel here is ours, so the platform has nothing to infer a role
@@ -109,6 +111,12 @@ struct CandelaSlider: View {
       // named if a future SwiftUI drops the modifier across the representation
       // boundary. Measured: naming it both ways yields ONE slider element with
       // no extra children, so the redundancy costs nothing.
+      // `step` here is only how coarsely the represented slider rounds the
+      // value it proposes; it is NOT how far the control moves. `adjust` owns
+      // that, because the grid depends on the snapping pref and on whether 0 is
+      // a legal value for this command. Measured on hardware: AXValue still
+      // reports the raw fraction (0.897), so this rounding never reaches the
+      // controller.
       Slider(value: adjustmentProxy, in: 0...1, step: Self.step) {
         Text(verbatim: accessibilityLabel)
       }
@@ -123,37 +131,63 @@ struct CandelaSlider: View {
     }
   }
 
-  /// VoiceOver step, and the arrow keys' unmodified step. One constant, because
-  /// the two routes moving by different amounts would be a bug nobody sees.
+  /// The coarse step, and `fineStep` the ⌥ one. Only used where the snapping
+  /// pref is off: with it on, the grid is `stops` and the step is whatever it
+  /// takes to reach the next one.
   private static let step: Double = 0.05
+  private static let fineStep: Double = 0.01
 
-  /// The representation sets an absolute value; `adjust(by:)` is the only clamp.
-  /// Converting back to a delta here keeps VoiceOver on exactly the arrow keys'
-  /// path: the same snapping, the same keyboard floor, the same "Minimum"
-  /// announcement, and volume's zero-free stops (D29) rather than a raw write
-  /// that could land on 0 and hardware-mute the display.
+  /// The representation writes an absolute value; we take only its DIRECTION.
+  ///
+  /// It has to be this way round. VoiceOver's increment arrives as an ordinary
+  /// write of "current plus the represented slider's own step", indistinguishable
+  /// from a script setting a value, so honouring the number would peg every
+  /// increment to that step and leave the snapping pref with no effect on this
+  /// route (measured on hardware: 5% steps with "Snap to 25% steps" verified on,
+  /// and a volume row walked down to 0 and muted the display). Taking the sign
+  /// instead puts both callers on `adjust`, which owns the grid.
+  ///
+  /// A script writing an absolute value therefore moves one step toward it per
+  /// write rather than jumping. Repeated writes converge, and `AXIncrement` and
+  /// `AXDecrement` are the actions a slider is meant to be driven by.
   private var adjustmentProxy: Binding<Double> {
-    Binding(get: { value }, set: { adjust(by: $0 - value) })
+    Binding(
+      get: { value },
+      set: { proposed in
+        guard proposed != value else { return }
+        adjust(up: proposed > value)
+      }
+    )
   }
 
-  /// THE clamp: the arrow keys and the accessibility representation are both
-  /// callers, so a floor cannot be honoured on one route and missed on the
-  /// other.
+  /// THE step: the arrow keys and the accessibility representation are both
+  /// callers, so a grid or a floor cannot be honoured on one route and missed
+  /// on the other.
   ///
-  /// Snapping is kept for PARITY with the stepping the accessibility route
-  /// already does, not as a safety measure. It protects nothing at 0:
-  /// with `stopsWithoutZero` the nearest stop to 0 is 0.25, outside
-  /// `tolerance`, so `snapped` hands 0 straight back exactly as a bare clamp
-  /// would. Dropping it would only change how far one VoiceOver step moves a
-  /// snapping slider.
+  /// `SliderSnap.stepped` owns the grid, including the zero-free one that keeps
+  /// a volume row off 0 (D29). `snapped` deliberately has no part in this: it
+  /// captures only within `tolerance`, so on a volume row it hands back every
+  /// value between the stops untouched and a walk-down reaches 0 unimpeded.
+  /// That is exactly the defect this replaced.
   ///
-  /// Order is snap-then-floor: `snapped` clamps to 0…1, then the floor goes on
-  /// top, so a stop below the floor cannot pull the value under it.
-  private func adjust(by delta: Double) {
+  /// Order is step-then-floor: `stepped` lands on the grid, then `keyboardFloor`
+  /// goes on top, so a grid point below the floor cannot pull the value under it.
+  private func adjust(up: Bool, fine: Bool = false) {
     // The floor is clamped to the slider's own range: it raises the lower
     // bound, it can never push a write past 1 for the controllers downstream.
     let floor = min(max(keyboardFloor ?? 0, 0), 1)
-    let next = max(floor, SliderSnap.snapped(value + delta, enabled: snapsToStops, stops: stops))
+    let next = max(
+      floor,
+      SliderSnap.stepped(
+        from: value,
+        up: up,
+        step: fine ? Self.fineStep : Self.step,
+        // ⌥ steps off the coarse grid; nothing steps off the zero-free one,
+        // which travels in `stops`.
+        toStops: snapsToStops && !fine,
+        stops: stops
+      )
+    )
     // Only an explicit floor is worth announcing: at 0 the value itself already
     // says "0%", and announcing on a floor nobody set would change what the
     // panel says today.
