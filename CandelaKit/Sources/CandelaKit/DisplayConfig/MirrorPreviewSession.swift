@@ -117,7 +117,7 @@ public actor MirrorPreviewSession {
   /// The countdown fires at most once. A failed expiry revert is re-attempted
   /// through `revert()`, not by returning `.failed` from every later tick.
   private var countdownArmed = false
-  private var lastOutcome: ModePreviewOutcome?
+  private var lastOutcome: PreviewOutcome?
 
   /// Thirty seconds, the same as `ModePreviewSession` — see the note there.
   /// Both are one kind of decision and differing timers would be arbitrary.
@@ -177,7 +177,7 @@ public actor MirrorPreviewSession {
   /// it was, exactly as every other resolution here does: nothing moved, so the
   /// fallback is still the truth, and a still-armed expiry is a free retry.
   @discardableResult
-  public func revertOnDeparture(displayID: CGDirectDisplayID) -> ModePreviewOutcome? {
+  public func revertOnDeparture(displayID: CGDirectDisplayID) -> PreviewOutcome? {
     guard let outstanding else { return nil }
     let members = Set([outstanding.confirmationDisplayID] + outstanding.applied.map(\.display))
     guard members.contains(displayID) else { return nil }
@@ -294,7 +294,7 @@ public actor MirrorPreviewSession {
   /// outstanding preview has moved on since, the answer does not apply to it,
   /// and committing anyway would make a topology the user never saw outlive the
   /// process while reporting success.
-  public func confirm(_ answered: PreviewedMirrorTopology) -> ModePreviewOutcome {
+  public func confirm(_ answered: PreviewedMirrorTopology) -> PreviewOutcome {
     guard let outstanding else {
       // Nothing is applied: repeat the answer already given rather than
       // inventing a reversion that never happened. Never begun at all is
@@ -309,7 +309,7 @@ public actor MirrorPreviewSession {
   /// preview. A revert that threw left the topology where it was, so trying
   /// again once CoreGraphics recovers is the whole recovery path — the error UI
   /// hangs off this, and it passes back the same value it is showing.
-  public func revert(_ answered: PreviewedMirrorTopology) -> ModePreviewOutcome {
+  public func revert(_ answered: PreviewedMirrorTopology) -> PreviewOutcome {
     guard let outstanding else { return lastOutcome ?? .reverted }
     guard matches(answered, outstanding) else { return .stale }
     return revertOutstanding()
@@ -317,7 +317,7 @@ public actor MirrorPreviewSession {
 
   /// Call once per second. Returns nil while the countdown runs, and the
   /// outcome when it expires.
-  public func tick() -> ModePreviewOutcome? {
+  public func tick() -> PreviewOutcome? {
     guard countdownArmed, outstanding != nil else { return nil }
     remaining -= 1
     guard remaining <= 0 else { return nil }
@@ -331,7 +331,7 @@ public actor MirrorPreviewSession {
   /// The expiry and the cross-preview hand-off revert without an intent check
   /// on purpose: they are the SESSION's own decisions about what it is holding,
   /// not a person's answer to a window. Only answers can be stale.
-  private func revertOutstanding() -> ModePreviewOutcome {
+  private func revertOutstanding() -> PreviewOutcome {
     guard let outstanding else { return lastOutcome ?? .reverted }
     // Computed against the LIVE topology, not against the applied changes: a
     // display that moved since the preview must be restored to what the capture
@@ -384,8 +384,8 @@ public actor MirrorPreviewSession {
   /// `MirrorTopologyPolicy.changes(from:to:)` returns `[]` whenever the live
   /// topology already matches the capture.
   private func resolve(
-    applying changes: [MirrorChange], success: ModePreviewOutcome
-  ) -> ModePreviewOutcome {
+    applying changes: [MirrorChange], success: PreviewOutcome
+  ) -> PreviewOutcome {
     do {
       try configurator.applyMirroring(changes, scope: .session)
     } catch let error as DisplayConfigError {

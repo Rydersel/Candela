@@ -62,21 +62,21 @@ public actor RotationPreviewSession {
   }
 
   /// Keeps it. Nothing is written — see the type's note.
-  public func confirm(_ answered: RotationRequest) -> ModePreviewOutcome {
+  public func confirm(_ answered: RotationRequest) -> PreviewOutcome {
     guard outstanding == answered else { return .stale }
     outstanding = nil
     remaining = 0
     return .committed
   }
 
-  public func revert(_ answered: RotationRequest) -> ModePreviewOutcome {
+  public func revert(_ answered: RotationRequest) -> PreviewOutcome {
     guard outstanding == answered else { return .stale }
     return performRevert(answered)
   }
 
   /// One second of the clock. Returns nil while it is still running, and the
   /// outcome of the expiry revert on the tick that spends it.
-  public func tick() -> ModePreviewOutcome? {
+  public func tick() -> PreviewOutcome? {
     guard let outstanding, remaining > 0 else { return nil }
     remaining -= 1
     guard remaining == 0 else { return nil }
@@ -91,7 +91,7 @@ public actor RotationPreviewSession {
     remaining = 0
   }
 
-  private func performRevert(_ request: RotationRequest) -> ModePreviewOutcome {
+  private func performRevert(_ request: RotationRequest) -> PreviewOutcome {
     do {
       try configurator.applyRotation(request.from, to: request.display)
     } catch let error as DisplayConfigError {

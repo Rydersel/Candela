@@ -125,3 +125,30 @@ extension LogicalGeometry {
 
 extension DisplayMode: LogicalGeometry {}
 extension DisplayModeDescriptor: LogicalGeometry {}
+
+public extension DisplayMode {
+  /// Whether two modes denote the same GEOMETRY: both size pairs, and the
+  /// refresh rate within tolerance.
+  ///
+  /// Spelled out twice before (#68), in `ModeReapplyPolicy`'s already-running
+  /// test and in the apply cross-check. Those two answer different questions and
+  /// must stay where they are; the predicate underneath them is one rule.
+  ///
+  /// Never `ioModeID`, and never `==`. The ID is a positional handle that is
+  /// reassigned across reconfiguration, so two equal IDs are not evidence of the
+  /// same mode and two different IDs are not evidence of different ones.
+  ///
+  /// `isNative` is deliberately excluded: it is a fact about the panel rather
+  /// than part of a mode's identity, and folding it in would make the apply
+  /// cross-check reject a mode it had just correctly resolved.
+  ///
+  /// Refresh carries the usual tolerance. CoreGraphics reports 59.997, and an
+  /// exact comparison would decide a display is never already where it is.
+  func matchesGeometry(of other: DisplayMode) -> Bool {
+    logicalWidth == other.logicalWidth
+      && logicalHeight == other.logicalHeight
+      && pixelWidth == other.pixelWidth
+      && pixelHeight == other.pixelHeight
+      && ModePersistence.refreshMatches(refreshHz, other.refreshHz)
+  }
+}

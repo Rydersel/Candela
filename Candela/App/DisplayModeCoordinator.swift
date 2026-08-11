@@ -18,7 +18,7 @@ import os
 ///
 /// Two rules hold this together and neither is optional:
 ///
-/// 1. **Every session-touching operation is serialised** through `pending`.
+/// 1. **Every session-touching operation is serialised** through `queue`.
 ///    Without it, two clicks both suspend inside `begin()`, the actor
 ///    serialises them, and their main-actor continuations resume in an order
 ///    unrelated to the actor's — leaving the banner naming one mode while
@@ -230,8 +230,8 @@ final class DisplayModeCoordinator {
   /// hold. A missing entry answers `.floatingPanel` — the safe default, since
   /// the floating window shows on the display that changed.
   @ObservationIgnored private var surfaces: [CGDirectDisplayID: PreviewSurface] = [:]
-  @ObservationIgnored private var countdown: Task<Void, Never>?
-  @ObservationIgnored private var pending: Task<Void, Never>?
+  @ObservationIgnored private let countdown = PreviewCountdownDriver()
+  @ObservationIgnored private let queue = PreviewQueue()
   @ObservationIgnored private var inFlightSelects = 0
   /// Displays anything has asked about. `handleDisplaysChanged` re-enumerates
   /// these rather than only the currently cached ones, so a display that
@@ -292,8 +292,8 @@ final class DisplayModeCoordinator {
   /// object lives as long as the app, and the block holds `self` weakly, so a
   /// surviving registration is inert rather than dangling.
   deinit {
-    countdown?.cancel()
-    pending?.cancel()
+    countdown.stop()
+    queue.cancel()
   }
 
   // MARK: - Enumeration
@@ -445,7 +445,7 @@ final class DisplayModeCoordinator {
     // the session, but it does apply modes at SESSION scope — landing that in
     // the middle of a `begin()`/`confirm()` would move a display out from under
     // a preview whose fallback was captured before it.
-    await enqueueReturning { await self.performReapply(displays) }
+    await queue.enqueueReturning { await self.performReapply(displays) }
   }
 
   // MARK: - Reports
@@ -634,7 +634,7 @@ final class DisplayModeCoordinator {
   /// Also silent when the display cannot report the mode it is running —
   /// leaving an existing pin alone beats replacing it with a guess.
   func pinCurrentMode(on displayID: CGDirectDisplayID) {
-    enqueue {
+    queue.enqueue {
       guard await self.session.previewedMode?.displayID != displayID else { return }
       // Live read FIRST, cache only as the fallback: a countdown expiry
       // reverts on the session actor and enqueues nothing but `adopt(.keep)`,
@@ -686,7 +686,7 @@ final class DisplayModeCoordinator {
     // the first one's completion clear the flag for the second.
     inFlightSelects += 1
     isApplying = true
-    enqueue {
+    queue.enqueue {
       await self.performSelect(mode, on: displayID, from: origin, surface: surface)
       self.inFlightSelects -= 1
       if self.inFlightSelects == 0 { self.isApplying = false }
@@ -722,13 +722,13 @@ final class DisplayModeCoordinator {
   /// makes "an answer only ever resolves the preview it was given for" a
   /// property of the type, and demotes queue ordering to an optimisation.
   @discardableResult
-  func confirm(_ answered: Preview) async -> ModePreviewOutcome {
-    await enqueueReturning { await self.performResolve(answered, keeping: true) }
+  func confirm(_ answered: Preview) async -> PreviewOutcome {
+    await queue.enqueueReturning { await self.performResolve(answered, keeping: true) }
   }
 
   @discardableResult
-  func revert(_ answered: Preview) async -> ModePreviewOutcome {
-    await enqueueReturning { await self.performResolve(answered, keeping: false) }
+  func revert(_ answered: Preview) async -> PreviewOutcome {
+    await queue.enqueueReturning { await self.performResolve(answered, keeping: false) }
   }
 
   /// Ends any outstanding MODE preview and reports whether the display is back
@@ -759,7 +759,7 @@ final class DisplayModeCoordinator {
   /// refuse: the same refusal `ModePreviewSession.begin` already makes across
   /// displays, for the same reason.
   func endOutstandingPreview() async -> Bool {
-    await enqueueReturning {
+    await queue.enqueueReturning {
       guard let outstanding = await self.session.previewedMode else { return true }
       // Built FROM the session, so the intent check inside `performResolve`
       // cannot see it as stale: it is by construction the preview that is
@@ -787,28 +787,9 @@ final class DisplayModeCoordinator {
   }
 
   // MARK: - Serialisation
-
-  private func enqueue(_ operation: @escaping @MainActor () async -> Void) {
-    let previous = pending
-    pending = Task { @MainActor in
-      _ = await previous?.value
-      await operation()
-    }
-  }
-
-  private func enqueueReturning<T: Sendable>(
-    _ operation: @escaping @MainActor () async -> T
-  ) async -> T {
-    let previous = pending
-    let task = Task { @MainActor () -> T in
-      _ = await previous?.value
-      return await operation()
-    }
-    // The chain is Void-typed, so the next operation waits on this one through
-    // an erased wrapper rather than on its result.
-    pending = Task { @MainActor in _ = await task.value }
-    return await task.value
-  }
+  //
+  // The queue itself is `PreviewQueue` in CandelaKit (#68): four coordinators
+  // held four byte-identical copies of it, and the countdown driver beside it.
 
   // MARK: - Operations (always inside the queue)
 
@@ -868,7 +849,7 @@ final class DisplayModeCoordinator {
     refreshCatalog(for: displayID)
   }
 
-  private func performResolve(_ answered: Preview, keeping: Bool) async -> ModePreviewOutcome {
+  private func performResolve(_ answered: Preview, keeping: Bool) async -> PreviewOutcome {
     let intent = PreviewedMode(displayID: answered.displayID, mode: answered.mode)
     let outcome = keeping ? await session.confirm(intent) : await session.revert(intent)
     switch outcome {
@@ -904,7 +885,7 @@ final class DisplayModeCoordinator {
   /// would wedge. That is the exact case this exists to prevent, so it must not
   /// consult the copy.
   private func dropPreviewOnDepartedDisplay() {
-    enqueue {
+    queue.enqueue {
       guard let outstanding = await self.session.previewedMode else { return }
       let stillHere = self.configurator.displays().contains { $0.id == outstanding.displayID }
       guard !stillHere else { return }
@@ -1024,30 +1005,22 @@ final class DisplayModeCoordinator {
   /// reconfiguration callback or by blocking work in a pane must not be able to
   /// stop the expiry — the expiry is what rescues a screen nobody can read.
   private func startCountdown() {
-    countdown?.cancel()
     let session = session
-    countdown = Task.detached { [weak self] in
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .seconds(1))
-        if Task.isCancelled { return }
-        let outcome = await session.tick()
-        Task { @MainActor [weak self] in
-          guard let self else { return }
-          if case let .failed(error) = outcome {
-            enqueue { await self.adopt(.set(error)) }
-          } else {
-            enqueue { await self.adopt(.keep) }
-          }
-        }
-        // The countdown fires at most once; whatever it returned, it is spent.
-        if outcome != nil { return }
+    countdown.start(tick: { await session.tick() }) { [weak self] outcome in
+      guard let self else { return }
+      // Through the queue, never straight to `adopt`: a tick that landed
+      // mid-apply would otherwise publish a picture the apply is about to
+      // replace.
+      if case let .failed(error) = outcome {
+        queue.enqueue { await self.adopt(.set(error)) }
+      } else {
+        queue.enqueue { await self.adopt(.keep) }
       }
     }
   }
 
   private func stopCountdown() {
-    countdown?.cancel()
-    countdown = nil
+    countdown.stop()
   }
 
   /// THE only writer of `storedDisplayMode`. Announcing the write is part of

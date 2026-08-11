@@ -25,4 +25,22 @@ Skipping it costs nothing but feedback latency: the same gates run in CI on ever
 push and pull request, and CI is the enforcing layer. The hook is advisory and
 `git commit --no-verify` skips it, which is a legitimate escape hatch.
 
-Portions transplanted from [MonitorControl](https://github.com/MonitorControl/MonitorControl) (MIT).
+## License and attribution
+
+Candela is MIT licensed: see [`LICENSE`](LICENSE).
+
+It exists because of
+[MonitorControl](https://github.com/MonitorControl/MonitorControl), and the
+relationship is closer than "inspired by". Candela began as a fork of it, and
+its DDC/CI transport for Apple Silicon and Intel, its media-key handling, its
+software-dimming approach and its HDR toggle were transplanted or adapted from
+that project. Where Candela behaves differently, MonitorControl is the baseline
+the difference is measured against. It is MIT licensed, and every file carrying
+its code carries its attribution header.
+
+[`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md) reproduces the full notice
+for MonitorControl, for [MediaKeyTap](https://github.com/nhurden/MediaKeyTap)
+(which reached us through it), and for
+[KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts), the only
+third-party package Candela links against. It also records the one place the
+provenance chain runs out, so nobody has to rediscover it.

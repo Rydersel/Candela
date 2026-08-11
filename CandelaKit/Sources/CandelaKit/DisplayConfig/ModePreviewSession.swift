@@ -1,17 +1,6 @@
 import CoreGraphics
 import Foundation
 
-public enum ModePreviewOutcome: Sendable, Equatable {
-  case committed
-  case reverted
-  case failed(DisplayConfigError)
-  /// The answer named a preview that is no longer the outstanding one, so it
-  /// resolved nothing and the outstanding preview is untouched. An answer is
-  /// given about something a person was looking at; applying it to a different
-  /// preview would commit a mode they never saw.
-  case stale
-}
-
 /// The applied-but-unresolved preview: what a UI renders, and what an answer
 /// about that UI carries back.
 ///
@@ -73,7 +62,7 @@ public actor ModePreviewSession {
   /// The countdown fires at most once. A failed expiry revert is re-attempted
   /// through `revert()`, not by returning `.failed` from every later tick.
   private var countdownArmed = false
-  private var lastOutcome: ModePreviewOutcome?
+  private var lastOutcome: PreviewOutcome?
 
   /// Thirty seconds, the same as `MirrorPreviewSession`. The two are the same
   /// kind of decision — a reconfiguration that may itself have made the answer
@@ -186,7 +175,7 @@ public actor ModePreviewSession {
   /// would make a mode the user never saw permanent at session scope while
   /// reporting success. That is the worst failure this type can produce, so it
   /// is refused structurally rather than prevented by call ordering.
-  public func confirm(_ answered: PreviewedMode) -> ModePreviewOutcome {
+  public func confirm(_ answered: PreviewedMode) -> PreviewOutcome {
     guard let outstanding else {
       // Nothing is applied: repeat the answer already given rather than
       // inventing a reversion that never happened. Never begun at all is
@@ -203,7 +192,7 @@ public actor ModePreviewSession {
   /// preview. A revert that threw left the display where it was, so trying
   /// again once CoreGraphics recovers is the whole recovery path — the error UI
   /// hangs off this, and it passes back the same `PreviewedMode` it is showing.
-  public func revert(_ answered: PreviewedMode) -> ModePreviewOutcome {
+  public func revert(_ answered: PreviewedMode) -> PreviewOutcome {
     guard let outstanding else { return lastOutcome ?? .reverted }
     guard matches(answered, outstanding) else { return .stale }
     return revertOutstanding()
@@ -211,7 +200,7 @@ public actor ModePreviewSession {
 
   /// Call once per second. Returns nil while the countdown runs, and the
   /// outcome when it expires.
-  public func tick() -> ModePreviewOutcome? {
+  public func tick() -> PreviewOutcome? {
     guard countdownArmed, outstanding != nil else { return nil }
     remaining -= 1
     guard remaining <= 0 else { return nil }
@@ -225,7 +214,7 @@ public actor ModePreviewSession {
   /// The expiry and the cross-display hand-off revert without an intent check
   /// on purpose: they are the SESSION's own decisions about whatever it is
   /// holding, not a person's answer to a banner. Only answers can be stale.
-  private func revertOutstanding() -> ModePreviewOutcome {
+  private func revertOutstanding() -> PreviewOutcome {
     guard let outstanding else { return lastOutcome ?? .reverted }
     return resolve(
       applying: outstanding.previousMode, to: outstanding.displayID, success: .reverted
@@ -245,8 +234,8 @@ public actor ModePreviewSession {
   /// they can definitely see is the safe way to end that.
   private func resolve(
     applying mode: DisplayMode, to displayID: CGDirectDisplayID,
-    success: ModePreviewOutcome
-  ) -> ModePreviewOutcome {
+    success: PreviewOutcome
+  ) -> PreviewOutcome {
     do {
       try configurator.apply(mode, to: displayID, scope: .session)
     } catch let error as DisplayConfigError {

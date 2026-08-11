@@ -10,7 +10,7 @@ import os
 ///
 /// `DisplayModeCoordinator`'s shape, for its reasons, and they are not optional:
 ///
-/// 1. **Every session-touching operation is serialised** through `pending`.
+/// 1. **Every session-touching operation is serialised** through `queue`.
 ///    Without it two drops both suspend inside `begin()`, the actor serialises
 ///    them, and their main-actor continuations resume in an order unrelated to
 ///    the actor's — leaving the window describing one layout while "Keep"
@@ -96,8 +96,8 @@ final class ArrangementCoordinator {
   /// shy silently fails to restore anything on the reconnect the feature is
   /// named for.
   @ObservationIgnored private var arrivals = TopologyArrivalTracker()
-  @ObservationIgnored private var pending: Task<Void, Never>?
-  @ObservationIgnored private var countdown: Task<Void, Never>?
+  @ObservationIgnored private let queue = PreviewQueue()
+  @ObservationIgnored private let countdown = PreviewCountdownDriver()
   @ObservationIgnored private var inFlight = 0
   @ObservationIgnored private var screenObserver: (any NSObjectProtocol)?
   @ObservationIgnored private let log = Logger(
@@ -199,8 +199,8 @@ final class ArrangementCoordinator {
   /// object lives as long as the app and the block holds `self` weakly, so a
   /// surviving registration is inert rather than dangling.
   deinit {
-    countdown?.cancel()
-    pending?.cancel()
+    countdown.stop()
+    queue.cancel()
   }
 
   // MARK: - Sampling
@@ -243,7 +243,7 @@ final class ArrangementCoordinator {
       self.recoverableLayout = nil
       syncConfirmation()
     }
-    enqueue {
+    queue.enqueue {
       guard await self.session.discardIfTopologyChanged() else { return }
       self.log.info("Dropped an unanswered arrangement preview: the display set changed")
       await self.adopt(.clear)
@@ -258,16 +258,16 @@ final class ArrangementCoordinator {
   /// Synchronous and fire-and-forget on purpose — the queue owns the ordering, so
   /// no caller can create a second in-flight apply by spawning its own task.
   func apply(_ wanted: DisplayArrangement) {
-    // Raised HERE, synchronously, and not inside `enqueue`: a control that
+    // Raised HERE, synchronously, and not inside the queue: a control that
     // queues main-actor work and only then disables itself is a control two
-    // clicks get through — and `enqueue` also carries the screen-parameters
+    // clicks get through, and the queue also carries the screen-parameters
     // reconciliation, which is not an apply and must not grey out the answer
     // buttons every time anything on the machine reconfigures. Counted rather
     // than boolean, so two queued applies do not have the first one's
     // completion clear the flag for the second.
     inFlight += 1
     isApplying = true
-    enqueue {
+    queue.enqueue {
       await self.performApply(wanted)
       self.inFlight -= 1
       if self.inFlight == 0 { self.isApplying = false }
@@ -315,7 +315,7 @@ final class ArrangementCoordinator {
   /// the same gate, and a refused pass cannot rely on the winner producing a
   /// reconfiguration event when the winner applied nothing.
   func restoreSavedArrangement() async {
-    await enqueueReturning { await self.performRestore() }
+    await queue.enqueueReturning { await self.performRestore() }
   }
 
   /// `answered` is the preview the caller was LOOKING AT. It is carried into the
@@ -323,13 +323,13 @@ final class ArrangementCoordinator {
   /// preview — so an answer can only ever resolve what the user was reading, and
   /// queue ordering is demoted to an optimisation.
   @discardableResult
-  func confirm(_ answered: Preview) async -> ModePreviewOutcome {
-    await enqueueReturning { await self.resolve(answered, keeping: true) }
+  func confirm(_ answered: Preview) async -> PreviewOutcome {
+    await queue.enqueueReturning { await self.resolve(answered, keeping: true) }
   }
 
   @discardableResult
-  func revert(_ answered: Preview) async -> ModePreviewOutcome {
-    await enqueueReturning { await self.resolve(answered, keeping: false) }
+  func revert(_ answered: Preview) async -> PreviewOutcome {
+    await queue.enqueueReturning { await self.resolve(answered, keeping: false) }
   }
 
   /// Clears everything the report card renders, and syncs the window in the same
@@ -351,28 +351,9 @@ final class ArrangementCoordinator {
   }
 
   // MARK: - Serialisation
-
-  private func enqueue(_ operation: @escaping @MainActor () async -> Void) {
-    let previous = pending
-    pending = Task { @MainActor in
-      _ = await previous?.value
-      await operation()
-    }
-  }
-
-  private func enqueueReturning<T: Sendable>(
-    _ operation: @escaping @MainActor () async -> T
-  ) async -> T {
-    let previous = pending
-    let task = Task { @MainActor () -> T in
-      _ = await previous?.value
-      return await operation()
-    }
-    // The chain is Void-typed, so the next operation waits on this one through
-    // an erased wrapper rather than on its result.
-    pending = Task { @MainActor in _ = await task.value }
-    return await task.value
-  }
+  //
+  // The queue itself is `PreviewQueue` in CandelaKit (#68): four coordinators
+  // held four byte-identical copies of it, and the countdown driver beside it.
 
   // MARK: - Operations (always inside the queue)
 
@@ -565,7 +546,7 @@ final class ArrangementCoordinator {
   func setRestoringLayout(_ restoring: Bool) {
     persistence.setRestoreEnabled(restoring)
     guard restoring else { return }
-    enqueue {
+    queue.enqueue {
       // NOT while a preview stands. The layout on screen during a countdown is
       // one nobody has approved, and saving it would file the very arrangement
       // the user is about to revert — the settings window and the confirmation
@@ -615,7 +596,7 @@ final class ArrangementCoordinator {
     log.error("An arrangement apply diverged; holding the previous layout so it can be restored")
   }
 
-  private func resolve(_ answered: Preview, keeping: Bool) async -> ModePreviewOutcome {
+  private func resolve(_ answered: Preview, keeping: Bool) async -> PreviewOutcome {
     let outcome = keeping
       ? await session.confirm(answered.value)
       : await session.revert(answered.value)
@@ -725,30 +706,22 @@ final class ArrangementCoordinator {
   /// lands mid-`begin()` must reconcile after it, not against a session that is
   /// half-way through changing.
   private func startCountdown() {
-    countdown?.cancel()
     let session = session
-    countdown = Task.detached { [weak self] in
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .seconds(1))
-        if Task.isCancelled { return }
-        let outcome = await session.tick()
-        Task { @MainActor [weak self] in
-          guard let self else { return }
-          if case let .failed(error) = outcome {
-            enqueue { await self.adopt(.set(error)) }
-          } else {
-            enqueue { await self.adopt(.keep) }
-          }
-        }
-        // The countdown fires at most once; whatever it returned, it is spent.
-        if outcome != nil { return }
+    countdown.start(tick: { await session.tick() }) { [weak self] outcome in
+      guard let self else { return }
+      // Through the queue, never straight to `adopt`: a tick that landed
+      // mid-apply would otherwise publish a picture the apply is about to
+      // replace.
+      if case let .failed(error) = outcome {
+        queue.enqueue { await self.adopt(.set(error)) }
+      } else {
+        queue.enqueue { await self.adopt(.keep) }
       }
     }
   }
 
   private func stopCountdown() {
-    countdown?.cancel()
-    countdown = nil
+    countdown.stop()
   }
 }
 
