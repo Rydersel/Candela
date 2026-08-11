@@ -167,7 +167,10 @@ struct PanelResolutionSection: View {
       PanelReportRow(text: Text(DisplayModeCopy.startFailure(failure.reason))) {
         coordinator.dismissStartFailure()
       }
-      .help(DisplayModeCopy.startFailureDiagnostic(failure.reason))
+      // No `.help` here: nothing in the menu bar's panel delivers a tooltip
+      // (#130), so one attached here would be a string nobody can ever read.
+      // The same diagnostic reaches the user from the confirmation window and
+      // from the settings page's banner, both of which are ordinary windows.
     }
   }
 

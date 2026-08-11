@@ -76,3 +76,57 @@ struct ValueSliderRow: View {
     )
   }
 }
+
+extension View {
+  /// Reveals a greyed panel control's reason on hover, drawn by us.
+  ///
+  /// The panel cannot use a tooltip. [MEASURED 2026-08-11, #130] Nothing inside
+  /// the `NSMenu` tracking session the panel runs in delivers one: not SwiftUI's
+  /// `.help`, not `NSView.toolTip`, and not on an ENABLED control either (the
+  /// MAG's HDR button, whose `.help` has never once appeared). So this is not a
+  /// workaround for `.disabled`; a tooltip is simply not available here.
+  ///
+  /// `.onHover` DOES fire in the panel, including from an overlay applied after
+  /// the `.disabled` it sits on, which is what makes a self-drawn caption
+  /// possible where the system one is not.
+  ///
+  /// The line's height is RESERVED whenever a reason exists, and only the text
+  /// fades. Letting it appear would re-lay-out every row below it in that
+  /// display's section as the pointer crossed a control nobody can use, and the
+  /// panel already moves enough when a disclosure opens. Nothing is reserved for
+  /// a live control, so a panel with nothing greyed is pixel-identical to before.
+  ///
+  /// Left readable to VoiceOver at zero opacity on purpose: hover is a pointer
+  /// affordance, and the reason is the one thing a keyboard user cannot
+  /// otherwise get from this surface.
+  func panelHoverReason(_ reason: String?) -> some View {
+    modifier(PanelHoverReason(reason: reason))
+  }
+}
+
+private struct PanelHoverReason: ViewModifier {
+  let reason: String?
+  @State private var hovering = false
+
+  func body(content: Content) -> some View {
+    VStack(alignment: .leading, spacing: 3) {
+      content
+        .overlay {
+          if reason != nil {
+            // Applied after the caller's `.disabled`, so it is outside that
+            // subtree and still hit-tests. Swallowing the hover costs nothing:
+            // the control underneath is inert whenever a reason exists.
+            Color.clear.contentShape(Rectangle()).onHover { hovering = $0 }
+          }
+        }
+      if let reason {
+        Text(verbatim: reason)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+          .opacity(hovering ? 1 : 0)
+          .animation(.easeInOut(duration: 0.12), value: hovering)
+      }
+    }
+  }
+}

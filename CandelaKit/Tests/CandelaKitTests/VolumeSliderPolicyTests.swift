@@ -86,4 +86,61 @@ struct VolumeSliderPolicyTests {
       }
     }
   }
+
+  // MARK: - The menu bar's short form (#130)
+
+  /// The panel draws this directly under the display's own name header in a
+  /// 280 pt column, so it must NOT name the display: that word is already on
+  /// screen one row up, and repeating it wraps a one-line caption onto three.
+  @Test func theCompactReasonNeverNamesTheDisplay() {
+    for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
+      for support in [VCPSupport.supported, .unsupported, .unknown] {
+        let reason = VolumeSliderPolicy.compactDisabledReason(
+          override: override, volumeSupport: support) ?? ""
+        #expect(!reason.contains("DELL"))
+        #expect(!reason.lowercased().contains("panel"))
+        #expect(!reason.contains("\u{2014}"))
+      }
+    }
+  }
+
+  /// The whole point of the long form carries over: the two greys must not
+  /// share a sentence just because the short form is shorter.
+  @Test func theCompactFormStillSeparatesTheTwoCauses() {
+    let setting = VolumeSliderPolicy.compactDisabledReason(
+      override: .forceNone, volumeSupport: .unsupported)
+    let display = VolumeSliderPolicy.compactDisabledReason(
+      override: .auto, volumeSupport: .unsupported)
+    #expect(setting == "Volume slider set to always off.")
+    #expect(display == "This display lists no volume command.")
+    #expect(setting != display)
+  }
+
+  /// Same invariant as the long form, and the reason the panel can bind its
+  /// hover caption's very EXISTENCE to this call: non-nil exactly when the
+  /// slider is disabled, so a reason can never outlive its grey.
+  @Test func aCompactReasonExistsExactlyWhenTheSliderIsDisabled() {
+    for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
+      for support in [VCPSupport.supported, .unsupported, .unknown] {
+        let enabled = VolumeSliderPolicy.isEnabled(override: override, volumeSupport: support)
+        let reason = VolumeSliderPolicy.compactDisabledReason(
+          override: override, volumeSupport: support)
+        #expect(enabled == (reason == nil), "override \(override), support \(support)")
+      }
+    }
+  }
+
+  /// The two forms must stay in step about WHICH cause applied, even though
+  /// they word it differently: same inputs, same nil-ness, always.
+  @Test func theTwoFormsAgreeOnWhenThereIsAReason() {
+    for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
+      for support in [VCPSupport.supported, .unsupported, .unknown] {
+        let long = VolumeSliderPolicy.disabledReason(
+          displayName: "D", override: override, volumeSupport: support)
+        let short = VolumeSliderPolicy.compactDisabledReason(
+          override: override, volumeSupport: support)
+        #expect((long == nil) == (short == nil), "override \(override), support \(support)")
+      }
+    }
+  }
 }
