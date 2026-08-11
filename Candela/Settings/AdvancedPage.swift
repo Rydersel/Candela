@@ -111,27 +111,35 @@ struct AdvancedPage: View {
 
   private var isBlocked: Bool { trafficBlock != nil }
 
-  /// Stated ONCE, at the foot of Control Method — the section above the three
-  /// the block greys out (SO12). Both sentences are the two-sentence safety
+  /// Stated ONCE, at the foot of Control Method: the section above the three the
+  /// block greys out (SO12). Both sentences are the two-sentence safety
   /// allowance SO15 grants the HDR block.
-  private func blockExplanation(_ block: DDCTrafficBlock) -> LocalizedStringKey {
-    switch block {
-    // The `isBuiltIn` guard in `body` is what makes this branch external-only,
-    // and `BrightnessPathPolicy.usesNative` has exactly one way to answer yes
-    // for an external: HDR is live, whoever engaged it (#52).
-    case .macOSDrivesBrightness:
-      "This display is in HDR mode. macOS is setting its brightness directly, so the settings below have no effect until HDR turns off."
-    case .hardwareControlOff:
-      "Hardware (DDC) control is off for this display, so the settings below have no effect."
-    }
+  ///
+  /// The copy lives on `SafetySentence` because the HDR half is also spoken as
+  /// part of the hardware-control toggle's label, which is the one control a
+  /// block greys BEFORE a VoiceOver user reaches this caption. The `isBuiltIn`
+  /// guard in `body` is what makes `.macOSDrivesBrightness` external-only here,
+  /// and `BrightnessPathPolicy.usesNative` has exactly one way to answer yes for
+  /// an external: HDR is live, whoever engaged it (#52).
+  private func blockExplanation(_ block: DDCTrafficBlock) -> SettingsCaption {
+    SettingsCaption(verbatim: SafetySentence.trafficBlockExplanation(block))
   }
 
   // MARK: - Control Method
 
   @ViewBuilder private var controlMethodSection: some View {
     Section {
-      SettingRow("Turn off if hardware control misbehaves; brightness dims in software instead.") {
-        Toggle("Use hardware (DDC) control", isOn: Binding(
+      // A safety row (accessibility contract 3). Under live HDR this toggle is
+      // the only control a block greys BEFORE the page's one explanation, which
+      // sits at the foot of this section, so a VoiceOver user would otherwise
+      // hear "dimmed" with no reason for it. The sentence is spoken as part of
+      // the label and is NOT repeated as a caption here: SO12 states it once.
+      SettingRow(
+        safety: .hdrBlock(trafficBlock),
+        label: "Use hardware (DDC) control",
+        caption: SettingsCaption("Turn off if hardware control misbehaves; brightness dims in software instead.")
+      ) { label in
+        Toggle(label, isOn: Binding(
           get: { !prefs.forceSoftware },
           set: { useDDC in
             // D29 rule 1 — the THIRD mute-stranding path, and the only one that
@@ -183,7 +191,7 @@ struct AdvancedPage: View {
       }
 
       if let trafficBlock {
-        SettingsCaption(blockExplanation(trafficBlock))
+        blockExplanation(trafficBlock)
       }
     } header: {
       Text("Control Method").settingsHeading()

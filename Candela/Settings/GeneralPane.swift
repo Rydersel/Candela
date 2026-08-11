@@ -144,10 +144,12 @@ struct GeneralPane: View {
       // slider range IS the software leg. Disabling it there would lock a user
       // out of the one control that governs how dark that display can go. The
       // caption carries the condition instead.
-      // Two sentences, not one: SO15's exception list names the blank display
-      // as a safety case, and the hazard is the second sentence.
-      SettingRow("The slider can reach 0% on any display dimming in software, which blanks it completely. If keyboard control is also off, a blank display can be hard to undo.") {
-        Toggle("Allow a fully dark display", isOn: Binding(
+      // Two sentences, not one, and spoken as part of the toggle's label rather
+      // than offered as a hint: SO15's exception list names the blank display as
+      // a safety case, and accessibility contract 3 puts the three safety
+      // sentences where a VoiceOver user cannot switch them off.
+      SettingRow(safety: .blankDisplay, label: "Allow a fully dark display") { label in
+        Toggle(label, isOn: Binding(
           get: { prefs.allowZeroSwBrightness },
           set: { enabled in
             prefs.allowZeroSwBrightness = enabled
