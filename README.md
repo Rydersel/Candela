@@ -1,4 +1,4 @@
-# Candela (working name)
+# Candela
 
 A macOS menu-bar app for controlling external displays — brightness, volume,
 contrast, HDR — with native polish. Successor to our MonitorControl fork;
