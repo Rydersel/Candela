@@ -48,41 +48,6 @@ actor FakeHDR: HDRToggling {
   func recordedMeasuredReads() -> Int { measuredReads }
 }
 
-@MainActor
-final class FakeShade: ShadeRendering {
-  private(set) var alphaCalls: [(alpha: Double, id: CGDirectDisplayID)] = []
-  private(set) var removed: [CGDirectDisplayID] = []
-  private(set) var repinCount = 0
-
-  @discardableResult
-  func setShadeAlpha(_ alpha: Double, on displayID: CGDirectDisplayID) -> Bool {
-    alphaCalls.append((alpha, displayID))
-    return true
-  }
-
-  func removeShade(for displayID: CGDirectDisplayID) { removed.append(displayID) }
-  func removeAllShades() {}
-  func repinFrames() { repinCount += 1 }
-}
-
-@MainActor
-final class FakeGamma: GammaApplying {
-  private(set) var scales: [Double] = []
-  private(set) var recaptured: [CGDirectDisplayID] = []
-
-  @discardableResult
-  func applyGammaScale(
-    _ scale: Double, on _: CGDirectDisplayID, enforcerOn _: CGDirectDisplayID
-  ) -> Bool {
-    scales.append(scale)
-    return true
-  }
-
-  func verifyTableIntact(on _: CGDirectDisplayID) -> Bool { true }
-  func recaptureDefaultTable(on displayID: CGDirectDisplayID) { recaptured.append(displayID) }
-  func resetAllGamma() {}
-}
-
 /// Records every target applied through the native leg (post-coalescing).
 /// Copies share the lock's heap storage, so the harness copy observes the
 /// controller's writes.
@@ -115,8 +80,8 @@ private final class Harness {
   let ddc: FakeDDC
   let native = FakeNativeApplier()
   let hdr: FakeHDR?
-  let shade = FakeShade()
-  let gamma = FakeGamma()
+  let shade = RecordingShade()
+  let gamma = RecordingGamma()
   let store = PathMemoryStore()
   let defaults: UserDefaults
   let prefs: DisplayPrefs
@@ -1114,7 +1079,7 @@ struct HDRModeEngageFailureTests {
     let controller = BrightnessController(
       writer: FakeDDC(readResult: nil),
       backends: BrightnessBackends(
-        applierNative: FakeNativeApplier(), hdr: gated, shade: FakeShade(), gamma: FakeGamma()
+        applierNative: FakeNativeApplier(), hdr: gated, shade: RecordingShade(), gamma: RecordingGamma()
       ),
       prefs: prefs,
       displayID: 7
@@ -1161,7 +1126,7 @@ struct HDRModeEngageFailureTests {
     let controller = BrightnessController(
       writer: FakeDDC(readResult: nil),
       backends: BrightnessBackends(
-        applierNative: FakeNativeApplier(), hdr: gated, shade: FakeShade(), gamma: FakeGamma()
+        applierNative: FakeNativeApplier(), hdr: gated, shade: RecordingShade(), gamma: RecordingGamma()
       ),
       prefs: prefs,
       displayID: 7
@@ -1208,7 +1173,7 @@ struct HDRModeEngageFailureTests {
     let controller = BrightnessController(
       writer: FakeDDC(readResult: nil),
       backends: BrightnessBackends(
-        applierNative: FakeNativeApplier(), hdr: gated, shade: FakeShade(), gamma: FakeGamma()
+        applierNative: FakeNativeApplier(), hdr: gated, shade: RecordingShade(), gamma: RecordingGamma()
       ),
       prefs: prefs,
       displayID: 7
@@ -1448,7 +1413,7 @@ struct HDRSettleAccessorTests {
     let controller = BrightnessController(
       writer: FakeDDC(readResult: nil),
       backends: BrightnessBackends(
-        applierNative: FakeNativeApplier(), hdr: gated, shade: FakeShade(), gamma: FakeGamma()
+        applierNative: FakeNativeApplier(), hdr: gated, shade: RecordingShade(), gamma: RecordingGamma()
       ),
       prefs: prefs,
       displayID: 7

@@ -58,10 +58,7 @@ public actor ModePreviewSession {
   private let countdownSeconds: Int
 
   private var outstanding: OutstandingPreview?
-  private var remaining = 0
-  /// The countdown fires at most once. A failed expiry revert is re-attempted
-  /// through `revert()`, not by returning `.failed` from every later tick.
-  private var countdownArmed = false
+  private var countdown = PreviewCountdown()
   private var lastOutcome: PreviewOutcome?
 
   /// Thirty seconds, the same as `MirrorPreviewSession`. The two are the same
@@ -74,7 +71,7 @@ public actor ModePreviewSession {
     self.countdownSeconds = countdownSeconds
   }
 
-  public var secondsRemaining: Int { remaining }
+  public var secondsRemaining: Int { countdown.remaining }
 
   /// True while a preview is applied and unresolved — including after a
   /// resolution that threw. `revert()` is worth calling exactly while this
@@ -91,7 +88,7 @@ public actor ModePreviewSession {
   /// than inferred: a failed EXPIRY disarms it while a failed COMMIT leaves it
   /// armed, and a caller that guesses wrong either shows a countdown that will
   /// never fire or hides one that will.
-  public var isCountingDown: Bool { countdownArmed && outstanding != nil }
+  public var isCountingDown: Bool { countdown.isArmed && outstanding != nil }
 
   /// The display is gone. Drops the outstanding preview WITHOUT applying
   /// anything — there is nothing left to apply it to.
@@ -106,8 +103,7 @@ public actor ModePreviewSession {
   public func discard(displayID: CGDirectDisplayID) -> Bool {
     guard outstanding?.displayID == displayID else { return false }
     outstanding = nil
-    remaining = 0
-    countdownArmed = false
+    countdown.disarm()
     lastOutcome = .reverted
     return true
   }
@@ -162,8 +158,7 @@ public actor ModePreviewSession {
     // outcome. Wiping it on the way in would make a later confirm() report a
     // reversion that never happened, after a commit that did.
     lastOutcome = nil
-    remaining = countdownSeconds
-    countdownArmed = true
+    countdown.arm(seconds: countdownSeconds)
     return .success(())
   }
 
@@ -201,11 +196,7 @@ public actor ModePreviewSession {
   /// Call once per second. Returns nil while the countdown runs, and the
   /// outcome when it expires.
   public func tick() -> PreviewOutcome? {
-    guard countdownArmed, outstanding != nil else { return nil }
-    remaining -= 1
-    guard remaining <= 0 else { return nil }
-    remaining = 0
-    countdownArmed = false
+    guard outstanding != nil, countdown.tick() else { return nil }
     return revertOutstanding()
   }
 
@@ -247,8 +238,7 @@ public actor ModePreviewSession {
       return .failed(error)
     }
     outstanding = nil
-    remaining = 0
-    countdownArmed = false
+    countdown.disarm()
     lastOutcome = success
     return success
   }

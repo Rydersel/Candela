@@ -46,37 +46,19 @@ struct DDCValueControllerTests {
     private var reads: [(current: UInt16, max: UInt16)?]
     private var writeResults: [Bool]
     private(set) var writes: [(command: UInt8, value: UInt16)] = []
+    /// Fires DURING the nth read rather than between reads (#68, absorbed from
+    /// `HookedScriptedDDC`). That is the whole seam: it lands user input INSIDE
+    /// `refreshFromHardware`'s value loop, which is the F2 mute-generation
+    /// regression pin, and firing between reads would not reach the case.
+    private var hookAfterRead: Int?
+    private var hook: (@Sendable () async -> Void)?
 
-    init(reads: [(current: UInt16, max: UInt16)?] = [], writeResults: [Bool] = []) {
+    init(
+      reads: [(current: UInt16, max: UInt16)?] = [], writeResults: [Bool] = [],
+      hookAfterRead: Int? = nil
+    ) {
       self.reads = reads
       self.writeResults = writeResults
-    }
-
-    func write(command: UInt8, value: UInt16) async -> Bool {
-      writes.append((command, value))
-      return writeResults.isEmpty ? true : writeResults.removeFirst()
-    }
-
-    func read(command _: UInt8) async -> (current: UInt16, max: UInt16)? {
-      readCount += 1
-      return reads.isEmpty ? nil : reads.removeFirst()
-    }
-
-    func recordedWrites() -> [(command: UInt8, value: UInt16)] { writes }
-  }
-
-  /// Scripted reads plus a hook fired DURING a chosen read — the seam that
-  /// lets a test land user input inside `refreshFromHardware`'s value loop
-  /// (the F2 mute-generation regression pin).
-  private actor HookedScriptedDDC: DDCWriting {
-    private(set) var readCount = 0
-    private var reads: [(current: UInt16, max: UInt16)?]
-    private var hookAfterRead: Int
-    private var hook: (@Sendable () async -> Void)?
-    private(set) var writes: [(command: UInt8, value: UInt16)] = []
-
-    init(reads: [(current: UInt16, max: UInt16)?], hookAfterRead: Int) {
-      self.reads = reads
       self.hookAfterRead = hookAfterRead
     }
 
@@ -84,7 +66,7 @@ struct DDCValueControllerTests {
 
     func write(command: UInt8, value: UInt16) async -> Bool {
       writes.append((command, value))
-      return true
+      return writeResults.isEmpty ? true : writeResults.removeFirst()
     }
 
     func read(command _: UInt8) async -> (current: UInt16, max: UInt16)? {
@@ -453,7 +435,7 @@ struct DDCValueControllerTests {
     // mute as newer and bail. Sink the capture below the value loop and the
     // capture already includes the bump — the readback's (current: 2) then
     // clobbers the fresh mute back to unmuted and this test goes red.
-    let scripted = HookedScriptedDDC(
+    let scripted = ScriptedDDC(
       reads: [(current: 50, max: 100), (current: 2, max: 2)], // value read, then 0x8D says "unmuted"
       hookAfterRead: 1
     )

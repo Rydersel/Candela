@@ -39,8 +39,8 @@ struct LockDimTests {
       backends: BrightnessBackends(
         applierNative: native,
         hdr: FakeHDR(supports: true, enabled: hdrEnabled),
-        shade: FakeShade(),
-        gamma: FakeGamma()
+        shade: RecordingShade(),
+        gamma: RecordingGamma()
       ),
       prefs: prefs,
       displayID: 7,
@@ -243,12 +243,12 @@ struct LockDimTests {
     // point, so a dim that lands there is visible in the gamma scale.
     let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "lock")
-    let gamma = FakeGamma()
+    let gamma = RecordingGamma()
     let controller = BrightnessController(
       writer: FakeDDC(readResult: nil),
       backends: BrightnessBackends(
         applierNative: FakeNativeApplier(), hdr: FakeHDR(supports: false, enabled: false),
-        shade: FakeShade(), gamma: gamma
+        shade: RecordingShade(), gamma: gamma
       ),
       prefs: prefs,
       displayID: 7,
