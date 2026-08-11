@@ -745,7 +745,10 @@ public final class BrightnessController {
       clearSoftwareLeg()
       beginHDRTransition()
       let generation = hdrTransitionGeneration
-      let engaged = await backends.hdr?.setHDR(displayID: displayID, enabled: true) ?? false
+      // ISSUED, not achieved (#65). The backend reports that it took the lock
+      // and assigned `preferHDRModes`; whether the panel switched is a separate
+      // question, and it is asked below after the settle.
+      let issued = await backends.hdr?.setHDR(displayID: displayID, enabled: true) ?? false
       // Supersession guard (fix round 2; generation token final wave): this
       // body is a bare async func and the panel spawns one unserialized Task
       // per mode change, so nothing serializes them. If a newer transition
@@ -753,13 +756,22 @@ public final class BrightnessController {
       // here (stale rollback, clearing the newer transition's settle flag,
       // re-firing applyPaths) would be an orphaned-continuation clobber.
       guard hdrTransitionGeneration == generation else { return }
-      if engaged {
+      // The measured answer to "is this display in HDR now". A write that was
+      // never issued cannot have achieved anything, so that arm skips the read
+      // rather than paying for a panel enumeration to learn what it knows.
+      var achieved = false
+      if issued {
+        // Optimistic for the settle window only: the poller is gated off and
+        // the native leg has to believe it is live to hold the value.
         cachedHDRActive = true
         try? await Task.sleep(for: settleDelay)
         guard hdrTransitionGeneration == generation else { return } // post-settle
         settleInProgress = false
-        await refreshHDRCaches()
+        await refreshHDRCaches(measured: true)
         guard hdrTransitionGeneration == generation else { return }
+        achieved = cachedHDRActive
+      }
+      if achieved {
         assertNativeEntryBrightness()
       } else {
         // Engage failed (T8 carry-over, adjudicated M3 blocker): the mode was
@@ -770,10 +782,19 @@ public final class BrightnessController {
         // caches settle, re-apply the current value through the normal path;
         // without it the screen is stranded un-dimmed under a low slider.
         // No `resetDuplicateState()` here (deliberate asymmetry vs the
-        // disengage arm): a failed engage means no mode switch occurred, so
+        // disengage arm): neither way of reaching this arm switched modes, so
         // the last recorded DDC value still reflects the register.
+        //
+        // TWO ways of reaching it, and they are different facts (#65). The
+        // write was never issued (no panel, or the MonitorPanel lock was busy),
+        // or it was issued, returned success, and the display did not switch.
+        // The second is the class CLAUDE.md §2 names, and before #65 it was not
+        // reachable at all: the arm was chosen from the write's own return.
+        let reason = issued
+          ? "was accepted and the display did not switch"
+          : "was never issued"
         pathLog.error(
-          "setHDRMode(.alwaysOn) engage failed: rolling back to \(previous.rawValue) display=\(self.displayID)"
+          "setHDRMode(.alwaysOn) \(reason, privacy: .public): rolling back to \(previous.rawValue) display=\(self.displayID)"
         )
         prefs.hdrMode = previous
         hdrMode = previous
@@ -801,7 +822,11 @@ public final class BrightnessController {
       settleInProgress = false
       coalescer.resetDuplicateState()
       applyPaths()
-      await refreshHDRCaches()
+      // Measured, for the reason the engage arm is (#65). This arm does not roll
+      // back on a disengage that did not take (that is #87's question, not this
+      // one), but the mirror it leaves behind is now the panel's answer rather
+      // than the request's.
+      await refreshHDRCaches(measured: true)
     }
   }
 
@@ -876,10 +901,18 @@ public final class BrightnessController {
     }
   }
 
-  private func refreshHDRCaches() async {
+  ///
+  /// `measured: true` reads the panel now, past the backend's 2 s cache. Every
+  /// decision about whether a transition ACHIEVED anything has to pass it (#65):
+  /// the cached read is fine for keeping the mirror roughly fresh, and useless
+  /// as evidence, because a cache filled during the transition would answer with
+  /// the transition's own optimism.
+  private func refreshHDRCaches(measured: Bool = false) async {
     if let hdr = backends.hdr {
       cachedSupportsHDR = await hdr.supportsHDR(displayID: displayID)
-      cachedHDRActive = await hdr.isHDREnabled(displayID: displayID)
+      cachedHDRActive = measured
+        ? await hdr.measuredHDREnabled(displayID: displayID)
+        : await hdr.isHDREnabled(displayID: displayID)
     } else {
       cachedSupportsHDR = false
       cachedHDRActive = false
