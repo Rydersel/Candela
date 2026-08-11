@@ -1,3 +1,9 @@
+//  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
+//  The window setup is transplanted from the MonitorControl project (MIT), via
+//  `ShadeOverlay`. The header is here rather than only in the prose below
+//  because the attribution audit (#45) reads headers: derived-of-transplanted is
+//  still transplanted.
+
 import AppKit
 import CandelaKit
 import os

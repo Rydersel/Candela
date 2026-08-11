@@ -63,6 +63,13 @@ struct AboutPane: View {
         LabeledContent("MonitorControl") {
           Text("MIT (DDC/CI transport and the behavior this app is measured against)")
         }
+        // Reached us through MonitorControl, which adapted it, and named here
+        // for the reason the attribution audit (#45) gives: a notice that
+        // travels only in a source comment does not reach anyone running the
+        // app. `MediaKeyEventTap.swift` credits both.
+        LabeledContent("MediaKeyTap") {
+          Text("MIT (Nicholas Hurden)")
+        }
         LabeledContent("KeyboardShortcuts") {
           Text("MIT (Sindre Sorhus)")
         }
