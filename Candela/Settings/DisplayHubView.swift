@@ -413,8 +413,14 @@ struct DisplayHubView: View {
         }
       }
 
-      SettingRow(caption: SettingsCaption(muteCaption)) {
-        Toggle("Mute with the display's own mute command", isOn: Binding(
+      // A safety row (accessibility contract 3): what "On" costs is D29's mute
+      // strand, so the sentence goes into the toggle's label rather than into a
+      // hint a VoiceOver user may have switched off.
+      SettingRow(
+        safety: .hardwareMute(isAvailable: state.volume.isAvailable),
+        label: "Mute with the display's own mute command"
+      ) { label in
+        Toggle(label, isOn: Binding(
           get: { prefs.enableMuteUnmute },
           set: { enabled in
             // D22/D29 rule 1, and there is NO engine backstop: unmute BEFORE the
@@ -491,13 +497,6 @@ struct DisplayHubView: View {
     return active ? "On" : "Off"
   }
 
-  /// SO5: a recoverable state never borrows an unrecoverable state's copy — the
-  /// two sentences are distinct because the states are.
-  private var muteCaption: LocalizedStringKey {
-    state.volume.isAvailable
-      ? "Off: muting sets volume to zero. On: sends the display's own mute command."
-      : "Volume control is off for this display, so mute is unavailable."
-  }
 
   // MARK: - OLED Care
 
