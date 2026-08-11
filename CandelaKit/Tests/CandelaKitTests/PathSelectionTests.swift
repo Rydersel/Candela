@@ -9,9 +9,11 @@ import Testing
 /// Scriptable HDR backend; records every `setHDR` call.
 actor FakeHDR: HDRToggling {
   private(set) var setCalls: [Bool] = []
+  private(set) var measuredReads = 0
   private var supports: Bool
   private var enabled: Bool
   private var setResult = true
+  private var achieves = true
 
   init(supports: Bool = true, enabled: Bool = false) {
     self.supports = supports
@@ -20,11 +22,15 @@ actor FakeHDR: HDRToggling {
 
   func supportsHDR(displayID _: CGDirectDisplayID) -> Bool { supports }
   func isHDREnabled(displayID _: CGDirectDisplayID) -> Bool { enabled }
+  func measuredHDREnabled(displayID _: CGDirectDisplayID) -> Bool {
+    measuredReads += 1
+    return enabled
+  }
 
   @discardableResult
   func setHDR(displayID _: CGDirectDisplayID, enabled: Bool) -> Bool {
     setCalls.append(enabled)
-    if setResult {
+    if setResult, achieves {
       self.enabled = enabled
     }
     return setResult
@@ -33,7 +39,13 @@ actor FakeHDR: HDRToggling {
   func displaysReconfigured() {}
 
   func stubSetResult(_ value: Bool) { setResult = value }
+  /// The #65 panel: the write is ACCEPTED and the display does not switch.
+  /// A different fact from `stubSetResult(false)`, which is a write that was
+  /// never issued, and before #65 the two were indistinguishable to the
+  /// controller because it read only the return value.
+  func stubAchieves(_ value: Bool) { achieves = value }
   func recordedSetCalls() -> [Bool] { setCalls }
+  func recordedMeasuredReads() -> Int { measuredReads }
 }
 
 @MainActor
@@ -378,6 +390,53 @@ struct PathSelectionTests {
     await h.controller.setHDRMode(.alwaysOn)
     #expect(h.submitted.last == .native(0.25))
     #expect(h.controller.isNativeActive())
+  }
+
+  // MARK: #65, committing an engage on the achieved state and not the write
+
+  /// The class CLAUDE.md §2 names, now reachable in the HDR path: the panel
+  /// accepts the write, reports success, and does not switch. Before this the
+  /// arm was chosen from `setHDR`'s return, so `.alwaysOn` persisted across
+  /// launches on a display that was never in HDR.
+  @Test func anEngageThatIsAcceptedAndDoesNotSwitchRollsTheModeBack() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    await h.hdr!.stubAchieves(false)
+
+    await h.controller.setHDRMode(.alwaysOn)
+
+    #expect(await h.hdr!.recordedSetCalls() == [true], "the write is still issued")
+    #expect(h.controller.hdrMode == .off, "the published mirror rolls back")
+    #expect(h.prefs.hdrMode == .off, "and so does the pref, or it survives a relaunch")
+    #expect(!h.controller.isHDREngaged)
+  }
+
+  /// The other half, so the fix cannot be "always roll back": a panel that does
+  /// switch still commits.
+  @Test func anEngageThatSwitchesStillCommits() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+
+    await h.controller.setHDRMode(.alwaysOn)
+
+    #expect(h.controller.hdrMode == .alwaysOn)
+    #expect(h.prefs.hdrMode == .alwaysOn)
+    #expect(h.controller.isHDREngaged)
+  }
+
+  /// The decision has to be taken from a read that goes past the backend's 2 s
+  /// cache. Pinned structurally rather than by timing: the seed's TTL used to
+  /// equal `settleDelay`, so the confirmation read sat exactly on the boundary
+  /// of the window that would have handed the request back to itself, and a
+  /// test written against the clock would pass or fail by scheduling luck.
+  @Test func theCommitDecisionReadsPastTheCache() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    let before = await h.hdr!.recordedMeasuredReads()
+
+    await h.controller.setHDRMode(.alwaysOn)
+
+    #expect(await h.hdr!.recordedMeasuredReads() > before)
   }
 
   // MARK: C2 — refreshFromHardware combined-domain mapping (MUST-HAVE)
@@ -1162,6 +1221,7 @@ actor GatedEngageHDR: HDRToggling {
 
   func supportsHDR(displayID _: CGDirectDisplayID) -> Bool { true }
   func isHDREnabled(displayID _: CGDirectDisplayID) -> Bool { enabledState }
+  func measuredHDREnabled(displayID _: CGDirectDisplayID) -> Bool { enabledState }
 
   @discardableResult
   func setHDR(displayID _: CGDirectDisplayID, enabled: Bool) async -> Bool {
@@ -1220,6 +1280,7 @@ actor GatedRollbackHDR: HDRToggling {
   }
 
   func isHDREnabled(displayID _: CGDirectDisplayID) -> Bool { enabled }
+  func measuredHDREnabled(displayID _: CGDirectDisplayID) -> Bool { enabled }
 
   @discardableResult
   func setHDR(displayID _: CGDirectDisplayID, enabled: Bool) -> Bool {
@@ -1378,6 +1439,7 @@ actor GatedTransitionHDR: HDRToggling {
 
   func supportsHDR(displayID _: CGDirectDisplayID) -> Bool { true }
   func isHDREnabled(displayID _: CGDirectDisplayID) -> Bool { true }
+  func measuredHDREnabled(displayID _: CGDirectDisplayID) -> Bool { true }
 
   @discardableResult
   func setHDR(displayID _: CGDirectDisplayID, enabled: Bool) async -> Bool {

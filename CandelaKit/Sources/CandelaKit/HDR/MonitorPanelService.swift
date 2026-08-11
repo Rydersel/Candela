@@ -12,6 +12,16 @@ import os
 public protocol HDRToggling: Sendable {
   func supportsHDR(displayID: CGDirectDisplayID) async -> Bool
   func isHDREnabled(displayID: CGDirectDisplayID) async -> Bool
+  /// The panel's HDR state read NOW, past any cache.
+  ///
+  /// Deliberately not a default implementation forwarding to `isHDREnabled`
+  /// (#65). A conformance that silently answered from a cache would turn every
+  /// achieved-state check built on this into a check that cannot fail, which is
+  /// the defect this method exists to remove: each conformance has to say what
+  /// its own read-through is.
+  func measuredHDREnabled(displayID: CGDirectDisplayID) async -> Bool
+  /// Reports whether the write was ISSUED, never whether the display switched
+  /// (#65). See the implementation's note.
   @discardableResult
   func setHDR(displayID: CGDirectDisplayID, enabled: Bool) async -> Bool
   func displaysReconfigured() async
@@ -64,6 +74,10 @@ public actor MonitorPanelService: HDRToggling {
     if let cached = hdrStateCache[displayID], cached.timestamp.duration(to: .now) < .seconds(2) {
       return cached.value
     }
+    return self.measuredHDREnabled(displayID: displayID)
+  }
+
+  public func measuredHDREnabled(displayID: CGDirectDisplayID) -> Bool {
     let value = self.mpDisplay(displayID)?.preferHDRModes ?? false
     self.hdrStateCache[displayID] = (value, .now)
     return value
@@ -72,6 +86,12 @@ public actor MonitorPanelService: HDRToggling {
   /// The display blanks and re-modes for ~2 s after this returns; the caller
   /// owns the settle delay and any deferred brightness write (spec §6,
   /// fork: HDRControl.swift:56,107,125).
+  ///
+  /// **`true` means the write was ISSUED: the lock was taken and
+  /// `preferHDRModes` was assigned. It does NOT mean the display switched**
+  /// (#65). A caller deciding whether an engage happened has to read
+  /// `measuredHDREnabled` after the settle; CLAUDE.md §2's rule about treating
+  /// an ACK as evidence of nothing applies here as much as it does on the wire.
   @discardableResult
   public func setHDR(displayID: CGDirectDisplayID, enabled: Bool) -> Bool {
     guard let manager, let display = mpDisplay(displayID) else { return false }
@@ -82,7 +102,12 @@ public actor MonitorPanelService: HDRToggling {
     }
     display.preferHDRModes = enabled
     mgr.unlockAccess()
-    self.hdrStateCache[displayID] = (enabled, .now)
+    // INVALIDATED, not seeded with the requested value (#65). Seeding made the
+    // cache assert the very thing the post-settle read is there to test, and
+    // the seed's 2 s TTL equalled `BrightnessController.settleDelay`, so the
+    // confirmation read landed on the boundary of the window that would have
+    // returned the request back to itself.
+    self.hdrStateCache[displayID] = nil
     return true
   }
 

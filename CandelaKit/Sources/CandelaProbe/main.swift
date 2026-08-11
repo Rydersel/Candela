@@ -322,8 +322,11 @@ case "hdr":
       let issued = await service.setHDR(displayID: display.id, enabled: enabled)
       print("\(display.name): setHDR(\(enabled)) -> \(issued ? "issued" : "FAILED (lock busy or unavailable)")")
       guard issued else { continue }
-      // The service caches its own optimistic write for 2 s, so every poll tick
-      // must clear that cache first or we just read our own answer back.
+      // `setHDR` invalidates the cache rather than seeding it with the request
+      // (#65), so a poll now reads the panel. The per-tick clear stays: what
+      // `isHDREnabled` MEASURES is still cached for 2 s, which would otherwise
+      // pin this loop to its first reading for the first two of its five
+      // seconds.
       let start = ContinuousClock.now
       var settled = false
       while start.duration(to: .now) < .seconds(5) {
