@@ -70,6 +70,27 @@ public enum BrightnessPath: Sendable, Equatable {
   case unavailable(BrightnessPathBlock)
 }
 
+public extension BrightnessPath {
+  /// Whether this path puts the display's brightness REGISTER under Candela's
+  /// control. Read it as a question about the wire, not about the slider: a
+  /// path can move the display (the software leg does) and still answer false.
+  ///
+  /// The false answers are what matter, and #143 is why they are worth naming.
+  /// Software dimming can only ever subtract from whatever the panel is already
+  /// emitting, so it assumes a register at full range. A path that stops
+  /// driving the register therefore inherits wherever the previous path left
+  /// it, and combined mode leaves it at the hardware floor for every value
+  /// below the switching point: the app then reports 100% over a panel at its
+  /// minimum backlight, with the gamma table already at 1.0 and nothing left to
+  /// brighten with.
+  var drivesDDCBrightness: Bool {
+    switch self {
+    case .combined, .hardware: true
+    case .native, .software, .softwareOnly, .unavailable: false
+    }
+  }
+}
+
 /// The four-branch path table from `BrightnessController.applyPaths`, stated
 /// ONCE, in the Kit, under test.
 ///

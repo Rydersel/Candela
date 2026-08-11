@@ -217,6 +217,20 @@ public final class BrightnessController {
   /// fork's (review M35): a fresh controller always applies its first value.
   @ObservationIgnored private var lastAppliedSw: Double?
 
+  /// The 0…1 brightness portion this controller last SUBMITTED on the DDC leg,
+  /// before tuning maps it onto the register, or nil while it has never driven
+  /// that leg at all.
+  ///
+  /// The nil is as load-bearing as the number (#143). A register Candela has
+  /// never written is a register the user set with the monitor's own buttons,
+  /// and the hand-back must not stomp it; a register Candela drove to the
+  /// combined-mode floor is one Candela owes back. Kept in the PORTION domain
+  /// rather than the raw domain so `invert` and the min/max overrides cannot
+  /// make "full range" mean different things on the two sides of the
+  /// comparison: portion 1 is the brightest the panel is configured to go,
+  /// whatever register value that lands on.
+  @ObservationIgnored private var submittedDDCPortion: Double?
+
   /// The engine boundary (DT15). Consulted for anything that needs a display
   /// with a DESKTOP — the shade window and the gamma activity enforcer — and
   /// never for the DDC or gamma write targets, which stay the raw panel ID.
@@ -524,10 +538,7 @@ public final class BrightnessController {
       // opposite. That state is `.softwareOnly` below, which is where the
       // skipped submit now lives.
       let split = DimmingMath.combinedSplit(value: value, switching: switching)
-      submitHardware(
-        .ddc(raw: brightnessRaw(split.ddc, tuning: tuning)),
-        applier: brightnessApplier(tuning: tuning)
-      )
+      submitDDCBrightness(portion: split.ddc, tuning: tuning)
       applySoftware(split.sw)
 
     case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
@@ -540,10 +551,7 @@ public final class BrightnessController {
       applySoftware(DimmingMath.combinedSplit(value: value, switching: dimsBelow).sw)
 
     case .hardware:
-      submitHardware(
-        .ddc(raw: brightnessRaw(value, tuning: tuning)),
-        applier: brightnessApplier(tuning: tuning)
-      )
+      submitDDCBrightness(portion: value, tuning: tuning)
 
     case .unavailable:
       // DDC brightness turned off with no software leg left to carry the value —
@@ -565,6 +573,18 @@ public final class BrightnessController {
       maxDDC: Double(tuning.effectiveMaxDDC(readMax: Int(maxDDCValue))),
       curve: tuning.curveMultiplier,
       invert: tuning.invert
+    )
+  }
+
+  /// The ONE door to the brightness register, so `submittedDDCPortion` cannot
+  /// drift from what was actually put on the wire: a submit that recorded
+  /// nothing would make the display look like one Candela never drove, and
+  /// `handBackDDCLegIfAbandoned` would then leave it at the floor (#143).
+  private func submitDDCBrightness(portion: Double, tuning: CommandTuning) {
+    submittedDDCPortion = portion
+    submitHardware(
+      .ddc(raw: brightnessRaw(portion, tuning: tuning)),
+      applier: brightnessApplier(tuning: tuning)
     )
   }
 
@@ -1341,7 +1361,12 @@ public final class BrightnessController {
   /// 2. clears the software dedupe and the coalescer's duplicate memo, so a
   ///    re-apply at an unchanged value still reaches the wire;
   /// 3. re-runs FULL path selection for the current published value, writing
-  ///    both legs.
+  ///    both legs;
+  /// 4. hands the brightness register back at full range if the new path has
+  ///    stopped driving it (#143), which is the same obligation as step 1
+  ///    applied to the OTHER leg: the abandoned backend has to be torn down,
+  ///    and for DDC "torn down" means parked where software dimming assumes it
+  ///    is rather than left at the combined-mode floor.
   ///
   /// The published `brightness` is untouched: a mode switch is a re-conversion
   /// of the same perceptual value, never a reset to 100% (D4).
@@ -1359,6 +1384,51 @@ public final class BrightnessController {
     lastAppliedSw = nil
     coalescer.resetDuplicateState()
     applyPaths()
+    handBackDDCLegIfAbandoned()
+  }
+
+  /// Hands the brightness register back at full range when the newly selected
+  /// path has stopped driving it (#143).
+  ///
+  /// Without this the teardown is one-directional: turning "Use hardware (DDC)
+  /// control" back ON writes the register immediately, while turning it OFF
+  /// wrote nothing at all, so software dimming ran on top of a panel already at
+  /// its hardware minimum. At 40% combined that is DDC 0, and at 100% software
+  /// there is nothing left to brighten with, because the gamma table is already
+  /// at 1.0. The app reported 100% over a panel at its minimum backlight.
+  ///
+  /// ORDER IS THE CONTRACT, and it is the opposite of the intuitive one: this
+  /// runs AFTER `applyPaths`, never before. This write only ever RAISES the
+  /// register, and the software leg it hands over to only ever LOWERS what the
+  /// register emits, so:
+  ///
+  /// - raise first and the intermediate state is a full-range register under
+  ///   the old, brighter gamma table: at 90% that is raw 100 under gamma 1.0,
+  ///   a flash to full brightness for as long as the two writes are apart, and
+  ///   the D4 failure hardware checklist item 54 forbids by name;
+  /// - raise second and the intermediate state is the old register under the
+  ///   new, dimmer table, which is never brighter than either endpoint.
+  ///
+  /// No ordering is transient-free. The software leg is inline and synchronous
+  /// while the register write drains off-actor through the coalescer, so the
+  /// two land milliseconds apart whatever we do. What the ordering buys is that
+  /// the gap sits INSIDE the two endpoints instead of overshooting past both.
+  ///
+  /// Gated on `unavailableDDC` exactly as `restoreFullRangeDDC` is: a command
+  /// the display has declared it does not support, or the user has switched
+  /// off, is not one to write on the way out. That leaves the tuning grid's own
+  /// Off switch able to strand a display the same way this fixes, which is the
+  /// same shape as D29 rule 1 (undo the disabling effect BEFORE persisting the
+  /// value that disables it) and belongs in that control, not here.
+  private func handBackDDCLegIfAbandoned() {
+    guard role == .external, !usesNative else { return }
+    // Only a register THIS controller drove below full range is ours to hand
+    // back. nil is a panel whose brightness the user set on the monitor itself.
+    guard let parked = submittedDDCPortion, parked < 1 else { return }
+    let tuning = prefs.tuning(for: .brightness)
+    guard !tuning.unavailableDDC else { return }
+    guard !BrightnessPathPolicy.path(pathInputs(tuning: tuning)).drivesDDCBrightness else { return }
+    submitDDCBrightness(portion: 1, tuning: tuning)
   }
 
   /// Quit restore: write the register's FULL-RANGE equivalent of the
@@ -1382,10 +1452,7 @@ public final class BrightnessController {
     let tuning = prefs.tuning(for: .brightness)
     guard !tuning.unavailableDDC else { return }
     coalescer.resetDuplicateState()
-    submitHardware(
-      .ddc(raw: brightnessRaw(brightness, tuning: tuning)),
-      applier: brightnessApplier(tuning: tuning)
-    )
+    submitDDCBrightness(portion: brightness, tuning: tuning)
   }
 
   /// Test seam: observes the coalescer's duplicate-memo reset counter (the
