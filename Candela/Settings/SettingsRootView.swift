@@ -622,10 +622,37 @@ private struct BannerColumnHeight: ViewModifier {
   }
 }
 
+/// **The two ideals size a window that has never been sized before, and nothing
+/// else** [MEASURED 2026-08-11, #149]. AppKit autosaves this window's frame,
+/// SIZE included, under `NSWindow Frame com_apple_SwiftUI_Settings_window` in
+/// the app's own defaults domain, and restores it ahead of anything SwiftUI
+/// computes. Once a person has dragged a corner, or a display reconfiguration
+/// has re-fitted the window, that saved frame is the size for good and these
+/// numbers never speak again.
+///
+/// So `idealWidth` disagreeing with the window on screen is the DESIGNED state,
+/// not a defect: #149 was filed on the disagreement, and the harness that
+/// settled it reproduced 1005x580 from a saved frame alone, with a page whose
+/// content wanted 900. Reading these constants as "the window is 900 wide" is
+/// what made a resize look like a regression, and it is also why the checkpoint
+/// scripts once selected the window by a literal `{900, 568}`. Never quote a
+/// size as this window's, in a comment, a doc or a selector.
+///
+/// Two routes back to the ideals, both measured in that harness. From a shell,
+/// with the app quit:
+/// `defaults delete com.rydersel.Candela "NSWindow Frame com_apple_SwiftUI_Settings_window"`.
+/// From inside the app, Reset All Settings, whose `removePersistentDomain` takes
+/// this key with everything else: closing the resized window afterwards does NOT
+/// write the frame back, and the next launch comes up at the ideals.
+///
+/// The MINIMA are a different contract and are not advisory: see the floor
+/// note above, `SettingsWindowConfigurator.pinMinimumSize` and #124.
 enum SettingsWindowMetrics {
   static let minWidth: CGFloat = 720
+  /// First-launch width only. Read the note above before quoting it.
   static let idealWidth: CGFloat = 900
   static let minHeight: CGFloat = 480
+  /// First-launch height only. Read the note above before quoting it.
   static let idealHeight: CGFloat = 560
 
   static var minContentSize: NSSize { NSSize(width: minWidth, height: minHeight) }

@@ -10,8 +10,11 @@
 # so nothing else can match.
 #
 # This used to select on `size is {900, 568}`. That broke on 2026-08-11 when the
-# window silently became 1005x580 (#149): every script here failed at once, and
-# the size is now known not to be stable. Do not put a literal size back.
+# window came up 1005x580 (#149). The size is not a property of the app at all:
+# AppKit autosaves this window's frame, size included, under
+# `NSWindow Frame com_apple_SwiftUI_Settings_window` in com.rydersel.Candela and
+# restores it ahead of anything SwiftUI computes, so any resize sticks for good.
+# Do not put a literal size back.
 W='first window whose name does not start with "Candela "'
 SB="UI element 1 of UI element 1 of UI element 1 of UI element 1 of w"
 DETAIL="UI element 1 of UI element 3 of UI element 1 of UI element 1 of w"
