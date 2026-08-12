@@ -402,15 +402,57 @@ public enum DiagnosticsCopy {
 
   /// The SETTING that turns muting off is a different sentence from the DISPLAY
   /// denying the volume command, and this row is the one place both can reach.
+  ///
+  /// The row's help is "VCP 0x8D", so what it answers is whether the display's
+  /// own mute command is the one carrying a mute here. That is the STRATEGY IN
+  /// FORCE and not the pref: `VolumeSliderPolicy.usesDedicatedMuteCommand`
+  /// decides it, and the two demotions it applies (a clean denial of 0x8D, and
+  /// the "always off" override) each leave the engine writing the volume
+  /// register while the pref still asks for the mute command. Read from the pref
+  /// alone this row said "Available" about a command the mute never reached,
+  /// which on a page written for bug reports is the one thing it cannot do.
+  ///
+  /// Named apart for the reason the volume row names its two causes apart: a
+  /// user who set the slider to always off and is told the display refused goes
+  /// looking at their hardware.
+  ///
+  /// The prior two answers keep their precedence: the pref being off is why 0x8D
+  /// is out of use when it is off, and a switched-off volume command means no
+  /// mute is written at all, so neither may be replaced by a sentence about
+  /// where a mute would land.
+  ///
+  /// `muteSupport` is nil when nobody has asked this display yet. Unlike the
+  /// volume row that difference changes no answer here, because D24 resolves
+  /// both nil and `.unknown` to the dedicated command: it is taken as an
+  /// optional so the call site hands over its cache lookup rather than choosing
+  /// a fallback of its own.
   public static func muteAvailability(
-    muteEnabled: Bool, volumeAvailable: Bool, forceSoftware: Bool
+    muteEnabled: Bool,
+    volumeAvailable: Bool,
+    forceSoftware: Bool,
+    override: AudioSinkOverride,
+    muteSupport: VCPSupport?
   ) -> String {
     if !muteEnabled {
       return "Unavailable: muting with the display's own mute command is turned off"
     }
-    return volumeAvailable
-      ? "Available"
-      : commandTurnedOff(command: "volume", forceSoftware: forceSoftware)
+    guard volumeAvailable else {
+      return commandTurnedOff(command: "volume", forceSoftware: forceSoftware)
+    }
+    guard !VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true, override: override, muteSupport: muteSupport ?? .unknown)
+    else { return "Available" }
+    switch override {
+    case .forceNone:
+      return "Unavailable: you set this display's volume slider to always off, so muting writes zero to the volume command instead"
+    case .auto:
+      return "Unavailable: this display's description parsed cleanly and does not list the mute command, so muting writes zero to the volume command instead"
+    case .forcePresent:
+      // Unreachable: the override keeps the dedicated command whatever the
+      // display says, so the guard above returned "Available". Stated rather
+      // than defaulted so a new case is a compile error here.
+      return "Available"
+    }
   }
 
   /// `DDCValueController.isAvailable` is `!unavailableDDC && !forceSoftware`,
