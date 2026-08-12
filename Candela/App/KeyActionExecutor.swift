@@ -192,20 +192,26 @@ final class KeyActionExecutor {
   }
 
   /// Volume-key target set per multiKeyboardVolume (D4). Every branch runs
-  /// through the isDisabled key filter LAST (R1, fork loop-body parity) — so
-  /// a resolved-but-disabled display swallows the press rather than
+  /// through the volume-key filter LAST (R1, fork loop-body parity), so
+  /// a resolved-but-refusing display swallows the press rather than
   /// triggering the fallback.
+  ///
+  /// That filter is `volumeKeyEnabledStates`, not the plain `keyEnabledStates`
+  /// the brightness paths use: it adds D24's verdict, so a display whose own
+  /// capabilities deny the volume register takes no volume or mute key, exactly
+  /// as its slider takes no drag. Steps, mute toggles and the key-release blip
+  /// all resolve through here, so all three inherit it together.
   private func resolveVolumeTargets() -> [AppModel.DisplayState] {
     switch model.volumeMode {
     case .allScreens:
-      return model.keyEnabledStates(model.displays)
+      return model.volumeKeyEnabledStates(model.displays)
     case .audioDeviceNameMatching:
       // Zero matches never falls back (fork parity). Two states reach here:
       // the tap released the keys to macOS (default output can set its own
       // volume), OR the keys stay watched with a nil default output — the
       // tap rule can't distinguish that from "not yet routed" — and the
       // empty match set swallows the press.
-      return model.keyEnabledStates(model.audioMatchingDisplays())
+      return model.volumeKeyEnabledStates(model.audioMatchingDisplays())
     case .mouse:
       let ids = Self.pointerDisplayID().map(expandToMirrorSet) ?? []
       let resolved = ids.compactMap { id in model.displays.first { $0.id == id } }
@@ -215,7 +221,7 @@ final class KeyActionExecutor {
       // that a defect). Candela extends its own M2 brightness rule: losing
       // the targeting beats losing the keypress.
       let targets = resolved.isEmpty ? model.displays : resolved
-      return model.keyEnabledStates(targets)
+      return model.volumeKeyEnabledStates(targets)
     }
   }
 

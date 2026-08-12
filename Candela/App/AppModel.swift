@@ -374,6 +374,29 @@ final class AppModel {
     states.filter { !DisplayPrefs(persistenceKey: $0.display.persistenceKey).isDisabled }
   }
 
+  /// The same filter for VOLUME and MUTE keys, which additionally obey D24: the
+  /// monitor's own denial of VCP 0x62, the verdict that greys the slider
+  /// (`volumeSliderEnabled` asks the same policy for the slider surfaces). One
+  /// predicate for both, so a keypress cannot write a register the display says
+  /// it does not implement while its slider sits greyed for that exact reason.
+  ///
+  /// Brightness and contrast keys keep the plain filter: the denial is about the
+  /// volume register, not about the display.
+  ///
+  /// A display dropped here SWALLOWS its press. The executor's
+  /// nothing-resolved fallbacks run BEFORE this filter (R1), so a denied display
+  /// never converts its keypress into a step of every other panel.
+  func volumeKeyEnabledStates(_ states: [DisplayState]) -> [DisplayState] {
+    states.filter { state in
+      let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
+      return VolumeSliderPolicy.acceptsVolumeKeys(
+        isKeyboardDisabled: prefs.isDisabled,
+        override: prefs.audioSinkOverride,
+        volumeSupport: volumeSupport[state.display.persistenceKey] ?? .unknown
+      )
+    }
+  }
+
   func stepBrightnessAllExternal(isUp: Bool, isFine: Bool) -> [(id: CGDirectDisplayID, name: String, newValue: Double)] {
     keyEnabledStates(displays).map { state in
       (state.id, state.display.name, state.controller.step(isUp: isUp, isFine: isFine))

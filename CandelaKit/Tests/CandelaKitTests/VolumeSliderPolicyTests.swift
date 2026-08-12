@@ -144,3 +144,65 @@ struct VolumeSliderPolicyTests {
     }
   }
 }
+
+/// The keyboard half of the same verdict. Measured 2026-08-11: four volume-up
+/// presses with the pointer on the DELL U2725QE walked its stored volume 0.5 to
+/// 0.75 and sent four DDC 0x62 writes, all ACKed, to a display whose own
+/// capabilities string parses cleanly with no 0x62 and whose slider D24 therefore
+/// greys. The HUD reported a rising volume that existed only in the pref.
+@Suite("Volume and mute keys obey the same denial as the slider (D24)")
+struct VolumeKeyAcceptanceTests {
+  /// The bug. A display that lists no volume command takes no volume key.
+  @Test func aParsedDenialSwallowsVolumeKeys() {
+    #expect(!VolumeSliderPolicy.acceptsVolumeKeys(
+      isKeyboardDisabled: false, override: .auto, volumeSupport: .unsupported))
+  }
+
+  /// The MAG 341C's permanent state, and the regression that would hurt most:
+  /// every DDC read on it returns zeros, so its capabilities can never resolve
+  /// better than `.unknown`, while its 3.5 mm jack works. D24 greys on a clean
+  /// denial only, never on absence of evidence, and the keys inherit that.
+  /// A gate keyed on "no positive evidence" would kill the keys on this panel.
+  @Test func noEvidenceIsNotADenial() {
+    #expect(VolumeSliderPolicy.acceptsVolumeKeys(
+      isKeyboardDisabled: false, override: .auto, volumeSupport: .unknown))
+    #expect(VolumeSliderPolicy.acceptsVolumeKeys(
+      isKeyboardDisabled: false, override: .auto, volumeSupport: .supported))
+  }
+
+  /// The per-display keyboard pref keeps working on its own: a display with a
+  /// perfectly good volume register still takes no key while its keyboard
+  /// control is off.
+  @Test func theKeyboardPrefStillRefusesOnItsOwn() {
+    for support in [VCPSupport.supported, .unsupported, .unknown] {
+      #expect(!VolumeSliderPolicy.acceptsVolumeKeys(
+        isKeyboardDisabled: true, override: .forcePresent, volumeSupport: support),
+        "keyboard off with \(support)")
+    }
+  }
+
+  /// The escape hatch reaches the keys, not just the slider: a user who
+  /// overrides a display the app believes has no volume command gets both back.
+  @Test func theOverrideReachesTheKeysToo() {
+    #expect(VolumeSliderPolicy.acceptsVolumeKeys(
+      isKeyboardDisabled: false, override: .forcePresent, volumeSupport: .unsupported))
+    #expect(!VolumeSliderPolicy.acceptsVolumeKeys(
+      isKeyboardDisabled: false, override: .forceNone, volumeSupport: .supported))
+  }
+
+  /// The anti-drift pin, and the reason this lives beside `isEnabled` rather
+  /// than in the key path: wherever the keyboard is enabled for a display, the
+  /// keys and the slider reach exactly the same verdict, for every input. The
+  /// settings page already tells the user they move together.
+  @Test func theKeysAndTheSliderNeverDisagree() {
+    for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
+      for support in [VCPSupport.supported, .unsupported, .unknown] {
+        #expect(
+          VolumeSliderPolicy.acceptsVolumeKeys(
+            isKeyboardDisabled: false, override: override, volumeSupport: support)
+            == VolumeSliderPolicy.isEnabled(override: override, volumeSupport: support),
+          "override \(override), support \(support)")
+      }
+    }
+  }
+}

@@ -22,6 +22,24 @@ public enum VolumeSliderPolicy {
     }
   }
 
+  /// May a volume or mute KEY act on this display?
+  ///
+  /// The capability half is `isEnabled` itself, called and not copied: a
+  /// keypress and the slider refuse together or not at all. They did not, and
+  /// the key path was the one that could write a register the display says it
+  /// does not implement, ACK it, and show a rising HUD for a change with
+  /// nowhere to land (measured on the DELL U2725QE, 2026-08-11).
+  ///
+  /// The keyboard half is the per-display "use the keys for this display" pref,
+  /// which the slider has no equivalent of. A refusal here SWALLOWS the press:
+  /// the key path must not treat it as "nothing resolved" and spray every other
+  /// display instead (R1).
+  public static func acceptsVolumeKeys(
+    isKeyboardDisabled: Bool, override: AudioSinkOverride, volumeSupport: VCPSupport
+  ) -> Bool {
+    !isKeyboardDisabled && isEnabled(override: override, volumeSupport: volumeSupport)
+  }
+
   /// Why the slider is refusing input, for the panel's tooltip. `nil` when it
   /// is enabled: a working control has nothing to explain.
   ///
