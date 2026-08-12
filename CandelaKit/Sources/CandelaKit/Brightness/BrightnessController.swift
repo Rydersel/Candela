@@ -962,10 +962,17 @@ public final class BrightnessController: PendingWireDraining {
     // between the two available wrong answers only one can do damage. Believing
     // HDR is live routes brightness native, so nothing writes DDC and nothing
     // writes a gamma table onto a panel that may be in HDR; believing it is off
-    // licenses both. The cost of being wrong this way is a brightness write that
-    // goes nowhere on a DDC-only panel, and it is bounded: every transition that
-    // can supersede this one ends with a measured refresh, and a reconfiguration
-    // refreshes the mirror as well.
+    // licenses both.
+    //
+    // The cost of being wrong this way is a brightness write that goes nowhere
+    // on a DDC-only panel, and the honest bound on it is LOOSE: it stands until
+    // the next reconfiguration or HDR transition refreshes the mirror, which may
+    // not be soon. It is specifically NOT bounded by the superseding
+    // transition's own refresh, which was the earlier claim here and is measured
+    // false in both directions: an engage that was never issued ends on the
+    // CACHED read (and the lock-busy arm returns before the cache is even
+    // invalidated), and in the clobbering interleaving the superseder's refresh
+    // has already happened by the time this write lands.
     //
     // These are the file's only post-fence mutations, and they are deliberate:
     // the fences exist to stop a stale call from asserting state it does not

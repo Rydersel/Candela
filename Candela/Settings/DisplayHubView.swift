@@ -733,7 +733,7 @@ struct DisplayHubView: View {
           // are macOS-visible state this button deliberately leaves alone.
           // Counted panel hours are wear data, kept for the same reason the
           // levels are.
-          Text("This unmutes \(state.display.name), turns HDR off while it runs, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, and everything under Advanced, including control-code remaps and response curves. HDR that was turned on in System Settings goes back on at the end. A display that cannot be reached at the time keeps its mute and its HDR as they are, rather than being sent commands that cannot be confirmed. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
+          Text("This unmutes \(state.display.name), turns HDR off while it runs, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, and everything under Advanced, including control-code remaps and response curves. HDR that was turned on in System Settings goes back on at the end. If the display cannot be reached at the time, nothing is sent to it that cannot be confirmed, so some of these may be left for you to change yourself. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
         }
     }
   }
@@ -810,9 +810,10 @@ struct DisplayHubView: View {
       //    HDR" standing, so the path resolves native and this step writes
       //    neither DDC nor a gamma table onto a display that may be in HDR.
       //    What it can cost is a brightness write that goes nowhere on a
-      //    DDC-only panel, which the next brightness change or reconfiguration
-      //    puts right. If that rule ever changes, this step has to move below
-      //    the switch.
+      //    DDC-only panel, and only a reconfiguration or an HDR transition puts
+      //    that right: the next brightness change routes native again, for the
+      //    same stale reason. If that rule ever changes, this step has to move
+      //    below the switch.
       //
       //    Every pref except the mute strategy, in ONE batch whose fan-out is
       //    the UNION of its rows. Never collapse it onto a single
