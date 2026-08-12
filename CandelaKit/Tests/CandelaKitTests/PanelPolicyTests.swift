@@ -83,6 +83,12 @@ struct PanelPolicyTests {
     #expect(order([Entry(hardwareName: "MAG 341C", hidden: true)]) == [])
   }
 
+  // The three ordinal tests below cover the derivation, and only that. They do
+  // NOT cover the thing that trapped: a sidebar row re-rendered against a
+  // display list that had already been emptied. That path is a SwiftUI `ForEach`
+  // in the app target, which has no test target (D21), so nothing automated
+  // reaches it. The issue's hardware verification (a Reset All with the settings
+  // window open) is the only evidence the crash is gone.
   @Test func uniqueKeysGetNoOrdinal() {
     #expect(DisplayOrdering.sharedIdentityOrdinals(keys: []) == [])
     #expect(DisplayOrdering.sharedIdentityOrdinals(keys: ["mag", "dell"]) == [nil, nil])
@@ -107,22 +113,6 @@ struct PanelPolicyTests {
       DisplayOrdering.sharedIdentityOrdinals(keys: ["a", "b", "a", "b", "c"])
         == [1, 1, 2, 2, nil]
     )
-  }
-
-  /// The crash this replaced: the sidebar asked "is this key shared" and then
-  /// counted a PREFIX of the live display list at a positional index captured
-  /// against an older, longer list. A settings reset empties that list and
-  /// rebuilds it, so a SwiftUI child re-evaluation could index past the end.
-  /// One call over one snapshot answers for every row, so there is no index to
-  /// go stale and no shrunken list to index into.
-  @Test func everyRowIsAnsweredFromOneSnapshotSoNoIndexCanOutliveIt() {
-    let before = ["twin", "twin", "dell"]
-    #expect(DisplayOrdering.sharedIdentityOrdinals(keys: before).count == before.count)
-    // The same derivation over the post-reset list: shorter, still total.
-    let after: [String] = []
-    #expect(DisplayOrdering.sharedIdentityOrdinals(keys: after) == [])
-    // And a one-element list, where the old code's "index 2" would have trapped.
-    #expect(DisplayOrdering.sharedIdentityOrdinals(keys: ["dell"]) == [nil])
   }
 
   @Test func statusItemVisibilityTruthTable() {

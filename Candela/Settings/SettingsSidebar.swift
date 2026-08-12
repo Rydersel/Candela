@@ -176,12 +176,12 @@ struct SettingsSidebar: View {
   /// from ONE read of the model's display list.
   ///
   /// Everything a row renders travels with the row, and nothing it renders is
-  /// looked up again later. SwiftUI keeps a `ForEach`'s data from the body
-  /// evaluation that produced it and re-runs the content closure per child
-  /// afterwards, so a closure that reaches back into the model is reading a
-  /// list that may have moved on: a settings reset empties `displays` and
-  /// rebuilds it, which is enough to strand a row holding a position no longer
-  /// in the list. Positions do not survive that; values do.
+  /// looked up again later. The crash that forced this shape was a `ForEach`
+  /// content closure re-running on its own, after a settings reset had emptied
+  /// `displays`, and subscripting the model with the position it had been
+  /// handed at the previous body evaluation. Whatever schedules that re-run,
+  /// its input is not guaranteed to still describe the model: a position
+  /// captured against one list does not survive the list, and a value does.
   private var displayRows: [DisplayRow] {
     let states = model.displays
     let ordinals = DisplayOrdering.sharedIdentityOrdinals(

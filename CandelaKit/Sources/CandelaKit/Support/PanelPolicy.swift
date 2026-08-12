@@ -45,11 +45,12 @@ public enum DisplayOrdering {
   ///
   /// Answers for EVERY key in one pass over one snapshot, rather than offering
   /// a per-row "which number is this" that takes a position. A caller holding a
-  /// position holds a second, older description of the list, and a view that
-  /// re-renders one row against a list that has since shrunk (a settings reset
-  /// empties it before rebuilding) then indexes past the end. Returning the
-  /// whole answer leaves nothing to go stale: the result is as long as the
-  /// input, always.
+  /// position holds a second, older description of the list. The sidebar did
+  /// exactly that and crashed: its stack showed a per-row closure re-running
+  /// after a settings reset had emptied the display list, with the position it
+  /// had been handed earlier, and indexing past the end. Returning the whole
+  /// answer leaves nothing to go stale: the result is as long as the input,
+  /// always.
   public static func sharedIdentityOrdinals(keys: [String]) -> [Int?] {
     var occurrences: [String: Int] = [:]
     for key in keys { occurrences[key, default: 0] += 1 }
