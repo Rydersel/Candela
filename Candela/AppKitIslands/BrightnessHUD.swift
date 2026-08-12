@@ -10,8 +10,6 @@ import CandelaKit
 /// `BrightnessHUDPresenting`, so the engine can announce a value change without
 /// knowing anything about windows.
 protocol BrightnessHUDPresenting: AnyObject {
-  // Protocol requirements cannot carry default arguments, so the requirement
-  // spells out the full list and the extension below supplies the short form.
   @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double,
                                  nameSuffix: String?, position: HUDPosition)
   /// Generic pill (M4): volume/contrast/mute. Exposed through the protocol so
@@ -19,14 +17,6 @@ protocol BrightnessHUDPresenting: AnyObject {
   @MainActor func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String,
                           value: Float, maxValue: Float, nameSuffix: String?,
                           position: HUDPosition)
-}
-
-extension BrightnessHUDPresenting {
-  @MainActor func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String,
-                          value: Float, position: HUDPosition) {
-    self.showHUD(displayID: displayID, type: type, name: name, value: value, maxValue: 1,
-                 nameSuffix: nil, position: position)
-  }
 }
 
 enum HUDType {
@@ -96,6 +86,14 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     max(screen.frame.maxY - screen.visibleFrame.maxY, NSStatusBar.system.thickness) + self.menuBarClearance
   }
 
+  /// ONE window per display, shared by every pill kind. Brightness, volume,
+  /// contrast and mute cannot be on screen together on one display, and never
+  /// could be: a show reuses the window the last one left, retitles it and
+  /// re-places it. With per-kind positions that reuse is visible as a move,
+  /// because a volume press followed by a brightness press inside the 1.5 s
+  /// fade takes the same window from one anchor to the other. Keying by kind as
+  /// well as by display would make simultaneous pills possible, which is a
+  /// product change nobody has ruled on, not a bug fix.
   private var huds: [CGDirectDisplayID: HUD] = [:]
   private var fadeTimers: [CGDirectDisplayID: Timer] = [:]
   /// Monotonic per display, bumped by every `showHUD` and by `cleanupDisplay`.

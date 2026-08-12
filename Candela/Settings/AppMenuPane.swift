@@ -126,30 +126,38 @@ struct AppMenuPane: View {
   }
 
   /// Where the pills a key press puts on screen sit. Two pickers rather than
-  /// one: a person who keeps the volume pill somewhere else is usually keeping
-  /// it away from the brightness one.
+  /// one so each kind has a stable home: volume always reports in one place,
+  /// brightness in another. Not a way to see both at once: the HUD keys one
+  /// window per display, so on a single display the two kinds take turns in it.
+  ///
+  /// Each row's caption describes ITS OWN control, because `SettingRow`
+  /// republishes the caption as that control's accessibility hint: a shared
+  /// sentence under one picker would be spoken as a fact about that picker
+  /// alone.
   ///
   /// "Indicator" is the house term for these (the Keyboard pane and each
   /// display's Advanced page both use it); "OSD" and "HUD" are internal words
   /// and never appear here.
   @ViewBuilder private var indicatorSection: some View {
     Section("On-Screen Indicators") {
-      Picker("Brightness indicator position:", selection: Binding(
-        get: { prefs.hudPositionBrightness },
-        set: { position in
-          prefs.hudPositionBrightness = position
-          actions.prefDidChange(.hudPositionBrightness)
-        }
-      )) {
-        // `HUDPlacement.pickerOrder`, never `allCases`: raw 0 is the top-right
-        // position (the one every earlier build drew), so raw order is not
-        // reading order. Same rule as the menu-bar icon popup above.
-        ForEach(HUDPlacement.pickerOrder, id: \.self) { position in
-          Text(label(for: position)).tag(position)
+      SettingRow("Contrast uses this position too.") {
+        Picker("Brightness indicator position:", selection: Binding(
+          get: { prefs.hudPositionBrightness },
+          set: { position in
+            prefs.hudPositionBrightness = position
+            actions.prefDidChange(.hudPositionBrightness)
+          }
+        )) {
+          // `HUDPlacement.pickerOrder`, never `allCases`: raw 0 is the top-right
+          // position (the one every earlier build drew), so raw order is not
+          // reading order. Same rule as the menu-bar icon popup above.
+          ForEach(HUDPlacement.pickerOrder, id: \.self) { position in
+            Text(label(for: position)).tag(position)
+          }
         }
       }
 
-      SettingRow("The indicator appears on the display the keys act on. Contrast uses the brightness position; mute uses the volume one.") {
+      SettingRow("Mute uses this position too. The indicator appears on the display the keys act on.") {
         Picker("Volume indicator position:", selection: Binding(
           get: { prefs.hudPositionVolume },
           set: { position in

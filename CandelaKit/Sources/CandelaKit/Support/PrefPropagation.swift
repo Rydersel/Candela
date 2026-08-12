@@ -25,8 +25,10 @@ public enum PrefName: String, Sendable, CaseIterable {
   case menuIcon, hideBuiltInDisplay, showContrast
   case enableSliderSnap, enableSliderPercent
   // App-level: where the on-screen indicator pills sit. Two keys rather than
-  // one, decided up front because the choice is permanent: the pills exist to
-  // be moved out of each other's way, which one key cannot express.
+  // one, decided up front because the choice is permanent: each KIND gets a
+  // stable home of its own, so volume always reports in one place and
+  // brightness in another. Not a way to see both at once, which the island's
+  // one-window-per-display keying rules out either way.
   case hudPositionBrightness, hudPositionVolume
   // App-level — dimming
   case disableCombinedBrightness, allowZeroSwBrightness, enableBrightnessSync, startupAction

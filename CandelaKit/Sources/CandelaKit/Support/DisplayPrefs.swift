@@ -594,10 +594,17 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue.rawValue, forKey: "hudPositionBrightness") }
   }
 
-  /// The volume and mute pills' own position. Separate from the brightness one
-  /// so the two can be kept out of each other's way, and split along the same
-  /// line `hideOsd` already draws: volume and mute on one side, brightness and
+  /// The volume and mute pills' own position, split along the same line
+  /// `hideOsd` already draws: volume and mute on one side, brightness and
   /// contrast on the other.
+  ///
+  /// Two keys give each KIND a stable home of its own, so volume always reports
+  /// in one place and brightness in another. They are not a way to see both at
+  /// once: `BrightnessHUD` keys one window per DISPLAY, so on any one display
+  /// the two kinds take turns in the same window. Pressing volume and then
+  /// brightness inside the 1.5 s fade moves that window from one anchor to the
+  /// other, which is the single-window behaviour the app has always had and not
+  /// something these keys introduce.
   public var hudPositionVolume: HUDPosition {
     get { HUDPosition(rawValue: defaults.integer(forKey: "hudPositionVolume")) ?? .topRight }
     set { defaults.set(newValue.rawValue, forKey: "hudPositionVolume") }
