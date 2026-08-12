@@ -192,8 +192,13 @@ enum DiagnosticsPageCopy {
     isBuiltIn ? "Brightness commands" : "Hardware commands"
   }
 
-  static var safeMode: LocalizedStringKey {
-    "Shift was held at launch. Saved values are not restored, nothing is read back, and nothing is written at quit. Sliders and keys still work."
+  /// One of the three safe-mode summaries, and the words are `SafeModeCopy`'s
+  /// (#147): this row named three suppressions while the app performed four.
+  /// `String` rather than `LocalizedStringKey` for the same reason the rest of
+  /// `DiagnosticsCopy` is: the shared list lives in Kit, which imports no
+  /// SwiftUI. The call site takes it through `SettingsCaption(verbatim:)`.
+  static var safeMode: String {
+    SafeModeCopy.diagnosticsRow(app: AppInfo.productName)
   }
 
   /// Attached only to the empty case, which is the state a single-display rig is
