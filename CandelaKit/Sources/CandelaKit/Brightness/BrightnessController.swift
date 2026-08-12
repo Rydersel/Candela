@@ -196,6 +196,17 @@ public final class BrightnessController {
   /// Module-internal (not private) so in-module collaborators — `BrightnessSync`'s
   /// fan-out log — can name the display a controller belongs to.
   @ObservationIgnored let displayID: CGDirectDisplayID
+  /// Sync's ambient-hunting deadband for the movement THIS controller has
+  /// published as a source, advanced only by `BrightnessSync.fanOut`. It lives
+  /// here rather than in a table beside the sync code so it shares the
+  /// lifetime of the brightness it accumulates: a controller that goes away
+  /// takes its residual with it, and nothing has to prune stale entries.
+  ///
+  /// That is lifetime, not identity. `performRefresh` reconciles on
+  /// `CGDirectDisplayID` and REUSES the controller, so a display ID handed to
+  /// a different panel arrives here as a rebind, and the residual is cleared
+  /// in `rebind(writer:panelIdentity:)` alongside the other per-panel state.
+  @ObservationIgnored var syncDeadband = SyncDeadband()
   /// Explicitly nonisolated (immutable, Sendable) so `isNativeActive()` can
   /// answer from the poller's nonisolated context without an executor hop.
   @ObservationIgnored private nonisolated let role: DisplayRole
@@ -1186,6 +1197,9 @@ public final class BrightnessController {
       maxDDCValue = Self.assumedMaxDDC
       didReadMaxDDC = false
       readEvidence = .notAttempted
+      // Sync's held movement is about the panel that was moving, not the one
+      // now on the wire.
+      syncDeadband.reset()
     }
     coalescer.resetDuplicateState()
   }
