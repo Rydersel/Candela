@@ -80,6 +80,29 @@ public enum DDCOverrideValidation {
     return updated
   }
 
+  /// The whole decision a field commit makes: the text the field holds and the
+  /// tuning it is editing in, the tuning to write out, or `nil` for "write
+  /// nothing at all".
+  ///
+  /// `nil` covers both refusals, and the caller cannot tell them apart on
+  /// purpose: text that does not parse or falls outside `range`, and text that
+  /// resolves to the value already stored. Either way the field snaps back to
+  /// `text(for:)` and no pref is written, so a focus change passing through a
+  /// box nobody typed in costs nothing (D4).
+  ///
+  /// It exists as one function because a field commits on Return AND on losing
+  /// focus (#144). Two routes parsing their own text is how a looser second
+  /// validation gets in: the fork accepted `abc`, `70000` and `-1` in these
+  /// boxes, and a blur path with its own parsing could reintroduce that.
+  public static func committed(
+    _ text: String, to tuning: CommandTuning, field: Field
+  ) -> CommandTuning? {
+    guard let updated = applied(classify(text), to: tuning, field: field),
+          updated != tuning
+    else { return nil }
+    return updated
+  }
+
   /// Why a stored override pair does not do what it looks like it does.
   public enum Warning: Sendable, Equatable {
     /// `CommandTuning.effectiveMaxDDC` honors the max override only when it is
