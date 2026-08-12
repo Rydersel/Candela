@@ -70,7 +70,17 @@ struct PanelView: View {
         ForEach(externals) { state in
           let name = Self.title(for: state.display)
           VStack(alignment: .leading, spacing: 8) {
-            DisplayHeaderRow(controller: state.controller, displayName: name)
+            DisplayHeaderRow(
+              controller: state.controller,
+              // The other two queues on this display's wire. Dropping HDR
+              // unlocks the DDC register, and their memos may name values the
+              // panel ACKed and swallowed while it was locked; the engine drops
+              // those on the way out, and it can only drop the ones it is
+              // handed. No default on the engine's parameter, so a row added
+              // here cannot forget them quietly.
+              wireSiblings: [state.volume, state.contrast],
+              displayName: name
+            )
             DisplaySliderRow(
               controller: state.controller, displayName: name,
               snapsToStops: snapsToStops, showsPercent: showsPercent
@@ -335,6 +345,9 @@ enum PanelMenu {
 /// toggled HDR badges while the mode still reads "HDR Off".
 private struct DisplayHeaderRow: View {
   let controller: BrightnessController
+  /// This display's other DDC queues, handed to the HDR door so leaving HDR can
+  /// drop the memos built while the register was locked. See the call site.
+  let wireSiblings: [any PendingWireDraining]
   let displayName: String
 
   @State private var isHovering = false
@@ -388,7 +401,7 @@ private struct DisplayHeaderRow: View {
   /// state-revealing; the tooltip carries the "toggles" affordance.
   private var hdrModeButton: some View {
     Button {
-      Task { await controller.setHDRMode(nextMode) }
+      Task { await controller.setHDRMode(nextMode, alsoInvalidating: wireSiblings) }
     } label: {
       Text(modeLabel)
         .font(.system(size: 12))
