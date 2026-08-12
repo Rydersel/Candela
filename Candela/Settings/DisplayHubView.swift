@@ -476,7 +476,9 @@ struct DisplayHubView: View {
       // Nil in every cell where the engine is doing what the row says, so an On
       // row with no status is a promise the engine keeps.
       SettingRow(
-        safety: .hardwareMute(isAvailable: state.volume.isAvailable),
+        safety: .hardwareMute(
+          isAvailable: state.volume.isAvailable,
+          dedicatedCommandInReach: model.dedicatedMuteCommandInReach(state)),
         label: "Mute with the display's own mute command",
         caption: model.degradedMuteReason(state).map { SettingsCaption(verbatim: $0) }
       ) { label in

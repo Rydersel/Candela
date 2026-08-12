@@ -122,6 +122,13 @@ public enum VolumeSliderPolicy {
   /// `toggleMute` guards on under either strategy. False means no mute is
   /// written at all, so there is no register to name, and the row's own
   /// unavailable sentence (SO5) is what applies instead.
+  ///
+  /// The consequence is worded as the LEVEL the degrade reaches and not as a
+  /// register value, because the register value is not knowable from here: the
+  /// degrade goes out through `rawValue(for: 0)`, so a volume floor writes that
+  /// floor and Invert writes the top of the range. "All the way down" is true of
+  /// every one of them, and it is the only claim a person setting a floor cannot
+  /// falsify.
   public static func degradedMuteReason(
     commandIsAvailable: Bool, prefEnabled: Bool, override: AudioSinkOverride, muteSupport: VCPSupport
   ) -> String? {
@@ -131,9 +138,9 @@ public enum VolumeSliderPolicy {
     else { return nil }
     switch override {
     case .forceNone:
-      return "The volume slider for this display is set to always off, so muting sets its volume to zero."
+      return "The volume slider for this display is set to always off, so muting turns its volume all the way down."
     case .auto:
-      return "This display lists no mute command in its description, so muting sets its volume to zero."
+      return "This display lists no mute command in its description, so muting turns its volume all the way down."
     case .forcePresent:
       // Unreachable: forcePresent keeps the dedicated command whatever the
       // display says, so the guard above returned. Stated rather than defaulted

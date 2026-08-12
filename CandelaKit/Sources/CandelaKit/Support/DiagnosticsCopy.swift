@@ -421,17 +421,23 @@ public enum DiagnosticsCopy {
   /// mute is written at all, so neither may be replaced by a sentence about
   /// where a mute would land.
   ///
-  /// `muteSupport` is nil when nobody has asked this display yet. Unlike the
-  /// volume row that difference changes no answer here, because D24 resolves
-  /// both nil and `.unknown` to the dedicated command: it is taken as an
-  /// optional so the call site hands over its cache lookup rather than choosing
-  /// a fallback of its own.
+  /// The consequence names the LEVEL a degraded mute reaches, never a register
+  /// value: it goes out through `rawValue(for: 0)`, so a volume floor sends that
+  /// floor and Invert sends the top of the range, and both fields have UI a
+  /// person can set. "All the way down" is the claim none of them falsifies.
+  ///
+  /// `muteSupport` takes the non-optional `VCPSupport` the policy layer speaks,
+  /// with the cache miss resolved at the call site the way every other reader of
+  /// these caches resolves it. The volume row's optional exists because nil and
+  /// `.unknown` earn different sentences there; here D24 sends both to the
+  /// dedicated command, so an optional would only be a second spelling of the
+  /// same answer.
   public static func muteAvailability(
     muteEnabled: Bool,
     volumeAvailable: Bool,
     forceSoftware: Bool,
     override: AudioSinkOverride,
-    muteSupport: VCPSupport?
+    muteSupport: VCPSupport
   ) -> String {
     if !muteEnabled {
       return "Unavailable: muting with the display's own mute command is turned off"
@@ -440,17 +446,32 @@ public enum DiagnosticsCopy {
       return commandTurnedOff(command: "volume", forceSoftware: forceSoftware)
     }
     guard !VolumeSliderPolicy.usesDedicatedMuteCommand(
-      prefEnabled: true, override: override, muteSupport: muteSupport ?? .unknown)
-    else { return "Available" }
+      prefEnabled: true, override: override, muteSupport: muteSupport)
+    else {
+      // The escape hatch names itself here for the reason the volume row names
+      // it: it is a setting, and a reader who does not know it is on cannot
+      // account for what follows. Over a clean denial it is also the one cell
+      // that writes 0x8D into a display saying it has no 0x8D, which is where a
+      // mute the app records and no register carries comes from: the page
+      // exists to put that in a bug report.
+      switch override {
+      case .forcePresent where muteSupport == .unsupported:
+        return "Available: you set this display's volume slider to always on, so muting uses the mute command this display's description does not list"
+      case .forcePresent:
+        return "Available: you set this display's volume slider to always on"
+      case .auto, .forceNone:
+        return "Available"
+      }
+    }
     switch override {
     case .forceNone:
-      return "Unavailable: you set this display's volume slider to always off, so muting writes zero to the volume command instead"
+      return "Unavailable: you set this display's volume slider to always off, so muting turns the volume command all the way down instead"
     case .auto:
-      return "Unavailable: this display's description parsed cleanly and does not list the mute command, so muting writes zero to the volume command instead"
+      return "Unavailable: this display's description parsed cleanly and does not list the mute command, so muting turns the volume command all the way down instead"
     case .forcePresent:
       // Unreachable: the override keeps the dedicated command whatever the
-      // display says, so the guard above returned "Available". Stated rather
-      // than defaulted so a new case is a compile error here.
+      // display says, so the guard above answered. Stated rather than defaulted
+      // so a new case is a compile error here.
       return "Available"
     }
   }

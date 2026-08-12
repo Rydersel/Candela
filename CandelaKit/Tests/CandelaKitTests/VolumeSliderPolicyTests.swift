@@ -376,7 +376,23 @@ struct DegradedMuteReasonTests {
     #expect(
       VolumeSliderPolicy.degradedMuteReason(
         commandIsAvailable: true, prefEnabled: true, override: .auto, muteSupport: .unsupported)
-        == "This display lists no mute command in its description, so muting sets its volume to zero.")
+        == "This display lists no mute command in its description, so muting turns its volume all the way down.")
+  }
+
+  /// The consequence names the LEVEL, never the register value: the degrade
+  /// writes `rawValue(for: 0)`, so a volume floor sends that floor and Invert
+  /// sends the top of the range. "Zero" was falsifiable by exactly the person
+  /// who set a floor, and both fields have real UI in the command grid.
+  @Test func theConsequenceSurvivesAVolumeFloorAndInvert() {
+    for override in AudioSinkOverride.allCases {
+      for support in VCPSupport.allCases {
+        let reason = VolumeSliderPolicy.degradedMuteReason(
+          commandIsAvailable: true, prefEnabled: true, override: override, muteSupport: support)
+        guard let reason else { continue }
+        #expect(!reason.contains("zero"), "override \(override), support \(support)")
+        #expect(reason.hasSuffix("turns its volume all the way down."))
+      }
+    }
   }
 
   /// The other cause, kept apart for the reason the slider's tooltip was split
@@ -386,7 +402,7 @@ struct DegradedMuteReasonTests {
     let reason = VolumeSliderPolicy.degradedMuteReason(
       commandIsAvailable: true, prefEnabled: true, override: .forceNone, muteSupport: .supported)
     #expect(
-      reason == "The volume slider for this display is set to always off, so muting sets its volume to zero.")
+      reason == "The volume slider for this display is set to always off, so muting turns its volume all the way down.")
     #expect(reason?.contains("lists no") == false)
   }
 
@@ -398,9 +414,11 @@ struct DegradedMuteReasonTests {
       commandIsAvailable: true, prefEnabled: true, override: .forceNone, muteSupport: .unsupported)
     let display = VolumeSliderPolicy.degradedMuteReason(
       commandIsAvailable: true, prefEnabled: true, override: .auto, muteSupport: .unsupported)
+    #expect(
+      setting
+        == "The volume slider for this display is set to always off, so muting turns its volume all the way down.")
     #expect(setting != display)
-    #expect(setting != nil && display != nil)
-    #expect(setting?.contains("lists no") == false)
+    #expect(display != nil)
   }
 
   /// The MAG 341C, and the reason the caption cannot key off the verdict alone:

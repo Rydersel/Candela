@@ -476,7 +476,7 @@ struct DiagnosticsPage: View {
           volumeAvailable: state.volume.isAvailable,
           forceSoftware: prefs.forceSoftware,
           override: prefs.audioSinkOverride,
-          muteSupport: model.muteSupport[persistenceKey]
+          muteSupport: model.muteSupport[persistenceKey] ?? .unknown
         )).foregroundStyle(.secondary)
       }
       .help(DiagnosticsPageCopy.muteHelp)

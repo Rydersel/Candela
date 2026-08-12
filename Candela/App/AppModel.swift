@@ -670,6 +670,19 @@ final class AppModel {
     )
   }
 
+  /// Would turning the mute row ON actually send this display's own mute
+  /// command? The strategy asked with the pref held on, so it answers the
+  /// switch's PROMISE rather than its position, which is what the row's spoken
+  /// label describes in both positions.
+  func dedicatedMuteCommandInReach(_ state: DisplayState) -> Bool {
+    let key = state.display.persistenceKey
+    return VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true,
+      override: DisplayPrefs(persistenceKey: key).audioSinkOverride,
+      muteSupport: muteSupport[key] ?? .unknown
+    )
+  }
+
   /// The settings row's status caption: why the mute this display takes is not
   /// the mute its row promises, or nil while the two agree.
   ///
