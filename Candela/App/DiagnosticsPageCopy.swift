@@ -207,7 +207,7 @@ enum DiagnosticsPageCopy {
   /// which of them is holding is not visible from here, and all of them are
   /// necessary conditions.
   static var watchedKeys: LocalizedStringKey {
-    "\(AppInfo.productName) watches a family of keys only while something can act on it: brightness while an external display is connected, volume while a display it controls can take a volume command and the sound output leaves those keys to it, and either one only while that family is set to use the media keys. Keys it does not watch go straight to macOS."
+    "\(AppInfo.productName) watches a family of keys only while a press could land: brightness while an external display is connected, and the volume or mute keys while some display can take the command they send. The mute key asks about the display's own mute command when that is switched on, and about its volume command otherwise. Which displays get asked depends on what the volume keys target: with the sound-output target, only a display matched to the current output counts. The volume keys also go to macOS whenever the current output device has a volume control of its own, and stay here while macOS reports no output device at all. Either family is watched only while it is set to use the media keys, and keys \(AppInfo.productName) does not watch go straight to macOS."
   }
 
   static var accessibilityMissing: LocalizedStringKey {

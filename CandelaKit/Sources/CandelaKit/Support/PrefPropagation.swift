@@ -156,10 +156,16 @@ public enum PrefPropagation {
          .minDDCOverride, .maxDDCOverride, .curveDDC, .invertDDC, .remapDDC:
       [.reapplyDimming]
 
-    case .avoidGamma, .unavailableDDC:
-      // Both change what the panel shows as well: the control-method caption,
-      // and whether a slider renders at all.
+    case .avoidGamma:
+      // Changes what the panel shows as well: the control-method caption.
       [.reapplyDimming, .rebuildPanel]
+
+    case .unavailableDDC:
+      // The same two, plus the tap: this is the switch the engine itself checks
+      // before any DDC write, so turning the volume command off leaves nothing
+      // for a volume or mute key to do on that display, and the keys belong to
+      // macOS once no display can take them.
+      [.reapplyDimming, .rebuildPanel, .rearmTap]
 
     case .forceSw:
       [.reapplyDimming, .rebuildPanel, .rearmTap]

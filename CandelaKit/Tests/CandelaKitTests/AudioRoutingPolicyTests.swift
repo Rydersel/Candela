@@ -130,6 +130,10 @@ struct AudioRoutingPolicyTests {
   /// act on it takes the press away from macOS as well, so the whole family goes
   /// silent. Every mode releases the keys when the count is zero, including the
   /// one whose default output cannot set its own volume.
+  ///
+  /// Only two of the three cells are new. Name matching already released on a
+  /// zero count; what changed for that mode is WHICH displays the count is of,
+  /// since a matched display that cannot take the command no longer counts.
   @Test func nothingActionableReleasesTheKeysInEveryMode() {
     for mode in [MultiKeyboardVolume.mouse, .allScreens, .audioDeviceNameMatching] {
       #expect(!AudioRoutingPolicy.shouldWatchVolumeKeys(

@@ -484,9 +484,11 @@ final class AppModel {
     // pair (match count from one device, routing verdict from another).
     let device = audioDevices.defaultOutputDevice()
     if KeyModePolicy.watchesMediaKeys(appPrefs.keyboardVolume) {
-      // Fork getDdcCapableDisplays (= !isSw(), review R5): forceSoftware
-      // displays don't count — a rig whose only external is forceSoftware
-      // releases the volume keys to macOS.
+      // Fork getDdcCapableDisplays (= !isSw(), review R5): the fork's own
+      // disengage gate, kept because it is where the rule came from. The
+      // per-display arming verdict below refuses a forceSoftware display too,
+      // through the same availability switch the engine checks before a write,
+      // so this line is no longer what decides such a rig on its own.
       let ddcDisplaysExist = !ddcCapableStates().isEmpty
       let pool = volumeKeyPool(for: device)
       // Asked once per family, because the two arm on different registers.
@@ -516,10 +518,16 @@ final class AppModel {
   /// `KeyActionExecutor.volumeKeyCandidates`, which is what makes the arming
   /// question and the acting question one question.
   ///
-  /// The mouse mode resolves to the pointer's display at key time, which the tap
-  /// cannot know in advance, and does not need to. That mode falls back to every
-  /// display when the pointer resolves no external, so `displays` is the set of
-  /// panels a press could reach either way.
+  /// The mouse mode resolves to the pointer's display at key time, and the tap
+  /// cannot know in advance where the pointer will be, so this is the union: that
+  /// mode falls back to every display when the pointer resolves no external, so
+  /// `displays` is the set a press could reach either way.
+  ///
+  /// The union is deliberately wider than any one press. With the pointer on a
+  /// display that refuses while another accepts, the keys stay armed and that
+  /// press is swallowed with nothing to show for it. That is R1 as specified: the
+  /// press was aimed at a display that refuses it, and the alternative is
+  /// spraying it at the panels the user was not pointing at.
   private func volumeKeyPool(for device: AudioOutputDevice?) -> [DisplayState] {
     switch volumeMode {
     case .audioDeviceNameMatching: audioMatchingDisplays(for: device)
@@ -527,23 +535,33 @@ final class AppModel {
     }
   }
 
-  /// Does this display keep the volume keys armed? The capability half of
-  /// `volumeKeyEnabledStates`' verdict, without the per-display keyboard switch
-  /// (`VolumeSliderPolicy.armsVolumeKeys` states why the switch is left out).
+  /// Does this display keep the volume keys armed? Everything the executor's
+  /// verdict is made of except the per-display keyboard switch: the capability
+  /// half of `volumeKeyEnabledStates`, plus the controller's own availability
+  /// (`VolumeSliderPolicy.armsVolumeKeys` states why the switch is left out and
+  /// why availability is passed rather than re-derived).
+  ///
+  /// `state.volume.isAvailable` is read from the controller the press would go
+  /// through, not rebuilt from its two prefs here, so the tap cannot come to a
+  /// different conclusion than the write path about the same wire.
   private func armsVolumeKeys(_ state: DisplayState) -> Bool {
     let key = state.display.persistenceKey
     return VolumeSliderPolicy.armsVolumeKeys(
+      commandIsAvailable: state.volume.isAvailable,
       override: DisplayPrefs(persistenceKey: key).audioSinkOverride,
       volumeSupport: volumeSupport[key] ?? .unknown
     )
   }
 
   /// The same for the mute key, on the register the display's mute strategy
-  /// selects: the register `muteKeyEnabledStates` would write.
+  /// selects: the register `muteKeyEnabledStates` would write. Availability is
+  /// the volume controller's under both strategies, because that is the
+  /// controller `toggleMute` runs on.
   private func armsMuteKey(_ state: DisplayState) -> Bool {
     let key = state.display.persistenceKey
     let prefs = DisplayPrefs(persistenceKey: key)
     return VolumeSliderPolicy.armsMuteKey(
+      commandIsAvailable: state.volume.isAvailable,
       override: prefs.audioSinkOverride,
       volumeSupport: volumeSupport[key] ?? .unknown,
       muteSupport: muteSupport[key] ?? .unknown,
@@ -660,8 +678,13 @@ final class AppModel {
         // These two verdicts decide which volume keys the tap watches, and they
         // land here, after the arm. A landing answer that differs from the one
         // the tap was armed from has to re-arm it.
-        if self.volumeSupport[persistenceKey] != previousVolume
-          || self.muteSupport[persistenceKey] != previousMute {
+        //
+        // Compared as every reader sees them, absent folded to `.unknown`: the
+        // first probe on a display always writes an entry where there was none,
+        // and on a panel that answers nothing that is the same verdict written
+        // down, not a change to react to.
+        if self.volumeSupport[persistenceKey] != (previousVolume ?? .unknown)
+          || self.muteSupport[persistenceKey] != (previousMute ?? .unknown) {
           self.onVolumeKeyRoutingChanged?()
         }
       }

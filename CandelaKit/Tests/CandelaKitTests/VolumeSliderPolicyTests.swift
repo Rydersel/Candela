@@ -290,25 +290,27 @@ struct MuteKeyAcceptanceTests {
 
 /// The tap decides what to WATCH before it knows what a press would act on, and
 /// a watched key is CONSUMED: it reaches neither the app's displays nor macOS.
-/// So the arming question is not the acting question, and the difference is
-/// exactly the per-display keyboard switch.
-@Suite("Arming the volume keys asks the capability half only")
+/// So the arming question is not the acting question. It asks everything that
+/// makes a press IMPOSSIBLE on this display (the capability verdict, and the
+/// engine's own availability switch for the register) and nothing that merely
+/// makes the press a deliberate no-op (the per-display keyboard switch).
+@Suite("Arming the volume keys asks what makes a press impossible")
 struct VolumeKeyArmingTests {
   /// The whole point: a rig whose every display denies the register must let the
   /// keys through to macOS, because nothing here can ever take them.
   @Test func aParsedDenialDoesNotArmTheKeys() {
-    #expect(!VolumeSliderPolicy.armsVolumeKeys(override: .auto, volumeSupport: .unsupported))
+    #expect(!VolumeSliderPolicy.armsVolumeKeys(commandIsAvailable: true, override: .auto, volumeSupport: .unsupported))
     #expect(!VolumeSliderPolicy.armsMuteKey(
-      override: .auto, volumeSupport: .unsupported, muteSupport: .unsupported,
+      commandIsAvailable: true, override: .auto, volumeSupport: .unsupported, muteSupport: .unsupported,
       usesDedicatedMuteCommand: false))
   }
 
   /// The MAG rule, one layer up: absence of evidence keeps the keys armed, so a
   /// write-only panel never loses them.
   @Test func noEvidenceStillArms() {
-    #expect(VolumeSliderPolicy.armsVolumeKeys(override: .auto, volumeSupport: .unknown))
+    #expect(VolumeSliderPolicy.armsVolumeKeys(commandIsAvailable: true, override: .auto, volumeSupport: .unknown))
     #expect(VolumeSliderPolicy.armsMuteKey(
-      override: .auto, volumeSupport: .unknown, muteSupport: .unknown,
+      commandIsAvailable: true, override: .auto, volumeSupport: .unknown, muteSupport: .unknown,
       usesDedicatedMuteCommand: true))
   }
 
@@ -316,8 +318,8 @@ struct VolumeKeyArmingTests {
   /// volume slider off is a statement that no key should act on it either, and if
   /// it is the only display the keys belong to macOS.
   @Test func theOverrideRulesTheArmingDecisionToo() {
-    #expect(!VolumeSliderPolicy.armsVolumeKeys(override: .forceNone, volumeSupport: .supported))
-    #expect(VolumeSliderPolicy.armsVolumeKeys(override: .forcePresent, volumeSupport: .unsupported))
+    #expect(!VolumeSliderPolicy.armsVolumeKeys(commandIsAvailable: true, override: .forceNone, volumeSupport: .supported))
+    #expect(VolumeSliderPolicy.armsVolumeKeys(commandIsAvailable: true, override: .forcePresent, volumeSupport: .unsupported))
   }
 
   /// R1, and the reason arming is not simply `acceptsVolumeKeys`. A display
@@ -327,11 +329,11 @@ struct VolumeKeyArmingTests {
   /// switch mean something it has never meant. The two verdicts DISAGREE here,
   /// on purpose, and that disagreement is the whole difference between them.
   @Test func aKeyboardDisabledDisplayStillArmsTheKeys() {
-    #expect(VolumeSliderPolicy.armsVolumeKeys(override: .auto, volumeSupport: .supported))
+    #expect(VolumeSliderPolicy.armsVolumeKeys(commandIsAvailable: true, override: .auto, volumeSupport: .supported))
     #expect(!VolumeSliderPolicy.acceptsVolumeKeys(
       isKeyboardDisabled: true, override: .auto, volumeSupport: .supported))
     #expect(VolumeSliderPolicy.armsMuteKey(
-      override: .auto, volumeSupport: .supported, muteSupport: .supported,
+      commandIsAvailable: true, override: .auto, volumeSupport: .supported, muteSupport: .supported,
       usesDedicatedMuteCommand: false))
     #expect(!VolumeSliderPolicy.acceptsMuteKey(
       isKeyboardDisabled: true, override: .auto, volumeSupport: .supported,
@@ -342,33 +344,78 @@ struct VolumeKeyArmingTests {
   /// display that lists 0x8D but not 0x62 keeps the mute key armed under the
   /// dedicated strategy while the volume keys go to macOS.
   @Test func theMuteKeyArmsOnTheRegisterItWrites() {
-    #expect(!VolumeSliderPolicy.armsVolumeKeys(override: .auto, volumeSupport: .unsupported))
+    #expect(!VolumeSliderPolicy.armsVolumeKeys(commandIsAvailable: true, override: .auto, volumeSupport: .unsupported))
     #expect(VolumeSliderPolicy.armsMuteKey(
-      override: .auto, volumeSupport: .unsupported, muteSupport: .supported,
+      commandIsAvailable: true, override: .auto, volumeSupport: .unsupported, muteSupport: .supported,
       usesDedicatedMuteCommand: true))
     // Without the dedicated command mute is a volume-register write, so it
     // follows the volume keys out.
     #expect(!VolumeSliderPolicy.armsMuteKey(
-      override: .auto, volumeSupport: .unsupported, muteSupport: .supported,
+      commandIsAvailable: true, override: .auto, volumeSupport: .unsupported, muteSupport: .supported,
       usesDedicatedMuteCommand: false))
   }
 
-  /// The anti-drift pin: arming IS the acting verdict with the keyboard switch
-  /// held off, delegated rather than restated, so the two can never disagree
-  /// about a capability. Every input, both key families.
-  @Test func armingIsTheActingVerdictWithoutTheKeyboardSwitch() {
-    for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
-      for volume in [VCPSupport.supported, .unsupported, .unknown] {
+  /// Dead-key rig (a): a single external whose Volume row On switch is off. That
+  /// writes the per-command availability pref, which the tap's DDC-capable pool
+  /// does not filter on, so the keys armed on a display whose every volume write
+  /// the engine refuses. The press then died between the two: the tap consumed
+  /// it, and `DDCValueController.isAvailable` dropped it.
+  ///
+  /// It outranks the capability verdict and the override alike, because it is not
+  /// an opinion about what the display can do: it switches the wire off.
+  @Test func theEnginesOwnAvailabilitySwitchRefusesToArm() {
+    for volume in VCPSupport.allCases {
+      for override in AudioSinkOverride.allCases {
         #expect(
-          VolumeSliderPolicy.armsVolumeKeys(override: override, volumeSupport: volume)
+          !VolumeSliderPolicy.armsVolumeKeys(
+            commandIsAvailable: false, override: override, volumeSupport: volume),
+          "override \(override), support \(volume)")
+      }
+    }
+    // The mute key rides the SAME controller and so the same switch, under either
+    // strategy: `toggleMute` guards on the volume command's availability even
+    // when the wire it would write is 0x8D.
+    for dedicated in [true, false] {
+      #expect(!VolumeSliderPolicy.armsMuteKey(
+        commandIsAvailable: false, override: .forcePresent,
+        volumeSupport: .supported, muteSupport: .supported,
+        usesDedicatedMuteCommand: dedicated), "dedicated \(dedicated)")
+    }
+  }
+
+  /// Dead-key rig (b): two externals, one forced to software dimming and one that
+  /// denies the register. The software-dimmed display is where the pool went
+  /// wrong twice over, because its capabilities can still read `.unknown` and D24
+  /// resolves that to enabled: it armed the whole rig on its own account and then
+  /// refused every press. Its DDC volume traffic is switched off, so it arms
+  /// nothing, which leaves only the denying display and sends the keys to macOS.
+  @Test func aSoftwareDimmedDisplayWithNoVerdictArmsNothing() {
+    #expect(!VolumeSliderPolicy.armsVolumeKeys(
+      commandIsAvailable: false, override: .auto, volumeSupport: .unknown))
+    #expect(!VolumeSliderPolicy.armsVolumeKeys(
+      commandIsAvailable: true, override: .auto, volumeSupport: .unsupported))
+  }
+
+  /// The anti-drift pin: with the register available, arming IS the acting
+  /// verdict with the keyboard switch held off, delegated rather than restated,
+  /// so the two can never disagree about a capability. Every input, both key
+  /// families, with the case lists derived so a new case cannot slip in
+  /// under-covered.
+  @Test func armingIsTheActingVerdictWithoutTheKeyboardSwitch() {
+    for override in AudioSinkOverride.allCases {
+      for volume in VCPSupport.allCases {
+        #expect(
+          VolumeSliderPolicy.armsVolumeKeys(
+            commandIsAvailable: true, override: override, volumeSupport: volume)
             == VolumeSliderPolicy.acceptsVolumeKeys(
               isKeyboardDisabled: false, override: override, volumeSupport: volume),
           "override \(override), support \(volume)")
-        for mute in [VCPSupport.supported, .unsupported, .unknown] {
+        for mute in VCPSupport.allCases {
           for dedicated in [true, false] {
             #expect(
               VolumeSliderPolicy.armsMuteKey(
-                override: override, volumeSupport: volume, muteSupport: mute,
+                commandIsAvailable: true, override: override,
+                volumeSupport: volume, muteSupport: mute,
                 usesDedicatedMuteCommand: dedicated)
                 == VolumeSliderPolicy.acceptsMuteKey(
                   isKeyboardDisabled: false, override: override, volumeSupport: volume,

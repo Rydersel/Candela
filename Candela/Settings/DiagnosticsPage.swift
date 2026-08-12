@@ -525,9 +525,11 @@ struct DiagnosticsPage: View {
       }
     }
 
-    // The caption is attached only to the empty case, which is the state a
-    // single-display rig is actually in.
-    if watchedKeyFamilies.isEmpty, model.lastArmedTapConfig != nil {
+    // The caption is attached whenever a family is missing, not only when they
+    // all are. Partial states are ordinary now that volume and mute arm
+    // separately, and a row that names two families out of three explains the
+    // absent one to nobody.
+    if model.lastArmedTapConfig != nil, !watchesEveryFamily {
       SettingRow(DiagnosticsPageCopy.watchedKeys) {
         LabeledContent("Keys being watched") {
           Text(verbatim: watchedKeysText).foregroundStyle(.secondary)
@@ -576,6 +578,14 @@ struct DiagnosticsPage: View {
   private var watchedKeysText: String {
     DiagnosticsCopy.watchedKeys(
       families: watchedKeyFamilies, tapRunning: model.lastArmedTapConfig != nil)
+  }
+
+  /// Whether the tap is watching everything it ever watches. False while any
+  /// family is released, which is what the caption explains.
+  private var watchesEveryFamily: Bool {
+    guard let config = model.lastArmedTapConfig else { return false }
+    return config.watchedKeys.isSuperset(
+      of: [.brightnessUp, .brightnessDown, .volumeUp, .volumeDown, .mute])
   }
 
   /// Split out so the row can tell "watching nothing" from "not running" and

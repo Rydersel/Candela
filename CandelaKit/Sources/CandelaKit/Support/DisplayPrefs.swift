@@ -51,7 +51,7 @@ public enum PollingMode: Int, Sendable, CaseIterable {
 /// Overrides exist because a capabilities string is unreliable in the field:
 /// monitors truncate them, omit codes they implement, and advertise codes they
 /// ignore.
-public enum AudioSinkOverride: Int, Sendable {
+public enum AudioSinkOverride: Int, Sendable, CaseIterable {
   /// Trust `CapabilityString.support(forVCP:in:)` via `VolumeSliderPolicy`.
   case auto = 0
   /// Always greyed — the panel advertises volume it does not actually apply.
