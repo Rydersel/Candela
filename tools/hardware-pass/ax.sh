@@ -8,8 +8,14 @@
 # and go and shift every index.
 #
 # This used to select on `size is {900, 568}`. That broke on 2026-08-11 when the
-# window silently became 1005x580 (#149): every script here failed at once, and
-# the size is now known not to be stable. Do not put a literal size back.
+# This used to select on `size is {900, 568}`. That broke on 2026-08-11 when the
+# window came up 1005x580 (#149), and the root cause makes a size selector
+# permanently unusable rather than merely stale: **the size is not a property of
+# the app at all.** AppKit autosaves this window's frame, size included, under
+# `NSWindow Frame com_apple_SwiftUI_Settings_window` in com.rydersel.Candela and
+# restores it ahead of anything SwiftUI computes, so any resize sticks for good.
+# 900x568 was never an ideal either; with the key deleted the window comes up
+# 900x520, and `idealHeight` is 560. Do not put a literal size back.
 #
 # It then selected on `name does not start with "Candela "`, which has its own
 # hole: the settings window is USUALLY named for its current pane ("General",
