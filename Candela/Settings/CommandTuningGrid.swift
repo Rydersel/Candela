@@ -38,7 +38,7 @@ enum DDCCommandCopy {
 /// here.
 ///
 /// Every edit is a read-modify-write of ONE command's tuning, and the
-/// modify half is `DDCOverrideValidation.applied` in CandelaKit, under test.
+/// modify half is `DDCOverrideValidation.committed` in CandelaKit, under test.
 /// The fork rewrote all 18 keys and forced brightness to 100% on any single
 /// edit (chapter 2 QUIRK 7); here nothing writes brightness at all — the D20
 /// seam re-applies the SAME published value through `reapplyAfterPrefChange()`
@@ -55,9 +55,9 @@ struct CommandTuningGrid: View {
 
   /// Carries the `DDCCommand` itself, not its raw string: the previous shape
   /// forced a `DDCCommand(rawValue:) ?? .brightness` fallback, so a mis-keyed
-  /// focus target would silently write against BRIGHTNESS (lens-4 M7). This is
-  /// a compile-time elimination, which is why it needs no test.
-  private enum FocusTarget: Hashable {
+  /// target would silently write against BRIGHTNESS (lens-4 M7). This is a
+  /// compile-time elimination, which is why it needs no test.
+  private enum Target: Hashable {
     case minimum(DDCCommand)
     case maximum(DDCCommand)
 
@@ -74,12 +74,6 @@ struct CommandTuningGrid: View {
       }
     }
   }
-
-  /// Field text is only held locally WHILE FOCUSED; an unfocused field always
-  /// renders from the stored pref, so an external write (or the reset button)
-  /// shows up immediately instead of leaving stale text behind.
-  @State private var drafts: [FocusTarget: String] = [:]
-  @FocusState private var focus: FocusTarget?
 
   /// A hard 60 pt clipped the value at larger text sizes: three digits plus the
   /// caret do not fit a fixed box once the font grows (accessibility contract
@@ -159,10 +153,6 @@ struct CommandTuningGrid: View {
       .disabled(isInert)
       captions
     }
-    .onChange(of: focus) { previous, current in
-      if let previous { commit(previous) }
-      if let current { drafts[current] = storedText(current) }
-    }
   }
 
   // MARK: - Cells
@@ -187,28 +177,26 @@ struct CommandTuningGrid: View {
   /// captions.
   private func rowName(_ command: DDCCommand) -> String { DDCCommandCopy.name(command) }
 
-  private func overrideField(_ target: FocusTarget) -> some View {
-    TextField("", text: Binding(
-      get: { focus == target ? (drafts[target] ?? storedText(target)) : storedText(target) },
-      set: { drafts[target] = $0 }
-    ))
-    // A grouped `Form` styles a bare `TextField` borderless, and with an empty
-    // value that renders as NOTHING: no border, no focus ring, no way to know
-    // a field is there (combined pass D4), under a caption inviting people to
-    // leave the boxes empty. The explicit border is what makes the box a box.
-    .textFieldStyle(.roundedBorder)
-    // The grid sits inside a `Form`, which splits a `TextField` into a label
-    // column and a field: the empty label still took its share of the
-    // cell, so the bezel drew at the trailing edge and no column header could
-    // sit over it. Hiding the label gives the bezel the whole cell.
-    .labelsHidden()
-    .focused($focus, equals: target)
-    .onSubmit { commit(target) }
-    .frame(width: fieldWidth)
-    .accessibilityLabel(Text(accessibilityLabel(for: target)))
+  /// The bezel, the width and the accessibility label are the same as they
+  /// always were; what `CommitOnBlurField` adds is that leaving the box applies
+  /// the number, which typing into one box and clicking the next always looked
+  /// like it did (#144).
+  private func overrideField(_ target: Target) -> some View {
+    CommitOnBlurField(
+      stored: { storedText(target) },
+      commit: { commit(target, $0) },
+      fieldLabel: Text(accessibilityLabel(for: target)),
+      width: fieldWidth
+    )
+    // Keyed to the display: SO23's switcher can carry this page onto another
+    // display while a box is being typed in, and a field that kept its text
+    // across that would commit one display's number to another's pref. A new
+    // identity per display also lets a pending edit commit to the display it
+    // was typed for, on the way out.
+    .id(state.display.persistenceKey)
   }
 
-  private func accessibilityLabel(for target: FocusTarget) -> String {
+  private func accessibilityLabel(for target: Target) -> String {
     switch target.field {
     case .minimum: "Minimum value for \(rowName(target.command))"
     case .maximum: "Maximum value for \(rowName(target.command))"
@@ -247,7 +235,7 @@ struct CommandTuningGrid: View {
 
   // MARK: - Override commits
 
-  private func storedText(_ target: FocusTarget) -> String {
+  private func storedText(_ target: Target) -> String {
     let tuning = prefs.tuning(for: target.command)
     return switch target.field {
     case .minimum: DDCOverrideValidation.text(for: tuning.minDDCOverride)
@@ -255,28 +243,23 @@ struct CommandTuningGrid: View {
     }
   }
 
-  private func commit(_ target: FocusTarget) {
+  /// Return and focus loss both arrive here, so neither route can validate the
+  /// text more loosely than the other (#144).
+  ///
+  /// ONE command's tuning in, the same tuning with ONE field changed out.
+  /// `DDCOverrideValidation.committed` returns nil for both refusals, garbage
+  /// and "that is already the stored value", and nil means write nothing at
+  /// all: the field snaps itself back, and a typo never fans out to a
+  /// `reapplyAfterPrefChange()`. Note there is no loop over
+  /// `DDCCommand.allCases` anywhere in this function: that shape is the fork's
+  /// QUIRK 7, and `DDCOverrideApplicationTests` is what keeps it out.
+  private func commit(_ target: Target, _ text: String) {
     let command = target.command
-    let current = prefs.tuning(for: command)
-    let input = DDCOverrideValidation.classify(drafts[target] ?? storedText(target))
-    // ONE command's tuning in, the same tuning with ONE field changed out.
-    // `nil` means rejected: snap the field back and write nothing (fork parity
-    // for Min, now applied to Max too). Note there is no loop over
-    // `DDCCommand.allCases` anywhere in this function — that shape is the
-    // fork's QUIRK 7, and `DDCOverrideApplicationTests` is what keeps it out.
-    guard let tuning = DDCOverrideValidation.applied(input, to: current, field: target.field),
-          // Return then blur commits the same field twice; the second commit
-          // has nothing to say, and a re-write would fan out to a pointless
-          // `reapplyAfterPrefChange()`. Same rule as
-          // `DisplayDetailView.commitName`.
-          tuning != current
-    else {
-      drafts[target] = storedText(target)
-      return
-    }
+    guard let tuning = DDCOverrideValidation.committed(
+      text, to: prefs.tuning(for: command), field: target.field
+    ) else { return }
     let name: PrefName = target.field == .minimum ? .minDDCOverride : .maxDDCOverride
     writer.write(name) { $0.setTuning(tuning, for: command) }
-    drafts[target] = storedText(target)
   }
 
   // MARK: - Captions
