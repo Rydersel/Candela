@@ -1,11 +1,11 @@
 //  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
 //  Based on MediaKeyTap by Nicholas Hurden (MIT)
 
-import AppKit
 // @preconcurrency: same mutable-C-global import quirk as AccessibilityPermission.
 @preconcurrency import ApplicationServices
 import CandelaKit
 import CoreGraphics
+import Foundation
 import os
 
 /// CGEventTap island that intercepts brightness/volume media keys and the
@@ -32,6 +32,9 @@ import os
 ///   until `tapCreate` returns, after the callback closure is built).
 /// - Only the `Sendable` `MediaKeyPress` escapes the callback; `onPress` is
 ///   invoked on the tap thread and the consumer hops actors itself.
+/// - **Nothing on the tap thread may touch AppKit or HIToolbox.** That is why
+///   this island imports no AppKit at all: the system-defined payload is
+///   decoded straight off the CGEvent (see `sysDefinedSubtypeField`).
 @MainActor
 final class MediaKeyEventTap {
   struct WatchConfig: Sendable {
@@ -402,6 +405,24 @@ final class MediaKeyEventTap {
 
   // MARK: - Tap-thread event handling
 
+  /// CGEvent integer fields holding an NX_SYSDEFINED event's compound payload:
+  /// the same two values `NSEvent.subtype` and `NSEvent.data1` expose, read
+  /// without constructing an NSEvent [MEASURED 2026-08-12, subtypes 0...11
+  /// round-tripped through `NSEvent.otherEvent` and back].
+  ///
+  /// `NSEvent(cgEvent:)` looks like a pure data wrapper and is not. On a
+  /// subtype-8 event it runs HIToolbox's caps-lock state machine
+  /// (`CreateEventWithCGEvent` to `TSMSetCapsLockKeyTransitionDetected` to
+  /// `TSMGetInputSourceProperty`), which asserts it is on the main dispatch
+  /// queue. The tap callback is on the tap thread by design, so one Caps Lock
+  /// press trapped the process in `_dispatch_assert_queue_fail`.
+  private nonisolated static let sysDefinedSubtypeField = CGEventField(rawValue: 99)!
+  private nonisolated static let sysDefinedData1Field = CGEventField(rawValue: 149)!
+
+  /// The only NX_SYSDEFINED subtype that carries media keys, and the only one
+  /// this tap decodes.
+  private nonisolated static let auxControlSubtype = Int64(NX_SUBTYPE_AUX_CONTROL_BUTTONS)
+
   /// Runs on the tap thread. Returns the event to pass it through to the
   /// system, or nil to swallow it after delivering a `MediaKeyPress`.
   private nonisolated static func process(
@@ -441,15 +462,16 @@ final class MediaKeyEventTap {
     }
 
     if type.rawValue == UInt32(NX_SYSDEFINED) {
-      // NSEvent(cgEvent:) is a pure data wrapper over the CGEvent — no UI,
-      // no main-thread requirement — and is used off-main here deliberately:
-      // hopping to the main thread inside the callback (as the original
-      // library did with DispatchQueue.main.sync) blocks the tap thread for
-      // the whole of any menu-tracking session until the tap times out.
-      guard let nsEvent = NSEvent(cgEvent: event), nsEvent.subtype.rawValue == 8 else {
+      // Decoded straight off the CGEvent, never via NSEvent(cgEvent:): see
+      // `sysDefinedSubtypeField` for why building an NSEvent here traps.
+      // The gate order is load-bearing, not stylistic: reading the payload
+      // field on a subtype that carries no compound data trips a CoreGraphics
+      // assertion (`event_carries_compound_data_field`), so the subtype must
+      // be checked first.
+      guard event.getIntegerValueField(Self.sysDefinedSubtypeField) == Self.auxControlSubtype else {
         return event // not a media-key system event
       }
-      let data1 = nsEvent.data1
+      let data1 = event.getIntegerValueField(Self.sysDefinedData1Field)
       let keycode = Int32((data1 & 0xFFFF_0000) >> 16)
       let keyFlags = data1 & 0x0000_FFFF
       let isPressed = ((keyFlags & 0xFF00) >> 8) == 0xA
