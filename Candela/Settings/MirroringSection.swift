@@ -224,6 +224,7 @@ struct MirroringSection: View {
         // defeat it.
         coordinator.disengage(containing: displayID)
       }
+      .accessibilityLabel(Text(MirroringCopy.stopMirroring))
       .disabled(!enabled)
     }
   }
@@ -286,6 +287,7 @@ struct MirroringSection: View {
         guard let selectedMaster else { return }
         coordinator.engage(master: selectedMaster)
       }
+      .accessibilityLabel(Text(MirroringCopy.startMirroring))
       .disabled(!canStart || selectedMaster == nil)
     }
   }

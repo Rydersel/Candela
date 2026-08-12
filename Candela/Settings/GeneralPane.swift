@@ -100,14 +100,24 @@ struct GeneralPane: View {
         .fixedSize(horizontal: false, vertical: true)
       }
       HStack(spacing: 8) {
+        // Both titles are stated twice on purpose. SwiftUI does not publish a
+        // `Button`'s own title to the accessibility layer, so without the
+        // explicit label these two announce as "button" and "button": the two
+        // most consequential controls in the app, one of which wipes every
+        // preference. The `let` keeps the spoken and the visible string from
+        // drifting apart, which is the reason `SettingRow` takes its label
+        // rather than reading one.
+        let quit = "Quit \(AppInfo.productName)"
         // The Menu Bar pane's caption promises this button by name when the
         // menu bar icon is hidden ("You can quit it from General") — with no
         // icon and no Dock tile there is otherwise no way out.
-        Button("Quit \(AppInfo.productName)") { NSApplication.shared.terminate(nil) }
+        Button(quit) { NSApplication.shared.terminate(nil) }
+          .accessibilityLabel(Text(verbatim: quit))
         // Trailing ellipsis per buttons.md: the click opens a confirmation
         // rather than destroying anything. No `.destructive` role here — the
         // role belongs on the button that actually performs the wipe.
         Button("Reset All Settings…") { confirmingReset = true }
+          .accessibilityLabel("Reset All Settings…")
       }
     }
   }

@@ -112,6 +112,7 @@ struct BannerRegion: View {
           SettingsCaption(DisplayModeCopy.startFailure(failure.reason))
             .help(DisplayModeCopy.startFailureDiagnostic(failure.reason))
           Button("OK") { coordinator.dismissStartFailure() }
+            .accessibilityLabel("OK")
         }
       }
     }
@@ -133,6 +134,7 @@ struct BannerRegion: View {
           // Keyed by the report on screen, so OK can only clear the notice the
           // user is reading — and the same call the panel's OK makes.
           Button("OK") { coordinator.dismissReport(forKey: report.key) }
+            .accessibilityLabel("OK")
         }
       }
     }
@@ -155,6 +157,7 @@ struct BannerRegion: View {
             Label("This display is muted in hardware.", systemImage: "speaker.slash")
             Spacer()
             Button("Turn Hardware Control Back On and Unmute") { recoverFromHardwareMute() }
+              .accessibilityLabel("Turn Hardware Control Back On and Unmute")
           }
           SettingsCaption("Muting used the display's own mute command, and that command can only be undone over hardware control. This turns hardware control back on for this display and unmutes it.")
         }
@@ -203,6 +206,7 @@ struct BannerRegion: View {
             .foregroundStyle(.secondary)
           Spacer()
           Button("OK") { model.dismissFirstSight(persistenceKey) }
+            .accessibilityLabel("OK")
         }
       }
     }
@@ -253,9 +257,11 @@ private struct AnswerableModeBanner: View {
         Button("Keep") { Task { await coordinator.confirm(preview) } }
           .buttonStyle(.borderedProminent)
           .keyboardShortcut(.defaultAction)
+          .accessibilityLabel("Keep")
           .accessibilityFocused($keepFocused)
         Button("Revert Now") { Task { await coordinator.revert(preview) } }
           .keyboardShortcut(.cancelAction)
+          .accessibilityLabel("Revert Now")
       }
       // Belt to the intent check's braces: while a selection is still landing
       // the banner is about to change, so offering an answer to the old one

@@ -651,7 +651,9 @@ struct DiagnosticsReportActions: View {
   var body: some View {
     HStack(spacing: 8) {
       Button(DiagnosticsPageCopy.copyReport) { copyReport() }
+        .accessibilityLabel(Text(DiagnosticsPageCopy.copyReport))
       Button(DiagnosticsPageCopy.saveReport) { saveReport() }
+        .accessibilityLabel(Text(DiagnosticsPageCopy.saveReport))
       if justCopied {
         Text(DiagnosticsPageCopy.copied)
           .foregroundStyle(.secondary)
