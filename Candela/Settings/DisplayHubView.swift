@@ -334,6 +334,7 @@ struct DisplayHubView: View {
             // The coordinator's own queue re-checks (session-authoritative), so
             // this disable is courtesy, not the guard.
             Button("Set to Current") { coordinator.pinCurrentMode(on: displayID) }
+              .accessibilityLabel("Set to Current")
               .disabled(pinnedMatchesCurrent(stored) || coordinator.preview?.displayID == displayID)
           }
         }
@@ -410,6 +411,7 @@ struct DisplayHubView: View {
           // (spec §4): the keys are configured app-wide under Keyboard.
           Button("Keyboard Settings…") { selection = .pane(.keyboard) }
             .buttonStyle(.link)
+            .accessibilityLabel("Keyboard Settings…")
         }
       }
 
@@ -471,6 +473,7 @@ struct DisplayHubView: View {
               audioNameDraft = currentOutput?.name ?? ""
               commitAudioName()
             }
+            .accessibilityLabel("Use Current")
             .disabled(currentOutput == nil)
           }
         }
@@ -538,6 +541,7 @@ struct DisplayHubView: View {
             selection = .pane(.oledCare)
           }
           .buttonStyle(.link)
+          .accessibilityLabel("All OLED Care Settings…")
         }
       }
     } header: {
@@ -648,6 +652,7 @@ struct DisplayHubView: View {
       // Plain at rest (SO20): the destructive role lives on the alert's confirm
       // button, not on a red button waiting on every display's page.
       Button("Reset Display Settings…") { confirmingReset = true }
+        .accessibilityLabel("Reset Display Settings…")
         .alert("Reset the settings for this display?", isPresented: $confirmingReset) {
           Button("Reset", role: .destructive) { resetDisplay() }
           Button("Cancel", role: .cancel) {}

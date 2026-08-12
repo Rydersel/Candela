@@ -123,6 +123,7 @@ struct ArrangementPane: View {
         // provably unchanged — "make main" cannot rearrange anything.
         coordinator.apply(coordinator.arrangement.makingMain(id))
       }
+      .accessibilityLabel("Use as Main Display")
       .disabled(!canMakeMain)
     }
   }
@@ -216,6 +217,7 @@ struct ArrangementPane: View {
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
           Button("OK") { coordinator.dismissReport() }
+            .accessibilityLabel("OK")
         }
       }
     }

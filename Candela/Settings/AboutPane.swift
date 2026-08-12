@@ -48,6 +48,7 @@ struct AboutPane: View {
         // name — the same word Settings → General's reset alert uses; the
         // internal name "onboarding" never appears in the UI.
         Button("Run Setup Again…") { actions.showOnboarding() }
+          .accessibilityLabel("Run Setup Again…")
         SettingsCaption("Walks through Open at Login, the keyboard keys and the Accessibility permission again.")
       }
       // The report's second entry point (spec §7). The first is on a display's

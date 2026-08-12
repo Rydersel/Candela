@@ -576,6 +576,7 @@ private struct OledCareDisplaySection: View {
             tracker.dismissStandbyNote()
             hoursRevision &+= 1
           }
+          .accessibilityLabel("Dismiss")
         }
       }
     }
@@ -691,6 +692,7 @@ private struct OledCareDisplaySection: View {
         Text("Display health")
         Spacer(minLength: 0)
         Button("Show…") { showingHealth = true }
+          .accessibilityLabel("Show…")
       }
     }
   }

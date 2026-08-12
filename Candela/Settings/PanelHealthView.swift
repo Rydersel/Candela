@@ -124,9 +124,11 @@ struct PanelHealthView: View {
   private var footer: some View {
     HStack {
       Button("Delete History…", role: .destructive) { confirmingDelete = true }
+        .accessibilityLabel("Delete History…")
       Spacer(minLength: 12)
       Button("Done") { dismiss() }
         .keyboardShortcut(.defaultAction)
+        .accessibilityLabel("Done")
     }
     .padding(.horizontal, 20)
     .padding(.vertical, 14)

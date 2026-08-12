@@ -55,6 +55,7 @@ struct BuiltInDisplayPane: View {
       Section("Menu Bar") {
         SettingRow("Whether this display's slider appears in the menu bar is set under Menu Bar, so it stays reachable when the lid is closed and this display disappears.") {
           Button("Open Menu Bar Settings") { selection = .pane(.menuBar) }
+            .accessibilityLabel("Open Menu Bar Settings")
         }
       }
 

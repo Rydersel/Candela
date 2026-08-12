@@ -100,14 +100,24 @@ struct GeneralPane: View {
         .fixedSize(horizontal: false, vertical: true)
       }
       HStack(spacing: 8) {
+        // Both titles are stated twice on purpose. SwiftUI does not publish a
+        // `Button`'s own title to the accessibility layer, so without the
+        // explicit label these two announce as "button" and "button": the two
+        // most consequential controls in the app, one of which wipes every
+        // preference. The `let` keeps the spoken and the visible string from
+        // drifting apart, which is the reason `SettingRow` takes its label
+        // rather than reading one.
+        let quit = "Quit \(AppInfo.productName)"
         // The Menu Bar pane's caption promises this button by name when the
         // menu bar icon is hidden ("You can quit it from General") — with no
         // icon and no Dock tile there is otherwise no way out.
-        Button("Quit \(AppInfo.productName)") { NSApplication.shared.terminate(nil) }
+        Button(quit) { NSApplication.shared.terminate(nil) }
+          .accessibilityLabel(Text(verbatim: quit))
         // Trailing ellipsis per buttons.md: the click opens a confirmation
         // rather than destroying anything. No `.destructive` role here — the
         // role belongs on the button that actually performs the wipe.
         Button("Reset All Settings…") { confirmingReset = true }
+          .accessibilityLabel("Reset All Settings…")
       }
     }
   }
@@ -208,27 +218,18 @@ struct GeneralPane: View {
             .foregroundStyle(.secondary)
           Text("Safe Mode is on for this session, so this setting is not in effect.")
         }
-        // The full scope lives HERE, in the state it describes, and nowhere
-        // else: an always-on paragraph explaining a mode nobody is in was the
-        // pane's longest block of text. D11's visibility rule is about the
+        // The full scope is VISIBLE here, in the state it describes, and in no
+        // always-on form: a paragraph explaining a mode nobody is in was the
+        // pane's longest block of text, and D11's visibility rule is about the
         // ACTIVE state, which keeps its status row above and this caption.
-        // Safe mode's real, final scope (D11): no startup restore, no wake
-        // restore, no brightness readback, no quit-time write, and (added by
-        // W3a) no OLED-care driver loop. `OledCareCoordinator.start` returns
-        // before the loop is built, so EVERYTHING that rides it stops: the
-        // dimming overlay, panel hours, and (added by W3b-1) brightness
-        // sampling and window observation. Sliders and keys still work and
-        // still send DDC, and so do the OLED Care pane's two screen-chrome
-        // switches (explicit writes to a system setting, not automatic
-        // behavior; that pane carries its own safe-mode note), so this must
-        // NEVER claim "no DDC commands" or that OLED care is entirely off.
         //
-        // It listed dimming and hours but not the two measurement features,
-        // which W3b-1 added to the same loop. Understating the scope is the
-        // same class of false copy as overstating it, and D11 covers both
-        // directions: a reader who trusts this list grants Screen Recording in
-        // a safe-mode session and waits for readings that cannot come.
-        SettingsCaption("Shift was held at launch, so \(AppInfo.productName) won't restore your saved values at startup or wake, won't read values back from your displays, won't write anything when it quits, and won't dim any display, count hours of use, or take any measurements for OLED care. The sliders and keys still work, your settings are unchanged, and relaunching without Shift restores normal behavior.")
+        // The words themselves are `SafeModeCopy`'s (#147). This pane was the
+        // only one of the three summaries that named all four suppressions, so
+        // for a milestone the launch alert and the Diagnostics row described a
+        // narrower feature than the one the app was running. Whichever surface
+        // is right, one list is what stops them disagreeing, and the enum is
+        // exhaustive so a fifth suppression cannot reach only one of them.
+        SettingsCaption(verbatim: SafeModeCopy.generalPaneCaption(app: AppInfo.productName))
       }
       // `startupCaption` is NOT repeated here: `SettingRow` above already
       // renders it beneath the picker. Rendering it a second time printed the

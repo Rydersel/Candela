@@ -45,7 +45,7 @@ struct SettingsSidebar: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 2) {
         ForEach(SettingsRegistry.panes) { pane in
-          row(.pane(pane.id)) {
+          row(.pane(pane.id), label: pane.title) {
             Label {
               Text(pane.title)
             } icon: {
@@ -123,8 +123,18 @@ struct SettingsSidebar: View {
   /// label's colour for selection styles it drew itself, so a hand-drawn
   /// background has to handle the text, or the tinted-tile rows go unreadable
   /// against the accent fill.
+  ///
+  /// `label` is passed in rather than read off `content`, for the reason
+  /// `SettingRow` records: a control's own label is not readable from here, and
+  /// SwiftUI does not publish a `Button`'s implicit label to the accessibility
+  /// layer at all, the same finding `NavigationRow` carries. Without it every
+  /// row announces as a bare "button", which is the whole sidebar.
   @ViewBuilder
-  private func row(_ destination: SettingsDestination, @ViewBuilder _ content: () -> some View) -> some View {
+  private func row(
+    _ destination: SettingsDestination,
+    label: String,
+    @ViewBuilder _ content: () -> some View
+  ) -> some View {
     let isSelected = selection == destination
     Button {
       if isSelected {
@@ -145,6 +155,10 @@ struct SettingsSidebar: View {
       RoundedRectangle(cornerRadius: 6, style: .continuous)
         .fill(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.clear))
     )
+    // Never `.accessibilityElement(children: .ignore)` here: it replaces the
+    // button's element and takes `AXPress` and `AXFocused` with it. See
+    // `NavigationRow` for the measurement.
+    .accessibilityLabel(Text(verbatim: label))
     .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
   }
 
@@ -179,7 +193,13 @@ struct SettingsSidebar: View {
     )
     let name = ordinal.map { "\(resolved) (\($0))" } ?? resolved
     let isSelected = selection == .display(display.persistenceKey)
-    row(.display(display.persistenceKey)) {
+    let hasUnread = model.displayModes.hasUnreadReport(for: display.id)
+    // The dot's fact rides in the row's own label rather than in a nested
+    // element: an explicit `.accessibilityLabel` on a `Button` replaces the
+    // label derived from its content, so a child element's label would simply
+    // stop being announced. Same reason the brightness bar stays hidden.
+    let spokenName = hasUnread ? "\(name), has an unread notice" : name
+    row(.display(display.persistenceKey), label: spokenName) {
       Label {
         VStack(alignment: .leading, spacing: 3) {
           HStack(spacing: 5) {
@@ -191,14 +211,13 @@ struct SettingsSidebar: View {
             // carries the account, this only says there is one to open. It is
             // never the sole carrier of the fact either — the notice itself is
             // inside — so a missed dot costs nothing.
-            if model.displayModes.hasUnreadReport(for: display.id) {
+            if hasUnread {
               Circle()
                 // White on the selected row for the reason the row forces its
                 // foreground: an accent dot on the accent pill is invisible.
                 .fill(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(Color.accentColor))
                 .frame(width: 6, height: 6)
-                .accessibilityElement()
-                .accessibilityLabel("Has an unread notice")
+                .accessibilityHidden(true)
             }
           }
           Capsule()

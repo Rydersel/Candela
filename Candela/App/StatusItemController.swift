@@ -141,33 +141,17 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     if isSafeMode {
       let alert = NSAlert()
       alert.messageText = "Safe Mode"
-      var informative = """
-      Shift was held during launch. For this session, \(AppInfo.productName) will not restore your \
-      saved brightness, volume, contrast or resolution, will not read any values back from your \
-      displays, and will not write to them when you quit.
-
-      Your sliders and keyboard shortcuts still work, and they still send commands to your displays. \
-      Nothing about your settings has changed: relaunch without holding Shift to leave Safe Mode.
-      """
-      // The one piece of traffic the paragraph above does not cover. Brightness
-      // sync is off by default, but when it is on, `BrightnessSync.fanOut`
-      // writes DDC to the other displays whenever the built-in's brightness
-      // moves — INCLUDING moves nobody made here, like the ambient light
-      // sensor's. That is unattended traffic, so "your sliders and keyboard
-      // shortcuts" does not honestly account for it, and a user in safe mode
-      // because DDC writes are wedging a monitor has to be told. Named only
-      // when the pref is actually on: a standing caveat about a feature the
-      // user does not use is noise, and the honesty rule is about the copy
-      // matching THIS session.
+      // The words live in `SafeModeCopy` (#147), with the Diagnostics row and
+      // the General pane caption, because this notice named three suppressions
+      // for a milestone while the app performed four: W3a added OLED care to
+      // the code and to one of the three surfaces. The list is one enum now, so
+      // a fifth suppression cannot reach only one of them.
+      var informative = SafeModeCopy.launchNotice(app: AppInfo.productName)
+      // The one piece of traffic the list does not cover, and the reason the
+      // paragraph is appended here rather than folded in: it is conditional on
+      // a pref, and it is additional to the four rather than one of them.
       if DisplayPrefs(persistenceKey: "app").enableBrightnessSync {
-        informative += """
-
-
-        "Match other displays to the built-in display" is on, so changes to the built-in display's \
-        brightness (including ones macOS makes by itself, such as the ambient light sensor's) are \
-        still mirrored out to your other displays. Turn it off in Settings if you need those \
-        displays left completely alone.
-        """
+        informative += "\n\n" + SafeModeCopy.brightnessSyncParagraph
       }
       alert.informativeText = informative
       // Accessory-policy app: without activating first, a launch-time alert can
