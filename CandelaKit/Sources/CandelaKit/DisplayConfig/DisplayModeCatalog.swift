@@ -14,6 +14,11 @@ public struct DisplayModeRow: Sendable, Equatable, Identifiable {
   /// display and scaled on another.
   public let isScaled: Bool
 
+  /// The row offers an option our own enumeration added. Taken from the
+  /// REPRESENTATIVE, which is the mode this row names and the one whose
+  /// framebuffer every other statement on the row is computed against.
+  public var isRevealed: Bool { mode.isRevealed }
+
   public var id: Int32 { mode.ioModeID }
 
   public init(mode: DisplayMode, isScaled: Bool) {

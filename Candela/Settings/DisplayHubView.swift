@@ -299,21 +299,35 @@ struct DisplayHubView: View {
   /// deduplicated by logical size, so the distinction words belong to the
   /// surfaces that show the duplicates (SO14/SO18, Task 14).
   ///
+  /// **The source mark DOES ride along, and the difference is the point.**
+  /// Native and Scaled tell two entries of one size apart, which this picker
+  /// has none of. "Added by Candela" says why the entry is on the list at all,
+  /// and this pop-up is where most people choose a resolution: a differentiator
+  /// nobody can see at the moment of choosing is one the app does not appear to
+  /// have.
+  ///
   /// `currentHz` is `outcome`'s contract, not a hint: when the display has no
   /// current mode the caps warning is SUPPRESSED entirely — a placeholder 0
   /// would both disable the warning and name the wrong rate.
   private func sizeItemLabel(_ row: DisplayModeRow, in catalog: DisplayModeCoordinator.Catalog) -> String {
+    var marks: [String] = []
+    if let current = catalog.current,
+       let outcome = DisplayModeCatalog.outcome(
+         selectingWidth: row.mode.logicalWidth,
+         selectingHeight: row.mode.logicalHeight,
+         currentHz: current.refreshHz,
+         in: catalog.all
+       ),
+       outcome.lowersCurrentRate {
+      // First: it is a warning about what this choice costs, and the source
+      // mark is a note about where the choice came from.
+      marks.append("caps at \(DisplayModeCopy.refresh(outcome.appliedHz))")
+    }
+    if row.isRevealed { marks.append(DisplayModeCopy.addedByApp) }
+
     let base = DisplayModeCopy.size(row.mode)
-    guard let current = catalog.current,
-          let outcome = DisplayModeCatalog.outcome(
-            selectingWidth: row.mode.logicalWidth,
-            selectingHeight: row.mode.logicalHeight,
-            currentHz: current.refreshHz,
-            in: catalog.all
-          ),
-          outcome.lowersCurrentRate
-    else { return base }
-    return "\(base) (caps at \(DisplayModeCopy.refresh(outcome.appliedHz)))"
+    guard !marks.isEmpty else { return base }
+    return "\(base) (\(marks.joined(separator: ", ")))"
   }
 
   /// The curated row the display is running, by SIZE — `ioModeID` would come up

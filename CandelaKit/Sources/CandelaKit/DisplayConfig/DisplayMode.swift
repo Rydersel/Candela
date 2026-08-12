@@ -61,6 +61,24 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
 
   public var isHiDPI: Bool { logicalWidth > 0 && pixelWidth >= logicalWidth * 2 }
 
+  /// This option exists because our own enumeration found it, not because the
+  /// public one listed it. The pickers mark these rows.
+  ///
+  /// Reads the recorded provenance and nothing else. Sharpness is not
+  /// provenance: `kCGDisplayShowDuplicateLowResolutionModes` puts HiDPI modes
+  /// INTO the CoreGraphics list, so a flag derived by diffing the two
+  /// enumerations is a synonym for `!isHiDPI`, which was built once and removed
+  /// for exactly that reason.
+  ///
+  /// Switched rather than compared so a third source (injection) cannot be
+  /// added without deciding whether the pickers mark it, and with which words.
+  public var isRevealed: Bool {
+    switch provenance {
+    case .coreGraphics: false
+    case .coreGraphicsServices: true
+    }
+  }
+
   /// A scaled mode renders oversized and downsamples. The comparison is
   /// against the PANEL's native pixel count — taken from the mode flagged
   /// `isNative` — and NOT against `CGDisplayPixelsWide`, which reports the
