@@ -518,7 +518,7 @@ struct DiagnosticsPage: View {
     }
 
     if model.isSafeMode {
-      SettingRow(DiagnosticsPageCopy.safeMode) {
+      SettingRow(caption: SettingsCaption(verbatim: DiagnosticsPageCopy.safeMode)) {
         LabeledContent("Safe Mode") {
           Text(verbatim: DiagnosticsCopy.safeModeState).foregroundStyle(.secondary)
         }
