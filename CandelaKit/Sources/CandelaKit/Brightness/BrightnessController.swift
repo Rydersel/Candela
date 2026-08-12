@@ -1391,7 +1391,15 @@ public final class BrightnessController: PendingWireDraining {
     // edge.
     let wasObservedActive = observedHDRActive
     observedHDRActive = cachedHDRActive
-    if wasObservedActive, !cachedHDRActive { invalidateWireMemos() }
+    if wasObservedActive, !cachedHDRActive {
+      // Logged because on a write-only panel this is the only observable that
+      // separates the fix from the bug: the swallowed write and the skip that
+      // certifies it both look like success from every other angle.
+      pathLog.log(
+        "HDR window closed on display=\(self.displayID): dropping the wire's duplicate memos"
+      )
+      invalidateWireMemos()
+    }
     updateNativeActive()
   }
 
