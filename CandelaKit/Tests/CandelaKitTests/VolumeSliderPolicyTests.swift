@@ -287,3 +287,55 @@ struct MuteKeyAcceptanceTests {
     }
   }
 }
+
+/// Which register a mute lands on. The pref asks for the display's own mute
+/// command; the display's capabilities string can refuse it, and a refusal
+/// degrades the display to the volume-register 0 every display without a
+/// dedicated mute command already uses.
+@Suite("The mute strategy in force")
+struct DedicatedMuteCommandTests {
+  @Test func thePrefIsTheFirstWord() {
+    for support in [VCPSupport.supported, .unsupported, .unknown] {
+      #expect(!VolumeSliderPolicy.usesDedicatedMuteCommand(
+        prefEnabled: false, override: .auto, muteSupport: support),
+        "mute support \(support)")
+    }
+  }
+
+  /// The defect this exists for: a display advertising volume and denying mute
+  /// took an ungated 0x8D write from the volume path.
+  @Test func aCleanDenialOfTheMuteRegisterRetiresTheDedicatedCommand() {
+    #expect(!VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true, override: .auto, muteSupport: .unsupported))
+  }
+
+  /// D24's other half, and the MAG's whole case: absence of evidence never
+  /// takes a command away.
+  @Test func noEvidenceKeepsTheDedicatedCommand() {
+    #expect(VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true, override: .auto, muteSupport: .unknown))
+    #expect(VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true, override: .auto, muteSupport: .supported))
+  }
+
+  @Test func theOverrideOutranksTheDisplayOnThisRegisterToo() {
+    #expect(VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true, override: .forcePresent, muteSupport: .unsupported))
+    #expect(!VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true, override: .forceNone, muteSupport: .supported))
+  }
+
+  /// One copy of D24's rule: with the pref on, the strategy IS `isEnabled`
+  /// read against 0x8D's verdict, for every input.
+  @Test func theStrategyReachesD24sVerdictOnTheMuteRegister() {
+    for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
+      for support in [VCPSupport.supported, .unsupported, .unknown] {
+        #expect(
+          VolumeSliderPolicy.usesDedicatedMuteCommand(
+            prefEnabled: true, override: override, muteSupport: support)
+            == VolumeSliderPolicy.isEnabled(override: override, volumeSupport: support),
+          "override \(override), mute support \(support)")
+      }
+    }
+  }
+}

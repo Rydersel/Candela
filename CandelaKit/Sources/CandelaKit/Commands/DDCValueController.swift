@@ -49,6 +49,19 @@ public final class DDCValueController: PendingWireDraining {
   /// The gate's other half, kept alongside the provider so a settle loop can
   /// wait on it. Default matches the coalescer's accept-everything default.
   @ObservationIgnored private var isEpochCurrent: @Sendable (UInt64) -> Bool = { _ in true }
+  /// What the display's own capabilities string says about VCP 0x8D, read
+  /// live at every mute decision.
+  ///
+  /// A provider and not a stored verdict for two reasons: the capabilities
+  /// probe is asynchronous and lands long after this object exists, and a
+  /// controller is REUSED for whatever panel next appears on its display ID,
+  /// so a copy held here would have to be re-pointed anyway. The refresh pass
+  /// re-points this alongside the epoch pair, from the same verdict the slider
+  /// and the mute key read.
+  ///
+  /// Defaults to `.unknown`, which D24 resolves to allowed: a controller
+  /// nobody has told anything still sends the display's mute command.
+  @ObservationIgnored private var muteWireSupport: () -> VCPSupport = { .unknown }
   private let store: (any BrightnessStoring)?
   private let storageKey: String?
   /// Validated readback max (nil until a successful `.read` pass); feeds
@@ -118,6 +131,27 @@ public final class DDCValueController: PendingWireDraining {
     muteCoalescer.finishSubmissions()
   }
 
+  public func setMuteWireSupport(_ provider: @escaping () -> VCPSupport) {
+    muteWireSupport = provider
+  }
+
+  /// Whether a mute on this display goes over its own mute command, or
+  /// degrades to a volume-register 0 (what every display with no dedicated
+  /// mute command already gets).
+  ///
+  /// Both halves are read live: the pref can be flipped from a settings row or
+  /// a `defaults write`, and the verdict changes when the capabilities probe
+  /// lands. The degrade is the point of the false case. Suppressing the 0x8D
+  /// write and skipping the volume write with it would leave the app recording
+  /// a mute no register carries, on a display still playing at its old level.
+  private var usesDedicatedMuteCommand: Bool {
+    VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: prefs.enableMuteUnmute,
+      override: prefs.audioSinkOverride,
+      muteSupport: muteWireSupport()
+    )
+  }
+
   // MARK: - Input funnel
 
   /// One key step (fork stepVolume/stepContrast). Returns the new published
@@ -139,17 +173,20 @@ public final class DDCValueController: PendingWireDraining {
 
   private func apply(_ next: Double) {
     // Mute companion (fork stepVolume + valueChangedOtherDisplay): crossing
-    // away from 0 unmutes, landing on 0 mutes. 0x8D traffic only when
-    // enableMuteUnmute; the logical flag always persists (D3).
+    // away from 0 unmutes, landing on 0 mutes. 0x8D traffic only under the
+    // dedicated strategy; the logical flag always persists (D3).
     var unmuting = false
     if command == .volume {
       if isMuted, next > 0 {
         setMuted(false)
         unmuting = true
+        // On the PREF alone, deliberately: the unmute direction is never
+        // gated on the display's verdict, so a mute sent while the probe read
+        // `.unknown` still has a way back after the probe says otherwise.
         if prefs.enableMuteUnmute { submitMuteWire(2) }
       } else if !isMuted, next == 0 {
         setMuted(true)
-        if prefs.enableMuteUnmute { submitMuteWire(1) }
+        if usesDedicatedMuteCommand { submitMuteWire(1) }
       }
     }
     let changed = next != value
@@ -160,9 +197,12 @@ public final class DDCValueController: PendingWireDraining {
     // would leave the panel silent behind an unmuted UI.
     guard changed || unmuting else { return }
     persist(next)
-    // enableMuteUnmute mode never writes volume 0 — silence is 0x8D's job,
-    // and digital 0 breaks some panels (fork guard).
-    if !(command == .volume && prefs.enableMuteUnmute && next == 0) {
+    // The dedicated strategy never writes volume 0: silence is 0x8D's job, and
+    // digital 0 breaks some panels (fork guard). The skip is licensed by the
+    // 0x8D write above having gone out, so it reads the same condition. Where
+    // the display denies that register the mute lands here instead, which is
+    // also plainly what a drag to zero asked for.
+    if !(command == .volume && usesDedicatedMuteCommand && next == 0) {
       submitValue(next)
     }
   }
@@ -180,6 +220,8 @@ public final class DDCValueController: PendingWireDraining {
         value = 1.0 / 16.0
         persist(value)
       }
+      // Ungated (D29 rule 3): this is the route back, and the display's own
+      // verdict may have arrived after the mute it has to undo.
       if prefs.enableMuteUnmute { submitMuteWire(2) }
       // One-shot unmute pair (wire 2 + value) rides two coalescers with no
       // wire-order guarantee, but both orders CONVERGE (review R2): 0x8D=2
@@ -191,10 +233,12 @@ public final class DDCValueController: PendingWireDraining {
       submitValue(value)
     } else {
       setMuted(true)
-      if prefs.enableMuteUnmute {
+      if usesDedicatedMuteCommand {
         submitMuteWire(1) // volume register untouched — 0x8D owns silence
       } else {
-        submitRaw(rawValue(for: 0)) // fork default: mute degrades to volume 0
+        // Fork default, and the same landing place for a display that denies
+        // 0x8D: mute degrades to volume 0.
+        submitRaw(rawValue(for: 0))
       }
     }
     return isMuted
@@ -202,14 +246,19 @@ public final class DDCValueController: PendingWireDraining {
 
   // MARK: - Startup/wake restore (D5)
 
-  /// Re-writes the saved value (+ mute companion when enableMuteUnmute), but
-  /// only for an ever-touched command — the fork's isTouched gate: a saved
-  /// value exists only after this command was written at least once.
+  /// Re-writes the saved value (+ mute companion under the dedicated mute
+  /// strategy), but only for an ever-touched command (the fork's isTouched
+  /// gate): a saved value exists only after this command was written at least
+  /// once.
   public func restoreToHardware() {
     guard isAvailable, let store, let storageKey,
           store.savedBrightness(for: storageKey) != nil else { return }
     if command == .volume, isMuted {
-      if prefs.enableMuteUnmute {
+      // The strategy the mute was taken under, not the pref: a display that
+      // denies 0x8D was muted at its volume register, and re-asserting the
+      // mute wire instead would restore silence nowhere while skipping the
+      // value write on the strength of it.
+      if usesDedicatedMuteCommand {
         // R2 wire-order rule: value and 0x8D ride SEPARATE coalescers, so a
         // submitted pair races to the writer actor — and many panels treat
         // a 0x62 write as an implicit unmute. While muted, restore submits
@@ -230,6 +279,10 @@ public final class DDCValueController: PendingWireDraining {
       // Unmuted pair (value + wire 2): both cross-coalescer orders converge
       // — 0x8D=2 leaves the register alone, 0x62 at worst implicitly
       // unmutes (same convergence argument as toggleMute's unmute).
+      //
+      // On the pref alone, like every other unmute: this is the pass that
+      // clears a 0x8D mute left over from a session where the verdict was
+      // still unknown, so the verdict must not be able to cancel it.
       submitMuteWire(2)
     }
   }
@@ -304,7 +357,11 @@ public final class DDCValueController: PendingWireDraining {
       persist(adopted)
       break
     }
-    guard command == .volume, prefs.enableMuteUnmute else { return }
+    // The strategy in force, not the pref: 0x8D is where this display's mute
+    // lives only if the display takes 0x8D. Asking a register the display
+    // denies and adopting its answer would write a mute state nothing ever
+    // put there, which is the same phantom the write gate above prevents.
+    guard command == .volume, usesDedicatedMuteCommand else { return }
     for _ in 0 ..< tries {
       guard let result = await writer.read(command: VCP.audioMuteScreenBlank), result.max > 0 else { continue }
       // Same fence for the mute readback: in wire mode every mute-state
@@ -439,6 +496,12 @@ public final class DDCValueController: PendingWireDraining {
   /// two. Stated here rather than buried, and pinned by
   /// `arebindToADifferentPanelReturnsTheReadbackMaxToAssumed` /
   /// `arebindToTheSamePanelKeepsWhatThatPanelReported`.
+  ///
+  /// The 0x8D verdict is read-derived evidence about a panel too, and is
+  /// deliberately NOT reset here: it is not held here. `muteWireSupport` is a
+  /// provider, and the refresh pass that calls this re-points it for every
+  /// display in the same pass, so it names the new panel's verdict without a
+  /// reset step that could be forgotten.
   ///
   /// The duplicate memos reset UNCONDITIONALLY, and the asymmetry is
   /// deliberate: they are not evidence about anything, they are a claim that

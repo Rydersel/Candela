@@ -433,8 +433,14 @@ final class AppModel {
   }
 
   /// The mute key's own filter. It asks about the register the key would write,
-  /// which the display's mute strategy chooses: `enableMuteUnmute` sends VCP
+  /// which the display's mute strategy chooses: the dedicated command sends VCP
   /// 0x8D, and without it silence is a volume-register write of 0.
+  ///
+  /// The strategy is the one IN FORCE, not the raw pref: a display whose
+  /// capabilities string denies 0x8D does not get the dedicated command, and
+  /// `DDCValueController` degrades its mute to the volume register. The engine
+  /// and this filter compute it from one function, so the key cannot be judged
+  /// on a register the write will not touch.
   ///
   /// Unmuting never depends on this. Every route back (the display's mute
   /// toggle, the hardware-control toggle, the reset, the stranded-mute banner)
@@ -449,7 +455,11 @@ final class AppModel {
         override: prefs.audioSinkOverride,
         volumeSupport: volumeSupport[key] ?? .unknown,
         muteSupport: muteSupport[key] ?? .unknown,
-        usesDedicatedMuteCommand: prefs.enableMuteUnmute
+        usesDedicatedMuteCommand: VolumeSliderPolicy.usesDedicatedMuteCommand(
+          prefEnabled: prefs.enableMuteUnmute,
+          override: prefs.audioSinkOverride,
+          muteSupport: muteSupport[key] ?? .unknown
+        )
       )
     }
   }
@@ -871,6 +881,16 @@ final class AppModel {
         { [displayManager] in displayManager.currentEpoch() },
         isCurrent: { [displayManager] in displayManager.isEpochCurrent($0) }
       )
+      // The mute companion's D24 gate, one register over from the slider's.
+      // Re-pointed on every pass for the same reason the epoch pair is: a kept
+      // controller can be looking at a panel that is not the one it saw last
+      // pass, and this verdict is keyed by persistence key. Read through a
+      // closure so a probe landing after this pass still decides the next
+      // mute, and so there is exactly one copy of the verdict.
+      let muteKey = state.display.persistenceKey
+      state.volume.setMuteWireSupport { [weak self] in
+        self?.muteSupport[muteKey] ?? .unknown
+      }
     }
     builtIn?.controller.setEpochProvider(
       { [displayManager] in displayManager.currentEpoch() },
