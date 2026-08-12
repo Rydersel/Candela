@@ -670,6 +670,25 @@ final class AppModel {
     )
   }
 
+  /// The settings row's status caption: why the mute this display takes is not
+  /// the mute its row promises, or nil while the two agree.
+  ///
+  /// Reads the same three inputs `usesDedicatedMuteCommand(_:key:)` passes, and
+  /// the policy resolves them through that same function, so the caption cannot
+  /// name a degrade the engine is not doing. `muteSupport` is observed, so the
+  /// row re-reads when the capabilities probe lands seconds after the display
+  /// appears.
+  func degradedMuteReason(_ state: DisplayState) -> String? {
+    let key = state.display.persistenceKey
+    let prefs = DisplayPrefs(persistenceKey: key)
+    return VolumeSliderPolicy.degradedMuteReason(
+      commandIsAvailable: state.volume.isAvailable,
+      prefEnabled: prefs.enableMuteUnmute,
+      override: prefs.audioSinkOverride,
+      muteSupport: muteSupport[key] ?? .unknown
+    )
+  }
+
   /// The same reason worded for the menu bar's panel, which renders it under the
   /// display's own name header and so must not repeat that name (#130).
   func volumeSliderCompactReason(_ state: DisplayState) -> String? {

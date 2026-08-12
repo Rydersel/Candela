@@ -340,6 +340,127 @@ struct DedicatedMuteCommandTests {
   }
 }
 
+/// The settings row's status caption. The row is a picture of the PREF, and on
+/// a display that denies 0x8D the engine sends a different mute than the one the
+/// pref names, so the row overstates the strategy in force with no way for the
+/// reader to tell.
+@Suite("The mute row says when the strategy in force is not the pref")
+struct DegradedMuteReasonTests {
+  /// The invariant that keeps the caption from outliving its cause, the same one
+  /// `disabledReason` holds for the greyed slider: a reason exists in exactly the
+  /// cells where the strategy in force differs from the pref, and the strategy is
+  /// read from `usesDedicatedMuteCommand` rather than restated here.
+  @Test func aReasonExistsExactlyWhereTheStrategyDiffersFromThePref() {
+    for available in [true, false] {
+      for prefEnabled in [true, false] {
+        for override in AudioSinkOverride.allCases {
+          for support in VCPSupport.allCases {
+            let strategy = VolumeSliderPolicy.usesDedicatedMuteCommand(
+              prefEnabled: prefEnabled, override: override, muteSupport: support)
+            let reason = VolumeSliderPolicy.degradedMuteReason(
+              commandIsAvailable: available, prefEnabled: prefEnabled,
+              override: override, muteSupport: support)
+            #expect(
+              (reason != nil) == (available && prefEnabled && !strategy),
+              "available \(available), pref \(prefEnabled), override \(override), support \(support)")
+          }
+        }
+      }
+    }
+  }
+
+  /// The bug: the pref is on, the display's own description denies 0x8D,
+  /// and the engine degrades the mute to the volume register while the row still
+  /// reads On.
+  @Test func aDisplayDeniedDegradeBlamesTheDisplay() {
+    #expect(
+      VolumeSliderPolicy.degradedMuteReason(
+        commandIsAvailable: true, prefEnabled: true, override: .auto, muteSupport: .unsupported)
+        == "This display lists no mute command in its description, so muting sets its volume to zero.")
+  }
+
+  /// The other cause, kept apart for the reason the slider's tooltip was split
+  /// (Checkpoint 1 item 81): "Always disabled" demotes the strategy too, and
+  /// telling that user their monitor refused sends them to check a cable.
+  @Test func aUserSetDegradeBlamesTheSettingAndNotTheDisplay() {
+    let reason = VolumeSliderPolicy.degradedMuteReason(
+      commandIsAvailable: true, prefEnabled: true, override: .forceNone, muteSupport: .supported)
+    #expect(
+      reason == "The volume slider for this display is set to always off, so muting sets its volume to zero.")
+    #expect(reason?.contains("lists no") == false)
+  }
+
+  /// The two causes must never share a sentence, including where both are true
+  /// at once: the user's own choice is the one that decided it, so it is the one
+  /// named.
+  @Test func theTwoCausesNeverProduceTheSameSentence() {
+    let setting = VolumeSliderPolicy.degradedMuteReason(
+      commandIsAvailable: true, prefEnabled: true, override: .forceNone, muteSupport: .unsupported)
+    let display = VolumeSliderPolicy.degradedMuteReason(
+      commandIsAvailable: true, prefEnabled: true, override: .auto, muteSupport: .unsupported)
+    #expect(setting != display)
+    #expect(setting != nil && display != nil)
+    #expect(setting?.contains("lists no") == false)
+  }
+
+  /// The MAG 341C, and the reason the caption cannot key off the verdict alone:
+  /// every read on that panel returns zeros, so its mute verdict is permanently
+  /// `.unknown`, D24 keeps the dedicated command, and 0x8D really does carry the
+  /// mute. A caption here would be false.
+  @Test func noEvidenceLeavesTheRowAloneOnTheOverrideToo() {
+    #expect(VolumeSliderPolicy.degradedMuteReason(
+      commandIsAvailable: true, prefEnabled: true, override: .auto, muteSupport: .unknown) == nil)
+    #expect(VolumeSliderPolicy.degradedMuteReason(
+      commandIsAvailable: true, prefEnabled: true, override: .forcePresent,
+      muteSupport: .unsupported) == nil)
+  }
+
+  /// With the pref off the row and the engine already agree: mute IS the volume
+  /// register, which is what Off means. Nothing to report in any cell.
+  @Test func aPrefThatIsOffIsNeverOverstated() {
+    for override in AudioSinkOverride.allCases {
+      for support in VCPSupport.allCases {
+        #expect(
+          VolumeSliderPolicy.degradedMuteReason(
+            commandIsAvailable: true, prefEnabled: false,
+            override: override, muteSupport: support) == nil,
+          "override \(override), support \(support)")
+      }
+    }
+  }
+
+  /// With the volume command switched off nothing mutes at all, and the row
+  /// already carries its own sentence saying so (SO5). A caption promising that
+  /// muting writes the volume register would contradict it one line down.
+  @Test func anUnavailableCommandSaysNothingAboutWhereAMuteLands() {
+    for override in AudioSinkOverride.allCases {
+      for support in VCPSupport.allCases {
+        #expect(
+          VolumeSliderPolicy.degradedMuteReason(
+            commandIsAvailable: false, prefEnabled: true,
+            override: override, muteSupport: support) == nil,
+          "override \(override), support \(support)")
+      }
+    }
+  }
+
+  /// House copy rules, and SO15: one consequence, so one sentence. SO14 retires
+  /// "panel" from visible copy, and no em dashes anywhere a person can read.
+  @Test func everyStatusIsOneSentenceInTheHouseVoice() {
+    for override in AudioSinkOverride.allCases {
+      for support in VCPSupport.allCases {
+        let reason = VolumeSliderPolicy.degradedMuteReason(
+          commandIsAvailable: true, prefEnabled: true, override: override, muteSupport: support)
+        guard let reason else { continue }
+        #expect(reason.filter { $0 == "." }.count == 1, "override \(override), support \(support)")
+        #expect(reason.hasSuffix("."))
+        #expect(!reason.lowercased().contains("panel"))
+        #expect(!reason.contains("\u{2014}"))
+      }
+    }
+  }
+}
+
 /// The tap decides what to WATCH before it knows what a press would act on, and
 /// a watched key is CONSUMED: it reaches neither the app's displays nor macOS.
 /// So the arming question is not the acting question. It asks everything that
