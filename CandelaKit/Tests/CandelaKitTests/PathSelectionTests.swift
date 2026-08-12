@@ -781,10 +781,13 @@ struct DDCLegHandBackTests {
     }
   }
 
-  /// Turning hardware control back ON is the direction that already worked, and
-  /// it stays a plain combined-mode re-apply: one register write at the combined
-  /// value, no full-range write on the way through.
-  @Test func turningHardwareControlBackOnIsUnchanged() async {
+  /// Turning hardware control back ON puts exactly one register write on the
+  /// wire, at the combined value, with no full-range write on the way through.
+  ///
+  /// The WIRE is what this pins, and #146 left it alone: what that fix changed
+  /// is only when the table moves relative to the write (its own suite below).
+  /// So the await is load-bearing here rather than decorative.
+  @Test func turningHardwareControlBackOnWritesOneRegisterValue() async {
     let h = Harness { prefs, _ in prefs.forceSoftware = true }
     h.controller.setBrightness(0.4)
     #expect(h.submitted.isEmpty)
@@ -792,6 +795,7 @@ struct DDCLegHandBackTests {
 
     h.prefs.forceSoftware = false
     h.controller.reapplyAfterPrefChange()
+    await h.controller.heldSoftwareLeg?.value
 
     #expect(h.submitted == [.ddc(raw: 0)])
     #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 0.83))
@@ -858,6 +862,195 @@ struct DDCLegHandBackTests {
     h.controller.reapplyAfterPrefChange()
 
     #expect(h.submitted == [.ddc(raw: 0), .ddc(raw: 80)])
+  }
+}
+
+// MARK: - Ordering a pref change that DROPS the register (#146)
+
+/// The other direction of #143's ordering rule, and the flash it left behind.
+///
+/// Turning hardware control back ON at a value the combined split puts at the
+/// register's floor lowers the register (100 to 0 on the MAG at 0.375) while
+/// raising the table (0.4688 to 0.7875). The software side is inline and the
+/// register write drains off-actor, so writing both at once composed a frame
+/// from the OLD register under the NEW table: brighter than either endpoint,
+/// for the ~17 ms the write was in flight, seen by eye on the MAG.
+///
+/// One rule covers both directions: the leg that goes DOWN goes first. When the
+/// register rises that costs nothing (the software side is inline and already
+/// first); when it drops, the software side has to WAIT for the write.
+@MainActor
+@Suite("Ordering a pref change that drops the register (#146)")
+struct RegisterDropOrderingTests {
+  /// Puts a display into the state the issue measured: software-only at `value`
+  /// with the register handed back at full range by #143.
+  private func softwareOnlyAfterHandBack(at value: Double) async -> Harness {
+    let h = Harness()
+    h.controller.setBrightness(value)
+    h.prefs.forceSoftware = true
+    h.controller.reapplyAfterPrefChange()
+    await h.controller.waitForPendingWrites()
+    return h
+  }
+
+  /// The measurement in the issue, as an engine test.
+  @Test func turningHardwareControlBackOnHoldsTheTableUntilTheRegisterLands() async {
+    let h = await softwareOnlyAfterHandBack(at: 0.375)
+    // Software-only at 0.375: register handed back at full range, table at
+    // swTransform(0.375).
+    #expect(h.submitted == [.ddc(raw: 0), .ddc(raw: 100)])
+    #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 0.46875))
+
+    // The ordering probe: how many writes had LANDED at the instant the table
+    // moved. Submits are not enough here: the defect was entirely in the gap
+    // between submitting the write and its landing.
+    //
+    // Counted as a DELTA against the settled count, never as an absolute: the
+    // coalescer is latest-wins, so whether the two setup writes both reached the
+    // wire or the first was superseded is a scheduling race and not this test's
+    // subject. One more write than had landed before is the whole claim.
+    let landedBefore = h.ddc.landedWriteCount()
+    var landedAtGammaTime = -1
+    h.controller.preGammaApplyHook = { [weak h] in
+      landedAtGammaTime = h?.ddc.landedWriteCount() ?? -1
+    }
+
+    h.prefs.forceSoftware = false
+    h.controller.reapplyAfterPrefChange()
+
+    // The register write is out and the table has NOT moved: the display is
+    // still rendering the state it was already in.
+    #expect(h.submitted == [.ddc(raw: 0), .ddc(raw: 100), .ddc(raw: 0)])
+    #expect(h.gamma.scales.count == 2)
+
+    await h.controller.heldSoftwareLeg?.value
+
+    #expect(h.gamma.scales.count == 3 && approx(h.gamma.scales[2], 0.7875))
+    #expect(landedAtGammaTime == landedBefore + 1) // the drop was already on the wire
+    #expect(h.controller.brightness == 0.375) // D4: the value is preserved
+  }
+
+  /// The invariant the hold exists for, at both sides of the switching point,
+  /// against every panel floor: the in-between frame never overshoots the
+  /// brighter endpoint, and releasing the table first always would.
+  @Test func theTransientNeverOvershootsEitherEndpoint() async {
+    for (value, ddcBefore, gammaBefore, ddcAfter, gammaAfter) in [
+      // Software zone: the register goes to its floor.
+      (0.375, UInt16(0), 0.46875, UInt16(0), 0.7875),
+      // Hardware zone: the register drops from full range to the combined split.
+      (0.875, UInt16(75), 0.89375, UInt16(75), 1.0),
+    ] {
+      let h = await softwareOnlyAfterHandBack(at: value)
+      #expect(h.submitted == [.ddc(raw: ddcBefore), .ddc(raw: 100)])
+      #expect(approx(h.gamma.scales.last ?? .nan, gammaBefore))
+
+      h.prefs.forceSoftware = false
+      h.controller.reapplyAfterPrefChange()
+      await h.controller.heldSoftwareLeg?.value
+
+      #expect(h.submitted.last == .ddc(raw: ddcAfter))
+      #expect(approx(h.gamma.scales.last ?? .nan, gammaAfter))
+
+      for floor in panelFloors {
+        let start = achieved(ddc: 100, gamma: gammaBefore, floor: floor)
+        let end = achieved(ddc: ddcAfter, gamma: gammaAfter, floor: floor)
+        // What the hold renders in between: the new register under the table
+        // that was already installed.
+        let transient = achieved(ddc: ddcAfter, gamma: gammaBefore, floor: floor)
+        #expect(transient <= max(start, end) + 1e-12)
+        // And it is the ORDER that buys that. Releasing the table first leaves
+        // the old, high register under the new, brighter table, which overshoots
+        // both endpoints for every curve. That is the flash.
+        let reversed = achieved(ddc: 100, gamma: gammaAfter, floor: floor)
+        #expect(reversed > max(start, end))
+      }
+    }
+  }
+
+  /// #143's direction is untouched: when the register RISES the software side
+  /// still runs inline, because it is the leg going down and therefore already
+  /// first. Nothing is held, so nothing waits on a DDC round trip for a change
+  /// that did not need one.
+  @Test func aPrefChangeThatRaisesTheRegisterKeepsTheSoftwareLegInline() async {
+    let h = Harness()
+    h.controller.setBrightness(0.4)
+
+    h.prefs.forceSoftware = true
+    h.controller.reapplyAfterPrefChange()
+
+    #expect(h.controller.heldSoftwareLeg == nil)
+    #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 0.49))
+    #expect(h.submitted == [.ddc(raw: 0), .ddc(raw: 100)])
+  }
+
+  /// A pref that moves only the software leg leaves the register where it is,
+  /// so there is nothing to wait for and the edit takes effect at once.
+  @Test func aPrefChangeThatLeavesTheRegisterAloneKeepsTheSoftwareLegInline() async {
+    let h = Harness()
+    h.controller.setBrightness(0.4)
+    #expect(h.submitted == [.ddc(raw: 0)])
+
+    h.prefs.avoidGamma = true
+    h.controller.reapplyAfterPrefChange()
+
+    #expect(h.controller.heldSoftwareLeg == nil)
+    #expect(h.shade.alphaCalls.count == 1)
+    #expect(approx(h.shade.alphaCalls[0].alpha, DimmingMath.shadeAlpha(fromValue: 0.83)))
+  }
+
+  /// The teardown is inside the hold, not before it. Abandoning the software leg
+  /// altogether hands the table back at 1.0, which is itself a brightening, so
+  /// holding only the re-apply would move the flash rather than remove it.
+  ///
+  /// Reaching `.hardware` from software-only takes two prefs, which the settings
+  /// window writes one at a time. The state is still reachable (a `defaults
+  /// write` of the advanced key, or a reset) and the invariant is about the
+  /// ordering, not about how the state was arrived at.
+  @Test func abandoningTheSoftwareLegEntirelyIsHeldToo() async {
+    let h = await softwareOnlyAfterHandBack(at: 0.4)
+    #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 0.49))
+
+    h.prefs.forceSoftware = false
+    h.prefs.disableCombinedBrightness = true
+    h.controller.reapplyAfterPrefChange()
+
+    // Pure DDC at 0.4 is register 40, below the full range it was parked at.
+    #expect(h.submitted.last == .ddc(raw: 40))
+    #expect(h.gamma.scales.count == 2) // the table has not been handed back yet
+
+    await h.controller.heldSoftwareLeg?.value
+    #expect(h.gamma.scales.count == 3 && h.gamma.scales[2] == 1.0)
+  }
+
+  /// A held software side is superseded by anything that moves the display
+  /// afterwards. Without the token the hold would resume onto a value the user
+  /// has already left, re-dimming the display behind them.
+  @Test func aLaterBrightnessChangeSupersedesAHeldSoftwareLeg() async {
+    let h = await softwareOnlyAfterHandBack(at: 0.375)
+    h.prefs.forceSoftware = false
+    h.controller.reapplyAfterPrefChange()
+
+    h.controller.setBrightness(0.9) // combined: ddc 0.8, sw 1
+    await h.controller.heldSoftwareLeg?.value
+
+    // The held 0.7875 never lands: the last word is the newer value's.
+    #expect(h.gamma.scales.count == 3 && h.gamma.scales[2] == 1.0)
+    #expect(h.submitted.last == .ddc(raw: 80))
+  }
+
+  /// A monitor that refuses the write must not strand the software side parked
+  /// forever: a write ACK is evidence of nothing, and so is its absence. The
+  /// coalescer completes every dequeued generation, failures included, and the
+  /// display ends in the state the prefs ask for either way.
+  @Test func aRefusedRegisterWriteStillReleasesTheSoftwareLeg() async {
+    let h = await softwareOnlyAfterHandBack(at: 0.375)
+    await h.ddc.setWritesSucceed(false)
+
+    h.prefs.forceSoftware = false
+    h.controller.reapplyAfterPrefChange()
+    await h.controller.heldSoftwareLeg?.value
+
+    #expect(h.gamma.scales.count == 3 && approx(h.gamma.scales[2], 0.7875))
   }
 }
 
