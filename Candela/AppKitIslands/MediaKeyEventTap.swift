@@ -416,21 +416,31 @@ final class MediaKeyEventTap {
   // MARK: - Tap-thread event handling
 
   /// PRIVATE API: CGEvent integer field indices 99 and 149 are undocumented.
-  /// They hold an NX_SYSDEFINED event's subtype and its compound
-  /// `data1`, the same two values `NSEvent.subtype` and `NSEvent.data1`
-  /// expose. Degradation: if the indices shift on a future macOS, the
-  /// `sysDefinedFieldsUsable` self-check below disarms interception loudly
-  /// (an `.fault` log, `start` throws, no tap is created) rather than
-  /// misdecoding. That is not a nicety. A moved field reads back 0 with no
-  /// error, and 0 is a valid payload meaning `NX_KEYTYPE_SOUND_UP` released,
-  /// so without the check a shift would silently swallow every aux key on the
-  /// system. The tracking issue carries the `private-api` label.
+  /// They hold an NX_SYSDEFINED event's subtype and its compound `data1`, the
+  /// same two values `NSEvent.subtype` and `NSEvent.data1` expose. The
+  /// tracking issue carries the `private-api` label.
   ///
-  /// [MEASURED 2026-08-12] Subtypes 0...13, 16, 17, 100...134, 200...202 and
-  /// 210 round-tripped through `NSEvent.otherEvent` and `.cgEvent`: index 99
-  /// is the subtype and index 149 the `data1` in every one of them, and the
-  /// set of subtypes carrying no compound payload is exactly {6, 9}. Nobody
-  /// needs to re-measure that.
+  /// Degradation: if an index goes inert on a future macOS, the
+  /// `sysDefinedFieldsUsable` self-check below disarms interception loudly (a
+  /// `.fault` log, `start` throws, no tap is created) rather than misdecoding.
+  /// That is not a nicety. An inert field reads back 0 with no error, and 0 is
+  /// a valid payload meaning `NX_KEYTYPE_SOUND_UP` released, so without the
+  /// check a shift would silently swallow every aux key on the system.
+  ///
+  /// The check's reach is narrower than "the indices still mean what we think"
+  /// [MEASURED 2026-08-12]: it proves only that each index is still a live
+  /// writable compound slot. Going inert is the dominant failure and is caught,
+  /// but a shift ONTO another live slot is not: probing (99, 150) or
+  /// (100, 149) reports usable, while (98, 149), (99, 148), (97, 151) and
+  /// (250, 999) all disarm. Nothing cheaper closes that gap. A semantic check
+  /// would need `NSEvent`, which is the thing being removed.
+  ///
+  /// [MEASURED 2026-08-12] Subtypes 0...40 plus 100, 110, 134, 200, 202 and
+  /// 210, round-tripped through `NSEvent.otherEvent` and `.cgEvent`: index 99
+  /// is the subtype and index 149 the `data1` in every one of them EXCEPT 6
+  /// and 9, which carry no compound payload at all, so index 149 is neither
+  /// readable nor writable on them. Within that range the no-payload set is
+  /// exactly {6, 9}. Nobody needs to re-measure it.
   ///
   /// Why not `NSEvent(cgEvent:)`, which reads both without any of this: it
   /// looks like a pure data wrapper and is not. On a subtype-8 event it runs
@@ -449,10 +459,18 @@ final class MediaKeyEventTap {
   private nonisolated static let auxControlSubtype = Int64(NX_SUBTYPE_AUX_CONTROL_BUTTONS)
 
   /// Write-then-read probe of the two private field indices, run once before
-  /// the first tap is armed. A bare synthetic event is safe to probe: setting
-  /// the subtype to the aux-control value first is what gives it a compound
-  /// payload, so reading `sysDefinedData1Field` cannot hit the
-  /// `event_carries_compound_data_field` assertion that subtypes {6, 9} trip.
+  /// the first tap is armed.
+  ///
+  /// Why this is safe to run [MEASURED 2026-08-12], because the obvious guess
+  /// is wrong: a bare event retyped to NX_SYSDEFINED ALREADY carries the
+  /// compound payload, with no subtype write at all. Setting the subtype does
+  /// not grant the payload; setting it to 6 or 9 TAKES IT AWAY, and the next
+  /// write to `sysDefinedData1Field` then aborts in
+  /// `SLSEventRecordSetCompoundInt` (CGSEvent.cc:1201, the write-side twin of
+  /// the read-side assertion). So the real invariant is narrow: this probe
+  /// must never write subtype 6 or 9. It holds because the value is
+  /// hard-coded to the aux-control subtype. Do not parameterize it believing
+  /// the write protects itself.
   private static let sysDefinedFieldsUsable: Bool = {
     let probeData1: Int64 = 0x0002_0A00 // brightness up, pressed, no repeat
     guard let probe = CGEvent(source: nil),

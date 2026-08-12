@@ -1070,6 +1070,15 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     do {
       try mediaKeyTap.start(config: config)
       model.noteTapArmed(config)
+    } catch MediaKeyEventTap.TapError.eventFieldsUnrecognized {
+      // Not a relaunch away: the private CGEvent field indices the decode
+      // depends on no longer behave, which takes an app update to fix.
+      log.error(
+        """
+        media-key tap disarmed: this macOS version does not answer the CGEvent \
+        fields the media-key decode reads; media keys are off until Candela is updated
+        """
+      )
     } catch {
       log.error("media-key tap failed to start: \(error); keys disabled until relaunch")
     }
