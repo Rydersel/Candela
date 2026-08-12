@@ -231,6 +231,19 @@ public final class BrightnessController {
   /// whatever register value that lands on.
   @ObservationIgnored private var submittedDDCPortion: Double?
 
+  /// The software side of a pref re-apply that is waiting for its register write
+  /// to land (#146), or nil when nothing is held. Exposed (internal) so a test
+  /// can await the handover instead of polling for it.
+  @ObservationIgnored private(set) var heldSoftwareLeg: Task<Void, Never>?
+
+  /// Supersession token for `heldSoftwareLeg`, in the shape `dimToken` already
+  /// uses for the lock-dim ramp: anything that writes the software leg, clears
+  /// it, or re-runs path selection invalidates a held re-apply, so a hold that
+  /// resumes after the world moved on is a no-op rather than a stale write. The
+  /// task is not cancelled, only disarmed; it still has to resume to let go of
+  /// its continuation.
+  @ObservationIgnored private var softwareLegToken: UInt64 = 0
+
   /// The engine boundary (DT15). Consulted for anything that needs a display
   /// with a DESKTOP — the shade window and the gamma activity enforcer — and
   /// never for the DDC or gamma write targets, which stay the raw panel ID.
@@ -275,7 +288,12 @@ public final class BrightnessController {
   @ObservationIgnored private(set) var initialHDRRefresh: Task<Void, Never>?
   /// Test seam: observes every hardware submit before the coalescer's own
   /// duplicate-skip (the boundary-walk tests assert at the submit level).
-  @ObservationIgnored var _onSubmit: ((HardwareTarget) -> Void)?
+  ///
+  /// The APPLIER rides along so the target/applier pairing is observable where
+  /// it is chosen. Every mismatch this codebase can produce is born here, in
+  /// `applyPaths`; the appliers' own guards only see it two layers later, as a
+  /// dropped write and a log line (#148).
+  @ObservationIgnored var _onSubmit: ((HardwareTarget, any BrightnessApplying) -> Void)?
 
   public init(
     writer: any DDCWriting,
@@ -504,18 +522,28 @@ public final class BrightnessController {
   /// where it is pinned by `BrightnessPathPolicyTests`; a `switch` here is
   /// order-free by construction.
   ///
-  /// **Takes no argument, deliberately.** Every leg has to derive from the same
-  /// effective value, and a parameter is exactly how that broke once:
+  /// **Takes no VALUE argument, deliberately.** Every leg has to derive from the
+  /// same effective value, and a parameter is exactly how that broke once:
   /// `handleReconfigure` recomputed the software split from raw `brightness`
   /// and re-applied an UNDIMMED software leg while the DDC leg held a temporary
   /// dim, leaving a half-lifted dim on a locked screen that the coordinator's
   /// re-assert could not repair (`beginTemporaryDim` no-ops on an unchanged
-  /// factor). With nothing to pass, a caller cannot pass the wrong thing.
-  private func applyPaths() {
+  /// factor). With nothing to pass, a caller cannot pass the wrong thing. The
+  /// `delivery` argument carries no value; it only says which legs this call is
+  /// allowed to write, and both of them still derive from `effectiveBrightness`.
+  ///
+  /// Returns the DDC portion this call put on the register, or nil when the
+  /// selected path wrote none. `reapplyAfterPrefChange` needs the direction the
+  /// register moved in and must not re-derive it: a second site computing the
+  /// combined split is a second copy of the table.
+  @discardableResult
+  private func applyPaths(_ delivery: LegDelivery = .both) -> Double? {
+    supersedeHeldSoftwareLeg()
     let value = effectiveBrightness
     let tuning = prefs.tuning(for: .brightness)
     switch BrightnessPathPolicy.path(pathInputs(tuning: tuning)) {
     case .native:
+      guard delivery.writesRegister else { return nil }
       // Local native-leg write: record the expected echo at call time (I15)
       // and invalidate any queued adoption (I9).
       echo.withLock { state in
@@ -524,12 +552,14 @@ public final class BrightnessController {
         state.converging = false
       }
       submitHardware(.native(Float(value)), applier: backends.applierNative)
+      return nil
 
     case .software:
       // `applySoftware` re-reads `avoidGamma` itself; the backend carried on the
       // path is for REPORTING. Left alone deliberately — routing the backend
       // through here would be a behaviour change wearing a refactor's clothes.
-      applySoftware(value)
+      if delivery.writesSoftware { applySoftware(value) }
+      return nil
 
     case let .combined(switching, _):
       // No `unavailableDDC` guard here any more, and its absence is the point:
@@ -538,8 +568,13 @@ public final class BrightnessController {
       // opposite. That state is `.softwareOnly` below, which is where the
       // skipped submit now lives.
       let split = DimmingMath.combinedSplit(value: value, switching: switching)
-      submitDDCBrightness(portion: split.ddc, tuning: tuning)
-      applySoftware(split.sw)
+      var submitted: Double?
+      if delivery.writesRegister {
+        submitDDCBrightness(portion: split.ddc, tuning: tuning)
+        submitted = split.ddc
+      }
+      if delivery.writesSoftware { applySoftware(split.sw) }
+      return submitted
 
     case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
       // Combined mode with its DDC brightness command turned off: the register
@@ -548,10 +583,15 @@ public final class BrightnessController {
       // silently convert this display to full-range software dimming, which is a
       // different feature. `PathSelectionTests` pins it under the name
       // `aDisabledBrightnessCommandWritesNoDDCButStillFixesTheSoftwareLeg`.
-      applySoftware(DimmingMath.combinedSplit(value: value, switching: dimsBelow).sw)
+      if delivery.writesSoftware {
+        applySoftware(DimmingMath.combinedSplit(value: value, switching: dimsBelow).sw)
+      }
+      return nil
 
     case .hardware:
+      guard delivery.writesRegister else { return nil }
       submitDDCBrightness(portion: value, tuning: tuning)
+      return value
 
     case .unavailable:
       // DDC brightness turned off with no software leg left to carry the value —
@@ -559,8 +599,22 @@ public final class BrightnessController {
       // The old code expressed the first of those as a bare `guard … else
       // { return }` and reached the second by handing the software leg a flat 1;
       // it is now a NAMED state the pane can report.
-      return
+      return nil
     }
+  }
+
+  /// Which legs one `applyPaths` call may write.
+  ///
+  /// Only #146's ordering asks for anything but `.both`, and it asks for both
+  /// halves in turn: the register alone first, then the software side once that
+  /// write has landed. Nothing on the drag path ever splits them.
+  private enum LegDelivery {
+    case both
+    case register
+    case software
+
+    var writesRegister: Bool { self != .software }
+    var writesSoftware: Bool { self != .register }
   }
 
   /// M4 tuning on the DDC leg: min/max overrides, 9-step curve, invert. The
@@ -593,7 +647,7 @@ public final class BrightnessController {
   }
 
   private func submitHardware(_ target: HardwareTarget, applier: any BrightnessApplying) {
-    _onSubmit?(target)
+    _onSubmit?(target, applier)
     issuedGeneration += 1
     coalescer.submit(
       .init(target: target, applier: applier, epoch: epochProvider(), generation: issuedGeneration)
@@ -628,6 +682,7 @@ public final class BrightnessController {
   /// dimmed nothing and then deduped every identical retry away forever — the
   /// display stayed bright while the engine reported the value as applied.
   private func applySoftware(_ sw: Double) {
+    supersedeHeldSoftwareLeg()
     guard lastAppliedSw != sw else { return }
     let transformed = DimmingMath.swTransform(sw, allowZero: prefs.allowZeroSwBrightness)
     let drawable = drawableDisplayID
@@ -667,6 +722,10 @@ public final class BrightnessController {
   /// on entering always-on — those are per-display user choices (documented
   /// divergence).
   private func clearSoftwareLeg() {
+    // Not merely belt-and-braces over `applyPaths`: the engage arm clears the
+    // leg and then AWAITS the HDR toggle, so a hold left armed here would fire
+    // during that suspension and re-dim a display on its way into HDR.
+    supersedeHeldSoftwareLeg()
     let drawable = drawableDisplayID
     backends.shade?.removeShade(for: drawable)
     backends.gamma?.applyGammaScale(1.0, on: displayID, enforcerOn: drawable)
@@ -1361,7 +1420,7 @@ public final class BrightnessController {
   /// 2. clears the software dedupe and the coalescer's duplicate memo, so a
   ///    re-apply at an unchanged value still reaches the wire;
   /// 3. re-runs FULL path selection for the current published value, writing
-  ///    both legs;
+  ///    both legs (in the order the next-but-one paragraph fixes);
   /// 4. hands the brightness register back at full range if the new path has
   ///    stopped driving it (#143), which is the same obligation as step 1
   ///    applied to the OTHER leg: the abandoned backend has to be torn down,
@@ -1376,15 +1435,88 @@ public final class BrightnessController {
   /// not a WindowServer rebuild. (Re-capturing on settings edits is a possible
   /// refinement — the baseline can otherwise go stale for a user who never
   /// replugs — but it is a behavior change, not part of this fix.)
+  ///
+  /// STILL SYNCHRONOUS, which D28 requires, but the software side may now finish
+  /// later than the call returns: see the ordering below.
+  ///
+  /// THE ORDERING (#146), which is one rule and not two. The register write
+  /// drains off-actor and takes ~17 ms on the MAG; everything on the software
+  /// side is inline and lands at once. So the leg that is going DOWN has to go
+  /// first, or the display renders a frame from the old register under the new
+  /// table and overshoots both endpoints:
+  ///
+  /// - the register RISES (the #143 hand-back, and any pref change that raises
+  ///   it): the software side goes first, inline, exactly as before, and the
+  ///   in-flight state is the old register under the new, dimmer table;
+  /// - the register DROPS (turning hardware control back on at a value the
+  ///   combined split puts at the register's floor): the software side is HELD
+  ///   until the write lands. Whatever is dimming the display now keeps dimming
+  ///   it in the meantime, so the in-flight state is the OLD state, unchanged,
+  ///   rather than a bright composite of the two.
+  ///
+  /// Held means the whole software side, teardown included, not just the
+  /// re-apply. Tearing an abandoned backend down is itself a brightening, so
+  /// holding only the re-apply would move the flash rather than remove it, and
+  /// keeping the pair together is also what preserves step 1's no-double-dim
+  /// property: the old backend is still the only one dimming until both run.
+  ///
+  /// The cost of the hold is that a display whose register write is slow keeps
+  /// its previous dimming for that long. That is the correct trade: it is the
+  /// state the user was already looking at.
   public func reapplyAfterPrefChange() {
+    coalescer.resetDuplicateState()
+    // Read BEFORE the submit below, which overwrites it.
+    let parked = submittedDDCPortion ?? 1
+    let submitted = applyPaths(.register)
+    guard let submitted, submitted < parked else {
+      applySoftwareSideOfPrefChange()
+      return
+    }
+    holdSoftwareLegUntilRegisterLands()
+  }
+
+  /// Everything in `reapplyAfterPrefChange` except the register write: tear down
+  /// the backend the new prefs do NOT select, clear the software dedupe,
+  /// re-apply the software leg, and hand the register back if the new path has
+  /// stopped driving it (steps 1, 3 and 4, plus the software half of step 2).
+  ///
+  /// `.software` delivery, never `.both`: the register has already been written
+  /// by the caller, and a second submit of the same target would put a duplicate
+  /// on a write-only bus for nothing.
+  private func applySoftwareSideOfPrefChange() {
     let choice = softwareBackendChoice
     let drawable = drawableDisplayID
     if choice != .shade { backends.shade?.removeShade(for: drawable) }
     if choice != .gamma { backends.gamma?.applyGammaScale(1.0, on: displayID, enforcerOn: drawable) }
     lastAppliedSw = nil
-    coalescer.resetDuplicateState()
-    applyPaths()
+    applyPaths(.software)
     handBackDDCLegIfAbandoned()
+  }
+
+  /// Parks the software side until the register write just submitted has landed
+  /// (#146). The generation is captured now, so a write submitted later cannot
+  /// extend the wait.
+  ///
+  /// Every dequeued target completes its generation, duplicates and stale epochs
+  /// included, so this cannot park forever on a write the coalescer chose not to
+  /// put on the wire.
+  private func holdSoftwareLegUntilRegisterLands() {
+    let generation = issuedGeneration
+    softwareLegToken &+= 1
+    let mine = softwareLegToken
+    heldSoftwareLeg = Task { @MainActor [weak self] in
+      await self?.coalescer.waitUntilCompleted(through: generation)
+      guard let self, self.softwareLegToken == mine else { return }
+      self.heldSoftwareLeg = nil
+      self.applySoftwareSideOfPrefChange()
+    }
+  }
+
+  /// Disarms a held software side. Called from every door that writes the
+  /// software leg or re-runs path selection, so "the world moved on" is checked
+  /// in one place rather than at each hold's resume.
+  private func supersedeHeldSoftwareLeg() {
+    softwareLegToken &+= 1
   }
 
   /// Hands the brightness register back at full range when the newly selected
@@ -1413,6 +1545,12 @@ public final class BrightnessController {
   /// while the register write drains off-actor through the coalescer, so the
   /// two land milliseconds apart whatever we do. What the ordering buys is that
   /// the gap sits INSIDE the two endpoints instead of overshooting past both.
+  ///
+  /// The mirror image of this rule, a pref change that DROPS the register while
+  /// the software leg brightens, is #146, and it cannot be fixed by reordering
+  /// two synchronous statements: `reapplyAfterPrefChange` holds the software
+  /// side until the register write has actually landed. Same rule stated once:
+  /// the leg that goes down goes first.
   ///
   /// Gated on `unavailableDDC` exactly as `restoreFullRangeDDC` is: a command
   /// the display has declared it does not support, or the user has switched

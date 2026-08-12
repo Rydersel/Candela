@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import CandelaKit
 
@@ -60,8 +61,18 @@ actor FakeDDC: DDCWriting {
 
   func write(command: UInt8, value: UInt16) async -> Bool {
     writes.append((command, value))
+    landed.withLock { $0 += 1 }
     return writesSucceed && !failingCommands.contains(command)
   }
+
+  /// Nonisolated mirror of `writes.count`. #146's ordering claim has to be
+  /// sampled at the instant the software leg goes out, and that instant is a
+  /// synchronous main-actor hook (`preGammaApplyHook`) which cannot await an
+  /// actor. Counting is enough: the question is only whether the register write
+  /// had landed by then.
+  private nonisolated let landed = OSAllocatedUnfairLock(initialState: 0)
+
+  nonisolated func landedWriteCount() -> Int { landed.withLock { $0 } }
 
   func read(command: UInt8) async -> (current: UInt16, max: UInt16)? {
     readResult

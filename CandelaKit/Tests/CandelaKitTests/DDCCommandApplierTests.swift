@@ -25,9 +25,15 @@ struct DDCCommandApplierTests {
 
   @Test func nativeTargetIsRejectedAsWiringBug() async {
     let fake = FakeDDC()
-    let applier = DDCCommandApplier(writer: fake, command: VCP.contrast)
+    let recorder = MismatchRecorder()
+    let applier = DDCCommandApplier(writer: fake, command: VCP.contrast, onMismatch: recorder.report)
+    #expect(applier.accepts == .ddc)
     #expect(await applier.apply(.native(0.5)) == false)
     #expect(await fake.recordedWrites().isEmpty)
+    // Reported once per instance, however many mismatches arrive, and the line
+    // is exactly what production would log.
+    #expect(await applier.apply(.native(0.25)) == false)
+    #expect(recorder.recorded() == ["DDCCommandApplier received a .native target (path-selection wiring bug)"])
   }
 
   @Test func ddcCommandCarriesTheRightVCPCodes() {
