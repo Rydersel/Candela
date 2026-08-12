@@ -1,4 +1,5 @@
 import CandelaKit
+import CoreGraphics
 import SwiftUI
 
 /// System Settings' row idiom: a tinted rounded-rect tile holding a white SF
@@ -23,6 +24,15 @@ struct SettingsSymbolTile: View {
       )
       .accessibilityHidden(true)
   }
+}
+
+/// One external display's sidebar row, fully resolved: the state it draws and
+/// the ordinal it draws it under. Identity stays the display ID, the same key
+/// the sidebar's rows have always been diffed on.
+private struct DisplayRow: Identifiable {
+  let state: AppModel.DisplayState
+  let ordinal: Int?
+  var id: CGDirectDisplayID { state.id }
 }
 
 @MainActor
@@ -65,11 +75,11 @@ struct SettingsSidebar: View {
         if let builtIn = model.builtIn {
           displayRow(display: builtIn.display, controller: builtIn.controller)
         }
-        ForEach(Array(model.displays.enumerated()), id: \.element.id) { index, state in
+        ForEach(displayRows) { row in
           displayRow(
-            display: state.display,
-            controller: state.controller,
-            ordinal: sharedIdentityOrdinal(at: index)
+            display: row.state.display,
+            controller: row.state.controller,
+            ordinal: row.ordinal
           )
         }
         if model.displays.isEmpty {
@@ -162,6 +172,24 @@ struct SettingsSidebar: View {
     .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
   }
 
+  /// The external-display rows, each carrying its own SO21 ordinal, derived
+  /// from ONE read of the model's display list.
+  ///
+  /// Everything a row renders travels with the row, and nothing it renders is
+  /// looked up again later. The crash that forced this shape was a `ForEach`
+  /// content closure re-running on its own, after a settings reset had emptied
+  /// `displays`, and subscripting the model with the position it had been
+  /// handed at the previous body evaluation. Whatever schedules that re-run,
+  /// its input is not guaranteed to still describe the model: a position
+  /// captured against one list does not survive the list, and a value does.
+  private var displayRows: [DisplayRow] {
+    let states = model.displays
+    let ordinals = DisplayOrdering.sharedIdentityOrdinals(
+      keys: states.map(\.display.persistenceKey)
+    )
+    return zip(states, ordinals).map(DisplayRow.init)
+  }
+
   /// A display's row: name, and a bar showing where its brightness currently
   /// sits. `BrightnessController` is `@MainActor @Observable` and publishes its
   /// value, so the bar tracks the keys and the panel live with no polling.
@@ -170,15 +198,6 @@ struct SettingsSidebar: View {
   /// destination carries the real state, and nothing here is conveyed by color
   /// alone. It is hidden from accessibility for the same reason: a percentage
   /// announced on every row is noise, and it is not actionable from here.
-  /// SO21: two identical units share one persistence key, hence one name and
-  /// one destination — an ordinal by model order is the only live fact that
-  /// tells their rows apart. nil (the near-universal case) appends nothing.
-  private func sharedIdentityOrdinal(at index: Int) -> Int? {
-    let key = model.displays[index].display.persistenceKey
-    guard model.isSharedIdentity(key) else { return nil }
-    return model.displays.prefix(index).count { $0.display.persistenceKey == key } + 1
-  }
-
   @ViewBuilder
   private func displayRow(
     display: ExternalDisplay, controller: BrightnessController, ordinal: Int? = nil

@@ -307,8 +307,16 @@ final class AppModel {
   /// units reporting no serial — share every pref, and the surfaces that show
   /// those prefs say so. Computed from the live display list at every read,
   /// never persisted: the state exists exactly while both units are attached.
+  ///
+  /// Asked of `DisplayOrdering.sharedIdentityOrdinals` rather than recounted
+  /// here, so shared identity has ONE definition: a key is shared exactly when
+  /// its rows get numbered. The hub's caption and the sidebar's numbering are
+  /// the two surfaces reading it, and a recount would let them drift apart
+  /// under any change to what counts as shared (excluding hidden displays, say).
   func isSharedIdentity(_ persistenceKey: String) -> Bool {
-    displays.count { $0.display.persistenceKey == persistenceKey } > 1
+    let keys = displays.map(\.display.persistenceKey)
+    return zip(keys, DisplayOrdering.sharedIdentityOrdinals(keys: keys))
+      .contains { $0 == persistenceKey && $1 != nil }
   }
 
   // MARK: - Diagnostics report

@@ -36,6 +36,32 @@ public enum DisplayOrdering {
       }
       .map(\.element)
   }
+
+  /// SO21: two attached units that report no serial resolve to ONE persistence
+  /// key, so they share every pref, one name and one destination. A 1-based
+  /// ordinal by list order is the only live fact that tells their rows apart.
+  /// `nil` (the near-universal case) means the key is unique and its row
+  /// appends nothing.
+  ///
+  /// Answers for EVERY key in one pass over one snapshot, rather than offering
+  /// a per-row "which number is this" that takes a position. A caller holding a
+  /// position holds a second, older description of the list. The sidebar did
+  /// exactly that and crashed: its stack showed a per-row closure re-running
+  /// after a settings reset had emptied the display list, with the position it
+  /// had been handed earlier, and indexing past the end. Returning the whole
+  /// answer leaves nothing to go stale: the result is as long as the input,
+  /// always.
+  public static func sharedIdentityOrdinals(keys: [String]) -> [Int?] {
+    var occurrences: [String: Int] = [:]
+    for key in keys { occurrences[key, default: 0] += 1 }
+    var numbered: [String: Int] = [:]
+    return keys.map { key in
+      guard occurrences[key, default: 0] > 1 else { return nil }
+      let ordinal = numbered[key, default: 0] + 1
+      numbered[key] = ordinal
+      return ordinal
+    }
+  }
 }
 
 /// Menu-bar icon visibility (D5). The mode is a user preference, but the
