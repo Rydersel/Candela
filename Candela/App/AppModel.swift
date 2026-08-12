@@ -117,6 +117,25 @@ final class AppModel {
   /// inline: it needs the safe-mode flag, which arrives as an init parameter.
   @ObservationIgnored private let appPrefs: DisplayPrefs
 
+  /// Raised for the whole of any settings reset, per-display or all-settings.
+  /// ONE latch for both, because the pair is what goes wrong: a per-display
+  /// reset running alongside Reset All restores HDR through a controller the
+  /// rebuild has already replaced, so the write lands on an object nothing is
+  /// looking at while the live display keeps a locked register. Observable, so
+  /// both buttons can refuse the second click rather than relying on nobody
+  /// making it.
+  private(set) var isResetting = false
+
+  /// Claims the latch. False means a reset is already running and this one must
+  /// not start.
+  func beginReset() -> Bool {
+    guard !isResetting else { return false }
+    isResetting = true
+    return true
+  }
+
+  func endReset() { isResetting = false }
+
   /// D24: per-display VCP 0x62 verdict from the capabilities string. Observable,
   /// so the panel's volume slider enables/disables live the moment a probe
   /// lands. An ABSENT entry means "not probed yet, or the probe was skipped" and

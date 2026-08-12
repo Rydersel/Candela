@@ -120,8 +120,12 @@ struct GeneralPane: View {
         // Trailing ellipsis per buttons.md: the click opens a confirmation
         // rather than destroying anything. No `.destructive` role here — the
         // role belongs on the button that actually performs the wipe.
+        // Disabled only WHILE a reset runs, per-display resets included: they
+        // share one latch, because the pair overlapping is what strands a
+        // display behind a controller the rebuild replaced.
         Button("Reset All Settings…") { confirmingReset = true }
           .accessibilityLabel("Reset All Settings…")
+          .disabled(model.isResetting)
       }
     }
   }

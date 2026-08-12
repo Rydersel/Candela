@@ -897,6 +897,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   }
 
   private func runSettingsReset() async {
+    // One reset at a time, app-wide (the latch a per-display reset claims too).
+    // Overlapping them would let that reset restore HDR through a controller
+    // step 5 has already thrown away.
+    guard model.beginReset() else { return }
+    defer { model.endReset() }
     // ---- 0. OLED care first (D29's ordering applied to dimming): overlays
     //         down and hour counters reset while their objects are still
     //         alive. The domain wipe below never reaches them —
@@ -923,6 +928,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // every controller and the display list is re-derived on the far side of
     // that; the EDID key is the only identity that survives it.
     var restoreHDRAfterRebuild: Set<String> = []
+    // Displays whose unmute had to stand down (HDR state unknown), and whose
+    // mute strategy therefore has to survive the wipe. D29 rule 1 states the
+    // ordering as unmute-before-disabling; where the unmute could not happen at
+    // all, the only way to honour it is to not disable. Written back after the
+    // wipe rather than exempted from it: the wipe is a domain removal, and it
+    // has no per-key exemptions to give.
+    var keepMuteStrategyFor: Set<String> = []
 
     for state in model.displays {
       let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
@@ -943,7 +955,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // opinion. Live HDR with no opinion behind it came from System Settings
       // and goes back at the end; live HDR under `.alwaysOn` is a Candela
       // setting, and clearing it is what this button is for.
-      if await state.controller.disengageHDRForReset() {
+      //
+      // The answer is evidence and not a request: `.disengaged` comes off a
+      // measured read taken after the drop settled, and it is what licenses the
+      // hardware writes below.
+      let hdrState = await state.controller.disengageHDRForReset()
+      if case .disengaged(restoreAfterward: true) = hdrState {
         restoreHDRAfterRebuild.insert(state.display.persistenceKey)
       }
 
@@ -966,9 +983,29 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // the hardware-mute strategy, a volume rewrite in the default one. Wiping
       // first would flip `enableMuteUnmute` to false and silently downgrade the
       // unmute to a volume write the panel may ignore.
-      if state.volume.isMuted {
+      //
+      // Skipped under `.unknown`, where the display may still be in HDR: the
+      // unmute would clear the stored mute flag over a register that stayed
+      // muted, and the wipe below then retires the strategy that could undo it.
+      // Standing the unmute down leaves the display muted and SAYING so, which
+      // is the recoverable half of D29's choice. The wipe still runs: it is what
+      // the user asked for, and it takes no hardware with it.
+      if case .disengaged = hdrState, state.volume.isMuted {
         _ = state.volume.toggleMute()
-        await state.volume.waitForPendingWrites()
+        if await state.volume.drainPendingWrites() == false {
+          log.error(
+            "reset: the unmute for display \(state.display.persistenceKey, privacy: .public) could not be confirmed as applied"
+          )
+        }
+      } else if case .unknown = hdrState, state.volume.isMuted {
+        log.error(
+          "reset: HDR state unknown on display \(state.display.persistenceKey, privacy: .public), so its unmute was skipped and it stays muted with its mute strategy intact"
+        )
+        // Only the dedicated-command strategy can strand: with it retired, the
+        // wire value that undoes 0x8D = 2 has no sender left. The default
+        // strategy mutes by writing volume 0, which any later volume write
+        // undoes, so it needs nothing kept.
+        if prefs.enableMuteUnmute { keepMuteStrategyFor.insert(state.display.persistenceKey) }
       }
     }
 
@@ -991,6 +1028,18 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       forName: Bundle.main.bundleIdentifier ?? "com.rydersel.Candela"
     )
 
+    // ---- 4b. The two facts a stranded display cannot afford to lose, put back
+    //          BEFORE the rebuild reads prefs at construction. `muted` is as
+    //          load-bearing as the strategy: a display whose register holds a
+    //          mute while the app reports it unmuted is the silent half of the
+    //          strand, and the banner that offers the recovery reads exactly
+    //          these two.
+    for key in keepMuteStrategyFor {
+      let prefs = DisplayPrefs(persistenceKey: key)
+      prefs.enableMuteUnmute = true
+      prefs.muted = true
+    }
+
     // ---- 5. D30: rebuild, do NOT merely refresh. `refresh()` would reuse every
     //         controller for a still-connected display and leave it holding
     //         state derived from the prefs just destroyed.
@@ -1010,10 +1059,20 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // ---- 6. LAST. The reset dropped HDR so the DDC register was unlocked for
     //         the D29 unmute in step 1, and re-engaging locks it again, so this
     //         cannot run before the rebuilt controllers have taken their own
-    //         opening writes. "Taken" means reached the wire, not submitted:
-    //         the restore is handed this display's other two controllers and
-    //         waits all three queues out before the engage goes out. It
-    //         restores the display's state, NOT a mode: `restoreExternalHDR`
+    //         opening writes. "Taken" means confirmed as applied, not merely
+    //         submitted: the restore is handed this display's other two
+    //         controllers and settles all three queues, and it declines to
+    //         re-engage at all if it cannot get them settled.
+    //
+    //         SCOPE, stated so the guarantee is not read as wider than it is:
+    //         this covers the REBUILT controllers only. Step 1's own exit write
+    //         belongs to the controller step 5 discarded, and can land after
+    //         that. Harmless here for a reason outside this loop: the engage
+    //         bumps the display epoch, and the coalescer's epoch gate drops a
+    //         write stamped before it. Nothing in this step enforces that, and
+    //         nothing in this step should be read as if it did.
+    //
+    //         It restores the display's state, NOT a mode: `restoreExternalHDR`
     //         deliberately persists nothing, because a reset that promises to
     //         clear Candela's settings must not end by writing one.
     for state in model.displays

@@ -55,6 +55,20 @@ public struct BrightnessBackends {
 /// 2. force-software → software leg only, full range;
 /// 3. combined (default) → `DimmingMath.combinedSplit` across both legs;
 /// 4. combined disabled → `.ddc` hardware leg, full range.
+/// What a reset path learned about a display's HDR before it starts writing.
+public enum HDRResetDisengage: Sendable, Equatable {
+  /// The display was measured out of HDR after everything the disengage did,
+  /// so the DDC register is not locked by HDR. `restoreAfterward` is true when
+  /// HDR was live with no Candela mode recording it: someone set it elsewhere,
+  /// and a reset that clears this app's settings hands it back at the end.
+  case disengaged(restoreAfterward: Bool)
+  /// The panel's HDR state is not known: another transition took the display
+  /// mid-flight, or the drop was issued and the display did not leave HDR.
+  /// A caller must neither write DDC on the strength of this nor re-engage,
+  /// because both bet on a state nothing here established.
+  case unknown
+}
+
 @MainActor @Observable
 public final class BrightnessController: PendingWireDraining {
   public private(set) var brightness: Double = 1.0
@@ -212,6 +226,9 @@ public final class BrightnessController: PendingWireDraining {
   @ObservationIgnored private nonisolated let role: DisplayRole
   private let coalescer: BrightnessWriteCoalescer
   @ObservationIgnored private var issuedGeneration: UInt64 = 0
+  /// The newest submit, kept for `drainPendingWrites` to re-issue.
+  @ObservationIgnored
+  private var lastSubmittedWire: (target: HardwareTarget, applier: any BrightnessApplying)?
   /// Read at submit time to stamp each `PendingWrite.epoch`. Default `{ 0 }`
   /// pairs with the coalescer's accept-everything default gate, so call sites
   /// that never install an epoch pair keep the M1 behavior.
@@ -287,6 +304,10 @@ public final class BrightnessController: PendingWireDraining {
   /// HDR settle window (ENGINEERING-NOTES: the display blanks and re-modes
   /// for ~2 s after an HDR toggle). Internal so tests can shrink it.
   @ObservationIgnored var settleDelay: Duration = .seconds(2)
+  /// Pause between the wire-settling rounds a restore runs before it re-engages
+  /// HDR. Sized in `WireQuiescence` to outlast a reconfiguration's write gate;
+  /// internal so tests can shrink it.
+  @ObservationIgnored var wireSettlePause: Duration = .milliseconds(400)
   /// Monotonic supersession token for `setHDRMode`'s post-await mutations
   /// (final review wave). Comparing `hdrMode` instead is ABA-prone: a parked
   /// `.alwaysOn` call resumes to find the mode back at `.alwaysOn` after an
@@ -660,6 +681,11 @@ public final class BrightnessController: PendingWireDraining {
   private func submitHardware(_ target: HardwareTarget, applier: any BrightnessApplying) {
     _onSubmit?(target, applier)
     issuedGeneration += 1
+    // Kept so a write the queue completed without applying can be re-issued
+    // exactly as it was, with a fresh epoch stamp. Only the NEWEST matters: an
+    // older one that never landed was superseded by this, which is the value
+    // the panel should end up at.
+    lastSubmittedWire = (target, applier)
     coalescer.submit(
       .init(target: target, applier: applier, epoch: epochProvider(), generation: issuedGeneration)
     )
@@ -897,7 +923,7 @@ public final class BrightnessController: PendingWireDraining {
       // Leaving the native path (`.alwaysOn` → `.off`, the only remaining exit
       // now that Boost is gone).
       beginHDRTransition()
-      await performHDRExit(generation: hdrTransitionGeneration)
+      _ = await performHDRExit(generation: hdrTransitionGeneration)
     }
   }
 
@@ -912,15 +938,22 @@ public final class BrightnessController: PendingWireDraining {
   /// Shared by the mode door and the reset door so the two cannot drift: what
   /// differs between them is only WHO decides there is something to do, and
   /// that decision is made before this runs.
-  private func performHDRExit(generation: UInt64) async {
+  ///
+  /// Returns whether it ran to the end. FALSE means a newer transition took the
+  /// display mid-flight, so this call knows nothing about where the panel ended
+  /// up: `cachedHDRActive` was set optimistically on the way in and the measured
+  /// refresh at the bottom never ran. A caller that treats that as "HDR is off"
+  /// is asserting the one thing it failed to learn.
+  @discardableResult
+  private func performHDRExit(generation: UInt64) async -> Bool {
     cachedHDRActive = false
     _ = await backends.hdr?.setHDR(displayID: displayID, enabled: false)
     // Same supersession fence as the engage arm (final wave): the post-await
     // block clears `settleInProgress` and fires `applyPaths`, both of which
     // belong to whichever transition is current.
-    guard hdrTransitionGeneration == generation else { return }
+    guard hdrTransitionGeneration == generation else { return false }
     try? await Task.sleep(for: settleDelay)
-    guard hdrTransitionGeneration == generation else { return } // post-settle
+    guard hdrTransitionGeneration == generation else { return false } // post-settle
     settleInProgress = false
     coalescer.resetDuplicateState()
     applyPaths()
@@ -929,6 +962,7 @@ public final class BrightnessController: PendingWireDraining {
     // did not take (that belongs to the stale-mode question, not here), but the
     // mirror it leaves behind is the panel's answer rather than the request's.
     await refreshHDRCaches(measured: true)
+    return hdrTransitionGeneration == generation
   }
 
   /// The reset paths' HDR disengage: makes the DISPLAY leave HDR, and asks the
@@ -944,40 +978,78 @@ public final class BrightnessController: PendingWireDraining {
   /// state is measured here, past the backend's cache, and it is the only thing
   /// this decision reads.
   ///
-  /// Candela's stored mode is cleared either way: it is a setting, and clearing
-  /// settings is what the button does.
+  /// On an external display Candela's stored mode is cleared whatever the panel
+  /// turns out to be doing: it is a setting, and clearing settings is what the
+  /// button does. (The built-in has no HDR mode to clear and returns early.)
   ///
-  /// Returns whether HDR was live with no Candela mode recording it, which
-  /// means someone engaged it outside the app: the caller puts that back at the
-  /// end of the reset, after the last DDC write has landed.
-  public func disengageHDRForReset() async -> Bool {
-    guard role == .external else { return false }
-    let previous = hdrMode
+  /// The result is evidence, not a request. `.disengaged` is only reported off
+  /// the back of a MEASURED read taken after everything this call did, and only
+  /// when no other transition was seen driving this display, so a caller may
+  /// treat it as "the register is not locked". Anything else is `.unknown`, and
+  /// the caller must then neither write DDC nor re-engage, because a transition
+  /// that raced this call can leave the panel in HDR while every optimistic
+  /// mirror here says otherwise.
+  ///
+  /// The bound on that promise, stated rather than implied: it describes the
+  /// display as of this call. Nothing here can stop a transition that begins
+  /// after it returns, and the app's own reset latch does not cover the panel's
+  /// HDR button. What this rules out is a reset proceeding on a state it never
+  /// established.
+  public func disengageHDRForReset() async -> HDRResetDisengage {
+    guard role == .external else { return .disengaged(restoreAfterward: false) }
     // An observation, not a transition, so it takes the capture-and-compare
     // fence rather than the token: bumping the generation here would supersede
     // a transition still parked on its own await.
     let observed = hdrTransitionGeneration
     await refreshHDRCaches(measured: true)
-    // A transition that started while we were reading owns the state now and
-    // has moved the display since. Disengage anyway: the reset is about to put
-    // DDC on the wire, and an unlocked register is the safe way to be wrong.
-    let engaged = cachedHDRActive || hdrTransitionGeneration != observed
-    if previous != .off {
-      prefs.hdrMode = .off
-      hdrMode = .off
-    }
+    let wasLive = cachedHDRActive
+    let raced = hdrTransitionGeneration != observed
+    // Read AFTER the await, and cleared unconditionally. A transition landing
+    // in the read window writes this mode, and a clear decided from the value
+    // that predated it would skip: on the per-display path nothing else in the
+    // reset touches this key, so the mode would survive the reset it exists to
+    // be cleared by and re-engage HDR at the next launch.
+    let previous = hdrMode
+    prefs.hdrMode = .off
+    hdrMode = .off
     pathLog.log(
-      "reset HDR disengage: engaged=\(engaged, privacy: .public) mode \(previous.rawValue) -> 0 display=\(self.displayID)"
+      "reset HDR disengage: live=\(wasLive, privacy: .public) raced=\(raced, privacy: .public) mode \(previous.rawValue) -> 0 display=\(self.displayID)"
     )
-    guard engaged else { return false }
+    // Nothing to drop, and the measured read that says so is itself the
+    // evidence the register is free. `raced` disqualifies it: the answer
+    // describes a display another transition has since moved.
+    if !wasLive, !raced { return .disengaged(restoreAfterward: false) }
     beginHDRTransition()
-    await performHDRExit(generation: hdrTransitionGeneration)
+    let completed = await performHDRExit(generation: hdrTransitionGeneration)
+    guard completed else {
+      pathLog.error(
+        "reset HDR disengage was superseded: display=\(self.displayID) HDR state is unknown, so nothing below may write DDC"
+      )
+      return .unknown
+    }
+    // `cachedHDRActive` is a measured answer here, and only here: the exit ran
+    // to its own confirmation read.
     if cachedHDRActive {
       pathLog.error(
-        "reset HDR disengage did not take: display=\(self.displayID) is still in HDR, so DDC writes below it will be swallowed"
+        "reset HDR disengage did not take: display=\(self.displayID) is still in HDR, so DDC writes below it would be swallowed"
       )
+      return .unknown
     }
-    return previous == .off
+    // The drop took, and yet: something else was driving this display's HDR
+    // while this ran, and it is free to drive it again the moment this returns.
+    // A reset writes DDC on the strength of this answer, so the display has to
+    // be one nobody else is touching, not merely one that measured off a moment
+    // ago.
+    guard !raced else {
+      pathLog.error(
+        "reset HDR disengage raced another transition on display=\(self.displayID): the drop took, but the state is not this call's to vouch for"
+      )
+      return .unknown
+    }
+    // The restore question, answered from the mode this reset found: HDR that
+    // was live with nothing here recording it was set somewhere else, and this
+    // reset borrowed it rather than owning it.
+    return .disengaged(restoreAfterward: wasLive && previous == .off)
   }
 
   /// Puts back HDR that was live before a reset and that Candela did not turn
@@ -1004,18 +1076,26 @@ public final class BrightnessController: PendingWireDraining {
   /// `alsoDraining` is load-bearing and not a convenience. Re-engaging HDR
   /// locks the DDC register, and a DDC submit is queued rather than sent: it
   /// rides a coalescer that drains on its own task, so the reset's unmute can
-  /// still be in flight when this is called. Measured 2026-08-11: the unmute
-  /// reached the panel half a second after the re-engage and was swallowed,
-  /// with the app recording an unmuted display, which is the strand D29 exists
-  /// to prevent. So this waits out its own queue and every controller handed to
-  /// it (the caller's siblings on the same wire: volume, contrast) before the
-  /// engage goes out. No default value on purpose: a caller with nothing in
-  /// flight says so by passing an empty list.
+  /// still be in flight when this is called. Measured 2026-08-11: the queued
+  /// writes reached the panel after the re-engage, the last of them more than a
+  /// second later, and were swallowed while the app recorded an unmuted
+  /// display, which is the strand D29 exists to prevent. So this settles its own
+  /// queue and every controller handed to it (the caller's siblings on the same
+  /// wire: volume, contrast) before the engage goes out. No default value on
+  /// purpose: a caller with nothing in flight says so by passing an empty list.
+  ///
+  /// A queue that cannot be settled SKIPS the re-engage, loudly. That is the
+  /// safe direction by a wide margin: the cost is a display left out of HDR
+  /// that the user set in System Settings, visible and one click from fixed,
+  /// against a monitor stranded silent behind a locked register with the app
+  /// reporting it unmuted.
   public func restoreExternalHDR(alsoDraining siblings: [any PendingWireDraining]) async {
     guard role == .external else { return }
-    await waitForPendingWrites()
-    for sibling in siblings {
-      await sibling.waitForPendingWrites()
+    guard await WireQuiescence.settle([self] + siblings, betweenRounds: wireSettlePause) else {
+      pathLog.error(
+        "not re-engaging HDR on display=\(self.displayID): a queued write could not be confirmed as applied, and re-engaging would lock the register over it"
+      )
+      return
     }
     clearSoftwareLeg()
     beginHDRTransition()
@@ -1209,6 +1289,17 @@ public final class BrightnessController: PendingWireDraining {
 
   public func waitForPendingWrites() async {
     await coalescer.waitUntilCompleted(through: issuedGeneration)
+  }
+
+  public func submissionMark() -> UInt64 { issuedGeneration }
+
+  public func drainPendingWrites() async -> Bool {
+    await waitForPendingWrites()
+    if await coalescer.appliedThrough() >= issuedGeneration { return true }
+    guard let wire = lastSubmittedWire else { return false }
+    submitHardware(wire.target, applier: wire.applier)
+    await waitForPendingWrites()
+    return await coalescer.appliedThrough() >= issuedGeneration
   }
 
   /// Swaps the stored DDC writer (used by both the hardware write leg and
@@ -1798,6 +1889,11 @@ actor BrightnessWriteCoalescer {
     )
 
   private var completedGeneration: UInt64 = 0
+  /// The highest generation that actually reached hardware, was skipped because
+  /// its exact target was already there, or was superseded by a newer write
+  /// that did one of those. Compare it against the submitter's own counter to
+  /// learn whether anything is still owed to the panel.
+  private var appliedGeneration: UInt64 = 0
   private var waiters: [(generation: UInt64, continuation: CheckedContinuation<Void, Never>)] = []
 
   init(isEpochCurrent: @escaping @Sendable (UInt64) -> Bool = { _ in true }) {
@@ -1880,6 +1976,10 @@ actor BrightnessWriteCoalescer {
   /// Suspends until a target with generation >= `generation` has been written
   /// (or skipped as a duplicate or stale-epoch, or superseded). Returns
   /// immediately for generation 0 (nothing was ever submitted).
+  /// See `appliedGeneration`. Read AFTER a `waitUntilCompleted` for the
+  /// generation in question, or it answers about a queue still in flight.
+  func appliedThrough() -> UInt64 { appliedGeneration }
+
   func waitUntilCompleted(through generation: UInt64) async {
     guard generation > completedGeneration else { return }
     await withCheckedContinuation { waiters.append((generation, $0)) }
@@ -1895,6 +1995,13 @@ actor BrightnessWriteCoalescer {
       // the generation below (the M1 deadlock rule: every dequeued target
       // completes, so no waiter is ever left suspended). `lastApplied` does
       // not advance on a skip: the skipped target never hit hardware.
+      // Whether this target ends up ON the wire, which is a different fact from
+      // its generation completing. Every dequeued target completes (the
+      // deadlock rule below), including the two skips, so a caller that waits
+      // for completion and concludes "the value is on the panel" is trusting a
+      // counter that says nothing of the kind. `appliedGeneration` is the fact
+      // itself, and it is the one the reset paths wait on.
+      var landed = false
       let isEpochCurrent = epochGate.withLock { $0 }
       if isEpochCurrent(write.epoch) {
         // Duplicate-skip (round 2): never rewrite the target already on the
@@ -1918,6 +2025,7 @@ actor BrightnessWriteCoalescer {
           // panel report a fault it never had. Both fields therefore move
           // together, inside one critical section, or neither does.
           let didApply = await write.applier.apply(write.target)
+          landed = didApply
           lastApplied.withLock { state in
             guard state.resets == memo.resets else { return }
             state.lastFailed = !didApply
@@ -1925,7 +2033,17 @@ actor BrightnessWriteCoalescer {
               state.target = write.target
             }
           }
+        } else {
+          // Skipped because this exact target is already on the wire, which is
+          // the state the caller wanted: landed, without a redundant write.
+          landed = true
         }
+      }
+      if landed {
+        // A superseded older write is covered without being dequeued: the newer
+        // target replaced it in the slot precisely because it is the value that
+        // should be on the panel, and its generation is higher.
+        appliedGeneration = max(appliedGeneration, write.generation)
       }
       complete(write.generation)
     }

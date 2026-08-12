@@ -39,6 +39,10 @@ public final class DDCValueController: PendingWireDraining {
   private let muteCoalescer: BrightnessWriteCoalescer
   @ObservationIgnored private var issuedGeneration: UInt64 = 0
   @ObservationIgnored private var issuedMuteGeneration: UInt64 = 0
+  /// The newest submit on each queue, kept for `drainPendingWrites` to re-issue
+  /// when the queue completed a generation without applying it.
+  @ObservationIgnored private var lastSubmittedRaw: UInt16?
+  @ObservationIgnored private var lastSubmittedMuteWire: UInt16?
   @ObservationIgnored private var epochProvider: @Sendable () -> UInt64 = { 0 }
   private let store: (any BrightnessStoring)?
   private let storageKey: String?
@@ -314,6 +318,46 @@ public final class DDCValueController: PendingWireDraining {
     await muteCoalescer.waitUntilCompleted(through: issuedMuteGeneration)
   }
 
+  /// Both counters in one number: the mute wire and the value register are
+  /// separate queues, and a caller asking "did anything get submitted while I
+  /// was away" needs an answer that covers both.
+  public func submissionMark() -> UInt64 { issuedGeneration &+ issuedMuteGeneration }
+
+  public func drainPendingWrites() async -> Bool {
+    let value = await drain(
+      coalescer,
+      issued: { self.issuedGeneration },
+      resubmit: { if let raw = self.lastSubmittedRaw { self.submitRaw(raw) } }
+    )
+    let mute = await drain(
+      muteCoalescer,
+      issued: { self.issuedMuteGeneration },
+      resubmit: { if let wire = self.lastSubmittedMuteWire { self.submitMuteWire(wire) } }
+    )
+    return value && mute
+  }
+
+  /// One queue's half of `drainPendingWrites`: wait, and if the generation
+  /// completed without the target reaching hardware, submit it again (fresh
+  /// epoch stamp) and wait once more. The re-submit is the whole point: a
+  /// target skipped because it was stamped before a display reconfiguration is
+  /// recoverable, and reporting it without trying is a strand nobody sees.
+  ///
+  /// `issued` is a closure and not a value because the re-submit bumps it.
+  private func drain(
+    _ coalescer: BrightnessWriteCoalescer,
+    issued: () -> UInt64,
+    resubmit: () -> Void
+  ) async -> Bool {
+    let first = issued()
+    await coalescer.waitUntilCompleted(through: first)
+    if await coalescer.appliedThrough() >= first { return true }
+    resubmit()
+    let second = issued()
+    await coalescer.waitUntilCompleted(through: second)
+    return await coalescer.appliedThrough() >= second
+  }
+
   /// Swaps the DDC writer, and — only when `panelIdentity` says the panel on
   /// the other end has CHANGED — drops the read-derived facts that were
   /// evidence about the old one.
@@ -429,6 +473,7 @@ public final class DDCValueController: PendingWireDraining {
     let tuning = prefs.tuning(for: command)
     let target = HardwareTarget.ddc(raw: raw)
     issuedGeneration += 1
+    lastSubmittedRaw = raw
     coalescer.submit(.init(
       target: target,
       // Rebuilt per submit (not held) so rebind takes effect on the next write.
@@ -441,6 +486,7 @@ public final class DDCValueController: PendingWireDraining {
   private func submitMuteWire(_ wireValue: UInt16) {
     let target = HardwareTarget.ddc(raw: wireValue)
     issuedMuteGeneration += 1
+    lastSubmittedMuteWire = wireValue
     muteCoalescer.submit(.init(
       target: target,
       applier: DDCCommandApplier(writer: writer, command: VCP.audioMuteScreenBlank, remapCodes: []),
