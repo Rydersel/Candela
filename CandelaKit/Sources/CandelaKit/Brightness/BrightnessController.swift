@@ -916,8 +916,16 @@ public final class BrightnessController: PendingWireDraining {
         // caches settle, re-apply the current value through the normal path;
         // without it the screen is stranded un-dimmed under a low slider.
         // No `resetDuplicateState()` here (deliberate asymmetry vs the
-        // disengage arm): neither way of reaching this arm switched modes, so
-        // the last recorded DDC value still reflects the register.
+        // disengage arm): neither way of reaching this arm switched modes BY
+        // ITSELF, so the last recorded DDC value normally still reflects the
+        // register.
+        //
+        // "Normally" is doing real work. One interleaving falsifies it and is
+        // knowingly left uncovered: an exit whose drop had already taken,
+        // superseded by this engage past its own fences, leaves the display out
+        // of HDR with memos built while the register was locked, and this arm
+        // then rolls back without dropping them. See `performHDRExit`'s note at
+        // the invalidation for why neither side can close it from here.
         //
         // TWO ways of reaching it, and they are different facts (#65). The
         // write was never issued (no panel, or the MonitorPanel lock was busy),
@@ -1019,9 +1027,19 @@ public final class BrightnessController: PendingWireDraining {
     // Before the re-apply, and before this returns to whatever writes next: the
     // window is closed, and everything the memos learned inside it is a claim
     // about a register that never heard those writes. A bail above leaves them
-    // standing on purpose, in step with the assume-locked rule: a superseded
-    // call establishes nothing, including that the window is over, and the
-    // transition that took the display carries its own exit when it ends.
+    // standing on purpose, in step with the assume-locked rule one line up: a
+    // superseded call establishes nothing, including that the window is over.
+    //
+    // Usually the transition that took the display closes the window itself, on
+    // its own exit. ONE INTERLEAVING IS LEFT UNCOVERED, deliberately and not
+    // silently: this drop TAKES, a newer engage supersedes us past a fence, and
+    // that engage then fails to engage. The display is out of HDR with memos
+    // built while it was locked, and the engage's rollback arm does not drop
+    // them either (its own note says so). Nothing here can see that cell,
+    // because a superseded call is exactly the one that must not assert state.
+    // Closing it means keying the invalidation to the mirror's true-to-false
+    // edge rather than to a call, which is the shape the open follow-up for
+    // HDR dropped OUTSIDE the app needs anyway.
     invalidateWireMemos(siblings)
     applyPaths()
     // Measured, for the reason the engage arm is: a write that returned success

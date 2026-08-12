@@ -748,6 +748,48 @@ struct PathSelectionTests {
     #expect(contrast.memoResets == 1)
   }
 
+  /// Below the fences, which is why the invalidation is a statement in the
+  /// completed path and not a `defer`. A superseded exit establishes nothing,
+  /// including that the HDR window is over, so it leaves the sibling memos
+  /// exactly as it found them: the same belief as the assume-locked mirror it
+  /// restores one line up. The known cost of that rule is written at the
+  /// invalidation site.
+  @Test func aSupersededExitDropsNoMemos() async {
+    let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "t")
+    prefs.hdrMode = .alwaysOn
+    let gated = GatedTransitionHDR()
+    let controller = BrightnessController(
+      writer: FakeDDC(readResult: nil),
+      backends: BrightnessBackends(
+        applierNative: FakeNativeApplier(), hdr: gated,
+        shade: RecordingShade(), gamma: RecordingGamma()
+      ),
+      prefs: prefs,
+      displayID: 7
+    )
+    controller.settleDelay = .milliseconds(5)
+    await controller.initialHDRRefresh?.value
+    let volume = MemoInvalidationRecorder()
+    let contrast = MemoInvalidationRecorder()
+
+    // The exit parks inside its own disengage, holding both siblings.
+    let exit = Task { await controller.setHDRMode(.off, alsoInvalidating: [volume, contrast]) }
+    #expect(await eventually { await gated.disengageCallCount() == 1 })
+    // A newer transition takes the display: the token moves while the exit is
+    // still parked, so it resumes into a bail.
+    let engage = Task { await controller.setHDRMode(.alwaysOn, alsoInvalidating: []) }
+    #expect(await eventually { await gated.engageCallCount() == 1 })
+
+    await gated.releaseDisengage()
+    await exit.value
+
+    #expect(volume.memoResets == 0)
+    #expect(contrast.memoResets == 0)
+
+    await gated.releaseEngage()
+    await engage.value
+  }
+
   /// The scoping half. A door that decides there is nothing to do opened no HDR
   /// window and closed none, so it must not drop a memo either: the suppression
   /// that keeps ordinary pref paths from re-moding every panel keeps them out of
