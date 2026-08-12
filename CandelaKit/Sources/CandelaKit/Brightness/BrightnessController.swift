@@ -196,6 +196,13 @@ public final class BrightnessController {
   /// Module-internal (not private) so in-module collaborators — `BrightnessSync`'s
   /// fan-out log — can name the display a controller belongs to.
   @ObservationIgnored let displayID: CGDirectDisplayID
+  /// Sync's ambient-hunting deadband for the movement THIS controller has
+  /// published as a source, advanced only by `BrightnessSync.fanOut`. It lives
+  /// here rather than in a table beside the sync code so it shares the
+  /// lifetime and the identity of the brightness it accumulates: a controller
+  /// that goes away takes its residual with it, and a display ID reassigned to
+  /// another panel cannot inherit one.
+  @ObservationIgnored var syncDeadband = SyncDeadband()
   /// Explicitly nonisolated (immutable, Sendable) so `isNativeActive()` can
   /// answer from the poller's nonisolated context without an executor hop.
   @ObservationIgnored private nonisolated let role: DisplayRole
