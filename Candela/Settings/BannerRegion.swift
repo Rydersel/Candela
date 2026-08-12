@@ -143,12 +143,19 @@ struct BannerRegion: View {
   // MARK: - Stranded mute recovery (SO4)
 
   /// D29 rule 3 — the explicit unmute affordance, never `.disabled`. This is
-  /// the ONLY control that can leave the state, because `toggleMute` refuses
-  /// while `isAvailable` is false; it clears the two prefs that make it false
+  /// the ONLY control that can leave the state, because every other route is
+  /// gone in exactly this state; it clears the prefs that closed those routes
   /// FIRST (D29 rule 2), then unmutes while the display's current mute strategy
   /// is still in force. Rendered here so it is on the hub root AND every
   /// sub-page — the DDC toggle that can cause the strand lives on Advanced, and
   /// the recovery must be visible where the damage was done (SO4).
+  ///
+  /// TWO causes reach this banner and they need different sentences, for the
+  /// reason the greyed-slider tooltip needed them: copy that names the wrong
+  /// cause sends the user to fix something that is not broken. Hardware control
+  /// off is one; a display whose volume controls are switched off or denied is
+  /// the other, and that one only became a strand when the volume and mute keys
+  /// started obeying the same verdict as the slider.
   @ViewBuilder private var strandedMuteBanner: some View {
     if isStrandedMuted {
       card {
@@ -156,36 +163,76 @@ struct BannerRegion: View {
           HStack {
             Label("This display is muted in hardware.", systemImage: "speaker.slash")
             Spacer()
-            Button("Turn Hardware Control Back On and Unmute") { recoverFromHardwareMute() }
-              .accessibilityLabel("Turn Hardware Control Back On and Unmute")
+            Button(strandedMuteButtonTitle) { recoverFromHardwareMute() }
+              .accessibilityLabel(strandedMuteButtonTitle)
           }
-          SettingsCaption("Muting used the display's own mute command, and that command can only be undone over hardware control. This turns hardware control back on for this display and unmutes it.")
+          SettingsCaption(strandedMuteExplanation)
         }
       }
     }
   }
 
-  /// Hardware-muted with the volume command turned off: `toggleMute` refuses
-  /// while `isAvailable` is false, so nothing but `recoverFromHardwareMute`
-  /// leaves this state.
+  /// Hardware-muted with no way back inside the app. Two ways to get there:
+  ///
+  /// 1. The volume command turned off, where `toggleMute` refuses on
+  ///    `isAvailable`.
+  /// 2. The display's volume controls disabled, either by the user's "Always
+  ///    disabled" choice or by the display's own denial of the volume command.
+  ///    That greys the sliders and, since the keys began sharing the slider's
+  ///    verdict, swallows the mute key too. The narrow window that makes this
+  ///    real without any user choice: a mute lands while the capabilities probe
+  ///    is still out (absent reads as unknown, which allows), and the answer
+  ///    comes back as a denial.
   private var isStrandedMuted: Bool {
-    state.volume.isMuted && !state.volume.isAvailable
+    state.volume.isMuted && (!state.volume.isAvailable || !model.volumeSliderEnabled(state))
   }
 
-  /// Clears the availability prefs FIRST, then unmutes. Doing it in the other
-  /// order is a silent no-op: `toggleMute` returns `isMuted` unchanged while
-  /// `isAvailable` is false, and the user is left believing they unmuted.
+  /// Which cause applies. Hardware control off is checked FIRST because it is
+  /// the stronger claim: it disables the volume command outright, so its
+  /// sentence stays true even when the volume controls are also switched off.
+  private var isHardwareControlOff: Bool { !state.volume.isAvailable }
+
+  private var strandedMuteButtonTitle: String {
+    isHardwareControlOff ? "Turn Hardware Control Back On and Unmute" : "Unmute This Display"
+  }
+
+  /// Says what the button will change and nothing more. The second sentence
+  /// deliberately does not promise the slider comes back: when the cause is the
+  /// display's own denial, setting the choice back to automatic leaves it
+  /// greyed, and the honest claim is about the unmute and the setting.
+  private var strandedMuteExplanation: LocalizedStringKey {
+    isHardwareControlOff
+      ? "Muting used the display's own mute command, and that command can only be undone over hardware control. This turns hardware control back on for this display and unmutes it."
+      : "Muting used the display's own mute command, and this display's volume controls are switched off, so no slider or key can undo it. This unmutes the display and sets its volume slider back to Enable automatically."
+  }
+
+  /// Clears the prefs that closed the other routes FIRST, then unmutes. Doing
+  /// it in the other order is a silent no-op for the hardware-control cause:
+  /// `toggleMute` returns `isMuted` unchanged while `isAvailable` is false, and
+  /// the user is left believing they unmuted.
+  ///
+  /// `audioSinkOverride` joins the two availability prefs because it is now one
+  /// of the ways in (D29 rule 2 covers whatever closed the routes, not a fixed
+  /// list). Clearing it to automatic is honest in both directions: it undoes an
+  /// "Always disabled" choice, and on a display that denies the command it
+  /// changes nothing, which is why the copy does not claim the slider returns.
+  ///
   /// `enableMuteUnmute` is deliberately NOT touched — the display was muted
   /// under whatever strategy is in force, and that strategy has to still be in
   /// force for the unmute to send the right wire value.
+  ///
+  /// The unmute itself drives the controller directly and consults no
+  /// capability verdict, which is what makes this recovery immune to the gates
+  /// that created the second cause.
   private func recoverFromHardwareMute() {
-    // Two prefs, two rows, one union — `writeAll`, never a single
+    // Three prefs, three rows, one union: `writeAll`, never a single
     // representative name.
-    writer.writeAll([.forceSw, .unavailableDDC]) { prefs in
+    writer.writeAll([.forceSw, .unavailableDDC, .audioSinkOverride]) { prefs in
       prefs.forceSoftware = false
       var tuning = prefs.tuning(for: .volume)
       tuning.unavailableDDC = false
       prefs.setTuning(tuning, for: .volume)
+      prefs.audioSinkOverride = .auto
     }
     _ = state.volume.toggleMute()
   }

@@ -126,6 +126,14 @@ final class AppModel {
   /// menu close.
   private(set) var volumeSupport: [String: VCPSupport] = [:]
 
+  /// The same verdict for VCP 0x8D, read from the same capabilities string in
+  /// the same pass. Separate because the two registers are separately
+  /// advertised: a display can list mute and not volume, or the reverse, and
+  /// the mute key writes whichever one the display's mute strategy selects.
+  /// Absent reads as `.unknown` for `volumeSupport`'s reasons, and never greys
+  /// the slider, which is a 0x62 surface only.
+  private(set) var muteSupport: [String: VCPSupport] = [:]
+
   /// The raw MCCS capability string, keyed by persistence key, stored ONLY on
   /// a successful read (B2).
   ///
@@ -374,7 +382,7 @@ final class AppModel {
     states.filter { !DisplayPrefs(persistenceKey: $0.display.persistenceKey).isDisabled }
   }
 
-  /// The same filter for VOLUME and MUTE keys, which additionally obey D24: the
+  /// The same filter for VOLUME keys, which additionally obey D24: the
   /// monitor's own denial of VCP 0x62, the verdict that greys the slider
   /// (`volumeSliderEnabled` asks the same policy for the slider surfaces). One
   /// predicate for both, so a keypress cannot write a register the display says
@@ -393,6 +401,28 @@ final class AppModel {
         isKeyboardDisabled: prefs.isDisabled,
         override: prefs.audioSinkOverride,
         volumeSupport: volumeSupport[state.display.persistenceKey] ?? .unknown
+      )
+    }
+  }
+
+  /// The mute key's own filter. It asks about the register the key would write,
+  /// which the display's mute strategy chooses: `enableMuteUnmute` sends VCP
+  /// 0x8D, and without it silence is a volume-register write of 0.
+  ///
+  /// Unmuting never depends on this. Every route back (the display's mute
+  /// toggle, the hardware-control toggle, the reset, the stranded-mute banner)
+  /// drives the controller directly and asks no capability verdict, which is
+  /// what keeps a refusal here inside D29 rule 3.
+  func muteKeyEnabledStates(_ states: [DisplayState]) -> [DisplayState] {
+    states.filter { state in
+      let key = state.display.persistenceKey
+      let prefs = DisplayPrefs(persistenceKey: key)
+      return VolumeSliderPolicy.acceptsMuteKey(
+        isKeyboardDisabled: prefs.isDisabled,
+        override: prefs.audioSinkOverride,
+        volumeSupport: volumeSupport[key] ?? .unknown,
+        muteSupport: muteSupport[key] ?? .unknown,
+        usesDedicatedMuteCommand: prefs.enableMuteUnmute
       )
     }
   }
@@ -559,6 +589,12 @@ final class AppModel {
         if let capabilities { self.capabilityString[persistenceKey] = capabilities }
         self.volumeSupport[persistenceKey] = capabilities.map {
           CapabilityString.support(forVCP: VCP.audioSpeakerVolume, in: $0)
+        } ?? .unknown
+        // One string, both verdicts, one statement: the probe gate reads
+        // `volumeSupport`, so a mute verdict written anywhere else would be
+        // sampled from a display this pass never asked.
+        self.muteSupport[persistenceKey] = capabilities.map {
+          CapabilityString.support(forVCP: VCP.audioMuteScreenBlank, in: $0)
         } ?? .unknown
       }
     }
@@ -848,6 +884,7 @@ final class AppModel {
     // IOAVService, so an old answer is not evidence about the new wire.
     let live = Set(displays.map(\.display.persistenceKey))
     volumeSupport = volumeSupport.filter { live.contains($0.key) }
+    muteSupport = muteSupport.filter { live.contains($0.key) }
     // Same rule, same reason: a replug hands out a fresh IOAVService, so an old
     // answer is not evidence about the new wire.
     capabilityString = capabilityString.filter { live.contains($0.key) }

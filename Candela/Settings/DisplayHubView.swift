@@ -444,10 +444,22 @@ struct DisplayHubView: View {
         .disabled(!state.volume.isAvailable)
       }
 
-      SettingRow("\(AppInfo.productName) asks the display; the slider is greyed only when it says no.") {
+      SettingRow("\(AppInfo.productName) asks the display, and the volume keys follow the same answer; the slider is greyed only when it says no.") {
         Picker("Volume slider", selection: Binding(
           get: { prefs.audioSinkOverride },
-          set: { override in writer.write(.audioSinkOverride) { $0.audioSinkOverride = override } }
+          set: { override in
+            // D29 rule 1. "Always disabled" now takes the MUTE key away as well
+            // as the slider, because both consult this same verdict, so
+            // persisting it while the display is hardware-muted would leave the
+            // strand behind a control that no longer answers. Unmute BEFORE the
+            // pref flips, the same shape the mute and hardware-control toggles
+            // use. The banner below still catches the state; this keeps it from
+            // being reachable through an ordinary picker choice.
+            if override == .forceNone, state.volume.isMuted {
+              _ = state.volume.toggleMute()
+            }
+            writer.write(.audioSinkOverride) { $0.audioSinkOverride = override }
+          }
         )) {
           Text("Enable automatically").tag(AudioSinkOverride.auto)
           Text("Always enabled").tag(AudioSinkOverride.forcePresent)

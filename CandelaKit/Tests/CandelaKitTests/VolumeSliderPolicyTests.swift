@@ -190,10 +190,11 @@ struct VolumeKeyAcceptanceTests {
       isKeyboardDisabled: false, override: .forceNone, volumeSupport: .supported))
   }
 
-  /// The anti-drift pin, and the reason this lives beside `isEnabled` rather
-  /// than in the key path: wherever the keyboard is enabled for a display, the
-  /// keys and the slider reach exactly the same verdict, for every input. The
-  /// settings page already tells the user they move together.
+  /// The anti-drift pin. It pins DELEGATION, not independent correctness: what
+  /// it proves is that `acceptsVolumeKeys` reaches its capability verdict by
+  /// calling `isEnabled` rather than restating it, so the keys and the slider
+  /// are structurally incapable of disagreeing. Whether that shared verdict is
+  /// itself right is D24's own table, pinned by the suite above.
   @Test func theKeysAndTheSliderNeverDisagree() {
     for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
       for support in [VCPSupport.supported, .unsupported, .unknown] {
@@ -202,6 +203,86 @@ struct VolumeKeyAcceptanceTests {
             isKeyboardDisabled: false, override: override, volumeSupport: support)
             == VolumeSliderPolicy.isEnabled(override: override, volumeSupport: support),
           "override \(override), support \(support)")
+      }
+    }
+  }
+}
+
+/// The mute key writes a DIFFERENT register from the volume keys, and which one
+/// depends on the display's mute strategy: `enableMuteUnmute` sends VCP 0x8D,
+/// and without it mute is a volume-register write of 0. The denial that refuses
+/// a key is therefore per command, so the mute key asks about the register it
+/// would actually write.
+@Suite("The mute key gates on the register it writes")
+struct MuteKeyAcceptanceTests {
+  /// The dedicated-command strategy sends 0x8D and nothing else, so 0x62's
+  /// verdict cannot speak for it in either direction.
+  @Test func theDedicatedCommandGatesOnTheMuteRegister() {
+    #expect(!VolumeSliderPolicy.acceptsMuteKey(
+      isKeyboardDisabled: false, override: .auto,
+      volumeSupport: .supported, muteSupport: .unsupported, usesDedicatedMuteCommand: true))
+    // The case a single 0x62 gate would get wrong: a display that advertises
+    // mute but no volume still takes the mute key.
+    #expect(VolumeSliderPolicy.acceptsMuteKey(
+      isKeyboardDisabled: false, override: .auto,
+      volumeSupport: .unsupported, muteSupport: .supported, usesDedicatedMuteCommand: true))
+  }
+
+  /// The default strategy never sends 0x8D: silence is a volume-register write
+  /// of 0. A display that denies 0x8D is therefore irrelevant here, and one
+  /// that denies 0x62 refuses the mute key along with the volume keys.
+  @Test func theDefaultStrategyGatesOnTheVolumeRegister() {
+    #expect(VolumeSliderPolicy.acceptsMuteKey(
+      isKeyboardDisabled: false, override: .auto,
+      volumeSupport: .supported, muteSupport: .unsupported, usesDedicatedMuteCommand: false))
+    #expect(!VolumeSliderPolicy.acceptsMuteKey(
+      isKeyboardDisabled: false, override: .auto,
+      volumeSupport: .unsupported, muteSupport: .supported, usesDedicatedMuteCommand: false))
+  }
+
+  /// The MAG rule on the second register: a write-only panel can never read
+  /// better than `.unknown` for 0x8D either, and D24 never greys on absence of
+  /// evidence. Both strategies must keep taking the key.
+  @Test func noEvidenceIsNotADenialOnEitherRegister() {
+    for dedicated in [true, false] {
+      #expect(VolumeSliderPolicy.acceptsMuteKey(
+        isKeyboardDisabled: false, override: .auto,
+        volumeSupport: .unknown, muteSupport: .unknown, usesDedicatedMuteCommand: dedicated),
+        "dedicated mute command \(dedicated)")
+    }
+  }
+
+  /// The two gates that are not about a register at all keep ruling the mute
+  /// key, whichever register it would write.
+  @Test func theKeyboardPrefAndTheOverrideStillRuleTheMuteKey() {
+    for dedicated in [true, false] {
+      #expect(!VolumeSliderPolicy.acceptsMuteKey(
+        isKeyboardDisabled: true, override: .forcePresent,
+        volumeSupport: .supported, muteSupport: .supported, usesDedicatedMuteCommand: dedicated))
+      #expect(!VolumeSliderPolicy.acceptsMuteKey(
+        isKeyboardDisabled: false, override: .forceNone,
+        volumeSupport: .supported, muteSupport: .supported, usesDedicatedMuteCommand: dedicated))
+      // The escape hatch reaches the mute key too, on a display that denies
+      // both registers.
+      #expect(VolumeSliderPolicy.acceptsMuteKey(
+        isKeyboardDisabled: false, override: .forcePresent,
+        volumeSupport: .unsupported, muteSupport: .unsupported, usesDedicatedMuteCommand: dedicated))
+    }
+  }
+
+  /// The delegation pin again, one register over: with the keyboard enabled and
+  /// the dedicated command in force, the mute key's verdict IS `isEnabled` read
+  /// against 0x8D's support, for every input. Same structure, so the same
+  /// single copy of D24's rule.
+  @Test func theMuteKeyReachesD24sVerdictOnItsOwnRegister() {
+    for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
+      for support in [VCPSupport.supported, .unsupported, .unknown] {
+        #expect(
+          VolumeSliderPolicy.acceptsMuteKey(
+            isKeyboardDisabled: false, override: override,
+            volumeSupport: .unsupported, muteSupport: support, usesDedicatedMuteCommand: true)
+            == VolumeSliderPolicy.isEnabled(override: override, volumeSupport: support),
+          "override \(override), mute support \(support)")
       }
     }
   }

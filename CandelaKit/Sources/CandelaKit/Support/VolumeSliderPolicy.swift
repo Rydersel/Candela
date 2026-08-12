@@ -37,7 +37,50 @@ public enum VolumeSliderPolicy {
   public static func acceptsVolumeKeys(
     isKeyboardDisabled: Bool, override: AudioSinkOverride, volumeSupport: VCPSupport
   ) -> Bool {
-    !isKeyboardDisabled && isEnabled(override: override, volumeSupport: volumeSupport)
+    acceptsKey(
+      isKeyboardDisabled: isKeyboardDisabled, override: override, writtenRegister: volumeSupport
+    )
+  }
+
+  /// May a MUTE key act on this display?
+  ///
+  /// Same rule, asked about the register the key would actually write, because
+  /// which register that is depends on the display's mute strategy.
+  /// `enableMuteUnmute` sends VCP 0x8D and never writes the volume register, so
+  /// 0x8D's own verdict decides. Without it (the default) mute degrades to a
+  /// volume-register write of 0, silence is 0x62's job, and 0x62's verdict is
+  /// the one that applies. A display advertising mute but not volume keeps its
+  /// mute key under the dedicated strategy; a single 0x62 gate would have taken
+  /// it away.
+  ///
+  /// Refusing here does NOT put unmuting out of reach, which is what D29 rule 3
+  /// demands of any gate near this register. Every route back drives the
+  /// controller directly and consults no capability verdict: the display's own
+  /// mute toggle, the hardware-control toggle, the settings reset, and the
+  /// stranded-mute banner.
+  public static func acceptsMuteKey(
+    isKeyboardDisabled: Bool,
+    override: AudioSinkOverride,
+    volumeSupport: VCPSupport,
+    muteSupport: VCPSupport,
+    usesDedicatedMuteCommand: Bool
+  ) -> Bool {
+    acceptsKey(
+      isKeyboardDisabled: isKeyboardDisabled,
+      override: override,
+      writtenRegister: usesDedicatedMuteCommand ? muteSupport : volumeSupport
+    )
+  }
+
+  /// `isEnabled` reads its argument as the verdict for the register in
+  /// question: D24's rule (a clean denial refuses, no evidence allows, the
+  /// user's override outranks both) is per command, not specific to 0x62.
+  /// Delegating rather than restating is what keeps ONE copy of that rule for
+  /// the slider and both key families.
+  private static func acceptsKey(
+    isKeyboardDisabled: Bool, override: AudioSinkOverride, writtenRegister: VCPSupport
+  ) -> Bool {
+    !isKeyboardDisabled && isEnabled(override: override, volumeSupport: writtenRegister)
   }
 
   /// Why the slider is refusing input, for the panel's tooltip. `nil` when it
