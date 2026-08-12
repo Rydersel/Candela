@@ -67,11 +67,15 @@ struct GeneralPane: View {
       // to the hardware on its way there. `runSettingsReset` turns HDR off,
       // unmutes, ends every lock dim and clears the hour counters before the
       // wipe (its own D29 ordering); copy that mentioned only the prefs left a
-      // person surprised by a display coming out of HDR. The stored levels are
-      // called out because on a write-only panel they are the only record of
-      // where the display is, and the login item because the wipe removes a
-      // registration that lives outside the prefs domain.
-      Text("Your displays are put into a known state first: HDR off, any display muted by \(AppInfo.productName) unmuted, and OLED care stopped with the counted hours of use cleared.\n\nThen every setting is removed: per-display tuning and names, custom keyboard shortcuts, saved brightness, volume and contrast levels, remembered resolutions and rotation, saved arrangements, OLED care enrollment, and the Open at Login registration. Setup will run again afterwards.")
+      // person surprised by a display coming out of HDR. Where the user set HDR
+      // themselves, that off lasts only for the DURATION: the reset needs the
+      // wire unlocked for the unmute and then hands back what it was never
+      // asked to change, so the copy says both or it promises an off that does
+      // not hold. The stored levels are called out because on a write-only
+      // panel they are the only record of where the display is, and the login
+      // item because the wipe removes a registration that lives outside the
+      // prefs domain.
+      Text("Your displays are put into a known state first: HDR off, any display muted by \(AppInfo.productName) unmuted, and OLED care stopped with the counted hours of use cleared. HDR that was turned on in System Settings goes back on at the end.\n\nThen every setting is removed: per-display tuning and names, custom keyboard shortcuts, saved brightness, volume and contrast levels, remembered resolutions and rotation, saved arrangements, OLED care enrollment, and the Open at Login registration. Setup will run again afterwards.")
     }
   }
 

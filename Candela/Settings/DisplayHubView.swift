@@ -723,7 +723,7 @@ struct DisplayHubView: View {
           // are macOS-visible state this button deliberately leaves alone.
           // Counted panel hours are wear data, kept for the same reason the
           // levels are.
-          Text("This unmutes \(state.display.name), turns HDR off, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, and everything under Advanced, including control-code remaps and response curves. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
+          Text("This unmutes \(state.display.name), turns HDR off while it runs, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, and everything under Advanced, including control-code remaps and response curves. HDR that was turned on in System Settings goes back on at the end. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
         }
     }
   }
