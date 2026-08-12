@@ -3,10 +3,16 @@
 # The settings window must be found by exclusion: Candela also owns a 1x1
 # "Candela Gamma Activity Enforcer" window whose presence shifts window indices.
 
-# Select by geometry, not by name or index: Candela also owns a 1x1 gamma
-# enforcer window and a full-screen OLED care overlay, both of which come and go
-# and shift every index.
-W='first window whose size is {900, 568}'
+# Select by EXCLUSION, not by geometry and not by index. Candela also owns a 1x1
+# gamma enforcer window and a full-screen OLED care overlay, both of which come
+# and go and shift every index, and both are named "Candela ...". The settings
+# window is named for its current pane ("General", "Keyboard", "MAG 341C OLED"),
+# so nothing else can match.
+#
+# This used to select on `size is {900, 568}`. That broke on 2026-08-11 when the
+# window silently became 1005x580 (#149): every script here failed at once, and
+# the size is now known not to be stable. Do not put a literal size back.
+W='first window whose name does not start with "Candela "'
 SB="UI element 1 of UI element 1 of UI element 1 of UI element 1 of w"
 DETAIL="UI element 1 of UI element 3 of UI element 1 of UI element 1 of w"
 

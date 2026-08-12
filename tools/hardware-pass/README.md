@@ -15,37 +15,20 @@ What each one exists for, and the measured fact behind it:
 | `pointer.swift` | Lists display bounds; warps the pointer to a display's centre | Key targeting defaults to the display under the pointer, so this is how a press is aimed at a chosen panel |
 | `gammaread.swift` | Reads back the loaded gamma table per display | The achieved state of the software dimming leg. No DDC readback can answer it, and the MAG cannot answer any readback at all |
 
-## Two traps these scripts encode
 
-**Select the settings window by size, never by name or index.** Candela also owns
-a 1x1 "Candela Gamma Activity Enforcer" window and a full-screen "Candela OLED
-Care Overlay for Display N" window. Both come and go mid-session and both shift
-every window index. `first window whose size is {900, 568}` is stable.
+## The guidance for these scripts lives in a skill
 
-**Guard every `name of` read with its own `try`.** One unnamed sibling otherwise
-aborts the enclosing group, and the control you wanted reports as missing, which
-looks exactly like a real failure. This produced a false "the Quit button does
-not exist" before it was caught by a screenshot.
+Everything that used to be in this file below this point (the traps the scripts
+encode, what they cannot reach, usage, and the measured rig facts) moved to
+**skill `candela-hardware-verification`** on 2026-08-11, so that it loads on
+demand and so that a subagent brief can name it. A README is not routed: nothing
+pushed anyone to read this one, and every brief written during the Checkpoint 1
+pass had to re-teach the same traps by hand.
 
-## What they cannot reach
+Load that skill before driving the rig. It also carries the positive-control
+discipline, which is the part that decides whether a measurement means anything.
 
-The menu-bar panel's sliders expose as `AXUnknown` with no settable value, so
-panel drags need a person. So do a Command-drag of the menu-bar icon, VoiceOver
-announcements, a PC keyboard's F14/F15, a real room-light change for the ambient
-sensor path, and typing a chord into a shortcut recorder.
-
-## Usage
-
-```
-./ax.sh nav 1                  # 1 General, 2 Menu Bar, 3 Arrangement,
-                               # 4 OLED Care, 5 Keyboard, 6 About,
-                               # 8/9/10 the displays (7 is a group heading)
-./ax.sh dump                   # every labelled control in the detail pane
-./ax.sh toggle "Open at Login"
-./ax.sh pick "Show the menu bar icon:" "Never"
-
-swift pointer.swift            # list display bounds
-swift pointer.swift 3          # aim the keys at display 3
-swift mediakey.swift brightnessDown 2
-swift gammaread.swift          # top=1.0000 means software dimming is released
-```
+Deliberately not duplicated here. If you find yourself adding guidance to this
+file, put it in the skill instead: two copies of one fact drifting apart is the
+defect we filed as #147 against our own product, and it is no better in our
+tooling.
