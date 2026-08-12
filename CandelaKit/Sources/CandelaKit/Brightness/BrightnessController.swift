@@ -1139,9 +1139,12 @@ public final class BrightnessController: PendingWireDraining {
   /// this used to be the only answer to. The edge fires on a mirror going
   /// true-to-false, so it can only see a window a refresh OBSERVED as live. A
   /// window that opened and closed with no refresh in it produces no edge at
-  /// all: HDR engaged in System Settings and dropped again before a
-  /// reconfiguration was delivered, or a non-measured read that answered from
-  /// the backend's cache and so lagged the engage. This path is about to write
+  /// all, and the ordinary way to get one is not a missing reconfiguration but a
+  /// coalesced pair: the app's topology stream reports once per quiet window and
+  /// buffers the newest event, so HDR switched on and off again inside one
+  /// window arrives as a single delivery showing only the final state. A
+  /// non-measured read answering from the backend's own cache lags the engage
+  /// the same way. This path is about to write
   /// DDC on the strength of those memos, and it is the one place that can pay
   /// for certainty, because what makes a memo untrustworthy is the window it was
   /// built through, which is in the past by the time anyone asks. Dropping a

@@ -744,6 +744,27 @@ struct PathSelectionTests {
     #expect(contrast.memoResets == 1)
   }
 
+  /// The arm above measures the display OUT of HDR, so the sweep is the only
+  /// rule that fires and one drop is the whole story. On a display that IS in
+  /// HDR three separate rules each answer for the same memos: the exit's own
+  /// drop before its re-apply, the confirming refresh's edge under it, and this
+  /// door's unconditional sweep. Pinned so that dropping any one of them shows
+  /// up here rather than only on a panel nobody can read back.
+  @Test func theResetDisengageOnALiveDisplayDropsThroughEveryRule() async {
+    let volume = MemoInvalidationRecorder()
+    let h = Harness(
+      hdrEnabled: true, settle: .milliseconds(5),
+      configure: { prefs, _ in prefs.hdrMode = .alwaysOn },
+      wireSiblings: { _ in [volume] }
+    )
+    await h.prime()
+
+    let outcome = await h.controller.disengageHDRForReset()
+
+    #expect(outcome == .disengaged(restoreAfterward: false))
+    #expect(volume.memoResets == 3)
+  }
+
   // MARK: The ordinary exit, which closes the same window the reset door does
 
   /// The defect at the wire, and the reason the invalidation belongs to the exit
@@ -859,6 +880,36 @@ struct PathSelectionTests {
     await engage.value
   }
 
+  /// The other strip of the same rule. The test above parks the exit inside its
+  /// own disengage, so it catches an invalidation hoisted above the FIRST fence
+  /// and nothing else: one placed between the two fences would survive it. Here
+  /// the drop has already returned and the exit is asleep in its settle window
+  /// when the newer transition takes the display, so the pair of them covers
+  /// both places the call could drift to.
+  @Test func anExitSupersededDuringItsSettleDropsNoMemos() async {
+    let volume = MemoInvalidationRecorder()
+    let contrast = MemoInvalidationRecorder()
+    // Sized against the poll below, which returns within a few milliseconds of
+    // the drop being issued: the supersession lands inside the settle window by
+    // construction rather than by scheduling luck.
+    let h = Harness(
+      hdrEnabled: true, settle: .milliseconds(150),
+      configure: { prefs, _ in prefs.hdrMode = .alwaysOn },
+      wireSiblings: { _ in [volume, contrast] }
+    )
+    await h.prime()
+
+    let exit = Task { await h.controller.setHDRMode(.off) }
+    #expect(await eventually { await h.hdr!.recordedSetCalls() == [false] })
+    let engage = Task { await h.controller.setHDRMode(.alwaysOn) }
+    await exit.value
+
+    #expect(volume.memoResets == 0)
+    #expect(contrast.memoResets == 0)
+
+    await engage.value
+  }
+
   /// The scoping half. A door that decides there is nothing to do opened no HDR
   /// window and closed none, so it must not drop a memo either: the suppression
   /// that keeps ordinary pref paths from re-moding every panel keeps them out of
@@ -882,6 +933,12 @@ struct PathSelectionTests {
   /// memos built while the register was locked are still standing when the next
   /// re-assert goes out. Here the swallowed value is the unmute wire, and the
   /// display is left silent behind a skip the queue reports as applied.
+  ///
+  /// What this does NOT discriminate is which flag the edge reads: no transition
+  /// runs on this route, so `observedHDRActive` and `cachedHDRActive` move
+  /// together and either would pass. The test that separates them is
+  /// `anOrdinaryHDRExitDropsEveryOtherQueuesMemo`, whose second drop exists only
+  /// because the edge reads the observed flag rather than the optimistic mirror.
   @Test func hdrDroppedOutsideTheAppLetsTheSameMuteWireValueGoOutAgain() async {
     let wire = FakeDDC(readResult: nil)
     let store = PathMemoryStore()
