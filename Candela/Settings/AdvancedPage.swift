@@ -23,12 +23,6 @@ struct AdvancedPage: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
 
-  /// Held locally only WHILE FOCUSED, the same rule the tuning grid's override
-  /// fields follow: an unfocused field renders from the stored pref, so an
-  /// external write or Restore Advanced Defaults shows up immediately instead
-  /// of leaving stale text behind.
-  @State private var remapDrafts: [DDCCommand: String] = [:]
-  @FocusState private var remapFocus: DDCCommand?
   @State private var confirmingRestore = false
 
   private var persistenceKey: String { state.display.persistenceKey }
@@ -90,14 +84,6 @@ struct AdvancedPage: View {
       }
     }
     .formStyle(.grouped)
-    // On the `Form`, not on a row: a lifecycle modifier attached to a `Section`
-    // inside a grouped `Form` is not reliably applied (measured — see
-    // `DisplayHubView.body`), and a blur commit that silently never fired would
-    // drop a typed control code.
-    .onChange(of: remapFocus) { previous, current in
-      if let previous { commitRemap(previous) }
-      if let current { remapDrafts[current] = storedRemapText(current) }
-    }
   }
 
   // MARK: - DDC traffic blocking (SO12)
@@ -254,17 +240,22 @@ struct AdvancedPage: View {
         // TITLE of "Standard" is treated as a label by the grouped `Form` and
         // rendered wrapped inside the 100 pt frame ("Stan-/dard", combined
         // pass D6); a PROMPT lays out as single-line placeholder text. The
-        // border matches the tuning grid's fields one section up.
-        TextField("", text: remapBinding(command), prompt: Text("Standard"))
-          .textFieldStyle(.roundedBorder)
-          .focused($remapFocus, equals: command)
-          .onSubmit { commitRemap(command) }
-          .frame(width: 100)
+        // border matches the tuning grid's fields one section up, and so does
+        // the commit: leaving the box applies the code (#144).
+        CommitOnBlurField(
+          stored: { storedRemapText(command) },
+          commit: { commitRemap(command, $0) },
+          prompt: Text("Standard"),
           // Not a `SettingRow` caption: the sub-group's one caption covers all
           // six controls, and repeating it under three fields would read as
           // three separate settings.
-          .accessibilityHint(Text("Hex control codes this display uses instead of the standard one."))
-          .disabled(isBlocked)
+          fieldHint: Text("Hex control codes this display uses instead of the standard one."),
+          width: 100
+        )
+        // Keyed to the display, for the reason the tuning grid's fields are:
+        // SO23's switcher can carry this page onto another display mid-edit.
+        .id(persistenceKey)
+        .disabled(isBlocked)
       }
     }
   }
@@ -504,7 +495,8 @@ struct AdvancedPage: View {
     if state.volume.isMuted, trafficBlock != .macOSDrivesBrightness {
       _ = state.volume.toggleMute()
     }
-    remapDrafts.removeAll()
+    // The control-code boxes empty themselves: each one watches the text its
+    // stored codes render to, and the batch above just cleared them.
   }
 
   // MARK: - Response curve
@@ -538,17 +530,6 @@ struct AdvancedPage: View {
 
   // MARK: - Control-code remap
 
-  private func remapBinding(_ command: DDCCommand) -> Binding<String> {
-    Binding(
-      get: {
-        remapFocus == command
-          ? (remapDrafts[command] ?? storedRemapText(command))
-          : storedRemapText(command)
-      },
-      set: { remapDrafts[command] = $0 }
-    )
-  }
-
   /// Rendered from the PARSED codes, never from the raw string on disk: the
   /// engine drops empty, zero and non-hex tokens (`DisplayPrefs.parseRemapCodes`),
   /// so this is what actually survived — which is the field's whole contract.
@@ -558,17 +539,16 @@ struct AdvancedPage: View {
       .joined(separator: ", ")
   }
 
-  private func commitRemap(_ command: DDCCommand) {
-    let draft = remapDrafts[command] ?? storedRemapText(command)
+  /// Return and focus loss both arrive here, so the two routes cannot come to
+  /// different conclusions about the same typed text (#144). Codes that parse
+  /// to what is already stored write nothing: a re-write would fan out to a
+  /// pointless `reapplyAfterPrefChange()`. Same rule as the tuning grid's
+  /// override commits and the hub's name commit.
+  private func commitRemap(_ command: DDCCommand, _ text: String) {
     var tuning = prefs.tuning(for: command)
-    let codes = DisplayPrefs.parseRemapCodes(draft)
-    // Return then blur commits the same field twice, and a re-write would fan
-    // out to a pointless `reapplyAfterPrefChange()`. Same rule as the tuning
-    // grid's override commits and the hub's name commit.
-    if codes != tuning.remapCodes {
-      tuning.remapCodes = codes
-      writer.write(.remapDDC) { $0.setTuning(tuning, for: command) }
-    }
-    remapDrafts[command] = storedRemapText(command)
+    let codes = DisplayPrefs.parseRemapCodes(text)
+    guard codes != tuning.remapCodes else { return }
+    tuning.remapCodes = codes
+    writer.write(.remapDDC) { $0.setTuning(tuning, for: command) }
   }
 }
