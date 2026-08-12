@@ -164,7 +164,10 @@ public enum PrefPropagation {
       // The same two, plus the tap: this is the switch the engine itself checks
       // before any DDC write, so turning the volume command off leaves nothing
       // for a volume or mute key to do on that display, and the keys belong to
-      // macOS once no display can take them.
+      // macOS once no display can take them. The name is one pref for all three
+      // commands, so a brightness or contrast flip re-arms too: idempotent, and
+      // cheaper than a per-command row that would have to be kept in step with
+      // which commands the tap reads.
       [.reapplyDimming, .rebuildPanel, .rearmTap]
 
     case .forceSw:

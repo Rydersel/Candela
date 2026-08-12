@@ -534,6 +534,13 @@ struct DiagnosticsPage: View {
         LabeledContent("Keys being watched") {
           Text(verbatim: watchedKeysText).foregroundStyle(.secondary)
         }
+        // The conditions are a list, so they render as one rather than as a
+        // paragraph nobody finishes (SO15/SO16).
+        ForEach(DiagnosticsPageCopy.keyWatchRequirements, id: \.title) { requirement in
+          KeyRequirementRow(
+            title: requirement.title, needs: requirement.needs, spoken: requirement.spoken
+          )
+        }
       }
     } else {
       LabeledContent("Keys being watched") {
@@ -643,6 +650,40 @@ struct DiagnosticsPage: View {
         }
       }
     }
+  }
+}
+
+/// One key family and what it needs before its keys are watched.
+///
+/// Same shape and same reasoning as the Keyboard pane's modifier legend: a
+/// two-column row that narrows to two lines, read aloud as one sentence rather
+/// than as two fragments. Not that type reused, because its columns are a
+/// shortcut and a key combination, and these are a family and a condition.
+private struct KeyRequirementRow: View {
+  let title: String
+  let needs: String
+  /// The prose this row replaced, kept whole for VoiceOver (SO16). It carries
+  /// the mode-dependent corners the visible half deliberately leaves out.
+  let spoken: String
+
+  var body: some View {
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 8) {
+        Text(verbatim: title)
+        Spacer(minLength: 8)
+        needsText.lineLimit(1)
+      }
+      VStack(alignment: .leading, spacing: 2) {
+        Text(verbatim: title)
+        needsText
+      }
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(spoken)
+  }
+
+  private var needsText: some View {
+    Text(verbatim: needs).foregroundStyle(.secondary)
   }
 }
 

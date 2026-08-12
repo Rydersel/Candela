@@ -201,13 +201,42 @@ enum DiagnosticsPageCopy {
     SafeModeCopy.diagnosticsRow(app: AppInfo.productName)
   }
 
-  /// Attached only to the empty case, which is the state a single-display rig is
-  /// actually in: the not-running sibling gives its reason in the value, and a
-  /// bare "None" gave none at all. It states the gates rather than picking one:
-  /// which of them is holding is not visible from here, and all of them are
-  /// necessary conditions.
+  /// Attached whenever a family is missing, which now includes the partial
+  /// states: the not-running sibling gives its reason in the value, and a bare
+  /// "None" gave none at all. It states the gates rather than picking one: which
+  /// of them is holding is not visible from here, and all of them are necessary
+  /// conditions.
+  ///
+  /// ONE consequence sentence (SO15). The conditions themselves are a list, so
+  /// they are a list on screen (`requirements` below), with the prose each row
+  /// replaces kept as that row's accessibility label (SO16).
   static var watchedKeys: LocalizedStringKey {
-    "\(AppInfo.productName) watches a family of keys only while a press could land: brightness while an external display is connected, and the volume or mute keys while some display can take the command they send. The mute key asks about the display's own mute command when that is switched on, and about its volume command otherwise. Which displays get asked depends on what the volume keys target: with the sound-output target, only a display matched to the current output counts. The volume keys also go to macOS whenever the current output device has a volume control of its own, and stay here while macOS reports no output device at all. Either family is watched only while it is set to use the media keys, and keys \(AppInfo.productName) does not watch go straight to macOS."
+    "\(AppInfo.productName) watches a family of keys only while a press could land on something, and keys it does not watch go straight to macOS."
+  }
+
+  /// What each family needs before its keys are watched, as `(title, needs,
+  /// spoken)`. The visible half states only what holds in every mode; the
+  /// mode-dependent corners live in the spoken half, which is where the prose
+  /// this list replaced went (SO16). The Keyboard pane states those corners in
+  /// full, each next to the control that rules it.
+  static var keyWatchRequirements: [(title: String, needs: String, spoken: String)] {
+    [
+      (
+        "Brightness keys",
+        "An external display",
+        "The brightness keys are watched while an external display is connected and they are set to use the media keys. With only the built-in display, macOS handles them."
+      ),
+      (
+        "Volume keys",
+        "A display that takes a volume command",
+        "The volume keys are watched while a display they would reach takes a volume command and they are set to use the media keys. Which displays they would reach follows the volume-key target: set to the display matching the audio output device, only a matched display counts. They also go to macOS whenever the current output device has a volume control of its own, and they stay here while macOS reports no output device at all."
+      ),
+      (
+        "Mute key",
+        "A display that takes the command it sends",
+        "The mute key follows the same rule on the command it sends, which is the display's own mute command when that is switched on and its volume command otherwise. A display can take one and refuse the other, so the mute key and the volume keys are watched separately."
+      ),
+    ]
   }
 
   static var accessibilityMissing: LocalizedStringKey {
