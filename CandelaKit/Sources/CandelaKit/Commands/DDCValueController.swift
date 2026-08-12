@@ -62,6 +62,11 @@ public final class DDCValueController: PendingWireDraining {
   /// Defaults to `.unknown`, which D24 resolves to allowed: a controller
   /// nobody has told anything still sends the display's mute command.
   @ObservationIgnored private var muteWireSupport: () -> VCPSupport = { .unknown }
+  /// The mute strategy the last restore acted on (volume only), or nil until
+  /// this controller has restored anything. Read by
+  /// `restoreIfMuteStrategyChanged` to tell a restore that is still correct
+  /// from one the display's late answer has superseded.
+  @ObservationIgnored private var restoredMuteStrategy: Bool?
   private let store: (any BrightnessStoring)?
   private let storageKey: String?
   /// Validated readback max (nil until a successful `.read` pass); feeds
@@ -144,6 +149,13 @@ public final class DDCValueController: PendingWireDraining {
   /// lands. The degrade is the point of the false case. Suppressing the 0x8D
   /// write and skipping the volume write with it would leave the app recording
   /// a mute no register carries, on a display still playing at its old level.
+  ///
+  /// `audioSinkOverride` therefore also decides the STRATEGY, not just the
+  /// slider it is captioned for: "Always disabled" demotes this display to the
+  /// volume-register mute, and "Always enabled" keeps the dedicated command on
+  /// a display whose description denies it. That is the same escape hatch
+  /// working on the register the mute lands on, which is the only reading under
+  /// which the two surfaces cannot disagree.
   private var usesDedicatedMuteCommand: Bool {
     VolumeSliderPolicy.usesDedicatedMuteCommand(
       prefEnabled: prefs.enableMuteUnmute,
@@ -237,7 +249,10 @@ public final class DDCValueController: PendingWireDraining {
         submitMuteWire(1) // volume register untouched — 0x8D owns silence
       } else {
         // Fork default, and the same landing place for a display that denies
-        // 0x8D: mute degrades to volume 0.
+        // 0x8D: mute degrades to volume 0. Pre-existing caveat, inherited
+        // rather than introduced: `rawValue` honours `minDDCOverride` and
+        // `invert`, so on a display with a volume floor set this mute is as
+        // audible as the default strategy's has always been.
         submitRaw(rawValue(for: 0))
       }
     }
@@ -253,6 +268,7 @@ public final class DDCValueController: PendingWireDraining {
   public func restoreToHardware() {
     guard isAvailable, let store, let storageKey,
           store.savedBrightness(for: storageKey) != nil else { return }
+    if command == .volume { restoredMuteStrategy = usesDedicatedMuteCommand }
     if command == .volume, isMuted {
       // The strategy the mute was taken under, not the pref: a display that
       // denies 0x8D was muted at its volume register, and re-asserting the
@@ -285,6 +301,31 @@ public final class DDCValueController: PendingWireDraining {
       // still unknown, so the verdict must not be able to cancel it.
       submitMuteWire(2)
     }
+  }
+
+  /// Redoes the restore when the display's answer about 0x8D arrives AFTER the
+  /// restore that had to assume one, which at launch it always does.
+  ///
+  /// The capabilities probe is asynchronous and its verdict is in-memory, so
+  /// the launch restore runs with an absent verdict, resolves it to `.unknown`
+  /// (D24: no evidence allows) and takes the dedicated strategy. On a display
+  /// that denies the register, that restore sent 0x8D=1 into nothing and, on
+  /// its own doctrine, skipped the volume write that would have carried the
+  /// silence. The same window opens on the first pass after a replug, where the
+  /// verdict for the new panel starts absent again.
+  ///
+  /// Nothing here is speculative: it fires only when the strategy the last
+  /// restore acted on is not the strategy now in force, and only while this
+  /// display is muted, which is the only restore branch the verdict changes.
+  /// The memo reset is what lets the corrected write reach the wire at all.
+  @discardableResult
+  public func restoreIfMuteStrategyChanged() -> Bool {
+    guard command == .volume, isMuted,
+          let assumed = restoredMuteStrategy,
+          assumed != usesDedicatedMuteCommand else { return false }
+    resetWriteMemo()
+    restoreToHardware()
+    return true
   }
 
   /// D5 `.read`: validated DDC readback. `(0, 0)` and `max == 0` are FAILED
@@ -520,9 +561,12 @@ public final class DDCValueController: PendingWireDraining {
     muteCoalescer.resetDuplicateState()
     // Dropped with the memos and for their reason: these name writes issued
     // through a service we no longer hold, so re-issuing one would put a stale
-    // value on a fresh wire.
+    // value on a fresh wire. `restoredMuteStrategy` is one of them: it names
+    // what a past restore did over that service, and the restore pass this
+    // rebind's own refresh triggers records it again.
     lastSubmittedRaw = nil
     lastSubmittedMuteWire = nil
+    restoredMuteStrategy = nil
   }
 
   /// Wake-restore prerequisite (D5): without the memo reset, repeat passes

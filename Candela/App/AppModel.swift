@@ -633,6 +633,15 @@ final class AppModel {
         self.muteSupport[persistenceKey] = capabilities.map {
           CapabilityString.support(forVCP: VCP.audioMuteScreenBlank, in: $0)
         } ?? .unknown
+        // The launch restore ran before this answer existed. It is dispatched
+        // from the same main-actor turn that finishes the refresh, while this
+        // probe is still out, so a muted display was restored on the assumption
+        // that its mute command works. Where the answer says otherwise, the
+        // restore has to be redone against the register the mute actually
+        // lands on; the controller decides whether anything changed and does
+        // nothing when it did not.
+        self.displays.first { $0.display.persistenceKey == persistenceKey }?
+          .volume.restoreIfMuteStrategyChanged()
       }
     }
   }

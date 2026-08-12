@@ -428,6 +428,102 @@ struct DDCValueControllerTests {
     #expect(writes.last?.value == 0)
   }
 
+  @Test func theUnmutedRestoreSendsWireTwoEvenWhereTheRegisterIsDenied() async {
+    // The load-bearing unmute after the launch window: an unmuted display's
+    // restore is what clears a 0x8D mute sent before the verdict landed, so
+    // this wire must not learn about the verdict. Gating it passes every other
+    // test in this file, which is why it has one of its own.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unsupported
+    ) { $0.enableMuteUnmute = true }
+    harness.controller.restoreToHardware()
+    let writes = await harness.drainedWrites()
+    #expect(writes.contains { $0.command == VCP.audioMuteScreenBlank && $0.value == 2 })
+    #expect(writes.contains { $0.command == VCP.audioSpeakerVolume && $0.value == 50 })
+  }
+
+  // MARK: - The verdict landing after the restore that assumed one
+
+  @Test func arestoreThatAssumedTheMuteCommandIsRedoneWhenTheDenialLands() async {
+    // The launch window: the capabilities probe is asynchronous, and the
+    // restore pass is dispatched from the same turn that finishes the refresh,
+    // so the verdict is always absent when a muted display is restored.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unknown
+    ) { prefs in
+      prefs.enableMuteUnmute = true
+      prefs.muted = true
+    }
+    harness.controller.restoreToHardware()
+    let assumed = await harness.drainedWrites()
+    #expect(assumed.count == 1)
+    #expect(assumed.first?.command == VCP.audioMuteScreenBlank) // the wrong register, unavoidably
+
+    harness.muteWireSupport = .unsupported // the probe lands
+    #expect(harness.controller.restoreIfMuteStrategyChanged())
+    let corrected = await harness.drainedWrites()
+    #expect(corrected.last?.command == VCP.audioSpeakerVolume)
+    #expect(corrected.last?.value == 0) // the silence now lands somewhere
+  }
+
+  @Test func averdictThatChangesNothingRedoesNothing() async {
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unknown
+    ) { prefs in
+      prefs.enableMuteUnmute = true
+      prefs.muted = true
+    }
+    harness.controller.restoreToHardware()
+    let assumed = await harness.drainedWrites()
+    harness.muteWireSupport = .supported // the display confirms the assumption
+    #expect(harness.controller.restoreIfMuteStrategyChanged() == false)
+    #expect((await harness.drainedWrites()).count == assumed.count)
+  }
+
+  @Test func aredoNeedsARestoreToHaveHappened() async {
+    // Nothing was restored (`startupAction` is not `.write`, or this display
+    // was never touched), so there is no assumption to supersede.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unknown
+    ) { prefs in
+      prefs.enableMuteUnmute = true
+      prefs.muted = true
+    }
+    harness.muteWireSupport = .unsupported
+    #expect(harness.controller.restoreIfMuteStrategyChanged() == false)
+    #expect((await harness.drainedWrites()).isEmpty)
+  }
+
+  @Test func anUnmutedDisplayHasNoRestoreToRedo() async {
+    // The unmuted restore writes the value and the ungated wire 2, neither of
+    // which the verdict decides, so a late answer supersedes nothing.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unknown
+    ) { $0.enableMuteUnmute = true }
+    harness.controller.restoreToHardware()
+    let restored = await harness.drainedWrites()
+    harness.muteWireSupport = .unsupported
+    #expect(harness.controller.restoreIfMuteStrategyChanged() == false)
+    #expect((await harness.drainedWrites()).count == restored.count)
+  }
+
+  @Test func arebindDropsTheAssumptionWithTheRestOfTheServiceState() async {
+    // The record names a restore issued over a service the rebind just
+    // replaced, so it goes with the memos and the last-submitted targets. The
+    // pass that rebinds runs its own restore, which records it again.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unknown
+    ) { prefs in
+      prefs.enableMuteUnmute = true
+      prefs.muted = true
+    }
+    harness.controller.restoreToHardware()
+    _ = await harness.drainedWrites()
+    harness.controller.rebind(writer: harness.fake, panelIdentity: "other")
+    harness.muteWireSupport = .unsupported
+    #expect(harness.controller.restoreIfMuteStrategyChanged() == false)
+  }
+
   @Test func theMuteReadbackIsSkippedWhereTheDisplayDeniesTheRegister() async {
     // Reading 0x8D on a display that lists no 0x8D and adopting the answer
     // would record a mute state nothing ever wrote. One read happens (the
