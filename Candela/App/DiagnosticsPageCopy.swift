@@ -207,7 +207,7 @@ enum DiagnosticsPageCopy {
   /// which of them is holding is not visible from here, and all of them are
   /// necessary conditions.
   static var watchedKeys: LocalizedStringKey {
-    "\(AppInfo.productName) watches a family of keys only while something can act on it: brightness while an external display is connected, volume while the sound output matches a display it controls, and either one only while that family is set to use the media keys. Keys it does not watch go straight to macOS."
+    "\(AppInfo.productName) watches a family of keys only while something can act on it: brightness while an external display is connected, volume while a display it controls can take a volume command and the sound output leaves those keys to it, and either one only while that family is set to use the media keys. Keys it does not watch go straight to macOS."
   }
 
   static var accessibilityMissing: LocalizedStringKey {

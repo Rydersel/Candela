@@ -585,9 +585,11 @@ struct DiagnosticsPage: View {
     return DiagnosticsCopy.watchedKeyFamilies(
       brightness: config.watchedKeys.contains(.brightnessUp)
         || config.watchedKeys.contains(.brightnessDown),
-      volumeOrMute: config.watchedKeys.contains(.volumeUp)
-        || config.watchedKeys.contains(.volumeDown)
-        || config.watchedKeys.contains(.mute)
+      // Reported apart because they are ARMED apart: the two write different
+      // registers, and a display can list one and deny the other.
+      volume: config.watchedKeys.contains(.volumeUp)
+        || config.watchedKeys.contains(.volumeDown),
+      mute: config.watchedKeys.contains(.mute)
     )
   }
 

@@ -199,7 +199,7 @@ struct KeyboardPane: View {
       }
 
       if KeyModePolicy.watchesMediaKeys(prefs.keyboardVolume) {
-        SettingsCaption("The volume keys go to macOS instead whenever the current audio output device has a volume control of its own. Option on its own opens Sound settings.")
+        SettingsCaption("The volume keys go to macOS instead whenever the current audio output device has a volume control of its own, or when no connected display can take a volume command. Option on its own opens Sound settings.")
       }
     }
   }

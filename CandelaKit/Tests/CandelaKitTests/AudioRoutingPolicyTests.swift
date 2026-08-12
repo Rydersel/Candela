@@ -95,40 +95,71 @@ struct AudioRoutingPolicyTests {
 
   @Test func noDisplaysMeansNoWatching() {
     #expect(!AudioRoutingPolicy.shouldWatchVolumeKeys(
-      mode: .mouse, ddcDisplaysExist: false, matchingDisplayCount: 0, defaultOutput: ddcOnlyDevice
+      mode: .mouse, ddcDisplaysExist: false, actionableDisplayCount: 1,
+      defaultOutput: ddcOnlyDevice
     ))
   }
 
   @Test func selfVolumeOutputReleasesTheKeysOutsideNameMatching() {
     #expect(!AudioRoutingPolicy.shouldWatchVolumeKeys(
-      mode: .mouse, ddcDisplaysExist: true, matchingDisplayCount: 0, defaultOutput: selfVolumeDevice
+      mode: .mouse, ddcDisplaysExist: true, actionableDisplayCount: 1,
+      defaultOutput: selfVolumeDevice
     ))
     #expect(!AudioRoutingPolicy.shouldWatchVolumeKeys(
-      mode: .allScreens, ddcDisplaysExist: true, matchingDisplayCount: 0, defaultOutput: selfVolumeDevice
+      mode: .allScreens, ddcDisplaysExist: true, actionableDisplayCount: 1,
+      defaultOutput: selfVolumeDevice
     ))
     #expect(AudioRoutingPolicy.shouldWatchVolumeKeys(
-      mode: .mouse, ddcDisplaysExist: true, matchingDisplayCount: 0, defaultOutput: ddcOnlyDevice
+      mode: .mouse, ddcDisplaysExist: true, actionableDisplayCount: 1,
+      defaultOutput: ddcOnlyDevice
     ))
   }
 
   @Test func nameMatchingWatchesOnlyWhenSomeDisplayMatches() {
     #expect(AudioRoutingPolicy.shouldWatchVolumeKeys(
-      mode: .audioDeviceNameMatching, ddcDisplaysExist: true, matchingDisplayCount: 1,
+      mode: .audioDeviceNameMatching, ddcDisplaysExist: true, actionableDisplayCount: 1,
       defaultOutput: selfVolumeDevice // matching mode ignores canSetOwnVolume (fork parity)
     ))
     #expect(!AudioRoutingPolicy.shouldWatchVolumeKeys(
-      mode: .audioDeviceNameMatching, ddcDisplaysExist: true, matchingDisplayCount: 0,
+      mode: .audioDeviceNameMatching, ddcDisplaysExist: true, actionableDisplayCount: 0,
+      defaultOutput: ddcOnlyDevice
+    ))
+  }
+
+  /// The dead-key case. Watching a key the tap will consume while no display can
+  /// act on it takes the press away from macOS as well, so the whole family goes
+  /// silent. Every mode releases the keys when the count is zero, including the
+  /// one whose default output cannot set its own volume.
+  @Test func nothingActionableReleasesTheKeysInEveryMode() {
+    for mode in [MultiKeyboardVolume.mouse, .allScreens, .audioDeviceNameMatching] {
+      #expect(!AudioRoutingPolicy.shouldWatchVolumeKeys(
+        mode: mode, ddcDisplaysExist: true, actionableDisplayCount: 0,
+        defaultOutput: ddcOnlyDevice
+      ), "\(mode)")
+    }
+  }
+
+  /// The count is a count of displays a press would ACT on, not of displays
+  /// present: one that can act keeps the family armed for the whole rig, which is
+  /// what preserves the per-display swallow (R1) for the ones that cannot.
+  @Test func oneActionableDisplayIsEnoughToKeepTheKeysWatched() {
+    #expect(AudioRoutingPolicy.shouldWatchVolumeKeys(
+      mode: .allScreens, ddcDisplaysExist: true, actionableDisplayCount: 1,
       defaultOutput: ddcOnlyDevice
     ))
   }
 
   @Test func noDefaultOutputKeepsTheKeysWatched() {
     // Fork parity: the key-removal block sits inside `if let defaultAudioDevice`.
+    // Deliberately ahead of the actionable count, and it changes nothing a user
+    // can feel: with no output device at all there is no system volume for a
+    // released key to move, so releasing would trade a dead key for a dead key.
     #expect(AudioRoutingPolicy.shouldWatchVolumeKeys(
-      mode: .mouse, ddcDisplaysExist: true, matchingDisplayCount: 0, defaultOutput: nil
+      mode: .mouse, ddcDisplaysExist: true, actionableDisplayCount: 0, defaultOutput: nil
     ))
     #expect(AudioRoutingPolicy.shouldWatchVolumeKeys(
-      mode: .audioDeviceNameMatching, ddcDisplaysExist: true, matchingDisplayCount: 0, defaultOutput: nil
+      mode: .audioDeviceNameMatching, ddcDisplaysExist: true, actionableDisplayCount: 0,
+      defaultOutput: nil
     ))
   }
 }

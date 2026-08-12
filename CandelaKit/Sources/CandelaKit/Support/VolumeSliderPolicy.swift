@@ -72,6 +72,44 @@ public enum VolumeSliderPolicy {
     )
   }
 
+  /// Should the event tap WATCH the volume keys on this display's account?
+  ///
+  /// `acceptsVolumeKeys` answers who a press ACTS on, and the tap has to decide
+  /// what to swallow before any of that is known. The difference between the two
+  /// questions is exactly the per-display keyboard switch, and it belongs to the
+  /// acting side only: a display whose keyboard control the user turned off
+  /// swallows its press (R1), the same as it does for brightness, so it must
+  /// keep the keys watched. A display whose own capabilities deny the register
+  /// is different in kind. No press can ever land on it, and a watched key is
+  /// consumed, so watching one on that display's account leaves the key dead in
+  /// both directions: it reaches neither this app nor macOS.
+  public static func armsVolumeKeys(
+    override: AudioSinkOverride, volumeSupport: VCPSupport
+  ) -> Bool {
+    acceptsVolumeKeys(
+      isKeyboardDisabled: false, override: override, volumeSupport: volumeSupport
+    )
+  }
+
+  /// The same question for the mute key, asked about the register it would
+  /// write. The two families arm separately because they are denied separately:
+  /// a display that lists 0x8D and not 0x62 keeps its mute key while its volume
+  /// keys go to macOS.
+  public static func armsMuteKey(
+    override: AudioSinkOverride,
+    volumeSupport: VCPSupport,
+    muteSupport: VCPSupport,
+    usesDedicatedMuteCommand: Bool
+  ) -> Bool {
+    acceptsMuteKey(
+      isKeyboardDisabled: false,
+      override: override,
+      volumeSupport: volumeSupport,
+      muteSupport: muteSupport,
+      usesDedicatedMuteCommand: usesDedicatedMuteCommand
+    )
+  }
+
   /// `isEnabled` reads its argument as the verdict for the register in
   /// question: D24's rule (a clean denial refuses, no evidence allows, the
   /// user's override outranks both) is per command, not specific to 0x62.

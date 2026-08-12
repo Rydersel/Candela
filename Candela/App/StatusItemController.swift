@@ -265,6 +265,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       Task { @MainActor in self?.refreshTapConfig() }
     }
 
+    // Re-arm when a capabilities probe lands (D24). The watched set is gated on
+    // the display's own verdict for the volume and mute registers, and that
+    // verdict arrives asynchronously after the display does, so the first arm
+    // after a plug is always made from the pre-probe answer.
+    model.onVolumeKeyRoutingChanged = { [weak self] in self?.refreshTapConfig() }
+
     settingsActions.rearmTap = { [weak self] in
       self?.refreshTapConfig()
       // Task 12 hand-off: a Carbon hotkey registration is exclusive and
