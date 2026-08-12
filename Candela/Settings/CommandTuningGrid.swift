@@ -273,6 +273,13 @@ struct CommandTuningGrid: View {
     // anything.
     if trafficBlock == nil {
       SettingsCaption("Most displays need none of this. Use it when a display bottoms out or tops out early, or runs backwards. Leave a box empty to use the display's own range.")
+      // Stated before the click, not after it: Invert is the one column here
+      // whose wrong setting produces a shape nobody would read as "I set this
+      // wrong". It is a hardware correction, so on a display that does not run
+      // backwards it turns the register around while the software leg keeps
+      // running forwards, and the combined response peaks at the switching
+      // point. `InvertCompositionTests` pins that shape as ruled behaviour.
+      SettingsCaption("Invert is only for a display whose brightness runs backwards. On any other display it runs the slider the wrong way, and with combined dimming on the slider peaks in the middle and dims again above that.")
       brightnessLegCaption
       let ignored = ignoredMaxCommands
       if ignored.count == 1 {
