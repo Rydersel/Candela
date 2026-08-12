@@ -273,14 +273,20 @@ struct LockDimTests {
     await rig.controller.waitForPendingWrites()
     rig.controller.beginTemporaryDim(factor: 0.5)
     await rig.controller.waitForPendingWrites()
-    #expect(await rig.ddc.recordedWrites().map(\.value) == [80, 40])
+    let throughTheDim = await rig.ddc.recordedWrites().map(\.value)
+    #expect(throughTheDim == [80, 40]) // the dim really reached the wire
     rig.controller.endTemporaryDim() // what the coordinator does at termination
     rig.controller.restoreFullRangeDDC()
     await rig.controller.waitForPendingWrites()
-    // Three writes, not four: the quit path's two restores are the same value
-    // and the coalescer is latest-wins, so they land as one. What matters is
-    // that the panel is left at the user's 80 rather than the dim's 40.
-    #expect(await rig.ddc.recordedWrites().map(\.value) == [80, 40, 80])
+    // The quit path submits the same undimmed value twice, and latest-wins
+    // coalescing collapses the pair only when the drain has not already run,
+    // so the exact write COUNT is scheduling-dependent and must not be pinned.
+    // The contract is what the panel is left holding: every write the teardown
+    // put on the wire is the user's 80, and the dim's 40 is not left standing.
+    let teardownWrites = await rig.ddc.recordedWrites().map(\.value)
+      .dropFirst(throughTheDim.count)
+    #expect(!teardownWrites.isEmpty, "the teardown must hand the register back")
+    #expect(teardownWrites.allSatisfy { $0 == 80 }, "saw \(Array(teardownWrites))")
   }
 
   /// Ending a dim nobody started is a no-op, which is what lets every teardown
