@@ -125,16 +125,34 @@ struct DisplayHubView: View {
   private var identitySection: some View {
     Section {
       SettingRow("Shown in the menu bar.") {
-        TextField("Name", text: $nameDraft, prompt: Text(verbatim: state.display.name))
-          .focused($nameFocused)
-          .onSubmit { commitName() }
-          .onChange(of: nameFocused) { _, focused in
-            if !focused { commitName() }
+        HStack(spacing: 6) {
+          TextField("Name", text: $nameDraft, prompt: Text(verbatim: state.display.name))
+            .focused($nameFocused)
+            .onSubmit { commitName() }
+            .onChange(of: nameFocused) { _, focused in
+              if !focused { commitName() }
+            }
+            .onChange(of: model.prefsRevision) { _, _ in
+              guard !nameFocused else { return } // never fight a live edit
+              nameDraft = prefs.friendlyName
+            }
+          // Only while there is a name to clear: the escape route from a custom
+          // name is otherwise select-all-and-delete, which nothing on the page
+          // suggests. Sibling of the field rather than a branch around it, so
+          // the `if` swaps an `EmptyView` for a button and never rebuilds the
+          // TextField underneath a live edit.
+          if hasCustomName {
+            Button(action: clearName) {
+              Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            // Says the outcome, not the gesture: the hardware name comes back
+            // as the placeholder, and a VoiceOver user cannot see it arrive.
+            .accessibilityLabel("Use the Display's Own Name")
+            .help("Clear this name and use the one the display reports.")
           }
-          .onChange(of: model.prefsRevision) { _, _ in
-            guard !nameFocused else { return } // never fight a live edit
-            nameDraft = prefs.friendlyName
-          }
+        }
       }
       if model.isSharedIdentity(persistenceKey) {
         // SO21: same persistence key, same prefs — every control on this page
@@ -159,6 +177,16 @@ struct DisplayHubView: View {
         set: { enabled in writer.write(.isDisabled) { $0.isDisabled = !enabled } }
       ))
     }
+  }
+
+  /// Keyed to the STORED name, never to the draft. Two reasons: a name only
+  /// half typed is not one this display is wearing anywhere else, and a
+  /// predicate on the draft would add and remove a control mid-keystroke,
+  /// resizing the field under the cursor. `normalizedFriendlyName` is the same
+  /// rule the title fallback uses, so a name that is whitespace shows the
+  /// hardware name AND offers nothing to clear.
+  private var hasCustomName: Bool {
+    !DisplayCardPolicy.normalizedFriendlyName(prefs.friendlyName).isEmpty
   }
 
   // MARK: - Display
@@ -801,6 +829,17 @@ struct DisplayHubView: View {
     nameDraft = trimmed
     guard trimmed != prefs.friendlyName else { return }
     writer.write(.friendlyName) { $0.friendlyName = trimmed }
+  }
+
+  /// Exactly what select-all-and-delete followed by Return does, and through
+  /// the same commit: one write route to this pref, one normalization, one
+  /// dirty check. Clearing the DRAFT first is the load-bearing half. The
+  /// re-seed hook is gated on focus, and a click on this button does not take
+  /// focus off the field, so a draft left holding the old name would be written
+  /// straight back the next time focus moved on.
+  private func clearName() {
+    nameDraft = ""
+    commitName()
   }
 
   private func commitAudioName() {
