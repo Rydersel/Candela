@@ -306,6 +306,7 @@ struct AdvancedPage: View {
               Button("Reset") {
                 writer.write(.combinedSwitchingPoint) { $0.combinedSwitchingPoint = 0 }
               }
+              .accessibilityLabel("Reset")
               .disabled(prefs.combinedSwitchingPoint == 0 || isBlocked)
             }
           }
@@ -326,6 +327,7 @@ struct AdvancedPage: View {
             appPrefs.combinedBrightness = true
             actions.prefDidChange(.disableCombinedBrightness)
           }
+          .accessibilityLabel("Turn On Dim Past the Display's Minimum")
           .disabled(isBlocked)
         }
       }
@@ -418,6 +420,7 @@ struct AdvancedPage: View {
             appPrefs.startupAction = .read
             actions.prefDidChange(.startupAction)
           }
+          .accessibilityLabel("Ask the Display at Startup")
           .disabled(isBlocked)
         }
       }
@@ -457,6 +460,7 @@ struct AdvancedPage: View {
       // Never disabled by `isBlocked`: under `.hardwareControlOff` this button
       // is the scoped way back out (D29 rule 3).
       Button("Restore Advanced Defaults…") { confirmingRestore = true }
+        .accessibilityLabel("Restore Advanced Defaults…")
         .alert("Restore this display's advanced settings?", isPresented: $confirmingRestore) {
           Button("Restore", role: .destructive) { restoreAdvancedDefaults() }
           Button("Cancel", role: .cancel) {}

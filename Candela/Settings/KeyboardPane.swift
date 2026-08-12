@@ -73,6 +73,7 @@ struct KeyboardPane: View {
           Button("Open System Settings…") {
             AccessibilityPermission.openSystemSettings()
           }
+          .accessibilityLabel("Open System Settings…")
         }
       }
     }
