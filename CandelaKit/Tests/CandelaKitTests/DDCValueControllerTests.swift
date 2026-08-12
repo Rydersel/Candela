@@ -739,29 +739,26 @@ struct DDCValueControllerTests {
   /// I2C write is acknowledged and swallowed, so a memo built through an HDR
   /// window records values that never arrived, and the skip would then certify
   /// the reset's own unmute. Dropping the memo is what re-opens the wire.
-  @Test func aMemoDroppedOnTheHDRExitLetsTheSameWireValueGoOutAgain() async {
+  @Test func aMemoDroppedOnTheHDRExitLetsTheSameRawGoOutAgain() async {
     let defaults = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
-    prefs.enableMuteUnmute = true
     let fake = FakeDDC(readResult: nil)
     let volume = DDCValueController(writer: fake, command: .volume, prefs: prefs)
 
-    // Stands in for the pair a display took while it was in HDR: acknowledged,
-    // swallowed, and recorded in the memo as though it had landed.
-    _ = volume.toggleMute() // 0x8D = 1
+    // Stands in for a write the display ACKed while it was in HDR: recorded in
+    // the memo as though it had landed, when the panel swallowed it. Two
+    // published values that scale to the SAME raw, because that is what the
+    // memo compares and therefore what it can suppress.
+    volume.setValue(0.301)
     await volume.waitForPendingWrites()
-    _ = volume.toggleMute() // 0x8D = 2, and now the memo holds it
-    await volume.waitForPendingWrites()
-    let before = await fake.recordedWrites().filter { $0.command == VCP.audioMuteScreenBlank }
-    _ = volume.toggleMute() // muted again, so the reset has something to undo
-    await volume.waitForPendingWrites()
+    let before = await fake.recordedWrites().count
 
     volume.resetWriteMemo()
-    _ = volume.toggleMute() // the reset's unmute: the same wire value as before
+    volume.setValue(0.304) // raw 30 again
     #expect(await volume.drainPendingWrites())
 
-    let after = await fake.recordedWrites().filter { $0.command == VCP.audioMuteScreenBlank }
-    #expect(after.count == before.count + 2, "the unmute went out rather than being skipped")
-    #expect(after.last?.value == 2)
+    let after = await fake.recordedWrites()
+    #expect(after.count == before + 1, "the write went out rather than being skipped")
+    #expect(after.last?.value == 30)
   }
 }

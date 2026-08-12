@@ -955,25 +955,33 @@ public final class BrightnessController: PendingWireDraining {
   @discardableResult
   private func performHDRExit(generation: UInt64) async -> Bool {
     // Optimistic for the duration: the legs have to stop treating the display as
-    // native while it leaves HDR. Kept so a bail can put it back, because on a
-    // bail this call has established nothing and the optimism is the one belief
-    // that licenses a gamma table onto a panel that may still be in HDR.
-    let believedBeforeExit = cachedHDRActive
+    // native while it leaves HDR.
+    //
+    // ONE RULE FOR EVERY BAIL BELOW: assume the register is LOCKED. A bail means
+    // a newer transition took the display and this call established nothing, and
+    // between the two available wrong answers only one can do damage. Believing
+    // HDR is live routes brightness native, so nothing writes DDC and nothing
+    // writes a gamma table onto a panel that may be in HDR; believing it is off
+    // licenses both. The cost of being wrong this way is a brightness write that
+    // goes nowhere on a DDC-only panel, and it is bounded: every transition that
+    // can supersede this one ends with a measured refresh, and a reconfiguration
+    // refreshes the mirror as well.
+    //
+    // These are the file's only post-fence mutations, and they are deliberate:
+    // the fences exist to stop a stale call from asserting state it does not
+    // know, which is exactly what leaving the optimistic false behind would be.
     cachedHDRActive = false
     _ = await backends.hdr?.setHDR(displayID: displayID, enabled: false)
     // Same supersession fence as the engage arm (final wave): the post-await
     // block clears `settleInProgress` and fires `applyPaths`, both of which
     // belong to whichever transition is current.
     guard hdrTransitionGeneration == generation else {
-      // The newer transition owns the mirror and ends with a measured refresh of
-      // its own, so this write is either superseded immediately or corrects a
-      // window in which nothing but this call's optimism was standing.
-      cachedHDRActive = believedBeforeExit
+      cachedHDRActive = true // assume locked: see the rule above
       return false
     }
     try? await Task.sleep(for: settleDelay)
     guard hdrTransitionGeneration == generation else {
-      cachedHDRActive = believedBeforeExit
+      cachedHDRActive = true // assume locked: see the rule above
       return false // post-settle
     }
     settleInProgress = false
@@ -1024,9 +1032,11 @@ public final class BrightnessController: PendingWireDraining {
   /// is ACKed and swallowed: a memo built through an HDR window therefore
   /// records values that never reached the panel. Left standing, the reset's own
   /// unmute would be skipped as a duplicate of a write that never landed, and
-  /// the skip would be reported as applied. The volume and contrast memos have
-  /// no other route to this fact, because nothing else in the HDR paths can
-  /// reach them.
+  /// the skip would be reported as applied. A rebind clears those memos too, but
+  /// it is neither synchronous with this nor ordered before the unmute: it lands
+  /// when a display is rediscovered, which is not a thing this path can wait
+  /// for. Doing it here is what puts the clearing between the HDR window and the
+  /// write that depends on it.
   public func disengageHDRForReset(
     alsoInvalidating siblings: [any PendingWireDraining]
   ) async -> HDRResetDisengage {

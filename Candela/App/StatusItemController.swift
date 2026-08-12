@@ -1104,8 +1104,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //         (the unmute settling, the login-item unregister, the rebuild), and
     //         dropping the controller does not cancel it either: teardown ends
     //         the drain loop only after every already-submitted target has
-    //         landed. Nothing in this step enforces that, and nothing in this
-    //         step should be read as if it did.
+    //         COMPLETED, which is the weaker word on purpose, since a target the
+    //         gate skipped completes without reaching the panel. That is the
+    //         right guarantee here: what matters is that nothing is left in
+    //         flight to land after the engage. Nothing in this step enforces
+    //         any of it, and nothing in this step should be read as if it did.
     //
     //         It restores the display's state, NOT a mode: `restoreExternalHDR`
     //         deliberately persists nothing, because a reset that promises to

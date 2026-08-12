@@ -796,10 +796,14 @@ struct PathSelectionTests {
   /// re-engage rather than writing blind.
   @Test func aRebindBetweenTheSubmitAndTheDrainDoesNotReplayTheOldWrite() async {
     let h = Harness()
-    h.controller.setEpochProvider({ 1 }, isCurrent: { _ in false }) // window closed
+    let wireOpen = OSAllocatedUnfairLock(initialState: false)
+    h.controller.setEpochProvider({ 1 }, isCurrent: { _ in wireOpen.withLock { $0 } })
     h.controller.setBrightness(0.75)
+    await h.controller.waitForPendingWrites() // the skip has already happened
     let fresh = FakeDDC(readResult: nil)
     h.controller.rebind(writer: fresh, panelIdentity: "a different panel")
+    // Open again, so nothing but the dropped target stops a replay.
+    wireOpen.withLock { $0 = true }
 
     #expect(await h.controller.drainPendingWrites() == false)
     #expect(await fresh.recordedWrites().isEmpty, "nothing stale went onto the new wire")

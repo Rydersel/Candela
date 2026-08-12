@@ -733,7 +733,7 @@ struct DisplayHubView: View {
           // are macOS-visible state this button deliberately leaves alone.
           // Counted panel hours are wear data, kept for the same reason the
           // levels are.
-          Text("This unmutes \(state.display.name), turns HDR off while it runs, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, and everything under Advanced, including control-code remaps and response curves. HDR that was turned on in System Settings goes back on at the end. If the display cannot be reached at the time, the settings are still cleared, and the unmute and the HDR change are left for you rather than sent blind. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
+          Text("This unmutes \(state.display.name), turns HDR off while it runs, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, and everything under Advanced, including control-code remaps and response curves. HDR that was turned on in System Settings goes back on at the end. A display that cannot be reached at the time keeps its mute and its HDR as they are, rather than being sent commands that cannot be confirmed. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
         }
     }
   }
@@ -805,11 +805,14 @@ struct DisplayHubView: View {
       // 2. This step is hardware too, and it runs before the evidence is acted
       //    on below: several of these keys fan out to `reapplyAfterPrefChange`,
       //    which re-runs the dimming legs synchronously. What keeps that honest
-      //    under `.unknown` is in the engine: a superseded exit puts back the
-      //    HDR belief it held before it started rather than leaving its
-      //    optimistic "not in HDR" standing, so the path resolves native and
-      //    nothing writes a gamma table onto a display that may still be in HDR.
-      //    If that ever changes, this step has to move below the switch.
+      //    under `.unknown` is in the engine: a superseded exit leaves the
+      //    mirror saying HDR is LIVE rather than leaving its optimistic "not in
+      //    HDR" standing, so the path resolves native and this step writes
+      //    neither DDC nor a gamma table onto a display that may be in HDR.
+      //    What it can cost is a brightness write that goes nowhere on a
+      //    DDC-only panel, which the next brightness change or reconfiguration
+      //    puts right. If that rule ever changes, this step has to move below
+      //    the switch.
       //
       //    Every pref except the mute strategy, in ONE batch whose fan-out is
       //    the UNION of its rows. Never collapse it onto a single
@@ -905,8 +908,16 @@ struct DisplayHubView: View {
           writer.write(.enableMuteUnmute) { $0.enableMuteUnmute = false }
         } else {
           resetLog.error(
-            "reset on display \(state.display.persistenceKey, privacy: .public): the unmute could not be confirmed as applied, so the mute strategy was left in place"
+            "reset on display \(state.display.persistenceKey, privacy: .public): the unmute could not be confirmed as applied, so its mute state and strategy were both left in place"
           )
+          // `toggleMute` cleared the stored flag on the way out, and the panel
+          // may still be muted, so put it back: the same two facts Reset All
+          // keeps across its wipe, kept here for the same reason. The live
+          // controller keeps its own belief until it is next rebuilt, which is
+          // a divergence in the safe direction (the record that survives a
+          // relaunch is the pessimistic one), and the ordinary mute control
+          // drives fresh writes from either state.
+          DisplayPrefs(persistenceKey: key).muted = true
         }
       case .unknown:
         resetLog.error(

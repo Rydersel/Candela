@@ -336,12 +336,20 @@ public final class DDCValueController: PendingWireDraining {
     let value = await drain(
       coalescer,
       issued: { self.issuedGeneration },
-      resubmit: { if let raw = self.lastSubmittedRaw { self.submitRaw(raw) } }
+      resubmit: {
+        guard let raw = self.lastSubmittedRaw else { return false }
+        self.submitRaw(raw)
+        return true
+      }
     )
     let mute = await drain(
       muteCoalescer,
       issued: { self.issuedMuteGeneration },
-      resubmit: { if let wire = self.lastSubmittedMuteWire { self.submitMuteWire(wire) } }
+      resubmit: {
+        guard let wire = self.lastSubmittedMuteWire else { return false }
+        self.submitMuteWire(wire)
+        return true
+      }
     )
     return value && mute
   }
@@ -353,16 +361,20 @@ public final class DDCValueController: PendingWireDraining {
   /// recoverable, and reporting it without trying is a strand nobody sees.
   ///
   /// `issued` is a closure and not a value because the re-submit bumps it.
+  /// `resubmit` reports whether it actually submitted: it has nothing to send
+  /// once a rebind has dropped the remembered target, and counting a retry that
+  /// never happened would walk `submissionMark` BACKWARDS, which the protocol
+  /// promises it never does.
   private func drain(
     _ coalescer: BrightnessWriteCoalescer,
     issued: () -> UInt64,
-    resubmit: () -> Void
+    resubmit: () -> Bool
   ) async -> Bool {
     let first = issued()
     await coalescer.waitUntilCompleted(through: first)
     if await coalescer.appliedThrough() >= first { return true }
+    guard resubmit() else { return false }
     retriedSubmissions &+= 1
-    resubmit()
     let second = issued()
     await coalescer.waitUntilCompleted(through: second)
     return await coalescer.appliedThrough() >= second

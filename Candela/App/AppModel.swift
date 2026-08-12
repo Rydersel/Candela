@@ -1015,8 +1015,14 @@ final class AppModel {
             // ELSE's schedule: a built-in ramping under ambient light, or a
             // Control Center drag, fans a write onto this display every poll
             // tick, so the queue never goes quiet and the reset gives up on
-            // restoring the display's HDR. Nothing is lost by holding it: sync
-            // re-fans from the next tick after the reset ends.
+            // restoring the display's HDR.
+            //
+            // The movement made during the reset is DROPPED, not deferred: a
+            // disabled fan-out resets the deadband and returns, so the externals
+            // stay offset by however far the source moved in those few seconds.
+            // That is the documented meaning of the pref being off, applied for
+            // the duration rather than a new behaviour, and it is the cheaper
+            // of the two losses on offer.
             BrightnessSync.fanOut(
               delta: delta,
               from: controller,
