@@ -28,10 +28,12 @@ public struct SyncDeadband: Sendable {
   /// Two costs, both deliberate. A press does not arrive all at once: eased
   /// into sub-steps by `adoptExternal`, its first crossing releases 0.0347 of
   /// the 0.0625, so about 55% lands promptly and the rest rides out with the
-  /// next movement. And a fine adjust is under the band entirely (1/64 =
-  /// 0.015625 on the system's own grid, a flat 0.01 through `step`), so one
-  /// fine press moves nothing and the second or third releases the pair or
-  /// triple together: still tracking, in coarser grain than it was asked for.
+  /// next movement. And the system's own fine adjust (1/64 = 0.015625) is
+  /// under the band entirely, so one fine press moves nothing and the second
+  /// or third releases the pair or triple together: still tracking, in
+  /// coarser grain than it was asked for. Candela's own fine step, a flat
+  /// 0.01, never reaches here at all: a local write is echo-suppressed at the
+  /// poller, and the key path steps every targeted display directly.
   ///
   /// The standing cost is a steady-state lag: an external can sit up to one
   /// band, 3% of range, behind its source. That is under half of the 9-unit

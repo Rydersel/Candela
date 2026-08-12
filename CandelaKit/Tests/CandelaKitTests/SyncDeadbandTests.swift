@@ -268,6 +268,8 @@ struct BrightnessSyncDeadbandTests {
     // presses deliver 0.1176 of 0.125 rather than one band's worth of drift.
     let second = feedEasedChange(to: 0.5 + 2 * keyStep, from: source, fanningOutTo: controllers)
     #expect(second.deltas.allSatisfy { $0 < SyncDeadband.threshold })
+    // The parked 0.0278 makes the very first sub-step cross the band.
+    #expect(second.releasedAt == [0, 4])
     #expect(close(external.controller.brightness, 0.5 + 0.1176543210, 1e-9))
     #expect(close(source.controller.brightness, 0.5 + 2 * keyStep, 1e-9))
   }
@@ -317,8 +319,11 @@ struct BrightnessSyncDeadbandTests {
     let external = Harness()
     let controllers = [source.controller, external.controller]
 
+    // Seed a bound identity first, so "same panel" below is a real string
+    // comparison rather than nil != nil.
+    source.controller.rebind(writer: source.ddc, panelIdentity: "a")
     BrightnessSync.fanOut(delta: 0.02, from: source.controller, to: controllers, isEnabled: true)
-    source.controller.rebind(writer: source.ddc, panelIdentity: nil) // same panel
+    source.controller.rebind(writer: source.ddc, panelIdentity: "a") // same panel
 
     #expect(source.controller.syncDeadband.held == 0.02)
   }
