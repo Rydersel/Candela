@@ -1,6 +1,12 @@
 import CandelaKit
 import CoreGraphics
+import os
 import SwiftUI
+
+/// The reset path's own category: a reset that stands hardware steps down says
+/// so somewhere a person can find later, and it is not a keyboard or a path
+/// event.
+private let resetLog = Logger(subsystem: "com.rydersel.Candela", category: "reset")
 
 /// The external display hub (spec §4): everything you change or consult about
 /// one display, on one page, with Advanced / Diagnostics / the full mode list
@@ -710,8 +716,12 @@ struct DisplayHubView: View {
     Section {
       // Plain at rest (SO20): the destructive role lives on the alert's confirm
       // button, not on a red button waiting on every display's page.
+      // Disabled only WHILE a reset runs (a second or two), never as a state
+      // the page can get stuck in: the latch is released by a `defer` on the
+      // reset's own task.
       Button("Reset Display Settings…") { confirmingReset = true }
         .accessibilityLabel("Reset Display Settings…")
+        .disabled(model.isResetting)
         .alert("Reset the settings for this display?", isPresented: $confirmingReset) {
           Button("Reset", role: .destructive) { resetDisplay() }
           Button("Cancel", role: .cancel) {}
@@ -723,7 +733,7 @@ struct DisplayHubView: View {
           // are macOS-visible state this button deliberately leaves alone.
           // Counted panel hours are wear data, kept for the same reason the
           // levels are.
-          Text("This unmutes \(state.display.name), turns HDR off, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, and everything under Advanced, including control-code remaps and response curves. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
+          Text("This unmutes \(state.display.name), turns HDR off while it runs, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, and everything under Advanced, including control-code remaps and response curves. HDR that was turned on in System Settings goes back on at the end. If the display cannot be reached at the time, nothing is sent to it that cannot be confirmed, so some of these may be left for you to change yourself. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
         }
     }
   }
@@ -748,27 +758,64 @@ struct DisplayHubView: View {
   /// So: availability prefs FIRST, unmute SECOND (while the display's current
   /// mute strategy is still in force), retire the strategy LAST.
   private func resetDisplay() {
+    // One reset at a time, app-wide. Two of them overlapping would drive this
+    // display from two tasks, and a per-display reset finishing inside Reset
+    // All's rebuild would hand HDR back through a controller that has already
+    // been replaced: a write nobody is looking at, over a register the live
+    // controller still believes is free.
+    guard model.beginReset() else { return }
+    let key = state.display.persistenceKey
+    // OLED care's lock dim drives this display's brightness on its own timer,
+    // and the reset accounts for every write it makes before letting HDR back
+    // on. Held off for the duration, for this display only.
+    model.oledCare.beginDisplayReset(key)
     Task { @MainActor in
-      // 1. D22: HDR goes through the controller's state machine — settle
-      //    window, poller gating, rollback — never through `prefs.hdrMode`.
-      //    Done first so the DDC register is unlocked for everything below.
+      defer {
+        model.oledCare.displayResetDidComplete(key)
+        model.endReset()
+      }
+      // 1. D22: HDR goes through the controller's state machine (settle window,
+      //    poller gating, rollback), never through `prefs.hdrMode`. Done first
+      //    so the DDC register is unlocked for everything below.
       //
-      //    UNCONDITIONAL (#83). Gating this on `hdrMode != .off` skipped the
-      //    disengage for HDR engaged in System Settings, and then everything
-      //    below — including the D29 unmute — ran against a register the
-      //    monitor still had locked. `setHDRMode` owns the "is there anything
-      //    to do" question now, so the condition cannot drift from it here.
+      //    The RESET door, not `setHDRMode(.off)`. That one decides from the
+      //    stored mode and the cached mirror, and the mirror lags a System
+      //    Settings toggle until the reconfigure lands: in that window it
+      //    reports no HDR, the request evaporates, and everything below,
+      //    including the D29 unmute, runs against a register the monitor still
+      //    has locked. This door measures the panel instead, clears the stored
+      //    mode either way, and answers the second question with it: HDR that
+      //    was live with no Candela mode recording it was engaged elsewhere,
+      //    and step 5 puts it back. Live HDR under `.alwaysOn` is a Candela
+      //    setting, and clearing it is what this button is for.
       //
-      //    Captured BEFORE the disengage, and it is a question about two
-      //    different things: `isHDREngaged` is the display's state, `hdrMode`
-      //    is Candela's opinion. Live HDR with no opinion behind it was
-      //    engaged in System Settings, so step 5 puts it back; live HDR under
-      //    `.alwaysOn` is a Candela setting, and clearing it is what this
-      //    button is for.
-      let restoreHDR = state.controller.isHDREngaged && state.controller.hdrMode == .off
-      await state.controller.setHDRMode(.off)
+      //    The answer is evidence and not a request: `.disengaged` comes off a
+      //    measured read taken after the drop settled, so it is what licenses
+      //    the hardware writes below. `.unknown` withholds that licence.
+      //
+      //    The other two controllers go in because their duplicate memos have
+      //    to be dropped here: a write ACKed while the display was in HDR was
+      //    swallowed by the panel, so a memo built through that window would let
+      //    the unmute below be skipped as a duplicate of a value the register
+      //    never took, and reported as applied.
+      let hdrState = await state.controller.disengageHDRForReset(
+        alsoInvalidating: [state.volume, state.contrast]
+      )
 
-      // 2. Every pref except the mute strategy, in ONE batch whose fan-out is
+      // 2. This step is hardware too, and it runs before the evidence is acted
+      //    on below: several of these keys fan out to `reapplyAfterPrefChange`,
+      //    which re-runs the dimming legs synchronously. What keeps that honest
+      //    under `.unknown` is in the engine: a superseded exit leaves the
+      //    mirror saying HDR is LIVE rather than leaving its optimistic "not in
+      //    HDR" standing, so the path resolves native and this step writes
+      //    neither DDC nor a gamma table onto a display that may be in HDR.
+      //    What it can cost is a brightness write that goes nowhere on a
+      //    DDC-only panel, and only a reconfiguration or an HDR transition puts
+      //    that right: the next brightness change routes native again, for the
+      //    same stale reason. If that rule ever changes, this step has to move
+      //    below the switch.
+      //
+      //    Every pref except the mute strategy, in ONE batch whose fan-out is
       //    the UNION of its rows. Never collapse it onto a single
       //    `prefDidChange(.forceSw)`: `hideDisplay` carries `.updateStatusItem`
       //    and `forceSw` does not, so with `menuIcon == .sliderOnly` a reset
@@ -826,24 +873,69 @@ struct DisplayHubView: View {
         prefs.resetOledCare()
       }
 
-      // 3. `isAvailable` is true again, and `enableMuteUnmute` still holds the
-      //    value the display was muted under — so this sends the RIGHT wire
-      //    value (0x8D=2 in the dedicated-command strategy, a volume write
-      //    otherwise). `toggleMute` also clears the persisted `muted` flag,
-      //    which is why it is not written by hand.
-      if state.volume.isMuted {
-        _ = state.volume.toggleMute()
+      // 3 and 4 are hardware, so they are gated on step 1's evidence. Under
+      // `.unknown` the display may still be in HDR, where DDC goes nowhere and
+      // a write-only panel cannot report it: the unmute would clear the stored
+      // mute flag over a register that stayed muted, and retiring the strategy
+      // would then remove the only command that could ever undo it. That is
+      // precisely the strand D29 rule 1 forbids, so BOTH steps stand down
+      // together and the display keeps its working mute strategy and its honest
+      // muted flag, which is the state the recovery banner reads.
+      switch hdrState {
+      case .disengaged:
+        // 3. `isAvailable` is true again, and `enableMuteUnmute` still holds the
+        //    value the display was muted under, so this sends the RIGHT wire
+        //    value (0x8D=2 in the dedicated-command strategy, a volume write
+        //    otherwise). `toggleMute` also clears the persisted `muted` flag,
+        //    which is why it is not written by hand.
+        var unmuteLanded = true
+        if state.volume.isMuted {
+          _ = state.volume.toggleMute()
+          // The same patience the restore uses, and for the same reason: one
+          // immediate retry is definitionally inside the same reconfiguration
+          // window that skipped the first attempt, and the disengage above IS a
+          // reconfiguration. Settling waits for the gate rather than guessing.
+          unmuteLanded = await WireQuiescence.settle(
+            [state.volume], isWireOpen: { state.volume.isWireOpen }
+          )
+        }
+        // 4. Only now retire the strategy, and only if the unmute is known to
+        //    have reached the panel. Retiring it after an unmute nobody can
+        //    confirm removes the one command that undoes 0x8D = 2, which is
+        //    D29 rule 1 read backwards: the display keeps a working strategy
+        //    and the ordinary mute control can re-drive it. Its row is UI-only,
+        //    so this second fan-out costs a re-render and nothing else.
+        if unmuteLanded {
+          writer.write(.enableMuteUnmute) { $0.enableMuteUnmute = false }
+        } else {
+          resetLog.error(
+            "reset on display \(state.display.persistenceKey, privacy: .public): the unmute could not be confirmed as applied, so its mute state and strategy were both left in place"
+          )
+          // `toggleMute` cleared the stored flag on the way out, and the panel
+          // may still be muted, so put it back: the same two facts Reset All
+          // keeps across its wipe, kept here for the same reason. The live
+          // controller keeps its own belief until it is next rebuilt, which is
+          // a divergence in the safe direction (the record that survives a
+          // relaunch is the pessimistic one), and the ordinary mute control
+          // drives fresh writes from either state.
+          DisplayPrefs(persistenceKey: key).muted = true
+        }
+      case .unknown:
+        resetLog.error(
+          "reset on display \(state.display.persistenceKey, privacy: .public): HDR state unknown after the disengage, so the unmute and the mute-strategy change were both skipped; the display keeps its current mute state and strategy"
+        )
       }
 
-      // 4. Only now retire the strategy. Its row is UI-only, so this second
-      //    fan-out costs a re-render and nothing else.
-      writer.write(.enableMuteUnmute) { $0.enableMuteUnmute = false }
-
-      // 5. LAST, after every DDC write above has gone out (#83): re-engaging
-      //    locks the register again, so anything sent after this would be
-      //    swallowed exactly as it was before the fix.
-      if restoreHDR {
-        await state.controller.restoreExternalHDR()
+      // 5. LAST, and only for HDR this reset borrowed rather than owned. The
+      //    restore is the door that settles the wire: every write above is
+      //    QUEUED rather than sent, and re-engaging locks the register the
+      //    moment one lands. It is handed all three controllers because the
+      //    pref fan-out in step 2 re-applies brightness on the same wire, and
+      //    it refuses to re-engage at all if it cannot confirm they landed.
+      if case .disengaged(restoreAfterward: true) = hdrState {
+        await state.controller.restoreExternalHDR(
+          alsoDraining: [state.volume, state.contrast]
+        )
       }
 
       nameDraft = ""

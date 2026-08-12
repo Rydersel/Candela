@@ -11,7 +11,7 @@ import Observation
 /// D3): DDC is dead while the display is in HDR mode, so the register catches
 /// up on the next write after HDR exits, or via startup/wake restore.
 @MainActor @Observable
-public final class DDCValueController {
+public final class DDCValueController: PendingWireDraining {
   public nonisolated let command: DDCCommand
   public private(set) var value: Double
   /// Logical mute flag (volume only; constitutively false for contrast).
@@ -39,7 +39,16 @@ public final class DDCValueController {
   private let muteCoalescer: BrightnessWriteCoalescer
   @ObservationIgnored private var issuedGeneration: UInt64 = 0
   @ObservationIgnored private var issuedMuteGeneration: UInt64 = 0
+  /// The newest submit on each queue, kept for `drainPendingWrites` to re-issue
+  /// when the queue completed a generation without applying it.
+  @ObservationIgnored private var lastSubmittedRaw: UInt16?
+  @ObservationIgnored private var lastSubmittedMuteWire: UInt16?
+  /// Submits made by the drain's own retry, excluded from `submissionMark`.
+  @ObservationIgnored private var retriedSubmissions: UInt64 = 0
   @ObservationIgnored private var epochProvider: @Sendable () -> UInt64 = { 0 }
+  /// The gate's other half, kept alongside the provider so a settle loop can
+  /// wait on it. Default matches the coalescer's accept-everything default.
+  @ObservationIgnored private var isEpochCurrent: @Sendable (UInt64) -> Bool = { _ in true }
   private let store: (any BrightnessStoring)?
   private let storageKey: String?
   /// Validated readback max (nil until a successful `.read` pass); feeds
@@ -314,6 +323,63 @@ public final class DDCValueController {
     await muteCoalescer.waitUntilCompleted(through: issuedMuteGeneration)
   }
 
+  /// Both counters in one number: the mute wire and the value register are
+  /// separate queues, and a caller asking "did anything get submitted while I
+  /// was away" needs an answer that covers both. The drain's own retries are
+  /// subtracted back out, or a round that retried could never report a quiet
+  /// wire even once it was quiet.
+  public func submissionMark() -> UInt64 {
+    (issuedGeneration &+ issuedMuteGeneration) &- retriedSubmissions
+  }
+
+  public func drainPendingWrites() async -> Bool {
+    let value = await drain(
+      coalescer,
+      issued: { self.issuedGeneration },
+      resubmit: {
+        guard let raw = self.lastSubmittedRaw else { return false }
+        self.submitRaw(raw)
+        return true
+      }
+    )
+    let mute = await drain(
+      muteCoalescer,
+      issued: { self.issuedMuteGeneration },
+      resubmit: {
+        guard let wire = self.lastSubmittedMuteWire else { return false }
+        self.submitMuteWire(wire)
+        return true
+      }
+    )
+    return value && mute
+  }
+
+  /// One queue's half of `drainPendingWrites`: wait, and if the generation
+  /// completed without the target reaching hardware, submit it again (fresh
+  /// epoch stamp) and wait once more. The re-submit is the whole point: a
+  /// target skipped because it was stamped before a display reconfiguration is
+  /// recoverable, and reporting it without trying is a strand nobody sees.
+  ///
+  /// `issued` is a closure and not a value because the re-submit bumps it.
+  /// `resubmit` reports whether it actually submitted: it has nothing to send
+  /// once a rebind has dropped the remembered target, and counting a retry that
+  /// never happened would walk `submissionMark` BACKWARDS, which the protocol
+  /// promises it never does.
+  private func drain(
+    _ coalescer: BrightnessWriteCoalescer,
+    issued: () -> UInt64,
+    resubmit: () -> Bool
+  ) async -> Bool {
+    let first = issued()
+    await coalescer.waitUntilCompleted(through: first)
+    if await coalescer.appliedThrough() >= first { return true }
+    guard resubmit() else { return false }
+    retriedSubmissions &+= 1
+    let second = issued()
+    await coalescer.waitUntilCompleted(through: second)
+    return await coalescer.appliedThrough() >= second
+  }
+
   /// Swaps the DDC writer, and — only when `panelIdentity` says the panel on
   /// the other end has CHANGED — drops the read-derived facts that were
   /// evidence about the old one.
@@ -389,20 +455,34 @@ public final class DDCValueController {
     }
     coalescer.resetDuplicateState()
     muteCoalescer.resetDuplicateState()
+    // Dropped with the memos and for their reason: these name writes issued
+    // through a service we no longer hold, so re-issuing one would put a stale
+    // value on a fresh wire.
+    lastSubmittedRaw = nil
+    lastSubmittedMuteWire = nil
   }
 
   /// Wake-restore prerequisite (D5): without the memo reset, repeat passes
-  /// are duplicate-skipped and never hit the wire.
+  /// are duplicate-skipped and never hit the wire. Also the HDR exit's
+  /// prerequisite, for a sharper version of the same reason: a write ACKed
+  /// while the display was in HDR was swallowed, so a memo built through that
+  /// window claims values the register never took.
   public func resetWriteMemo() {
     coalescer.resetDuplicateState()
     muteCoalescer.resetDuplicateState()
   }
+
+  /// Whether the wire is open right now: the same gate the coalescer consults
+  /// before applying, asked ahead of time so a settle loop can wait for it
+  /// instead of sleeping a guessed length of time.
+  public var isWireOpen: Bool { isEpochCurrent(epochProvider()) }
 
   public func setEpochProvider(
     _ provider: @escaping @Sendable () -> UInt64,
     isCurrent: @escaping @Sendable (UInt64) -> Bool
   ) {
     epochProvider = provider
+    isEpochCurrent = isCurrent
     coalescer.setEpochGate(isCurrent)
     muteCoalescer.setEpochGate(isCurrent)
   }
@@ -429,6 +509,7 @@ public final class DDCValueController {
     let tuning = prefs.tuning(for: command)
     let target = HardwareTarget.ddc(raw: raw)
     issuedGeneration += 1
+    lastSubmittedRaw = raw
     coalescer.submit(.init(
       target: target,
       // Rebuilt per submit (not held) so rebind takes effect on the next write.
@@ -441,6 +522,7 @@ public final class DDCValueController {
   private func submitMuteWire(_ wireValue: UInt16) {
     let target = HardwareTarget.ddc(raw: wireValue)
     issuedMuteGeneration += 1
+    lastSubmittedMuteWire = wireValue
     muteCoalescer.submit(.init(
       target: target,
       applier: DDCCommandApplier(writer: writer, command: VCP.audioMuteScreenBlank, remapCodes: []),

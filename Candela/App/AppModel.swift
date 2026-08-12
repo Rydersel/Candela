@@ -117,6 +117,25 @@ final class AppModel {
   /// inline: it needs the safe-mode flag, which arrives as an init parameter.
   @ObservationIgnored private let appPrefs: DisplayPrefs
 
+  /// Raised for the whole of any settings reset, per-display or all-settings.
+  /// ONE latch for both, because the pair is what goes wrong: a per-display
+  /// reset running alongside Reset All restores HDR through a controller the
+  /// rebuild has already replaced, so the write lands on an object nothing is
+  /// looking at while the live display keeps a locked register. Observable, so
+  /// both buttons can refuse the second click rather than relying on nobody
+  /// making it.
+  private(set) var isResetting = false
+
+  /// Claims the latch. False means a reset is already running and this one must
+  /// not start.
+  func beginReset() -> Bool {
+    guard !isResetting else { return false }
+    isResetting = true
+    return true
+  }
+
+  func endReset() { isResetting = false }
+
   /// D24: per-display VCP 0x62 verdict from the capabilities string. Observable,
   /// so the panel's volume slider enables/disables live the moment a probe
   /// lands. An ABSENT entry means "not probed yet, or the probe was skipped" and
@@ -990,11 +1009,25 @@ final class AppModel {
             // The built-in is in the list (its own slot, outside `displays`,
             // re-review T10-A); it moves from last to first, behaviorally
             // irrelevant (`task-11-report.md:49`).
+            // Not while a reset is running. A reset drives this display's
+            // hardware and then waits for its queue to go quiet before letting
+            // HDR back on, and sync is the one writer that submits on somebody
+            // ELSE's schedule: a built-in ramping under ambient light, or a
+            // Control Center drag, fans a write onto this display every poll
+            // tick, so the queue never goes quiet and the reset gives up on
+            // restoring the display's HDR.
+            //
+            // The movement made during the reset is DROPPED, not deferred: a
+            // disabled fan-out resets the deadband and returns, so the externals
+            // stay offset by however far the source moved in those few seconds.
+            // That is the documented meaning of the pref being off, applied for
+            // the duration rather than a new behaviour, and it is the cheaper
+            // of the two losses on offer.
             BrightnessSync.fanOut(
               delta: delta,
               from: controller,
               to: self.allControlledStates.map(\.controller),
-              isEnabled: self.appPrefs.enableBrightnessSync
+              isEnabled: self.appPrefs.enableBrightnessSync && !self.isResetting
             )
           }
         },

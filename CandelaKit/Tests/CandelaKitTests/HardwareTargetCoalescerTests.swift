@@ -505,3 +505,84 @@ actor GatedFailingApplier: BrightnessApplying {
   #expect(controller.lastApplyFailed() == true)
   #expect(controller.lastAppliedTarget() == .ddc(raw: 40)) // the failed write never landed
 }
+
+// MARK: - Settling a set of queues
+
+/// A queue whose contents are visible: `pending` is what would still be owed to
+/// the panel if the settle loop stopped now.
+@MainActor
+final class CountingQueue: PendingWireDraining {
+  private(set) var mark: UInt64 = 0
+  private(set) var pending = 0
+
+  func enqueue() {
+    mark += 1
+    pending += 1
+  }
+
+  func submissionMark() -> UInt64 { mark }
+
+  /// Nothing here is memoised, so there is nothing to forget.
+  func resetWriteMemo() {}
+
+  func drainPendingWrites() async -> Bool {
+    pending = 0
+    return true
+  }
+}
+
+/// Stands in for anything that writes on its own timer (the poller's fan-out, a
+/// dimming ramp): while IT is being drained, it puts work on a queue that was
+/// drained earlier in the same pass.
+@MainActor
+final class RefillingQueue: PendingWireDraining {
+  private let victim: CountingQueue
+  private var refillsLeft: Int
+
+  init(victim: CountingQueue, refills: Int) {
+    self.victim = victim
+    self.refillsLeft = refills
+  }
+
+  func submissionMark() -> UInt64 { 0 }
+
+  func resetWriteMemo() {}
+
+  func drainPendingWrites() async -> Bool {
+    if refillsLeft > 0 {
+      refillsLeft -= 1
+      victim.enqueue()
+    }
+    return true
+  }
+}
+
+/// Draining a list one at a time proves only that the LAST one is empty. This
+/// is the window: work lands on an already-drained queue while a later one is
+/// still being waited on, and a caller that took the first pass as proof would
+/// then make the wire unusable over a write nobody can see fail.
+@MainActor
+@Test func settlingReDrainsAQueueRefilledDuringTheSamePass() async {
+  let queue = CountingQueue()
+  let refiller = RefillingQueue(victim: queue, refills: 1)
+  queue.enqueue()
+
+  let settled = await WireQuiescence.settle([queue, refiller], betweenRounds: .zero)
+
+  #expect(settled)
+  #expect(queue.pending == 0, "the refill was drained too, not left behind the report")
+}
+
+/// And it gives up rather than claiming a quiet wire: something submitting on
+/// every pass never settles, and saying so is what makes the caller stand down.
+@MainActor
+@Test func settlingReportsFailureWhenTheQueueIsNeverQuiet() async {
+  let queue = CountingQueue()
+  let refiller = RefillingQueue(victim: queue, refills: .max)
+
+  let settled = await WireQuiescence.settle(
+    [queue, refiller], rounds: 3, betweenRounds: .zero
+  )
+
+  #expect(!settled)
+}

@@ -221,6 +221,13 @@ final class OledCareCoordinator {
   /// and `reapplyAfterPrefChange()` are all no-ops; only `resetDidComplete()`
   /// clears it.
   @ObservationIgnored private var resetting = false
+  /// The per-display equivalent, by persistence key. A one-display reset drives
+  /// that display's hardware and waits for its writes to land, so a lock dim
+  /// starting underneath would queue brightness behind the reset's own writes,
+  /// where the reset cannot account for them. Deliberately NOT `prepareForReset`
+  /// for this case: that one ends every display's dim and resets every hour
+  /// counter, which a reset of one display has no business doing.
+  @ObservationIgnored private var resettingDisplays: Set<String> = []
   /// OC12 for removals issued OUTSIDE the per-display tick (reset,
   /// un-enrollment), whose per-display state — the thing that would carry the
   /// marker — is deleted in the same breath. Keyed by the ID the window was
@@ -522,6 +529,30 @@ final class OledCareCoordinator {
     // far side of it.)
     for tracker in wearTrackers.values { tracker.reset() }
     wearTrackers.removeAll()
+  }
+
+  /// The per-display reset's opening move, paired with
+  /// `displayResetDidComplete`: end this display's lock dim and hold its care
+  /// work off while the reset drives the hardware. Scoped to one display, so
+  /// every other display's dims, counters and overlays are untouched, which is
+  /// why this is not `prepareForReset()`.
+  func beginDisplayReset(_ key: String) {
+    resettingDisplays.insert(key)
+    guard let model,
+          var state = states[key],
+          let controller = model.displays
+          .first(where: { $0.display.persistenceKey == key })?.controller
+    else { return }
+    endLockDim(&state, on: controller)
+    clearSkip(for: key)
+    states[key] = state
+  }
+
+  func displayResetDidComplete(_ key: String) {
+    resettingDisplays.remove(key)
+    guard let model, !model.isSafeMode else { return }
+    reconcileEnrollment()
+    if driver != nil { tick() }
   }
 
   /// The post-wipe half of the reset contract (paired with
@@ -888,6 +919,14 @@ final class OledCareCoordinator {
     guard dimState == .lockDim else {
       endLockDim(&state, on: displayState.controller)
       clearSkip(for: key)
+      return
+    }
+    // A display mid-reset drives its own hardware and waits for those writes to
+    // land before it lets HDR back on; a dim engaged here would ride the same
+    // queue behind the reset's back. The dim resumes on the next tick after
+    // `displayResetDidComplete`, which is a second at most.
+    guard !resettingDisplays.contains(key) else {
+      endLockDim(&state, on: displayState.controller)
       return
     }
     let controller = displayState.controller
