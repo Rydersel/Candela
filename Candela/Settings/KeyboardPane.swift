@@ -199,7 +199,10 @@ struct KeyboardPane: View {
       }
 
       if KeyModePolicy.watchesMediaKeys(prefs.keyboardVolume) {
-        SettingsCaption("The volume keys go to macOS instead whenever the current audio output device has a volume control of its own. Option on its own opens Sound settings.")
+        // The output-device rule is NOT restated here. It does not hold in every
+        // mode (name matching never consults it), and `volumeTargetCaption`
+        // already states it beside the picker that decides whether it applies.
+        SettingsCaption("While macOS reports an output device, the volume keys go to it instead whenever no display those keys would reach can take the command they send. Option on its own opens Sound settings.")
       }
     }
   }

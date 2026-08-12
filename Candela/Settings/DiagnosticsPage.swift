@@ -525,12 +525,21 @@ struct DiagnosticsPage: View {
       }
     }
 
-    // The caption is attached only to the empty case, which is the state a
-    // single-display rig is actually in.
-    if watchedKeyFamilies.isEmpty, model.lastArmedTapConfig != nil {
+    // The caption is attached whenever a family is missing, not only when they
+    // all are. Partial states are ordinary now that volume and mute arm
+    // separately, and a row that names two families out of three explains the
+    // absent one to nobody.
+    if model.lastArmedTapConfig != nil, !watchesEveryFamily {
       SettingRow(DiagnosticsPageCopy.watchedKeys) {
         LabeledContent("Keys being watched") {
           Text(verbatim: watchedKeysText).foregroundStyle(.secondary)
+        }
+        // The conditions are a list, so they render as one rather than as a
+        // paragraph nobody finishes (SO15/SO16).
+        ForEach(DiagnosticsPageCopy.keyWatchRequirements, id: \.title) { requirement in
+          KeyRequirementRow(
+            title: requirement.title, needs: requirement.needs, spoken: requirement.spoken
+          )
         }
       }
     } else {
@@ -578,6 +587,14 @@ struct DiagnosticsPage: View {
       families: watchedKeyFamilies, tapRunning: model.lastArmedTapConfig != nil)
   }
 
+  /// Whether the tap is watching everything it ever watches. False while any
+  /// family is released, which is what the caption explains.
+  private var watchesEveryFamily: Bool {
+    guard let config = model.lastArmedTapConfig else { return false }
+    return config.watchedKeys.isSuperset(
+      of: [.brightnessUp, .brightnessDown, .volumeUp, .volumeDown, .mute])
+  }
+
   /// Split out so the row can tell "watching nothing" from "not running" and
   /// caption the first without recomputing the words.
   private var watchedKeyFamilies: [String] {
@@ -585,9 +602,11 @@ struct DiagnosticsPage: View {
     return DiagnosticsCopy.watchedKeyFamilies(
       brightness: config.watchedKeys.contains(.brightnessUp)
         || config.watchedKeys.contains(.brightnessDown),
-      volumeOrMute: config.watchedKeys.contains(.volumeUp)
-        || config.watchedKeys.contains(.volumeDown)
-        || config.watchedKeys.contains(.mute)
+      // Reported apart because they are ARMED apart: the two write different
+      // registers, and a display can list one and deny the other.
+      volume: config.watchedKeys.contains(.volumeUp)
+        || config.watchedKeys.contains(.volumeDown),
+      mute: config.watchedKeys.contains(.mute)
     )
   }
 
@@ -631,6 +650,40 @@ struct DiagnosticsPage: View {
         }
       }
     }
+  }
+}
+
+/// One key family and what it needs before its keys are watched.
+///
+/// Same shape and same reasoning as the Keyboard pane's modifier legend: a
+/// two-column row that narrows to two lines, read aloud as one sentence rather
+/// than as two fragments. Not that type reused, because its columns are a
+/// shortcut and a key combination, and these are a family and a condition.
+private struct KeyRequirementRow: View {
+  let title: String
+  let needs: String
+  /// The prose this row replaced, kept whole for VoiceOver (SO16). It carries
+  /// the mode-dependent corners the visible half deliberately leaves out.
+  let spoken: String
+
+  var body: some View {
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 8) {
+        Text(verbatim: title)
+        Spacer(minLength: 8)
+        needsText.lineLimit(1)
+      }
+      VStack(alignment: .leading, spacing: 2) {
+        Text(verbatim: title)
+        needsText
+      }
+    }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(spoken)
+  }
+
+  private var needsText: some View {
+    Text(verbatim: needs).foregroundStyle(.secondary)
   }
 }
 
