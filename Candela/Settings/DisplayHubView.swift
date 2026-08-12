@@ -125,7 +125,7 @@ struct DisplayHubView: View {
   private var identitySection: some View {
     Section {
       SettingRow("Shown in the menu bar.") {
-        HStack(spacing: 6) {
+        HStack(spacing: 2) {
           TextField("Name", text: $nameDraft, prompt: Text(verbatim: state.display.name))
             .focused($nameFocused)
             .onSubmit { commitName() }
@@ -138,12 +138,20 @@ struct DisplayHubView: View {
             }
           // Only while there is a name to clear: the escape route from a custom
           // name is otherwise select-all-and-delete, which nothing on the page
-          // suggests. Sibling of the field rather than a branch around it, so
-          // the `if` swaps an `EmptyView` for a button and never rebuilds the
-          // TextField underneath a live edit.
+          // suggests. A sibling of the field rather than a branch around it, so
+          // the TextField keeps its position in the HStack's tuple: a bare `if`
+          // is `buildOptional`, and the optional it produces is the button's
+          // own slot, not a swap of the pair. The field is never rebuilt
+          // underneath a live edit.
           if hasCustomName {
             Button(action: clearName) {
               Image(systemName: "xmark.circle.fill")
+                // The glyph alone is a ~13 pt target hard against the row's
+                // trailing edge. Padding widens the hit area without growing
+                // the symbol; `contentShape` is what makes the padding
+                // clickable rather than merely empty.
+                .padding(4)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -153,6 +161,14 @@ struct DisplayHubView: View {
             .help("Clear this name and use the one the display reports.")
           }
         }
+        // The field gives up about 20 pt when the button arrives and takes it
+        // back when it goes, and both edges land while the caret may be in the
+        // field. Declarative rather than a `withAnimation` at the call site
+        // because the flip has four routes in (commit on Return, commit on
+        // focus loss, this button, the per-display reset) plus any external
+        // write, and only a predicate on the value itself covers them all.
+        // Keyed to `hasCustomName`, so typing animates nothing.
+        .animation(.easeInOut(duration: 0.15), value: hasCustomName)
       }
       if model.isSharedIdentity(persistenceKey) {
         // SO21: same persistence key, same prefs — every control on this page
@@ -181,10 +197,13 @@ struct DisplayHubView: View {
 
   /// Keyed to the STORED name, never to the draft. Two reasons: a name only
   /// half typed is not one this display is wearing anywhere else, and a
-  /// predicate on the draft would add and remove a control mid-keystroke,
-  /// resizing the field under the cursor. `normalizedFriendlyName` is the same
-  /// rule the title fallback uses, so a name that is whitespace shows the
-  /// hardware name AND offers nothing to clear.
+  /// predicate on the draft would add and remove a control on the first and
+  /// last keystroke of every edit. The field still resizes ONCE at each commit
+  /// boundary, caret possibly in it, which is what the animation above softens;
+  /// what this avoids is a resize per keystroke, not every resize.
+  /// `normalizedFriendlyName` is the same rule the title fallback uses, so a
+  /// name that is whitespace shows the hardware name AND offers nothing to
+  /// clear.
   private var hasCustomName: Bool {
     !DisplayCardPolicy.normalizedFriendlyName(prefs.friendlyName).isEmpty
   }
@@ -840,6 +859,19 @@ struct DisplayHubView: View {
   private func clearName() {
     nameDraft = ""
     commitName()
+    // Activating this button destroys it: the condition that shows it is now
+    // false, so the button is gone by the next render and takes any focus
+    // standing on it with it, under Full Keyboard Access or VoiceOver. Focus
+    // goes to the field the button serves rather than nowhere, which is also
+    // where a person would want to be next, and the announcement carries the
+    // result: the field now looks empty
+    // to VoiceOver, and the hardware name arriving as a placeholder is not
+    // something it reports (accessibility contract 8's pattern, announcement
+    // plus deliberate focus placement).
+    nameFocused = true
+    AccessibilityNotification.Announcement(
+      "Name cleared. Using the name the display reports."
+    ).post()
   }
 
   private func commitAudioName() {
