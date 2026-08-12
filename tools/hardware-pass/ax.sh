@@ -5,14 +5,40 @@
 
 # Select by EXCLUSION, not by geometry and not by index. Candela also owns a 1x1
 # gamma enforcer window and a full-screen OLED care overlay, both of which come
-# and go and shift every index, and both are named "Candela ...". The settings
-# window is named for its current pane ("General", "Keyboard", "MAG 341C OLED"),
-# so nothing else can match.
+# and go and shift every index.
 #
 # This used to select on `size is {900, 568}`. That broke on 2026-08-11 when the
 # window silently became 1005x580 (#149): every script here failed at once, and
 # the size is now known not to be stable. Do not put a literal size back.
-W='first window whose name does not start with "Candela "'
+#
+# It then selected on `name does not start with "Candela "`, which has its own
+# hole: the settings window is USUALLY named for its current pane ("General",
+# "Keyboard", "MAG 341C OLED"), but it was measured on 2026-08-11 reporting
+# "Candela Settings", the scene's default name, while it was the app's only
+# window. A prefix rule throws the real window away exactly then. So exclude the
+# two decoys by their OWN names, which admits the settings window under either
+# name.
+#
+# That trades one fragility for another: a prefix rule survives a new decoy
+# nobody has seen, and this one does not. Hence the count check below. Neither
+# rule can be trusted to be right forever, so the script's job is to FAIL LOUDLY
+# when it is wrong rather than return a confident wrong window: a zero-match
+# selector reports every control missing, which reads exactly like a real defect
+# in the app, and that has already cost one issue filed against a defect that did
+# not exist.
+BIND='set cands to (every window whose name does not start with "Candela Gamma Activity Enforcer" and name does not start with "Candela OLED Care Overlay")
+    if (count of cands) is not 1 then
+      set seen to ""
+      repeat with x in windows
+        set nm to "(unnamed)"
+        try
+          set nm to name of x as text
+        end try
+        set seen to seen & "  [" & nm & "]" & linefeed
+      end repeat
+      error "ax.sh: settings window not uniquely identified: " & (count of cands) & " candidates. Open windows:" & linefeed & seen
+    end if
+    set w to item 1 of cands'
 SB="UI element 1 of UI element 1 of UI element 1 of UI element 1 of w"
 DETAIL="UI element 1 of UI element 3 of UI element 1 of UI element 1 of w"
 
@@ -21,7 +47,7 @@ nav() {
   osascript <<EOF 2>&1
 tell application "System Events"
   tell process "Candela"
-    set w to $W
+    $BIND
     click (UI element $1 of $SB)
     delay 1.0
   end tell
@@ -34,7 +60,7 @@ dump() {
   osascript <<EOF 2>&1
 tell application "System Events"
   tell process "Candela"
-    set w to $W
+    $BIND
     set dg to $DETAIL
     set out to ""
     set i to 0
@@ -70,7 +96,7 @@ toggle() {
   osascript <<EOF 2>&1
 tell application "System Events"
   tell process "Candela"
-    set w to $W
+    $BIND
     set dg to $DETAIL
     repeat with t in (UI elements of dg)
       try
@@ -100,7 +126,7 @@ pick() {
   osascript <<EOF 2>&1
 tell application "System Events"
   tell process "Candela"
-    set w to $W
+    $BIND
     set dg to $DETAIL
     repeat with t in (UI elements of dg)
       try
