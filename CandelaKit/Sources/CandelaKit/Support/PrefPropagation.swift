@@ -24,6 +24,10 @@ public enum PrefName: String, Sendable, CaseIterable {
   // App-level — panel and menu-bar presentation
   case menuIcon, hideBuiltInDisplay, showContrast
   case enableSliderSnap, enableSliderPercent
+  // App-level: where the on-screen indicator pills sit. Two keys rather than
+  // one, decided up front because the choice is permanent: the pills exist to
+  // be moved out of each other's way, which one key cannot express.
+  case hudPositionBrightness, hudPositionVolume
   // App-level — dimming
   case disableCombinedBrightness, allowZeroSwBrightness, enableBrightnessSync, startupAction
   case separateCombinedScale
@@ -124,9 +128,13 @@ public enum PrefPropagation {
 
     case .enableMuteUnmute, .startupAction, .multiKeyboardBrightness,
          .useFineScaleBrightness, .useFineScaleVolume,
-         .pollingMode, .pollingCount, .separateCombinedScale:
+         .pollingMode, .pollingCount, .separateCombinedScale,
+         .hudPositionBrightness, .hudPositionVolume:
       // Read at key time / launch time / DDC-read time. `.refreshUI` alone is
-      // the whole row — that is a deliberate answer, not a missing one.
+      // the whole row, which is a deliberate answer and not a missing one. The two
+      // indicator positions are read by `KeyActionExecutor` as it announces a
+      // pill, so the next press already uses the new one; a pill currently on
+      // screen keeps the place it was drawn at, and nothing here moves it.
       []
 
     case .keyboardBrightness, .keyboardVolume:

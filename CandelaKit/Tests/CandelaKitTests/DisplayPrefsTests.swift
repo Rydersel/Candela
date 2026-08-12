@@ -430,13 +430,36 @@ struct DisplayPrefsTests {
     }
   }
 
+  @Test func hudPositionsAreAppLevelAndDefaultToTheShippedTopRight() {
+    let d = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: d, persistenceKey: "irrelevant")
+    // An install that has never touched these keeps the only position the app
+    // ever had.
+    #expect(prefs.hudPositionBrightness == .topRight)
+    #expect(prefs.hudPositionVolume == .topRight)
+
+    prefs.hudPositionBrightness = .topLeft
+    prefs.hudPositionVolume = .topCenter
+    #expect(d.integer(forKey: "hudPositionBrightness") == 1)
+    #expect(d.integer(forKey: "hudPositionVolume") == 2)
+    // App-level: no per-display suffix, so one choice covers every display.
+    #expect(d.object(forKey: "hudPositionBrightness.irrelevant") == nil)
+
+    // The two are genuinely independent, which is the whole point of shipping
+    // two keys: setting one must not move the other.
+    let reread = DisplayPrefs(defaults: d, persistenceKey: "another-display")
+    #expect(reread.hudPositionBrightness == .topLeft)
+    #expect(reread.hudPositionVolume == .topCenter)
+  }
+
   @Test func unknownStoredRawValuesFallBackRatherThanTrap() {
     // Raw 0 is a VALID case for three of these four enums, so the default-value
     // assertions above cannot reach the `?? fallback` at all. D13's downgrade
     // story (and the retired-HDRMode-raw-1 precedent) rests entirely on it.
     let d = InMemoryDefaults()
     for key in ["menuIcon", "menuItemStyle", "keyboardBrightness",
-                "keyboardVolume", "multiKeyboardBrightness"] {
+                "keyboardVolume", "multiKeyboardBrightness",
+                "hudPositionBrightness", "hudPositionVolume"] {
       d.set(99, forKey: key)
     }
     let prefs = DisplayPrefs(defaults: d, persistenceKey: "x")
@@ -445,6 +468,11 @@ struct DisplayPrefsTests {
     #expect(prefs.keyboardBrightness == .media)
     #expect(prefs.keyboardVolume == .media)
     #expect(prefs.multiKeyboardBrightness == .mouse)
+    // Raw 0 is a valid case for these two as well, so only an out-of-range
+    // value reaches their fallback. It is the position every build before the
+    // preference existed drew the pill at.
+    #expect(prefs.hudPositionBrightness == .topRight)
+    #expect(prefs.hudPositionVolume == .topRight)
   }
 
   @Test func foldedRawKeysKeepTheirExactKeyStrings() {

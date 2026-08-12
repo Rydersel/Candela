@@ -146,7 +146,10 @@ final class KeyActionExecutor {
         guard let newValue = state.contrast.step(isUp: isUp, isFine: isFine) else { continue }
         stepped.append((state, newValue))
       }
-      showStateHUDs(stepped) { _ in .contrast }
+      // Contrast follows the BRIGHTNESS position, the same line `hideOsd`
+      // already draws: it is a picture control, stepped by the brightness key
+      // family, and volume and mute are the pair that gets its own place.
+      showStateHUDs(stepped, position: appPrefs.hudPositionBrightness) { _ in .contrast }
     case .openSoundSettings:
       NSWorkspace.shared.open(
         URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension")!
@@ -250,7 +253,8 @@ final class KeyActionExecutor {
     // had per display: a suppressed display shows no pill and is not counted
     // among the others sharing one.
     showStateHUDs(
-      stepped.filter { !DisplayPrefs(persistenceKey: $0.state.display.persistenceKey).hideOsd }
+      stepped.filter { !DisplayPrefs(persistenceKey: $0.state.display.persistenceKey).hideOsd },
+      position: appPrefs.hudPositionVolume
     ) { $0.volume.isMuted ? .volumeMuted : .volume }
   }
 
@@ -290,7 +294,8 @@ final class KeyActionExecutor {
         value: named.newValue,
         nameSuffix: HUDGrouping.nameSuffix(
           isHDREngaged: isHDREngaged(named.id), othersInSet: pill.othersInSet
-        )
+        ),
+        position: appPrefs.hudPositionBrightness
       )
     }
   }
@@ -300,6 +305,7 @@ final class KeyActionExecutor {
   /// reaches their suffix.
   private func showStateHUDs(
     _ stepped: [(state: AppModel.DisplayState, value: Double)],
+    position: HUDPosition,
     type: (AppModel.DisplayState) -> HUDType
   ) {
     let topology = model.mirrorTopology.topology()
@@ -311,10 +317,16 @@ final class KeyActionExecutor {
         name: hudName(for: named.state),
         value: Float(named.value),
         maxValue: 1,
-        nameSuffix: HUDGrouping.nameSuffix(isHDREngaged: false, othersInSet: pill.othersInSet)
+        nameSuffix: HUDGrouping.nameSuffix(isHDREngaged: false, othersInSet: pill.othersInSet),
+        position: position
       )
     }
   }
+
+  /// The app-level defaults, re-read at every announcement rather than cached:
+  /// the indicator positions fan out to `.refreshUI` alone, so a pill drawn
+  /// after the picker moves has to pick the new value up here.
+  private var appPrefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
   /// What the HUD calls a display. The model hands every step path the RAW
   /// hardware name, so the rename the user made in the Displays pane has to be

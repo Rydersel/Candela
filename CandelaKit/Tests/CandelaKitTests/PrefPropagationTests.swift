@@ -84,7 +84,12 @@ struct PrefPropagationTests {
     // from the enum, not arithmetic on the two claims.
     #expect(PrefName.oledTelemetry.rawValue == "oledTelemetry")
     #expect(PrefName.oledWindowObservation.rawValue == "oledWindowObservation")
-    #expect(PrefName.allCases.count == 53)
+    // The two on-screen indicator positions added two more: 53 -> 55. Their raw
+    // values are the keys `DisplayPrefs` writes, and a typo in either would move
+    // one pill and strand the position the user chose for the other.
+    #expect(PrefName.hudPositionBrightness.rawValue == "hudPositionBrightness")
+    #expect(PrefName.hudPositionVolume.rawValue == "hudPositionVolume")
+    #expect(PrefName.allCases.count == 55)
   }
 
   // MARK: - Rows
@@ -215,6 +220,16 @@ struct PrefPropagationTests {
     // They are read at use (DDC-read time / key time), so their row is
     // refreshUI alone — a deliberate answer, matching enableMuteUnmute.
     for name in [PrefName.pollingMode, .pollingCount, .separateCombinedScale] {
+      #expect(PrefPropagation.effects(forChange: name) == [.refreshUI])
+    }
+  }
+
+  @Test func indicatorPositionsRefreshTheUIAndNothingElse() {
+    // Read by `KeyActionExecutor` as it announces a pill, so the next press
+    // already uses the new position: no re-arm, no rebuild, and above all no
+    // `.reapplyDimming`, which would put a DDC write on the bus every time
+    // someone tried a position out.
+    for name in [PrefName.hudPositionBrightness, .hudPositionVolume] {
       #expect(PrefPropagation.effects(forChange: name) == [.refreshUI])
     }
   }
