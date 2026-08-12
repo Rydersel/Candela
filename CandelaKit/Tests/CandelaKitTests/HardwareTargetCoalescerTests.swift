@@ -9,6 +9,8 @@ import Testing
 /// hardware failures: scripted results are consumed in order, then every
 /// later apply succeeds.
 actor RecordingApplier: BrightnessApplying {
+  nonisolated let accepts = HardwareTargetKind.ddc
+
   private(set) var applied: [HardwareTarget] = []
   private var scriptedResults: [Bool]
 
@@ -203,6 +205,8 @@ final class FakeEpochGate: Sendable {
 /// Applier whose applies block until released, for racing `resetDuplicateState`
 /// against an apply that is already in flight.
 actor GatedApplier: BrightnessApplying {
+  nonisolated let accepts = HardwareTargetKind.ddc
+
   private(set) var applied: [HardwareTarget] = []
   private var permits = 0
   private var gateWaiters: [CheckedContinuation<Void, Never>] = []
@@ -269,9 +273,12 @@ actor GatedApplier: BrightnessApplying {
 /// without touching the writer.
 @Test func ddcApplierWritesBrightnessAndRejectsNativeTargets() async {
   let fake = FakeDDC()
-  let applier = DDCCommandApplier(writer: fake, command: VCP.brightness)
+  let recorder = MismatchRecorder()
+  let applier = DDCCommandApplier(writer: fake, command: VCP.brightness, onMismatch: recorder.report)
+  #expect(applier.accepts == .ddc)
   #expect(await applier.apply(.ddc(raw: 55)) == true)
   #expect(await applier.apply(.native(0.5)) == false)
+  #expect(recorder.recorded().count == 1)
   let writes = await fake.recordedWrites()
   #expect(writes.count == 1)
   #expect(writes.first?.command == VCP.brightness)
@@ -282,12 +289,19 @@ actor GatedApplier: BrightnessApplying {
 /// and rejects `.ddc` targets (wiring bug) without invoking the closure.
 @Test func nativeApplierInvokesClosureAndRejectsDDCTargets() async {
   let calls = OSAllocatedUnfairLock<[(Float, CGDirectDisplayID)]>(initialState: [])
-  let applier = NativeBrightnessApplier(displayID: 7) { value, displayID in
-    calls.withLock { $0.append((value, displayID)) }
-    return true
-  }
+  let recorder = MismatchRecorder()
+  let applier = NativeBrightnessApplier(
+    displayID: 7,
+    apply: { value, displayID in
+      calls.withLock { $0.append((value, displayID)) }
+      return true
+    },
+    onMismatch: recorder.report
+  )
+  #expect(applier.accepts == .native)
   #expect(await applier.apply(.native(0.25)) == true)
   #expect(await applier.apply(.ddc(raw: 25)) == false)
+  #expect(recorder.recorded().count == 1)
   let recorded = calls.withLock { $0 }
   #expect(recorded.count == 1)
   #expect(recorded.first?.0 == 0.25)
@@ -432,6 +446,8 @@ struct LastAppliedTargetTests {
 /// shape, but every apply reports failure. Separate rather than a flag on
 /// `GatedApplier` so the existing I1 test's expectations stay untouched.
 actor GatedFailingApplier: BrightnessApplying {
+  nonisolated let accepts = HardwareTargetKind.ddc
+
   private var started = false
   private var startObservers: [CheckedContinuation<Void, Never>] = []
   private var permits = 0
