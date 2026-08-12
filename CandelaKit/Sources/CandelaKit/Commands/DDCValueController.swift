@@ -317,7 +317,13 @@ public final class DDCValueController: PendingWireDraining {
   /// Nothing here is speculative: it fires only when the strategy the last
   /// restore acted on is not the strategy now in force, and only while this
   /// display is muted, which is the only restore branch the verdict changes.
-  /// The memo reset is what lets the corrected write reach the wire at all.
+  ///
+  /// The memo reset is defence in depth, not the thing that makes this work
+  /// [MEASURED: removing it keeps the suite green]. The corrected write targets
+  /// a different register from the one it supersedes, and `performRestorePass`
+  /// resets the memos before every restore anyway. It stays because this is a
+  /// correction path, and a correction dropped as a duplicate of a value the
+  /// register never took is the failure it exists to undo.
   @discardableResult
   public func restoreIfMuteStrategyChanged() -> Bool {
     guard command == .volume, isMuted,
