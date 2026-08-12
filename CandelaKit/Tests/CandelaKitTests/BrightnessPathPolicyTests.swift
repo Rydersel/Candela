@@ -187,4 +187,38 @@ struct BrightnessPathPolicyTests {
       }
     }
   }
+
+  /// `drivesDDCBrightness` is a projection of the same table, so it is pinned
+  /// against the table rather than described beside it: the two arms that
+  /// SUBMIT a register value in `applyPaths` are exactly the two that answer
+  /// true. A drift here is #143 again, in either direction: a false answer for
+  /// a path that writes would hand the register back underneath a live DDC leg,
+  /// and a true answer for one that does not would leave it at the floor.
+  @Test func drivesDDCBrightnessNamesExactlyTheRegisterWritingArms() {
+    let bools = [false, true]
+    for role in [DisplayRole.external, .builtIn] {
+      for isHDRActive in bools {
+        for forceSoftware in bools {
+          for disableCombined in bools {
+            for unavailableDDC in bools {
+              for switching in [0.0, 0.5, 0.9375] {
+                let path = BrightnessPathPolicy.path(inputs(
+                  role: role, isHDRActive: isHDRActive,
+                  forceSoftware: forceSoftware,
+                  disableCombinedBrightness: disableCombined,
+                  unavailableDDC: unavailableDDC,
+                  switchingValue: switching
+                ))
+                let writesRegister: Bool = switch path {
+                case .combined, .hardware: true
+                case .native, .software, .softwareOnly, .unavailable: false
+                }
+                #expect(path.drivesDDCBrightness == writesRegister)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }

@@ -646,7 +646,15 @@ struct ReapplyAfterPrefChangeTests {
     h.prefs.setTuning(tuning, for: .brightness)
     h.controller.reapplyAfterPrefChange()
 
-    #expect(h.submitted == [.ddc(raw: 0)]) // nothing new on the wire
+    // Nothing new on the wire, and after #143 that silence is deliberate rather
+    // than incidental: `handBackDDCLegIfAbandoned` skips a command the display
+    // has declared unsupported or the user has switched off, exactly as
+    // `restoreFullRangeDDC` does. The register therefore stays at the combined
+    // floor here. That is the same stranding #143 fixed for the hardware-control
+    // toggle, and undoing it belongs in the tuning grid's own Off switch (D29
+    // rule 1's shape: undo the disabling effect before persisting the value that
+    // disables it), not in a write to a command just declared unavailable.
+    #expect(h.submitted == [.ddc(raw: 0)])
     #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 0.83)) // re-asserted
   }
 
@@ -680,6 +688,176 @@ struct ReapplyAfterPrefChangeTests {
     // the other route: the table is handed back at 1.0 and no shade is drawn.
     #expect(h.gamma.scales == [1.0])
     #expect(h.shade.removed == [Harness.displayID])
+  }
+}
+
+// MARK: - Handing the DDC leg back when a pref abandons it (#143)
+
+/// Achieved output for a register value under a gamma scale, on a panel that
+/// still emits `floor` of its maximum at register 0. Everything below is
+/// asserted for SEVERAL floors, because the panel's real curve is unknown (the
+/// MAG answers no reads at all) and the ordering claim must not depend on it:
+/// the only property used is that the curve is monotone increasing.
+private func achieved(ddc raw: UInt16, gamma: Double, floor: Double) -> Double {
+  (floor + (1 - floor) * Double(raw) / 100) * gamma
+}
+
+private let panelFloors = [0.0, 0.1, 0.2, 0.5]
+
+private extension HardwareTarget {
+  var isDDC: Bool { if case .ddc = self { true } else { false } }
+}
+
+@MainActor
+@Suite("Handing the DDC leg back (#143)")
+struct DDCLegHandBackTests {
+  /// The measurement in the issue, as an engine test: MAG at 40% combined is
+  /// register 0 with the table at 0.83, and turning hardware control off used to
+  /// write no register value at all, leaving software dimming to run on top of a
+  /// panel already at its hardware minimum.
+  @Test func turningHardwareControlOffParksTheRegisterAtFullRange() async {
+    let h = Harness()
+    h.controller.setBrightness(0.4)
+    #expect(h.submitted == [.ddc(raw: 0)])
+    #expect(h.gamma.scales.count == 1 && approx(h.gamma.scales[0], 0.83))
+
+    // The ordering probe: what had reached the wire at the instant the new
+    // mode's gamma write went out.
+    var wireAtGammaTime: [HardwareTarget] = []
+    h.controller.preGammaApplyHook = { [weak h] in wireAtGammaTime = h?.submitted ?? [] }
+
+    h.prefs.forceSoftware = true
+    h.controller.reapplyAfterPrefChange()
+
+    // Full-range register, and the software leg on the raw value: swTransform(0.4).
+    #expect(h.submitted == [.ddc(raw: 0), .ddc(raw: 100)])
+    #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 0.49))
+    #expect(h.controller.brightness == 0.4) // D4: the value is preserved
+    // ORDERING: the table was already at its new value before the register rose.
+    #expect(wireAtGammaTime == [.ddc(raw: 0)])
+  }
+
+  /// The invariant the ordering exists for, at both sides of the switching
+  /// point: the transient never overshoots the brighter of the two endpoints,
+  /// and the reversed ordering always would. 0.9 is the case hardware checklist
+  /// item 54 names, where reversing it is a flash to 100%.
+  @Test func theTransientNeverOvershootsEitherEndpoint() async {
+    for (value, ddcBefore, gammaBefore, gammaAfter) in [
+      (0.4, UInt16(0), 0.83, 0.49), // software zone: register already at the floor
+      (0.9, UInt16(80), 1.0, 0.915), // hardware zone: register high, table neutral
+    ] {
+      let h = Harness()
+      h.controller.setBrightness(value)
+      #expect(h.submitted == [.ddc(raw: ddcBefore)])
+      #expect(approx(h.gamma.scales.last ?? .nan, gammaBefore))
+
+      var wireAtGammaTime: [HardwareTarget] = []
+      h.controller.preGammaApplyHook = { [weak h] in wireAtGammaTime = h?.submitted ?? [] }
+
+      h.prefs.forceSoftware = true
+      h.controller.reapplyAfterPrefChange()
+
+      #expect(h.submitted == [.ddc(raw: ddcBefore), .ddc(raw: 100)])
+      #expect(approx(h.gamma.scales.last ?? .nan, gammaAfter))
+      // The register had NOT yet risen when the table dropped, which is what
+      // makes the transient computable below.
+      #expect(wireAtGammaTime == [.ddc(raw: ddcBefore)])
+
+      for floor in panelFloors {
+        let start = achieved(ddc: ddcBefore, gamma: gammaBefore, floor: floor)
+        let end = achieved(ddc: 100, gamma: gammaAfter, floor: floor)
+        let transient = achieved(ddc: ddcBefore, gamma: gammaAfter, floor: floor)
+        // No flash: the in-between state is never brighter than either endpoint.
+        #expect(transient <= max(start, end) + 1e-12)
+        // And it is the ORDER that buys that, not luck. Raising the register
+        // first would put a full-range panel under the old table, which
+        // overshoots both endpoints for every curve.
+        let reversed = achieved(ddc: 100, gamma: gammaBefore, floor: floor)
+        #expect(reversed > max(start, end))
+        // The register ends where software dimming assumes it is: full range,
+        // so the software leg alone accounts for the whole difference.
+        #expect(approx(end, gammaAfter))
+      }
+    }
+  }
+
+  /// Turning hardware control back ON is the direction that already worked, and
+  /// it stays a plain combined-mode re-apply: one register write at the combined
+  /// value, no full-range write on the way through.
+  @Test func turningHardwareControlBackOnIsUnchanged() async {
+    let h = Harness { prefs, _ in prefs.forceSoftware = true }
+    h.controller.setBrightness(0.4)
+    #expect(h.submitted.isEmpty)
+    #expect(h.gamma.scales.count == 1 && approx(h.gamma.scales[0], 0.49))
+
+    h.prefs.forceSoftware = false
+    h.controller.reapplyAfterPrefChange()
+
+    #expect(h.submitted == [.ddc(raw: 0)])
+    #expect(h.gamma.scales.count == 2 && approx(h.gamma.scales[1], 0.83))
+  }
+
+  /// A register Candela has never written is one the user set with the
+  /// monitor's own buttons. A pref change that touches only the software leg
+  /// must not seize it.
+  @Test func aRegisterCandelaNeverDroveIsLeftAlone() async {
+    let h = Harness { prefs, _ in prefs.forceSoftware = true }
+    h.controller.setBrightness(0.4)
+
+    h.prefs.avoidGamma = true
+    h.controller.reapplyAfterPrefChange()
+
+    #expect(h.submitted.isEmpty)
+    #expect(h.shade.alphaCalls.count == 1)
+  }
+
+  /// At 100% combined the register is already at full range, so abandoning the
+  /// leg has nothing to hand back and puts no extra write on a write-only bus.
+  @Test func aRegisterAlreadyAtFullRangeIsNotRewritten() async {
+    let h = Harness()
+    h.controller.setBrightness(1.0)
+    #expect(h.submitted == [.ddc(raw: 100)])
+
+    h.prefs.forceSoftware = true
+    h.controller.reapplyAfterPrefChange()
+
+    #expect(h.submitted == [.ddc(raw: 100)])
+  }
+
+  /// Under live HDR the register is dead (CLAUDE.md §2), so a register left
+  /// below full range stays there: the native path is not an abandonment this
+  /// can repair, and reaching for the wire to prove otherwise is the write that
+  /// cannot land.
+  @Test func theNativePathIsNeverHandedBackOverDDC() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    h.controller.setBrightness(0.4) // combined: the register goes to its floor
+    #expect(h.submitted == [.ddc(raw: 0)])
+    await h.controller.setHDRMode(.alwaysOn)
+
+    h.prefs.forceSoftware = true
+    h.controller.reapplyAfterPrefChange()
+
+    #expect(h.submitted.filter(\.isDDC) == [.ddc(raw: 0)])
+    await h.controller.waitForPendingWrites()
+    #expect(await h.ddc.recordedWrites().count == 1)
+  }
+
+  /// The min/max overrides move what "full range" MEANS, and the hand-back is
+  /// stated in the portion domain so it follows them: portion 1 is the
+  /// brightest the display is configured to go, not a hard-coded 100.
+  @Test func theHandBackRespectsAMaxOverride() async {
+    let h = Harness()
+    var tuning = h.prefs.tuning(for: .brightness)
+    tuning.maxDDCOverride = 80
+    h.prefs.setTuning(tuning, for: .brightness)
+    h.controller.setBrightness(0.4)
+    #expect(h.submitted == [.ddc(raw: 0)])
+
+    h.prefs.forceSoftware = true
+    h.controller.reapplyAfterPrefChange()
+
+    #expect(h.submitted == [.ddc(raw: 0), .ddc(raw: 80)])
   }
 }
 
