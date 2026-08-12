@@ -288,7 +288,12 @@ public final class BrightnessController {
   @ObservationIgnored private(set) var initialHDRRefresh: Task<Void, Never>?
   /// Test seam: observes every hardware submit before the coalescer's own
   /// duplicate-skip (the boundary-walk tests assert at the submit level).
-  @ObservationIgnored var _onSubmit: ((HardwareTarget) -> Void)?
+  ///
+  /// The APPLIER rides along so the target/applier pairing is observable where
+  /// it is chosen. Every mismatch this codebase can produce is born here, in
+  /// `applyPaths`; the appliers' own guards only see it two layers later, as a
+  /// dropped write and a log line (#148).
+  @ObservationIgnored var _onSubmit: ((HardwareTarget, any BrightnessApplying) -> Void)?
 
   public init(
     writer: any DDCWriting,
@@ -642,7 +647,7 @@ public final class BrightnessController {
   }
 
   private func submitHardware(_ target: HardwareTarget, applier: any BrightnessApplying) {
-    _onSubmit?(target)
+    _onSubmit?(target, applier)
     issuedGeneration += 1
     coalescer.submit(
       .init(target: target, applier: applier, epoch: epochProvider(), generation: issuedGeneration)

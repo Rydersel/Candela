@@ -52,6 +52,8 @@ actor FakeHDR: HDRToggling {
 /// Copies share the lock's heap storage, so the harness copy observes the
 /// controller's writes.
 struct FakeNativeApplier: BrightnessApplying {
+  let accepts = HardwareTargetKind.native
+
   private let recorded = OSAllocatedUnfairLock<[HardwareTarget]>(initialState: [])
 
   func apply(_ target: HardwareTarget) async -> Bool {
@@ -71,8 +73,11 @@ final class PathMemoryStore: BrightnessStoring, @unchecked Sendable {
 
 // MARK: - Harness
 
+/// Internal rather than file-private: `ApplierPairingTests` drives the same
+/// controller through the same path table, and a second copy of this harness
+/// would be a second answer to "how is a controller wired".
 @MainActor
-private final class Harness {
+final class Harness {
   static let displayID: CGDirectDisplayID = 7
   static let storageKey = "combinedBrightness.t"
   static let legacyKey = "brightness.t"
@@ -87,6 +92,9 @@ private final class Harness {
   let prefs: DisplayPrefs
   let controller: BrightnessController
   private(set) var submitted: [HardwareTarget] = []
+  /// Each submit with the applier that carried it (#148): `submitted` alone
+  /// cannot see a target handed to the wrong endpoint.
+  private(set) var submittedPairs: [(target: HardwareTarget, applier: any BrightnessApplying)] = []
 
   init(
     ddcRead: (current: UInt16, max: UInt16)? = nil,
@@ -122,7 +130,10 @@ private final class Harness {
       legacyKey: Self.legacyKey
     )
     controller.settleDelay = settle
-    controller._onSubmit = { [weak self] target in self?.submitted.append(target) }
+    controller._onSubmit = { [weak self] target, applier in
+      self?.submitted.append(target)
+      self?.submittedPairs.append((target, applier))
+    }
   }
 
   /// Makes the HDR caches deterministic: awaits the init-time refresh first so
@@ -1457,7 +1468,7 @@ struct HDRModeEngageFailureTests {
     )
     controller.settleDelay = .milliseconds(5)
     var submitted: [HardwareTarget] = []
-    controller._onSubmit = { submitted.append($0) }
+    controller._onSubmit = { target, _ in submitted.append(target) }
     await controller.initialHDRRefresh?.value
     controller.setBrightness(0.75)
 
@@ -1504,7 +1515,7 @@ struct HDRModeEngageFailureTests {
     )
     controller.settleDelay = .milliseconds(5)
     var submitted: [HardwareTarget] = []
-    controller._onSubmit = { submitted.append($0) }
+    controller._onSubmit = { target, _ in submitted.append(target) }
     await controller.initialHDRRefresh?.value
     controller.setBrightness(0.75)
 
@@ -1551,7 +1562,7 @@ struct HDRModeEngageFailureTests {
     )
     controller.settleDelay = .milliseconds(5)
     var submitted: [HardwareTarget] = []
-    controller._onSubmit = { submitted.append($0) }
+    controller._onSubmit = { target, _ in submitted.append(target) }
     await controller.initialHDRRefresh?.value
     controller.setBrightness(0.75)
 
@@ -1694,7 +1705,7 @@ struct EngageFailureReguardTests {
     )
     controller.settleDelay = .milliseconds(10)
     nonisolated(unsafe) var submitCount = 0
-    controller._onSubmit = { _ in submitCount += 1 }
+    controller._onSubmit = { _, _ in submitCount += 1 }
     await controller.initialHDRRefresh?.value
 
     await gated.armGate()

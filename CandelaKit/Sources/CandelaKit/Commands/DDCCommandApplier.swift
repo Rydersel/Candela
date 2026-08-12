@@ -8,21 +8,32 @@ import os
 /// code (reads use only the first; the read side lives in the controllers).
 /// Every DDC leg goes through this — an empty remap is one write to `command`.
 public struct DDCCommandApplier: BrightnessApplying {
+  public let accepts = HardwareTargetKind.ddc
+
   /// Per-instance, not static — same rationale as `NativeBrightnessApplier`.
-  private let mismatchLogged = OSAllocatedUnfairLock(initialState: false)
+  private let mismatchReported = OSAllocatedUnfairLock(initialState: false)
   private let writer: any DDCWriting
   private let command: UInt8
   private let remapCodes: [UInt8]
+  private let onMismatch: ApplierMismatchReporting?
 
-  public init(writer: any DDCWriting, command: UInt8, remapCodes: [UInt8] = []) {
+  public init(
+    writer: any DDCWriting,
+    command: UInt8,
+    remapCodes: [UInt8] = [],
+    onMismatch: ApplierMismatchReporting? = nil
+  ) {
     self.writer = writer
     self.command = command
     self.remapCodes = remapCodes
+    self.onMismatch = onMismatch
   }
 
   public func apply(_ target: HardwareTarget) async -> Bool {
     guard case let .ddc(raw) = target else {
-      logMismatchOnce(mismatchLogged, "DDCCommandApplier received a .native target")
+      reportMismatchOnce(
+        mismatchReported, "DDCCommandApplier received a .native target", to: onMismatch
+      )
       return false
     }
     let codes = remapCodes.isEmpty ? [command] : remapCodes
