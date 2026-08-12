@@ -183,6 +183,10 @@ struct BannerRegion: View {
   ///    real without any user choice: a mute lands while the capabilities probe
   ///    is still out (absent reads as unknown, which allows), and the answer
   ///    comes back as a denial.
+  ///
+  /// A display that denies only the MUTE register is deliberately NOT a cause:
+  /// its volume path is still live, and any upward volume move clears `isMuted`
+  /// and sends the unmute inside `apply()`, so the route back never closed.
   private var isStrandedMuted: Bool {
     state.volume.isMuted && (!state.volume.isAvailable || !model.volumeSliderEnabled(state))
   }
@@ -196,14 +200,25 @@ struct BannerRegion: View {
     isHardwareControlOff ? "Turn Hardware Control Back On and Unmute" : "Unmute This Display"
   }
 
-  /// Says what the button will change and nothing more. The second sentence
+  /// Says what the button will change and nothing more. The last sentence
   /// deliberately does not promise the slider comes back: when the cause is the
   /// display's own denial, setting the choice back to automatic leaves it
   /// greyed, and the honest claim is about the unmute and the setting.
+  ///
+  /// The cause sentence is the SAME one the greyed slider gives on hover, from
+  /// the policy that made the decision. A fused sentence here would have said
+  /// "this display's volume controls are switched off" for both causes, which
+  /// is the collapse the slider's own copy was split to fix: told their monitor
+  /// refused, a user who set "Always disabled" themselves goes looking for a
+  /// bad cable.
   private var strandedMuteExplanation: LocalizedStringKey {
-    isHardwareControlOff
-      ? "Muting used the display's own mute command, and that command can only be undone over hardware control. This turns hardware control back on for this display and unmutes it."
-      : "Muting used the display's own mute command, and this display's volume controls are switched off, so no slider or key can undo it. This unmutes the display and sets its volume slider back to Enable automatically."
+    if isHardwareControlOff {
+      return "Muting used the display's own mute command, and that command can only be undone over hardware control. This turns hardware control back on for this display and unmutes it."
+    }
+    // Non-nil exactly when the slider is disabled, which is this branch's own
+    // condition; the fallback exists for the compiler, not for a reachable state.
+    let cause = model.volumeSliderCompactReason(state) ?? "This display's volume controls are off."
+    return "\(cause) Muting used the display's own mute command, so no slider or key can undo it. This unmutes the display and sets its volume slider back to Enable automatically."
   }
 
   /// Clears the prefs that closed the other routes FIRST, then unmutes. Doing

@@ -444,7 +444,7 @@ struct DisplayHubView: View {
         .disabled(!state.volume.isAvailable)
       }
 
-      SettingRow("\(AppInfo.productName) asks the display, and the volume keys follow the same answer; the slider is greyed only when it says no.") {
+      SettingRow("\(AppInfo.productName) asks the display, and the volume and mute keys follow the same answer; the slider is greyed only when it says no.") {
         Picker("Volume slider", selection: Binding(
           get: { prefs.audioSinkOverride },
           set: { override in
