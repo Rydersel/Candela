@@ -110,7 +110,10 @@ final class KeyActionExecutor {
       // controller consumes isFresh (backlog #12b).
       var playedOnce = false
       var toggled: [(state: AppModel.DisplayState, value: Double)] = []
-      for state in resolveVolumeTargets() {
+      // Mute targets, not volume targets: the mute key writes 0x8D under the
+      // dedicated-command strategy, and a display's two registers carry their
+      // own verdicts.
+      for state in resolveMuteTargets() {
         let muted = state.volume.toggleMute(isFresh: isFresh)
         guard state.volume.isAvailable else { continue }
         toggled.append((state, muted ? 0 : state.volume.value))
@@ -191,21 +194,41 @@ final class KeyActionExecutor {
     showBrightnessHUDs(for: [builtInStep])
   }
 
-  /// Volume-key target set per multiKeyboardVolume (D4). Every branch runs
-  /// through the isDisabled key filter LAST (R1, fork loop-body parity) — so
-  /// a resolved-but-disabled display swallows the press rather than
-  /// triggering the fallback.
+  /// Volume-key targets: the candidates below, filtered by D24's verdict for
+  /// VCP 0x62. A display whose own capabilities deny that register takes no
+  /// volume key, exactly as its slider takes no drag.
   private func resolveVolumeTargets() -> [AppModel.DisplayState] {
+    model.volumeKeyEnabledStates(volumeKeyCandidates())
+  }
+
+  /// Mute-key targets: the same candidates, filtered against the register the
+  /// mute key would actually WRITE. That is VCP 0x8D under the dedicated-command
+  /// strategy and the volume register without it, so the two families can
+  /// legitimately disagree about one display, and a mute-capable panel that
+  /// denies volume keeps its mute key.
+  private func resolveMuteTargets() -> [AppModel.DisplayState] {
+    model.muteKeyEnabledStates(volumeKeyCandidates())
+  }
+
+  /// Volume/mute candidate set per multiKeyboardVolume (D4), before any
+  /// per-display filter.
+  ///
+  /// The fallbacks live HERE and the filters live at the two call sites above,
+  /// which is the whole R1 ordering (fork loop-body parity): a display that
+  /// resolves and then refuses swallows the press, while only a display that
+  /// never resolved at all reaches a fallback. Folding either filter into this
+  /// function would hand a refusing display's keypress to every other panel.
+  private func volumeKeyCandidates() -> [AppModel.DisplayState] {
     switch model.volumeMode {
     case .allScreens:
-      return model.keyEnabledStates(model.displays)
+      return model.displays
     case .audioDeviceNameMatching:
       // Zero matches never falls back (fork parity). Two states reach here:
       // the tap released the keys to macOS (default output can set its own
       // volume), OR the keys stay watched with a nil default output — the
       // tap rule can't distinguish that from "not yet routed" — and the
       // empty match set swallows the press.
-      return model.keyEnabledStates(model.audioMatchingDisplays())
+      return model.audioMatchingDisplays()
     case .mouse:
       let ids = Self.pointerDisplayID().map(expandToMirrorSet) ?? []
       let resolved = ids.compactMap { id in model.displays.first { $0.id == id } }
@@ -214,8 +237,7 @@ final class KeyActionExecutor {
       // already ate the event and it has no fallback — the dossier calls
       // that a defect). Candela extends its own M2 brightness rule: losing
       // the targeting beats losing the keypress.
-      let targets = resolved.isEmpty ? model.displays : resolved
-      return model.keyEnabledStates(targets)
+      return resolved.isEmpty ? model.displays : resolved
     }
   }
 
