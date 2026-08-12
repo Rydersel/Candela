@@ -32,7 +32,8 @@ struct SoftwareDimmingReportingTests {
       ),
       prefs: prefs,
       displayID: Self.slaveID,
-      mirrorTopology: store
+      mirrorTopology: store,
+      wireSiblings: []
     )
   }
 

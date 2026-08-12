@@ -46,7 +46,8 @@ struct LockDimTests {
       displayID: 7,
       role: .external,
       store: store,
-      storageKey: Self.storageKey
+      storageKey: Self.storageKey,
+      wireSiblings: []
     )
     return Rig(ddc: ddc, native: native, store: store, controller: controller)
   }
@@ -254,7 +255,8 @@ struct LockDimTests {
       displayID: 7,
       role: .external,
       store: PathMemoryStore(),
-      storageKey: Self.storageKey
+      storageKey: Self.storageKey,
+      wireSiblings: []
     )
     controller.setBrightness(0.2)
     controller.beginTemporaryDim(factor: 0.5)

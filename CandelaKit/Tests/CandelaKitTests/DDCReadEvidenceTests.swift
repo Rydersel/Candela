@@ -67,7 +67,8 @@ struct BrightnessReadEvidenceCallSiteTests {
         applierNative: NativeBrightnessApplier(displayID: 1) { _, _ in false },
         hdr: nil, shade: nil, gamma: nil
       ),
-      prefs: prefs, displayID: 1, store: nil, storageKey: nil
+      prefs: prefs, displayID: 1, store: nil, storageKey: nil,
+      wireSiblings: []
     )
     return (controller, prefs)
   }

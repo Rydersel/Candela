@@ -31,7 +31,8 @@ func makeLegacyPathController(
     displayID: 1,
     store: store,
     storageKey: storageKey,
-    panelIdentity: panelIdentity
+    panelIdentity: panelIdentity,
+    wireSiblings: []
   )
 }
 

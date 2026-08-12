@@ -109,7 +109,8 @@ struct ControllerRestoreTests {
         hdr: nil, shade: nil, gamma: nil
       ),
       prefs: prefs,
-      displayID: 3
+      displayID: 3,
+      wireSiblings: []
     )
     controller.setBrightness(0.3)
     prefs.forceSoftware = false // …then re-enable hardware for the quit path
@@ -131,7 +132,8 @@ struct ControllerRestoreTests {
         hdr: nil, shade: nil, gamma: nil
       ),
       prefs: DisplayPrefs(defaults: defaults, persistenceKey: "ra"),
-      displayID: 4
+      displayID: 4,
+      wireSiblings: []
     )
     controller.setBrightness(0.5)
     await controller.waitForPendingWrites()
@@ -163,7 +165,8 @@ struct ControllerRestoreTests {
       prefs: DisplayPrefs(defaults: defaults, persistenceKey: "et"),
       displayID: 6,
       store: store,
-      storageKey: "combinedBrightness.et"
+      storageKey: "combinedBrightness.et",
+      wireSiblings: []
     )
     #expect(controller.hasStoredValue == false) // never touched — restore must skip
     controller.setBrightness(0.5)

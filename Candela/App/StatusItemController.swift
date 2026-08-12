@@ -962,14 +962,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // measured read taken after the drop settled, and it is what licenses the
       // hardware writes below.
       //
-      // The other two controllers go in because their duplicate memos have to
-      // be dropped here: a write ACKed while the display was in HDR was
-      // swallowed by the panel, so a memo built through that window would let
-      // the unmute below be skipped as a duplicate of a value the register
-      // never took, and reported as applied.
-      let hdrState = await state.controller.disengageHDRForReset(
-        alsoInvalidating: [state.volume, state.contrast]
-      )
+      // It also drops the duplicate memos of every queue on this display's
+      // wire, which the unmute below depends on: a write ACKed while the display
+      // was in HDR was swallowed by the panel, so a memo built through that
+      // window would let the unmute be skipped as a duplicate of a value the
+      // register never took, and reported as applied. The controller holds its
+      // own wire, so this reset cannot name the wrong queues or forget one.
+      let hdrState = await state.controller.disengageHDRForReset()
       if case .disengaged(restoreAfterward: true) = hdrState {
         restoreHDRAfterRebuild.insert(state.display.persistenceKey)
       }
@@ -1115,7 +1114,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //         clear Candela's settings must not end by writing one.
     for state in model.displays
       where restoreHDRAfterRebuild.contains(state.display.persistenceKey) {
-      await state.controller.restoreExternalHDR(alsoDraining: [state.volume, state.contrast])
+      await state.controller.restoreExternalHDR()
     }
     // OLED care's latch is cleared by the `defer` at the top of this function,
     // which runs here — after every statement above.
