@@ -56,7 +56,7 @@ public struct BrightnessBackends {
 /// 3. combined (default) → `DimmingMath.combinedSplit` across both legs;
 /// 4. combined disabled → `.ddc` hardware leg, full range.
 @MainActor @Observable
-public final class BrightnessController {
+public final class BrightnessController: PendingWireDraining {
   public private(set) var brightness: Double = 1.0
 
   /// The maximum a panel is assumed to accept until it reports one of its own
@@ -895,29 +895,89 @@ public final class BrightnessController {
       }
     } else {
       // Leaving the native path (`.alwaysOn` → `.off`, the only remaining exit
-      // now that Boost is gone): drop HDR, wait out the settle, then re-apply
-      // the current value through the normal path. The duplicate memo is
-      // reset first — hardware left HDR at its own brightness level, so the
-      // last DDC value we recorded no longer reflects the register (I10).
-      cachedHDRActive = false
+      // now that Boost is gone).
       beginHDRTransition()
-      let generation = hdrTransitionGeneration
-      _ = await backends.hdr?.setHDR(displayID: displayID, enabled: false)
-      // Same supersession fence as the engage arm (final wave): the exit arm's
-      // post-await block clears `settleInProgress` and fires `applyPaths`, both
-      // of which belong to whichever transition is current.
-      guard hdrTransitionGeneration == generation else { return }
-      try? await Task.sleep(for: settleDelay)
-      guard hdrTransitionGeneration == generation else { return } // post-settle
-      settleInProgress = false
-      coalescer.resetDuplicateState()
-      applyPaths()
-      // Measured, for the reason the engage arm is (#65). This arm does not roll
-      // back on a disengage that did not take (that is #87's question, not this
-      // one), but the mirror it leaves behind is now the panel's answer rather
-      // than the request's.
-      await refreshHDRCaches(measured: true)
+      await performHDRExit(generation: hdrTransitionGeneration)
     }
+  }
+
+  /// The exit sequence, with the transition token already taken by the caller:
+  /// drop HDR, wait the settle out, re-apply the current value through the
+  /// normal path, and leave the mirror holding a measured answer.
+  ///
+  /// The duplicate memo is reset first: hardware left HDR at its own brightness
+  /// level, so the last DDC value we recorded no longer reflects the register
+  /// (I10).
+  ///
+  /// Shared by the mode door and the reset door so the two cannot drift: what
+  /// differs between them is only WHO decides there is something to do, and
+  /// that decision is made before this runs.
+  private func performHDRExit(generation: UInt64) async {
+    cachedHDRActive = false
+    _ = await backends.hdr?.setHDR(displayID: displayID, enabled: false)
+    // Same supersession fence as the engage arm (final wave): the post-await
+    // block clears `settleInProgress` and fires `applyPaths`, both of which
+    // belong to whichever transition is current.
+    guard hdrTransitionGeneration == generation else { return }
+    try? await Task.sleep(for: settleDelay)
+    guard hdrTransitionGeneration == generation else { return } // post-settle
+    settleInProgress = false
+    coalescer.resetDuplicateState()
+    applyPaths()
+    // Measured, for the reason the engage arm is: a write that returned success
+    // is evidence of nothing. This arm does not roll back on a disengage that
+    // did not take (that belongs to the stale-mode question, not here), but the
+    // mirror it leaves behind is the panel's answer rather than the request's.
+    await refreshHDRCaches(measured: true)
+  }
+
+  /// The reset paths' HDR disengage: makes the DISPLAY leave HDR, and asks the
+  /// display rather than the stored mode whether there is anything to do.
+  ///
+  /// Deliberately NOT `setHDRMode(.off)`. That door decides from the stored
+  /// mode and the cached mirror, which is right for a request a person made
+  /// about a policy and wrong here. The mirror lags a System Settings toggle
+  /// until the reconfigure lands, and in that window every input the mode door
+  /// consults says "already off" while the panel is in HDR: the request
+  /// evaporates, the reset's own D29 unmute goes into a register the monitor
+  /// still has locked, and a write-only panel ACKs the loss. So the physical
+  /// state is measured here, past the backend's cache, and it is the only thing
+  /// this decision reads.
+  ///
+  /// Candela's stored mode is cleared either way: it is a setting, and clearing
+  /// settings is what the button does.
+  ///
+  /// Returns whether HDR was live with no Candela mode recording it, which
+  /// means someone engaged it outside the app: the caller puts that back at the
+  /// end of the reset, after the last DDC write has landed.
+  public func disengageHDRForReset() async -> Bool {
+    guard role == .external else { return false }
+    let previous = hdrMode
+    // An observation, not a transition, so it takes the capture-and-compare
+    // fence rather than the token: bumping the generation here would supersede
+    // a transition still parked on its own await.
+    let observed = hdrTransitionGeneration
+    await refreshHDRCaches(measured: true)
+    // A transition that started while we were reading owns the state now and
+    // has moved the display since. Disengage anyway: the reset is about to put
+    // DDC on the wire, and an unlocked register is the safe way to be wrong.
+    let engaged = cachedHDRActive || hdrTransitionGeneration != observed
+    if previous != .off {
+      prefs.hdrMode = .off
+      hdrMode = .off
+    }
+    pathLog.log(
+      "reset HDR disengage: engaged=\(engaged, privacy: .public) mode \(previous.rawValue) -> 0 display=\(self.displayID)"
+    )
+    guard engaged else { return false }
+    beginHDRTransition()
+    await performHDRExit(generation: hdrTransitionGeneration)
+    if cachedHDRActive {
+      pathLog.error(
+        "reset HDR disengage did not take: display=\(self.displayID) is still in HDR, so DDC writes below it will be swallowed"
+      )
+    }
+    return previous == .off
   }
 
   /// Puts back HDR that was live before a reset and that Candela did not turn
@@ -940,8 +1000,23 @@ public final class BrightnessController {
   /// window with the poller gated off, and the measured check (#65). There is
   /// no rollback, because there is no mode to roll back to. A restore that does
   /// not take leaves the display where the disengage left it and says so.
-  public func restoreExternalHDR() async {
+  ///
+  /// `alsoDraining` is load-bearing and not a convenience. Re-engaging HDR
+  /// locks the DDC register, and a DDC submit is queued rather than sent: it
+  /// rides a coalescer that drains on its own task, so the reset's unmute can
+  /// still be in flight when this is called. Measured 2026-08-11: the unmute
+  /// reached the panel half a second after the re-engage and was swallowed,
+  /// with the app recording an unmuted display, which is the strand D29 exists
+  /// to prevent. So this waits out its own queue and every controller handed to
+  /// it (the caller's siblings on the same wire: volume, contrast) before the
+  /// engage goes out. No default value on purpose: a caller with nothing in
+  /// flight says so by passing an empty list.
+  public func restoreExternalHDR(alsoDraining siblings: [any PendingWireDraining]) async {
     guard role == .external else { return }
+    await waitForPendingWrites()
+    for sibling in siblings {
+      await sibling.waitForPendingWrites()
+    }
     clearSoftwareLeg()
     beginHDRTransition()
     let generation = hdrTransitionGeneration

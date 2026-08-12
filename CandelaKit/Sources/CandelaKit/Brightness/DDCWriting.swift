@@ -13,3 +13,15 @@ public extension DDCWriting {
   /// fakes — inherit the honest answer: we do not know.
   func readCapabilityString() async -> String? { nil }
 }
+
+/// A controller holding hardware writes that have been SUBMITTED and may not
+/// have reached the wire.
+///
+/// Every value controller here submits onto a coalescer that drains on its own
+/// task, so a submit call returning says nothing about the register. Anything
+/// that is about to make the wire unusable (HDR locks DDC on the display) has
+/// to wait the queue out first, and this is what it waits on.
+@MainActor
+public protocol PendingWireDraining {
+  func waitForPendingWrites() async
+}

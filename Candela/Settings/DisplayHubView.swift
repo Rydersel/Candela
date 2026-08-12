@@ -749,24 +749,22 @@ struct DisplayHubView: View {
   /// mute strategy is still in force), retire the strategy LAST.
   private func resetDisplay() {
     Task { @MainActor in
-      // 1. D22: HDR goes through the controller's state machine — settle
-      //    window, poller gating, rollback — never through `prefs.hdrMode`.
-      //    Done first so the DDC register is unlocked for everything below.
+      // 1. D22: HDR goes through the controller's state machine (settle window,
+      //    poller gating, rollback), never through `prefs.hdrMode`. Done first
+      //    so the DDC register is unlocked for everything below.
       //
-      //    UNCONDITIONAL (#83). Gating this on `hdrMode != .off` skipped the
-      //    disengage for HDR engaged in System Settings, and then everything
-      //    below — including the D29 unmute — ran against a register the
-      //    monitor still had locked. `setHDRMode` owns the "is there anything
-      //    to do" question now, so the condition cannot drift from it here.
-      //
-      //    Captured BEFORE the disengage, and it is a question about two
-      //    different things: `isHDREngaged` is the display's state, `hdrMode`
-      //    is Candela's opinion. Live HDR with no opinion behind it was
-      //    engaged in System Settings, so step 5 puts it back; live HDR under
-      //    `.alwaysOn` is a Candela setting, and clearing it is what this
+      //    The RESET door, not `setHDRMode(.off)`. That one decides from the
+      //    stored mode and the cached mirror, and the mirror lags a System
+      //    Settings toggle until the reconfigure lands: in that window it
+      //    reports no HDR, the request evaporates, and everything below,
+      //    including the D29 unmute, runs against a register the monitor still
+      //    has locked. This door measures the panel instead, clears the stored
+      //    mode either way, and answers the second question with it: it returns
+      //    true when HDR was live with no Candela mode recording it, which
+      //    means someone engaged it elsewhere and step 5 puts it back. Live HDR
+      //    under `.alwaysOn` is a Candela setting, and clearing it is what this
       //    button is for.
-      let restoreHDR = state.controller.isHDREngaged && state.controller.hdrMode == .off
-      await state.controller.setHDRMode(.off)
+      let restoreHDR = await state.controller.disengageHDRForReset()
 
       // 2. Every pref except the mute strategy, in ONE batch whose fan-out is
       //    the UNION of its rows. Never collapse it onto a single
@@ -839,11 +837,17 @@ struct DisplayHubView: View {
       //    fan-out costs a re-render and nothing else.
       writer.write(.enableMuteUnmute) { $0.enableMuteUnmute = false }
 
-      // 5. LAST, after every DDC write above has gone out (#83): re-engaging
-      //    locks the register again, so anything sent after this would be
-      //    swallowed exactly as it was before the fix.
+      // 5. LAST, and after every DDC write above has reached the WIRE, which is
+      //    not the same as having been submitted: each submit rides a coalescer
+      //    that drains on its own task, so the unmute is still in flight here.
+      //    Re-engaging locks the register the moment it lands. The restore
+      //    waits out every controller it is handed, and it is handed all three
+      //    because the pref fan-out in step 2 re-applies brightness on the same
+      //    wire.
       if restoreHDR {
-        await state.controller.restoreExternalHDR()
+        await state.controller.restoreExternalHDR(
+          alsoDraining: [state.volume, state.contrast]
+        )
       }
 
       nameDraft = ""

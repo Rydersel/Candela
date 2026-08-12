@@ -927,25 +927,25 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     for state in model.displays {
       let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
 
-      // Two different things, asked before the disengage: `isHDREngaged` is the
-      // display's state, `hdrMode` is Candela's opinion. Live HDR with no
-      // opinion behind it came from System Settings and goes back at the end;
-      // live HDR under `.alwaysOn` is a Candela setting, and clearing it is
-      // what this button is for.
-      if state.controller.isHDREngaged, state.controller.hdrMode == .off {
+      // HDR first. Wiping the pref under an engaged controller strands the
+      // panel in HDR while the app believes it is off, and the next launch then
+      // writes DDC into a register the monitor has locked, so brightness
+      // silently stops working with no diagnostic. (D22: never write
+      // `prefs.hdrMode` directly; the controller owns the state machine.)
+      //
+      // The RESET door rather than `setHDRMode(.off)`: that one decides from
+      // the stored mode and the cached mirror, and the mirror lags a System
+      // Settings toggle until the reconfigure lands, which is exactly the state
+      // this paragraph warns about. This door measures the panel.
+      //
+      // It answers the restore question in the same breath, and that question
+      // is about two different things: the display's state, and Candela's
+      // opinion. Live HDR with no opinion behind it came from System Settings
+      // and goes back at the end; live HDR under `.alwaysOn` is a Candela
+      // setting, and clearing it is what this button is for.
+      if await state.controller.disengageHDRForReset() {
         restoreHDRAfterRebuild.insert(state.display.persistenceKey)
       }
-
-      // HDR first. The controller mirrors `hdrMode` behind a state machine and
-      // `setHDRMode` opens with `guard mode != previous else { return }` (D22:
-      // never write `prefs.hdrMode` directly). Wiping the pref under an engaged
-      // controller strands the panel in HDR while the app believes it is off —
-      // and the next launch then writes DDC into a register the monitor has
-      // locked, so brightness silently stops working with no diagnostic.
-      // UNCONDITIONAL (#83): the `hdrMode != .off` gate skipped HDR engaged in
-      // System Settings, which is exactly the state this paragraph warns
-      // about. `setHDRMode` decides whether there is anything to do.
-      await state.controller.setHDRMode(.off)
 
       // D29 rule 2: clear the AVAILABILITY prefs BEFORE attempting the unmute,
       // never after. `DDCValueController.toggleMute` opens with
@@ -1007,16 +1007,18 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // onboarding re-runs (wired by Task 15; default no-op until then).
     settingsActions.postReset()
 
-    // ---- 6. LAST (#83). The reset dropped HDR so the DDC register was
-    //         unlocked for the D29 unmute in step 1, and re-engaging locks it
-    //         again, so this cannot run before the rebuilt controllers have
-    //         taken their own opening writes. It restores the display's state,
-    //         NOT a mode: `restoreExternalHDR` deliberately persists nothing,
-    //         because a reset that promises to clear Candela's settings must
-    //         not end by writing one.
+    // ---- 6. LAST. The reset dropped HDR so the DDC register was unlocked for
+    //         the D29 unmute in step 1, and re-engaging locks it again, so this
+    //         cannot run before the rebuilt controllers have taken their own
+    //         opening writes. "Taken" means reached the wire, not submitted:
+    //         the restore is handed this display's other two controllers and
+    //         waits all three queues out before the engage goes out. It
+    //         restores the display's state, NOT a mode: `restoreExternalHDR`
+    //         deliberately persists nothing, because a reset that promises to
+    //         clear Candela's settings must not end by writing one.
     for state in model.displays
       where restoreHDRAfterRebuild.contains(state.display.persistenceKey) {
-      await state.controller.restoreExternalHDR()
+      await state.controller.restoreExternalHDR(alsoDraining: [state.volume, state.contrast])
     }
     // OLED care's latch is cleared by the `defer` at the top of this function,
     // which runs here — after every statement above.

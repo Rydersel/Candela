@@ -39,6 +39,11 @@ actor FakeHDR: HDRToggling {
   func displaysReconfigured() {}
 
   func stubSetResult(_ value: Bool) { setResult = value }
+  /// The panel's HDR state changes with nothing telling the controller: a
+  /// System Settings toggle whose reconfigure has not been delivered yet. That
+  /// window is the whole of the stale-mirror hazard, and it is not reachable
+  /// through `setHDR`, which the controller can see.
+  func stubEnabled(_ value: Bool) { enabled = value }
   /// The #65 panel: the write is ACCEPTED and the display does not switch.
   /// A different fact from `stubSetResult(false)`, which is a write that was
   /// never issued, and before #65 the two were indistinguishable to the
@@ -46,6 +51,22 @@ actor FakeHDR: HDRToggling {
   func stubAchieves(_ value: Bool) { achieves = value }
   func recordedSetCalls() -> [Bool] { setCalls }
   func recordedMeasuredReads() -> Int { measuredReads }
+}
+
+/// A queued-write stand-in that answers ONE question: what had the HDR backend
+/// been told at the moment this was drained. A shared timeline rather than two
+/// independent counters, so "the wire drained between the disengage and the
+/// re-engage" is pinned by content and not by scheduling luck.
+@MainActor
+final class SetCallSnapshotDrain: PendingWireDraining {
+  private let hdr: FakeHDR
+  private(set) var setCallsWhenDrained: [Bool]?
+
+  init(hdr: FakeHDR) { self.hdr = hdr }
+
+  func waitForPendingWrites() async {
+    setCallsWhenDrained = await hdr.recordedSetCalls()
+  }
 }
 
 /// Records every target applied through the native leg (post-coalescing).
@@ -410,7 +431,7 @@ struct PathSelectionTests {
     let h = Harness(settle: .milliseconds(5))
     await h.prime()
 
-    await h.controller.restoreExternalHDR()
+    await h.controller.restoreExternalHDR(alsoDraining: [])
 
     #expect(await h.hdr!.recordedSetCalls() == [true])
     #expect(h.controller.isHDREngaged)
@@ -429,7 +450,7 @@ struct PathSelectionTests {
     #expect(approx(h.gamma.scales.last ?? -1, 0.575))
     await h.hdr!.stubAchieves(false)
 
-    await h.controller.restoreExternalHDR()
+    await h.controller.restoreExternalHDR(alsoDraining: [])
 
     #expect(!h.controller.isHDREngaged)
     #expect(h.controller.hdrMode == .off)
@@ -442,7 +463,7 @@ struct PathSelectionTests {
     let h = Harness(settle: .milliseconds(5), role: .builtIn)
     await h.prime()
 
-    await h.controller.restoreExternalHDR()
+    await h.controller.restoreExternalHDR(alsoDraining: [])
 
     #expect(await h.hdr!.recordedSetCalls().isEmpty)
   }
@@ -460,6 +481,131 @@ struct PathSelectionTests {
     await h.controller.setHDRMode(.alwaysOn)
 
     #expect(await h.hdr!.recordedMeasuredReads() > before)
+  }
+
+  // MARK: The reset path's disengage, which answers to the panel and not to the pref
+
+  /// The defect this door exists for. HDR is engaged in System Settings, the
+  /// reconfigure that would refresh the mirror has not arrived, and Candela's
+  /// stored mode was `.off` all along: every input the mode door consults says
+  /// "already off", so it suppresses the transition and the register stays
+  /// locked under the reset's own unmute. The reset asks the panel instead.
+  @Test func theResetDisengageDropsHDRTheMirrorHasNotNoticedYet() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    await h.hdr!.stubEnabled(true) // System Settings, no reconfigure delivered
+    #expect(!h.controller.isHDREngaged, "the mirror is stale, which is the setup")
+    #expect(h.controller.hdrMode == .off)
+
+    let restoreAfterward = await h.controller.disengageHDRForReset()
+
+    #expect(await h.hdr!.recordedSetCalls() == [false], "the physical drop still went out")
+    #expect(!h.controller.isHDREngaged)
+    #expect(restoreAfterward, "the user engaged it elsewhere, so the reset puts it back")
+  }
+
+  /// The scoping half: the mode door keeps deciding from what it knows, so
+  /// ordinary pref-driven paths are untouched by the reset door's freshness
+  /// read. Same stale mirror as above, and the request still evaporates.
+  @Test func theModeDoorStillDecidesFromTheMirror() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    await h.hdr!.stubEnabled(true)
+
+    await h.controller.setHDRMode(.off)
+
+    #expect(await h.hdr!.recordedSetCalls().isEmpty)
+  }
+
+  /// A reset must not re-mode every attached panel: a display measured out of
+  /// HDR takes no transition, and asks for no restore.
+  @Test func theResetDisengageIsANoOpOnADisplayThatIsNotInHDR() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+
+    let restoreAfterward = await h.controller.disengageHDRForReset()
+
+    #expect(await h.hdr!.recordedSetCalls().isEmpty)
+    #expect(!restoreAfterward)
+  }
+
+  /// HDR that Candela engaged is a Candela setting: it goes off, the stored
+  /// mode goes with it, and nothing puts it back.
+  @Test func theResetDisengageClearsCandelasOwnHDRWithoutRestoringIt() async {
+    let h = Harness(hdrEnabled: true, settle: .milliseconds(5)) { prefs, _ in
+      prefs.hdrMode = .alwaysOn
+    }
+    await h.prime()
+
+    let restoreAfterward = await h.controller.disengageHDRForReset()
+
+    #expect(await h.hdr!.recordedSetCalls() == [false])
+    #expect(!restoreAfterward)
+    #expect(h.controller.hdrMode == .off)
+    #expect(h.prefs.hdrMode == .off, "and it does not come back on the next launch")
+  }
+
+  /// A stale `.alwaysOn` over a display that is not in HDR: nothing to drop,
+  /// but the reset still clears the opinion it is there to clear.
+  @Test func theResetDisengageClearsAStaleAlwaysOnWithoutAReMode() async {
+    let h = Harness(settle: .milliseconds(5)) { prefs, _ in prefs.hdrMode = .alwaysOn }
+    await h.prime()
+
+    let restoreAfterward = await h.controller.disengageHDRForReset()
+
+    #expect(await h.hdr!.recordedSetCalls().isEmpty)
+    #expect(!restoreAfterward)
+    #expect(h.controller.hdrMode == .off)
+    #expect(h.prefs.hdrMode == .off)
+  }
+
+  /// The decision is taken from a read that goes past the backend's cache, for
+  /// the reason every achieved-state check here does: a cached answer filled
+  /// during a transition reports that transition's own optimism.
+  @Test func theResetDisengageDecidesFromAMeasuredRead() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    let before = await h.hdr!.recordedMeasuredReads()
+
+    _ = await h.controller.disengageHDRForReset()
+
+    #expect(await h.hdr!.recordedMeasuredReads() > before)
+  }
+
+  /// HDR machinery is external-display machinery; the built-in is
+  /// constitutively native already.
+  @Test func theResetDisengageIsANoOpOnTheBuiltIn() async {
+    let h = Harness(hdrEnabled: true, settle: .milliseconds(5), role: .builtIn)
+    await h.prime()
+
+    let restoreAfterward = await h.controller.disengageHDRForReset()
+
+    #expect(await h.hdr!.recordedSetCalls().isEmpty)
+    #expect(!restoreAfterward)
+  }
+
+  /// The ordering the reset's recovery depends on, measured as a defect on
+  /// hardware: a DDC submit rides a coalescer and reaches the wire on its own
+  /// task, so the unmute is merely QUEUED when the reset moves on. Re-engaging
+  /// HDR locks the register the moment it lands, and on a write-only panel a
+  /// swallowed unmute reports success and strands the display silent. So the
+  /// restore waits the wire out, and the wait belongs to the restore rather
+  /// than to each caller that must remember it.
+  @Test func theRestoreWaitsForQueuedWritesBeforeReEngagingHDR() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    await h.hdr!.stubEnabled(true)
+    #expect(await h.controller.disengageHDRForReset())
+    let drain = SetCallSnapshotDrain(hdr: h.hdr!)
+
+    await h.controller.restoreExternalHDR(alsoDraining: [drain])
+
+    #expect(
+      drain.setCallsWhenDrained == [false],
+      "drained after the disengage and before the re-engage"
+    )
+    #expect(await h.hdr!.recordedSetCalls() == [false, true])
+    #expect(h.controller.isHDREngaged)
   }
 
   // MARK: C2 — refreshFromHardware combined-domain mapping (MUST-HAVE)

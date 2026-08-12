@@ -11,7 +11,7 @@ import Observation
 /// D3): DDC is dead while the display is in HDR mode, so the register catches
 /// up on the next write after HDR exits, or via startup/wake restore.
 @MainActor @Observable
-public final class DDCValueController {
+public final class DDCValueController: PendingWireDraining {
   public nonisolated let command: DDCCommand
   public private(set) var value: Double
   /// Logical mute flag (volume only; constitutively false for contrast).
