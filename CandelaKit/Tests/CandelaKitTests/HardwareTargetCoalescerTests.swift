@@ -522,6 +522,9 @@ final class CountingQueue: PendingWireDraining {
 
   func submissionMark() -> UInt64 { mark }
 
+  /// Nothing here is memoised, so there is nothing to forget.
+  func resetWriteMemo() {}
+
   func drainPendingWrites() async -> Bool {
     pending = 0
     return true
@@ -542,6 +545,8 @@ final class RefillingQueue: PendingWireDraining {
   }
 
   func submissionMark() -> UInt64 { 0 }
+
+  func resetWriteMemo() {}
 
   func drainPendingWrites() async -> Bool {
     if refillsLeft > 0 {

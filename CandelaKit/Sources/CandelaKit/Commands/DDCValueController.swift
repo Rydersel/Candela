@@ -43,7 +43,12 @@ public final class DDCValueController: PendingWireDraining {
   /// when the queue completed a generation without applying it.
   @ObservationIgnored private var lastSubmittedRaw: UInt16?
   @ObservationIgnored private var lastSubmittedMuteWire: UInt16?
+  /// Submits made by the drain's own retry, excluded from `submissionMark`.
+  @ObservationIgnored private var retriedSubmissions: UInt64 = 0
   @ObservationIgnored private var epochProvider: @Sendable () -> UInt64 = { 0 }
+  /// The gate's other half, kept alongside the provider so a settle loop can
+  /// wait on it. Default matches the coalescer's accept-everything default.
+  @ObservationIgnored private var isEpochCurrent: @Sendable (UInt64) -> Bool = { _ in true }
   private let store: (any BrightnessStoring)?
   private let storageKey: String?
   /// Validated readback max (nil until a successful `.read` pass); feeds
@@ -320,8 +325,12 @@ public final class DDCValueController: PendingWireDraining {
 
   /// Both counters in one number: the mute wire and the value register are
   /// separate queues, and a caller asking "did anything get submitted while I
-  /// was away" needs an answer that covers both.
-  public func submissionMark() -> UInt64 { issuedGeneration &+ issuedMuteGeneration }
+  /// was away" needs an answer that covers both. The drain's own retries are
+  /// subtracted back out, or a round that retried could never report a quiet
+  /// wire even once it was quiet.
+  public func submissionMark() -> UInt64 {
+    (issuedGeneration &+ issuedMuteGeneration) &- retriedSubmissions
+  }
 
   public func drainPendingWrites() async -> Bool {
     let value = await drain(
@@ -352,6 +361,7 @@ public final class DDCValueController: PendingWireDraining {
     let first = issued()
     await coalescer.waitUntilCompleted(through: first)
     if await coalescer.appliedThrough() >= first { return true }
+    retriedSubmissions &+= 1
     resubmit()
     let second = issued()
     await coalescer.waitUntilCompleted(through: second)
@@ -433,20 +443,34 @@ public final class DDCValueController: PendingWireDraining {
     }
     coalescer.resetDuplicateState()
     muteCoalescer.resetDuplicateState()
+    // Dropped with the memos and for their reason: these name writes issued
+    // through a service we no longer hold, so re-issuing one would put a stale
+    // value on a fresh wire.
+    lastSubmittedRaw = nil
+    lastSubmittedMuteWire = nil
   }
 
   /// Wake-restore prerequisite (D5): without the memo reset, repeat passes
-  /// are duplicate-skipped and never hit the wire.
+  /// are duplicate-skipped and never hit the wire. Also the HDR exit's
+  /// prerequisite, for a sharper version of the same reason: a write ACKed
+  /// while the display was in HDR was swallowed, so a memo built through that
+  /// window claims values the register never took.
   public func resetWriteMemo() {
     coalescer.resetDuplicateState()
     muteCoalescer.resetDuplicateState()
   }
+
+  /// Whether the wire is open right now: the same gate the coalescer consults
+  /// before applying, asked ahead of time so a settle loop can wait for it
+  /// instead of sleeping a guessed length of time.
+  public var isWireOpen: Bool { isEpochCurrent(epochProvider()) }
 
   public func setEpochProvider(
     _ provider: @escaping @Sendable () -> UInt64,
     isCurrent: @escaping @Sendable (UInt64) -> Bool
   ) {
     epochProvider = provider
+    isEpochCurrent = isCurrent
     coalescer.setEpochGate(isCurrent)
     muteCoalescer.setEpochGate(isCurrent)
   }

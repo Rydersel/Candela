@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import CandelaKit
 
@@ -695,5 +696,72 @@ struct DDCValueControllerTests {
     await harness.fake.setReadResult(nil) // the bus goes quiet: every try returns nil
     await harness.controller.refreshFromHardware()
     #expect(harness.controller.readEvidence == .noReply)
+  }
+
+  // MARK: - The mute queue's own drain (the register the strand is about)
+
+  /// The value register and the mute register ride separate coalescers, and only
+  /// the second carries 0x8D. A drain that reported the value queue's health
+  /// would be certifying the wrong register, so the mute queue gets its own
+  /// skip-and-retry, pinned here.
+  @Test func aMuteWireTheEpochGateSkippedIsNotReportedAsLanded() async {
+    let defaults = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+    prefs.enableMuteUnmute = true
+    prefs.muted = true
+    let fake = FakeDDC(readResult: nil)
+    let volume = DDCValueController(writer: fake, command: .volume, prefs: prefs)
+    let gateOpen = OSAllocatedUnfairLock(initialState: false)
+    volume.setEpochProvider({ 1 }, isCurrent: { _ in gateOpen.withLock { $0 } })
+
+    _ = volume.toggleMute() // the unmute a reset sends: 0x8D = 2
+
+    #expect(await volume.drainPendingWrites() == false, "skipped is not applied")
+    let duringGate = await fake.recordedWrites()
+    #expect(
+      !duringGate.contains { $0.command == VCP.audioMuteScreenBlank },
+      "and nothing reached the mute register"
+    )
+
+    gateOpen.withLock { $0 = true }
+
+    #expect(await volume.drainPendingWrites(), "the re-submit lands once the gate opens")
+    let afterGate = await fake.recordedWrites()
+    #expect(
+      afterGate.contains { $0.command == VCP.audioMuteScreenBlank && $0.value == 2 },
+      "and it is the unmute wire value, not the volume register"
+    )
+  }
+
+  /// The memo says a value is already in the register, so the queue skips the
+  /// write and the drain counts it as landed. That holds only if the memo
+  /// describes a register the panel was really taking writes into: under HDR an
+  /// I2C write is acknowledged and swallowed, so a memo built through an HDR
+  /// window records values that never arrived, and the skip would then certify
+  /// the reset's own unmute. Dropping the memo is what re-opens the wire.
+  @Test func aMemoDroppedOnTheHDRExitLetsTheSameWireValueGoOutAgain() async {
+    let defaults = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+    prefs.enableMuteUnmute = true
+    let fake = FakeDDC(readResult: nil)
+    let volume = DDCValueController(writer: fake, command: .volume, prefs: prefs)
+
+    // Stands in for the pair a display took while it was in HDR: acknowledged,
+    // swallowed, and recorded in the memo as though it had landed.
+    _ = volume.toggleMute() // 0x8D = 1
+    await volume.waitForPendingWrites()
+    _ = volume.toggleMute() // 0x8D = 2, and now the memo holds it
+    await volume.waitForPendingWrites()
+    let before = await fake.recordedWrites().filter { $0.command == VCP.audioMuteScreenBlank }
+    _ = volume.toggleMute() // muted again, so the reset has something to undo
+    await volume.waitForPendingWrites()
+
+    volume.resetWriteMemo()
+    _ = volume.toggleMute() // the reset's unmute: the same wire value as before
+    #expect(await volume.drainPendingWrites())
+
+    let after = await fake.recordedWrites().filter { $0.command == VCP.audioMuteScreenBlank }
+    #expect(after.count == before.count + 2, "the unmute went out rather than being skipped")
+    #expect(after.last?.value == 2)
   }
 }

@@ -103,25 +103,34 @@ actor GatedMeasureHDR: HDRToggling {
   }
 }
 
+/// Records the one thing a sibling controller is handed to the disengage for.
+@MainActor
+final class MemoInvalidationRecorder: PendingWireDraining {
+  private(set) var memoResets = 0
+  func submissionMark() -> UInt64 { 0 }
+  func resetWriteMemo() { memoResets += 1 }
+  func drainPendingWrites() async -> Bool { true }
+}
+
 /// A DDC writer that holds every write until released, and records what the HDR
 /// backend had been told at the moment it finally applied one. A shared
 /// timeline rather than two independent counters, so "the write landed before
 /// the re-engage" is pinned by content and not by scheduling luck.
 actor GatedWriter: DDCWriting {
-  private let hdr: FakeHDR
+  private let hdr: FakeHDR?
   private var waiters: [CheckedContinuation<Void, Never>] = []
   private var released = false
   private var applies = 0
   private(set) var setCallsWhenApplied: [Bool]?
 
-  init(hdr: FakeHDR) { self.hdr = hdr }
+  init(hdr: FakeHDR? = nil) { self.hdr = hdr }
 
   func write(command _: UInt8, value _: UInt16) async -> Bool {
     applies += 1
     if !released {
       await withCheckedContinuation { waiters.append($0) }
     }
-    setCallsWhenApplied = await hdr.recordedSetCalls()
+    if let hdr { setCallsWhenApplied = await hdr.recordedSetCalls() }
     return true
   }
 
@@ -564,7 +573,7 @@ struct PathSelectionTests {
     #expect(!h.controller.isHDREngaged, "the mirror is stale, which is the setup")
     #expect(h.controller.hdrMode == .off)
 
-    let outcome = await h.controller.disengageHDRForReset()
+    let outcome = await h.controller.disengageHDRForReset(alsoInvalidating: [])
 
     #expect(await h.hdr!.recordedSetCalls() == [false], "the physical drop still went out")
     #expect(!h.controller.isHDREngaged)
@@ -596,7 +605,7 @@ struct PathSelectionTests {
     let h = Harness(settle: .milliseconds(5))
     await h.prime()
 
-    let outcome = await h.controller.disengageHDRForReset()
+    let outcome = await h.controller.disengageHDRForReset(alsoInvalidating: [])
 
     #expect(await h.hdr!.recordedSetCalls().isEmpty)
     #expect(outcome == .disengaged(restoreAfterward: false))
@@ -610,7 +619,7 @@ struct PathSelectionTests {
     }
     await h.prime()
 
-    let outcome = await h.controller.disengageHDRForReset()
+    let outcome = await h.controller.disengageHDRForReset(alsoInvalidating: [])
 
     #expect(await h.hdr!.recordedSetCalls() == [false])
     #expect(outcome == .disengaged(restoreAfterward: false))
@@ -624,7 +633,7 @@ struct PathSelectionTests {
     let h = Harness(settle: .milliseconds(5)) { prefs, _ in prefs.hdrMode = .alwaysOn }
     await h.prime()
 
-    let outcome = await h.controller.disengageHDRForReset()
+    let outcome = await h.controller.disengageHDRForReset(alsoInvalidating: [])
 
     #expect(await h.hdr!.recordedSetCalls().isEmpty)
     #expect(outcome == .disengaged(restoreAfterward: false))
@@ -640,7 +649,7 @@ struct PathSelectionTests {
     await h.prime()
     let before = await h.hdr!.recordedMeasuredReads()
 
-    _ = await h.controller.disengageHDRForReset()
+    _ = await h.controller.disengageHDRForReset(alsoInvalidating: [])
 
     #expect(await h.hdr!.recordedMeasuredReads() > before)
   }
@@ -651,10 +660,29 @@ struct PathSelectionTests {
     let h = Harness(hdrEnabled: true, settle: .milliseconds(5), role: .builtIn)
     await h.prime()
 
-    let outcome = await h.controller.disengageHDRForReset()
+    let outcome = await h.controller.disengageHDRForReset(alsoInvalidating: [])
 
     #expect(await h.hdr!.recordedSetCalls().isEmpty)
     #expect(outcome == .disengaged(restoreAfterward: false))
+  }
+
+  /// Every queue on this display forgets what it believes is in the register,
+  /// because a write ACKed during an HDR window was swallowed by the panel and
+  /// the memo cannot tell those apart. Without this the reset's own unmute can
+  /// be skipped as a duplicate of a write that never arrived, and the skip is
+  /// then reported as applied. Unconditional, including on a display that turns
+  /// out not to be in HDR: what makes a memo untrustworthy is the window it was
+  /// built through, which is already in the past.
+  @Test func theResetDisengageDropsTheOtherQueuesMemos() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    let volume = MemoInvalidationRecorder()
+    let contrast = MemoInvalidationRecorder()
+
+    _ = await h.controller.disengageHDRForReset(alsoInvalidating: [volume, contrast])
+
+    #expect(volume.memoResets == 1)
+    #expect(contrast.memoResets == 1)
   }
 
   /// A drop that is ISSUED and does not take is not a disengage, whatever the
@@ -666,7 +694,7 @@ struct PathSelectionTests {
     await h.prime()
     await h.hdr!.stubAchieves(false) // accepted, and the display stays in HDR
 
-    let outcome = await h.controller.disengageHDRForReset()
+    let outcome = await h.controller.disengageHDRForReset(alsoInvalidating: [])
 
     #expect(await h.hdr!.recordedSetCalls() == [false], "the write was issued")
     #expect(outcome == .unknown, "and issuing it is not the same as it working")
@@ -687,7 +715,7 @@ struct PathSelectionTests {
     let h = Harness(settle: .milliseconds(5))
     await h.prime()
     await h.hdr!.stubEnabled(true)
-    #expect(await h.controller.disengageHDRForReset() == .disengaged(restoreAfterward: true))
+    #expect(await h.controller.disengageHDRForReset(alsoInvalidating: []) == .disengaged(restoreAfterward: true))
 
     let gate = GatedWriter(hdr: h.hdr!)
     let volume = DDCValueController(writer: gate, command: .volume, prefs: h.prefs)
@@ -726,6 +754,57 @@ struct PathSelectionTests {
     #expect(!(await h.ddc.recordedWrites().isEmpty))
   }
 
+  /// The drain waits on a SNAPSHOT of its own counter. Anything submitted while
+  /// it is suspended belongs to whoever submitted it, and comparing against a
+  /// re-read counter would call that a failure, retry a write nobody was owed,
+  /// and hand the settle loop a false reason to decline the restore.
+  @Test func aSubmitLandingDuringTheDrainsOwnWaitIsNotMistakenForAFailure() async {
+    let gate = GatedWriter()
+    let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "t")
+    let controller = BrightnessController(
+      writer: gate,
+      backends: BrightnessBackends(
+        applierNative: FakeNativeApplier(), hdr: nil,
+        shade: RecordingShade(), gamma: RecordingGamma()
+      ),
+      prefs: prefs,
+      displayID: 7
+    )
+    let wireOpen = OSAllocatedUnfairLock(initialState: true)
+    controller.setEpochProvider({ 1 }, isCurrent: { _ in wireOpen.withLock { $0 } })
+    var submits = 0
+    controller._onSubmit = { _, _ in submits += 1 }
+    controller.setBrightness(0.75) // parked in the writer, mid-apply
+    while await gate.applyCount() == 0 { await Task.yield() }
+    let drain = Task { await controller.drainPendingWrites() }
+    await Task.yield() // let it take its snapshot and park on the wait
+    // Submitted while the drain is suspended, and into a closed window so it
+    // cannot land: the drain must judge itself on what IT was waiting for, not
+    // on a counter this moved.
+    wireOpen.withLock { $0 = false }
+    controller.setBrightness(0.5)
+    await gate.release()
+
+    #expect(await drain.value, "the write it waited for did land")
+    #expect(submits == 2, "the two the test made, and no retry of a write that landed")
+  }
+
+  /// A rebind hands out a fresh service, so the write the drain was holding for
+  /// a retry names a wire that no longer exists. It is dropped with the
+  /// duplicate memo the rebind already clears, rather than replayed onto the new
+  /// panel: the drain reports the failure instead, and the reset declines to
+  /// re-engage rather than writing blind.
+  @Test func aRebindBetweenTheSubmitAndTheDrainDoesNotReplayTheOldWrite() async {
+    let h = Harness()
+    h.controller.setEpochProvider({ 1 }, isCurrent: { _ in false }) // window closed
+    h.controller.setBrightness(0.75)
+    let fresh = FakeDDC(readResult: nil)
+    h.controller.rebind(writer: fresh, panelIdentity: "a different panel")
+
+    #expect(await h.controller.drainPendingWrites() == false)
+    #expect(await fresh.recordedWrites().isEmpty, "nothing stale went onto the new wire")
+  }
+
   /// And what the reset does with that: a wire it cannot settle means the
   /// re-engage does NOT happen. Leaving a display out of HDR is visible and one
   /// click from fixed; locking the register over a write nobody can see fail is
@@ -735,7 +814,7 @@ struct PathSelectionTests {
     h.controller.wireSettlePause = .milliseconds(1)
     await h.prime()
     await h.hdr!.stubEnabled(true)
-    #expect(await h.controller.disengageHDRForReset() == .disengaged(restoreAfterward: true))
+    #expect(await h.controller.disengageHDRForReset(alsoInvalidating: []) == .disengaged(restoreAfterward: true))
     // Closed for good: every submit from here is completed without landing.
     h.controller.setEpochProvider({ 1 }, isCurrent: { _ in false })
     h.controller.setBrightness(0.75)
@@ -770,7 +849,7 @@ struct PathSelectionTests {
     #expect(!controller.isHDREngaged)
     #expect(controller.hdrMode == .off)
 
-    let door = Task { await controller.disengageHDRForReset() }
+    let door = Task { await controller.disengageHDRForReset(alsoInvalidating: []) }
     while await hdr.measureCallCount() == 0 { await Task.yield() }
     let other = Task { await controller.setHDRMode(.alwaysOn) }
     while !controller.isHDRSettling { await Task.yield() }

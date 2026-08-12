@@ -75,7 +75,7 @@ struct GeneralPane: View {
       // panel they are the only record of where the display is, and the login
       // item because the wipe removes a registration that lives outside the
       // prefs domain.
-      Text("Your displays are put into a known state first: HDR off, any display muted by \(AppInfo.productName) unmuted, and OLED care stopped with the counted hours of use cleared. HDR that was turned on in System Settings goes back on at the end.\n\nThen every setting is removed: per-display tuning and names, custom keyboard shortcuts, saved brightness, volume and contrast levels, remembered resolutions and rotation, saved arrangements, OLED care enrollment, and the Open at Login registration. Setup will run again afterwards.")
+      Text("Your displays are put into a known state first: HDR off, any display muted by \(AppInfo.productName) unmuted, and OLED care stopped with the counted hours of use cleared. HDR that was turned on in System Settings goes back on at the end. A display that cannot be reached at the time keeps its mute and its HDR as they are, rather than being sent commands that cannot be confirmed.\n\nThen every setting is removed: per-display tuning and names, custom keyboard shortcuts, saved brightness, volume and contrast levels, remembered resolutions and rotation, saved arrangements, OLED care enrollment, and the Open at Login registration. Setup will run again afterwards.")
     }
   }
 

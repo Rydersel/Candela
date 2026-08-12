@@ -1009,11 +1009,19 @@ final class AppModel {
             // The built-in is in the list (its own slot, outside `displays`,
             // re-review T10-A); it moves from last to first, behaviorally
             // irrelevant (`task-11-report.md:49`).
+            // Not while a reset is running. A reset drives this display's
+            // hardware and then waits for its queue to go quiet before letting
+            // HDR back on, and sync is the one writer that submits on somebody
+            // ELSE's schedule: a built-in ramping under ambient light, or a
+            // Control Center drag, fans a write onto this display every poll
+            // tick, so the queue never goes quiet and the reset gives up on
+            // restoring the display's HDR. Nothing is lost by holding it: sync
+            // re-fans from the next tick after the reset ends.
             BrightnessSync.fanOut(
               delta: delta,
               from: controller,
               to: self.allControlledStates.map(\.controller),
-              isEnabled: self.appPrefs.enableBrightnessSync
+              isEnabled: self.appPrefs.enableBrightnessSync && !self.isResetting
             )
           }
         },

@@ -46,15 +46,6 @@ public struct BrightnessBackends {
   }
 }
 
-/// Single source of truth for one display's brightness (spec §5: every input
-/// funnels through here; every surface renders from `brightness`).
-///
-/// Task 6 path selection (fork order, dossier dimming-math §2/§10), evaluated
-/// synchronously from cached state on every `setBrightness`:
-/// 1. native (HDR mode set AND HDR live) → `.native` hardware leg, full range;
-/// 2. force-software → software leg only, full range;
-/// 3. combined (default) → `DimmingMath.combinedSplit` across both legs;
-/// 4. combined disabled → `.ddc` hardware leg, full range.
 /// What a reset path learned about a display's HDR before it starts writing.
 public enum HDRResetDisengage: Sendable, Equatable {
   /// The display was measured out of HDR after everything the disengage did,
@@ -69,6 +60,15 @@ public enum HDRResetDisengage: Sendable, Equatable {
   case unknown
 }
 
+/// Single source of truth for one display's brightness (spec §5: every input
+/// funnels through here; every surface renders from `brightness`).
+///
+/// Task 6 path selection (fork order, dossier dimming-math §2/§10), evaluated
+/// synchronously from cached state on every `setBrightness`:
+/// 1. native (HDR mode set AND HDR live) → `.native` hardware leg, full range;
+/// 2. force-software → software leg only, full range;
+/// 3. combined (default) → `DimmingMath.combinedSplit` across both legs;
+/// 4. combined disabled → `.ddc` hardware leg, full range.
 @MainActor @Observable
 public final class BrightnessController: PendingWireDraining {
   public private(set) var brightness: Double = 1.0
@@ -226,13 +226,21 @@ public final class BrightnessController: PendingWireDraining {
   @ObservationIgnored private nonisolated let role: DisplayRole
   private let coalescer: BrightnessWriteCoalescer
   @ObservationIgnored private var issuedGeneration: UInt64 = 0
-  /// The newest submit, kept for `drainPendingWrites` to re-issue.
-  @ObservationIgnored
-  private var lastSubmittedWire: (target: HardwareTarget, applier: any BrightnessApplying)?
+  /// The newest submit's TARGET, kept for `drainPendingWrites` to re-issue. The
+  /// applier is deliberately not kept: see `resubmit`.
+  @ObservationIgnored private var lastSubmittedTarget: HardwareTarget?
+  /// Submits made by the drain's own retry. Excluded from `submissionMark` so a
+  /// retry cannot look like someone else queueing work, which would make a round
+  /// that retried unable to report a quiet wire even once it was quiet.
+  @ObservationIgnored private var retriedSubmissions: UInt64 = 0
   /// Read at submit time to stamp each `PendingWrite.epoch`. Default `{ 0 }`
   /// pairs with the coalescer's accept-everything default gate, so call sites
   /// that never install an epoch pair keep the M1 behavior.
   @ObservationIgnored private var epochProvider: @Sendable () -> UInt64 = { 0 }
+  /// The gate's other half, kept here as well as in the coalescer: a settle loop
+  /// waits on it rather than on a clock. Default matches the coalescer's
+  /// accept-everything default.
+  @ObservationIgnored private var isEpochCurrent: @Sendable (UInt64) -> Bool = { _ in true }
   /// Last-written brightness is the only truth on write-only DDC panels, so it
   /// is persisted here and restored at init — without it the panel opens at
   /// the default on every launch.
@@ -681,11 +689,11 @@ public final class BrightnessController: PendingWireDraining {
   private func submitHardware(_ target: HardwareTarget, applier: any BrightnessApplying) {
     _onSubmit?(target, applier)
     issuedGeneration += 1
-    // Kept so a write the queue completed without applying can be re-issued
-    // exactly as it was, with a fresh epoch stamp. Only the NEWEST matters: an
-    // older one that never landed was superseded by this, which is the value
-    // the panel should end up at.
-    lastSubmittedWire = (target, applier)
+    // Kept so a write the queue completed without applying can be re-issued,
+    // with a fresh epoch stamp and a freshly built applier. Only the NEWEST
+    // matters: an older one that never landed was superseded by this, which is
+    // the value the panel should end up at.
+    lastSubmittedTarget = target
     coalescer.submit(
       .init(target: target, applier: applier, epoch: epochProvider(), generation: issuedGeneration)
     )
@@ -946,14 +954,28 @@ public final class BrightnessController: PendingWireDraining {
   /// is asserting the one thing it failed to learn.
   @discardableResult
   private func performHDRExit(generation: UInt64) async -> Bool {
+    // Optimistic for the duration: the legs have to stop treating the display as
+    // native while it leaves HDR. Kept so a bail can put it back, because on a
+    // bail this call has established nothing and the optimism is the one belief
+    // that licenses a gamma table onto a panel that may still be in HDR.
+    let believedBeforeExit = cachedHDRActive
     cachedHDRActive = false
     _ = await backends.hdr?.setHDR(displayID: displayID, enabled: false)
     // Same supersession fence as the engage arm (final wave): the post-await
     // block clears `settleInProgress` and fires `applyPaths`, both of which
     // belong to whichever transition is current.
-    guard hdrTransitionGeneration == generation else { return false }
+    guard hdrTransitionGeneration == generation else {
+      // The newer transition owns the mirror and ends with a measured refresh of
+      // its own, so this write is either superseded immediately or corrects a
+      // window in which nothing but this call's optimism was standing.
+      cachedHDRActive = believedBeforeExit
+      return false
+    }
     try? await Task.sleep(for: settleDelay)
-    guard hdrTransitionGeneration == generation else { return false } // post-settle
+    guard hdrTransitionGeneration == generation else {
+      cachedHDRActive = believedBeforeExit
+      return false // post-settle
+    }
     settleInProgress = false
     coalescer.resetDuplicateState()
     applyPaths()
@@ -995,7 +1017,26 @@ public final class BrightnessController: PendingWireDraining {
   /// after it returns, and the app's own reset latch does not cover the panel's
   /// HDR button. What this rules out is a reset proceeding on a state it never
   /// established.
-  public func disengageHDRForReset() async -> HDRResetDisengage {
+  ///
+  /// `alsoInvalidating` takes this display's other wire controllers, and it is
+  /// as load-bearing as the disengage itself. Each queue skips a write whose
+  /// value its memo says is already in the register, and under HDR an I2C write
+  /// is ACKed and swallowed: a memo built through an HDR window therefore
+  /// records values that never reached the panel. Left standing, the reset's own
+  /// unmute would be skipped as a duplicate of a write that never landed, and
+  /// the skip would be reported as applied. The volume and contrast memos have
+  /// no other route to this fact, because nothing else in the HDR paths can
+  /// reach them.
+  public func disengageHDRForReset(
+    alsoInvalidating siblings: [any PendingWireDraining]
+  ) async -> HDRResetDisengage {
+    defer {
+      // Unconditional, including the built-in's early return and the
+      // nothing-to-do arm: what makes a memo untrustworthy is the HDR window it
+      // was built through, which is in the past by the time anyone asks.
+      resetWriteMemo()
+      for sibling in siblings { sibling.resetWriteMemo() }
+    }
     guard role == .external else { return .disengaged(restoreAfterward: false) }
     // An observation, not a transition, so it takes the capture-and-compare
     // fence rather than the token: bumping the generation here would supersede
@@ -1091,7 +1132,11 @@ public final class BrightnessController: PendingWireDraining {
   /// reporting it unmuted.
   public func restoreExternalHDR(alsoDraining siblings: [any PendingWireDraining]) async {
     guard role == .external else { return }
-    guard await WireQuiescence.settle([self] + siblings, betweenRounds: wireSettlePause) else {
+    guard await WireQuiescence.settle(
+      [self] + siblings,
+      betweenRounds: wireSettlePause,
+      isWireOpen: { [weak self] in self?.isWireOpen ?? true }
+    ) else {
       pathLog.error(
         "not re-engaging HDR on display=\(self.displayID): a queued write could not be confirmed as applied, and re-engaging would lock the register over it"
       )
@@ -1291,15 +1336,39 @@ public final class BrightnessController: PendingWireDraining {
     await coalescer.waitUntilCompleted(through: issuedGeneration)
   }
 
-  public func submissionMark() -> UInt64 { issuedGeneration }
+  public func submissionMark() -> UInt64 { issuedGeneration &- retriedSubmissions }
 
   public func drainPendingWrites() async -> Bool {
-    await waitForPendingWrites()
-    if await coalescer.appliedThrough() >= issuedGeneration { return true }
-    guard let wire = lastSubmittedWire else { return false }
-    submitHardware(wire.target, applier: wire.applier)
-    await waitForPendingWrites()
-    return await coalescer.appliedThrough() >= issuedGeneration
+    // SNAPSHOT, never a re-read: `appliedThrough` is a suspension, and anything
+    // submitted while it runs (a poller fan-out, a key, a dimming step) would
+    // otherwise be compared against a generation nothing ever waited on. That
+    // reads as a failure, retries a write that was never owed, and hands the
+    // settle loop a false reason to decline the restore.
+    let first = issuedGeneration
+    await coalescer.waitUntilCompleted(through: first)
+    if await coalescer.appliedThrough() >= first { return true }
+    guard let target = lastSubmittedTarget else { return false }
+    retriedSubmissions &+= 1
+    resubmit(target)
+    let second = issuedGeneration
+    await coalescer.waitUntilCompleted(through: second)
+    return await coalescer.appliedThrough() >= second
+  }
+
+  /// Re-issues a target the queue completed without applying, with the applier
+  /// REBUILT rather than replayed. A rebind between the original submit and
+  /// this one hands out a fresh `IOAVService`, and the captured applier still
+  /// holds the old one: the retry would then write into a service that has been
+  /// replaced, which either fails (and burns the settle's rounds) or is
+  /// acknowledged by nothing that reaches the panel. Appliers are built per
+  /// submit everywhere else for exactly this reason.
+  private func resubmit(_ target: HardwareTarget) {
+    switch target {
+    case .ddc:
+      submitHardware(target, applier: brightnessApplier(tuning: prefs.tuning(for: .brightness)))
+    case .native:
+      submitHardware(target, applier: backends.applierNative)
+    }
   }
 
   /// Swaps the stored DDC writer (used by both the hardware write leg and
@@ -1368,6 +1437,10 @@ public final class BrightnessController: PendingWireDraining {
       syncDeadband.reset()
     }
     coalescer.resetDuplicateState()
+    // Dropped with the memo and for the memo's own reason: it names a write
+    // issued through a service we no longer hold, so re-issuing it would put a
+    // stale target on a fresh wire.
+    lastSubmittedTarget = nil
   }
 
   /// Installs the display-reconfiguration epoch pair: `provider` is read at
@@ -1378,8 +1451,14 @@ public final class BrightnessController: PendingWireDraining {
     isCurrent: @escaping @Sendable (UInt64) -> Bool
   ) {
     epochProvider = provider
+    isEpochCurrent = isCurrent
     coalescer.setEpochGate(isCurrent)
   }
+
+  /// Whether the wire is open right now: the same gate the coalescer consults
+  /// before applying, asked ahead of time so a settle loop can wait for it
+  /// instead of sleeping a guessed length of time.
+  private var isWireOpen: Bool { isEpochCurrent(epochProvider()) }
 
   // MARK: - Startup/wake/quit restore (D5)
 

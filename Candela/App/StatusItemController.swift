@@ -928,13 +928,15 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // every controller and the display list is re-derived on the far side of
     // that; the EDID key is the only identity that survives it.
     var restoreHDRAfterRebuild: Set<String> = []
-    // Displays whose unmute had to stand down (HDR state unknown), and whose
-    // mute strategy therefore has to survive the wipe. D29 rule 1 states the
-    // ordering as unmute-before-disabling; where the unmute could not happen at
-    // all, the only way to honour it is to not disable. Written back after the
-    // wipe rather than exempted from it: the wipe is a domain removal, and it
-    // has no per-key exemptions to give.
-    var keepMuteStrategyFor: Set<String> = []
+    // Displays left muted as far as anyone can tell: the unmute stood down, or
+    // it went out and could not be confirmed. Their mute state and their
+    // strategy have to survive the wipe, keyed by persistence key with the
+    // strategy they were using. D29 rule 1 states the ordering as
+    // unmute-before-disabling; where the unmute could not be established, the
+    // only way to honour it is to not disable. Written back after the wipe
+    // rather than exempted from it: the wipe is a domain removal, and it has no
+    // per-key exemptions to give.
+    var keepMuteStateFor: [String: Bool] = [:]
 
     for state in model.displays {
       let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
@@ -959,7 +961,15 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // The answer is evidence and not a request: `.disengaged` comes off a
       // measured read taken after the drop settled, and it is what licenses the
       // hardware writes below.
-      let hdrState = await state.controller.disengageHDRForReset()
+      //
+      // The other two controllers go in because their duplicate memos have to
+      // be dropped here: a write ACKed while the display was in HDR was
+      // swallowed by the panel, so a memo built through that window would let
+      // the unmute below be skipped as a duplicate of a value the register
+      // never took, and reported as applied.
+      let hdrState = await state.controller.disengageHDRForReset(
+        alsoInvalidating: [state.volume, state.contrast]
+      )
       if case .disengaged(restoreAfterward: true) = hdrState {
         restoreHDRAfterRebuild.insert(state.display.persistenceKey)
       }
@@ -990,22 +1000,36 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // Standing the unmute down leaves the display muted and SAYING so, which
       // is the recoverable half of D29's choice. The wipe still runs: it is what
       // the user asked for, and it takes no hardware with it.
-      if case .disengaged = hdrState, state.volume.isMuted {
-        _ = state.volume.toggleMute()
-        if await state.volume.drainPendingWrites() == false {
-          log.error(
-            "reset: the unmute for display \(state.display.persistenceKey, privacy: .public) could not be confirmed as applied"
+      //
+      // An unmute that CANNOT BE CONFIRMED counts as the same outcome, not as a
+      // log line. `toggleMute` has already cleared the stored flag by then, so
+      // without the same treatment the wipe would take the strategy too and the
+      // display would come back reporting itself unmuted over a register nobody
+      // ever reached: the full D29 rule 1 strand, produced by the button that
+      // exists to undo it. Reachable without any race, because the disengage's
+      // own reconfiguration can outlast the settle window.
+      if state.volume.isMuted {
+        var unmuteLanded = false
+        if case .disengaged = hdrState {
+          _ = state.volume.toggleMute()
+          // Multi-round and gate-aware, like the restore: one immediate retry
+          // falls inside the same reconfiguration window that skipped the first
+          // attempt, so it proves nothing the first attempt did not.
+          unmuteLanded = await WireQuiescence.settle(
+            [state.volume], isWireOpen: { state.volume.isWireOpen }
           )
         }
-      } else if case .unknown = hdrState, state.volume.isMuted {
-        log.error(
-          "reset: HDR state unknown on display \(state.display.persistenceKey, privacy: .public), so its unmute was skipped and it stays muted with its mute strategy intact"
-        )
-        // Only the dedicated-command strategy can strand: with it retired, the
-        // wire value that undoes 0x8D = 2 has no sender left. The default
-        // strategy mutes by writing volume 0, which any later volume write
-        // undoes, so it needs nothing kept.
-        if prefs.enableMuteUnmute { keepMuteStrategyFor.insert(state.display.persistenceKey) }
+        if !unmuteLanded {
+          log.error(
+            "reset: display \(state.display.persistenceKey, privacy: .public) could not be confirmed unmuted, so its mute state and strategy are kept across the wipe"
+          )
+          // The STRATEGY AS IT STANDS, not a fixed value: restoring the wrong
+          // one would change which wire a later unmute writes. Both are kept,
+          // because both leave a panel silent: the dedicated command has no
+          // sender left once retired, and the default strategy's volume 0 comes
+          // back as a display reporting itself unmuted at a level it is not at.
+          keepMuteStateFor[state.display.persistenceKey] = prefs.enableMuteUnmute
+        }
       }
     }
 
@@ -1029,14 +1053,19 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     )
 
     // ---- 4b. The two facts a stranded display cannot afford to lose, put back
-    //          BEFORE the rebuild reads prefs at construction. `muted` is as
-    //          load-bearing as the strategy: a display whose register holds a
-    //          mute while the app reports it unmuted is the silent half of the
-    //          strand, and the banner that offers the recovery reads exactly
-    //          these two.
-    for key in keepMuteStrategyFor {
+    //          BEFORE the rebuild reads prefs at construction (`muted` is read
+    //          by `DDCValueController.init`). `muted` is as load-bearing as the
+    //          strategy: a display whose register holds a mute while the app
+    //          reports it unmuted is the silent half of the strand.
+    //
+    //          What this buys is the ORDINARY mute control: the display comes
+    //          back reporting itself muted, under the strategy it was muted
+    //          with, so toggling mute drives the right wire again. It is not
+    //          the stranded-mute banner, whose predicate also requires the
+    //          command to be unavailable, and this reset has just cleared that.
+    for (key, usedMuteCommand) in keepMuteStateFor {
       let prefs = DisplayPrefs(persistenceKey: key)
-      prefs.enableMuteUnmute = true
+      prefs.enableMuteUnmute = usedMuteCommand
       prefs.muted = true
     }
 
@@ -1066,11 +1095,17 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //
     //         SCOPE, stated so the guarantee is not read as wider than it is:
     //         this covers the REBUILT controllers only. Step 1's own exit write
-    //         belongs to the controller step 5 discarded, and can land after
-    //         that. Harmless here for a reason outside this loop: the engage
-    //         bumps the display epoch, and the coalescer's epoch gate drops a
-    //         write stamped before it. Nothing in this step enforces that, and
-    //         nothing in this step should be read as if it did.
+    //         belongs to the controller step 5 discarded, and its queue is not
+    //         one of these. What makes that harmless is NOT the epoch gate: an
+    //         epoch is stamped at submit and checked at dequeue, both of which
+    //         happened back in step 1, so nothing gates it retroactively. It is
+    //         that the write is long since drained. Its queue runs on its own
+    //         task and the reset suspends many times between step 1 and here
+    //         (the unmute settling, the login-item unregister, the rebuild), and
+    //         dropping the controller does not cancel it either: teardown ends
+    //         the drain loop only after every already-submitted target has
+    //         landed. Nothing in this step enforces that, and nothing in this
+    //         step should be read as if it did.
     //
     //         It restores the display's state, NOT a mode: `restoreExternalHDR`
     //         deliberately persists nothing, because a reset that promises to
