@@ -308,19 +308,26 @@ struct AllModesPage: View {
     let spokenRate = hz > 0
       ? (caps ? "caps at \(ModeSpeech.spokenRate(hz))" : ModeSpeech.spokenRate(hz))
       : nil
+    // The mode this row would APPLY, not its representative, for the same
+    // reason the rate above is the applied one (SO18). The two carry different
+    // provenance whenever a size holds both kinds: measured on the MAG after
+    // 1920×804 was engaged, CoreGraphics began publishing that rate while the
+    // other rates at the same framebuffer stayed ours, which is a published
+    // representative in front of an applied mode we added.
+    let badge = sourceBadge(catalog.modeKeepingCurrentRefreshRate(for: row).isRevealed)
 
     return modeRow(
       id: RowID.mode(row.id),
       title: DisplayModeCopy.size(row.mode),
       detail: ([rate].compactMap { $0 } + tags).joined(separator: " · "),
-      badge: sourceBadge(row.isRevealed),
+      badge: badge,
       spoken: ([
         ModeSpeech.spoken(
           logicalWidth: row.mode.logicalWidth, logicalHeight: row.mode.logicalHeight,
           refreshHz: nil
         ),
         spokenRate,
-      ].compactMap { $0 } + tags + [sourceBadge(row.isRevealed)].compactMap { $0 })
+      ].compactMap { $0 } + tags + [badge].compactMap { $0 })
         .joined(separator: ", "),
       // By SIZE, like the hub's pop-up: a curated row's representative mode is
       // its size's fastest, so an ID comparison would drop the checkmark
@@ -412,6 +419,10 @@ struct AllModesPage: View {
   /// The mark on an option our own enumeration added, on both lists: the
   /// curated one, where it is why the row exists, and the full one, where it
   /// separates a mode we found from its published neighbour at the same size.
+  ///
+  /// Takes the answer rather than a mode, because the two lists ask about
+  /// different modes: a full row IS one mode, and a curated row is a size whose
+  /// applied mode depends on the rate the display is running.
   ///
   /// A size row never carries it. A size can hold published and added modes at
   /// once, so a mark on the closed row would be a claim about a set rather than
@@ -679,16 +690,17 @@ private struct ModeChoice: View {
           .foregroundStyle(.secondary)
         Spacer(minLength: 8)
         if let badge {
-          // The app's own badge shape, the one the menu bar's HDR marker uses:
-          // quiet fill, secondary text, no accent. A tint here would compete
-          // with the checkmark, which is the only thing in this list that says
-          // "you are here".
+          // The app's own badge shape, to the point: same font, padding, radius
+          // and fill as the menu bar's HDR marker (`PanelView`). Two badges
+          // differing by a point of radius is how one shape becomes two. A tint
+          // would compete with the checkmark, which is the only thing in this
+          // list that says "you are here".
           Text(verbatim: badge)
-            .font(.caption)
+            .font(.system(size: 11, weight: .medium))
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 5)
+            .padding(.horizontal, 4)
             .padding(.vertical, 1)
-            .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(.quaternary))
+            .background(RoundedRectangle(cornerRadius: 3, style: .continuous).fill(.quaternary))
             .accessibilityHidden(true)
         }
         if let chevron {

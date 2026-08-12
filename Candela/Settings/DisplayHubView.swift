@@ -302,7 +302,8 @@ struct DisplayHubView: View {
   /// **The source mark DOES ride along, and the difference is the point.**
   /// Native and Scaled tell two entries of one size apart, which this picker
   /// has none of. "Added by Candela" says why the entry is on the list at all,
-  /// and this pop-up is where most people choose a resolution: a differentiator
+  /// and this pop-up is the offering surface of record (the menu bar's list is
+  /// a five-row shortcut; see `PanelResolutionSection`): a differentiator
   /// nobody can see at the moment of choosing is one the app does not appear to
   /// have.
   ///
@@ -323,7 +324,15 @@ struct DisplayHubView: View {
       // mark is a note about where the choice came from.
       marks.append("caps at \(DisplayModeCopy.refresh(outcome.appliedHz))")
     }
-    if row.isRevealed { marks.append(DisplayModeCopy.addedByApp) }
+    // The mode this item would APPLY, not the row's representative, which is
+    // the same rule the caps warning above follows (SO18). They disagree
+    // whenever a size holds both kinds: measured on the MAG after 1920×804 was
+    // engaged, CoreGraphics began publishing that one rate while the rest of
+    // that framebuffer's rates stayed ours, so the representative can be
+    // published while the mode this item applies is one we added.
+    if catalog.modeKeepingCurrentRefreshRate(for: row).isRevealed {
+      marks.append(DisplayModeCopy.addedByApp)
+    }
 
     let base = DisplayModeCopy.size(row.mode)
     guard !marks.isEmpty else { return base }

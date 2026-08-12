@@ -14,10 +14,11 @@ public struct DisplayModeRow: Sendable, Equatable, Identifiable {
   /// display and scaled on another.
   public let isScaled: Bool
 
-  /// The row offers an option our own enumeration added. Taken from the
-  /// REPRESENTATIVE, which is the mode this row names and the one whose
-  /// framebuffer every other statement on the row is computed against.
-  public var isRevealed: Bool { mode.isRevealed }
+  // No `isRevealed` here, deliberately. A row is a SIZE, and the mode it
+  // applies is chosen at press time from the rate the display is running, so
+  // the representative's provenance is not the row's answer: a size can hold
+  // published and added modes at once. Surfaces marking a curated row ask
+  // whatever they would apply.
 
   public var id: Int32 { mode.ioModeID }
 

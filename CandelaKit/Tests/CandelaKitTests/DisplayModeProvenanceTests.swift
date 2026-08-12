@@ -69,10 +69,10 @@ struct RevealedModeMarkingTests {
   }
 
   /// The MAG's measured collision (S6): CoreGraphics and our revelation both
-  /// offer 1920×804, and curation hands the row to the sharp one. The row must
-  /// then report itself as ours, or the feature is invisible at the exact point
-  /// it delivers.
-  @Test func aCuratedRowReportsTheProvenanceOfTheModeItWouldApply() {
+  /// offer 1920×804, and curation hands the row to the sharp one. Unless it
+  /// does, the mark has nothing to attach to and the feature stays invisible at
+  /// the exact point it delivers.
+  @Test func curationHandsACollidedSizeToTheModeWeAdded() {
     let modes = [
       mode(69, logical: (3440, 1440), pixels: (3440, 1440), native: true),
       mode(70, logical: (1920, 804), pixels: (1920, 804)),
@@ -83,7 +83,7 @@ struct RevealedModeMarkingTests {
 
     let row = rows.first { $0.mode.logicalWidth == 1920 }
     #expect(row?.mode.ioModeID == 101)
-    #expect(row?.isRevealed == true)
+    #expect(row?.mode.isRevealed == true)
   }
 
   /// A mode's own provenance, never the list's. A published size sharing a list
@@ -96,7 +96,37 @@ struct RevealedModeMarkingTests {
     ]
     let rows = DisplayModeCatalog.curated(modes, nativePixelWidth: 3440, nativePixelHeight: 1440)
 
-    #expect(rows.first { $0.mode.ioModeID == 69 }?.isRevealed == false)
-    #expect(rows.first { $0.mode.ioModeID == 101 }?.isRevealed == true)
+    #expect(rows.first { $0.mode.ioModeID == 69 }?.mode.isRevealed == false)
+    #expect(rows.first { $0.mode.ioModeID == 101 }?.mode.isRevealed == true)
+  }
+
+  /// Why a curated row cannot be marked from its representative: one framebuffer
+  /// can hold both provenances at once, so the representative and the mode a
+  /// press would apply disagree.
+  ///
+  /// This is the MAG's measured post-adoption state (S6, after the dock cycle):
+  /// once 1920×804 was engaged at 175 Hz, CoreGraphics began publishing THAT
+  /// rate while the other rates at the same framebuffer stayed ours. The
+  /// representative is the size's fastest, so it is now the published one, and
+  /// a display running 120 Hz applies the mode we added.
+  ///
+  /// The pickers therefore ask `modeKeepingCurrentRefreshRate` (app target,
+  /// no test target). What is pinned here is that the two answers really do
+  /// diverge, so a later "simplify this to `row.mode`" reads the case first.
+  @Test func theRepresentativeAndTheAppliedSiblingCanDisagree() {
+    let modes = [
+      mode(101, logical: (1920, 804), pixels: (3840, 1608), hz: 175),
+      mode(102, logical: (1920, 804), pixels: (3840, 1608), hz: 120,
+           provenance: .coreGraphicsServices),
+    ]
+    let rows = DisplayModeCatalog.curated(modes, nativePixelWidth: 3440, nativePixelHeight: 1440)
+
+    let representative = rows.first { $0.mode.logicalWidth == 1920 }?.mode
+    #expect(representative?.ioModeID == 101)
+    #expect(representative?.isRevealed == false)
+
+    // What a display running 120 Hz would land on at that size and framebuffer.
+    let applied = modes.first { $0.refreshHz == 120 }
+    #expect(applied?.isRevealed == true)
   }
 }
