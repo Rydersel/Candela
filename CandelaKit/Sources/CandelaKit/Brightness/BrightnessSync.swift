@@ -21,8 +21,12 @@ public enum BrightnessSync {
   /// the step via its own path (combined/native/software) and clamps at the
   /// ends, fork-faithfully.
   ///
-  /// While sync is off the band re-centres instead of accumulating: movement
-  /// nobody was replicating must not replay when it comes back on.
+  /// A disabled call re-centres the band, so movement observed while sync was
+  /// off does not replay when it comes back on. Only movement re-centres it:
+  /// the toggle itself never reaches here (its pref propagation rebuilds the
+  /// panel and nothing else), so a residual can survive a quiet off/on cycle
+  /// and ride out with the first nudge afterwards. Bounded by one band, which
+  /// is why that is left alone rather than wired to the pref.
   ///
   /// No feedback loop by construction: a native target's write lands in its own
   /// expected-native slot, so the poller sees the replicated value as an echo;
@@ -43,6 +47,8 @@ public enum BrightnessSync {
       // Diagnostics for "the other display followed/didn't follow" reports:
       // the same `path` category as the controller's own mode/settle lines, so
       // one predicate shows the source's adoption and every replication.
+      // `delta=` is the released accumulation, not the source's own step, so
+      // line COUNTS compare across builds but magnitudes do not.
       pathLog.log(
         "sync fan-out delta=\(step, format: .fixed(precision: 4)) from=\(source.displayID) to=\(target.displayID)"
       )

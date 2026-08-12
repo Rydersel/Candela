@@ -19,13 +19,23 @@ public struct SyncDeadband: Sendable {
   ///   0.011 and their running sum stays around 0.02 of the centre, so 0.03
   ///   leaves hunting no way out of the band;
   /// - below half a brightness key press (1/16 = 0.0625): a residual can sit
-  ///   anywhere inside the band, so a deliberate step only clears the band
-  ///   from ANY starting residual while threshold < step - threshold. At 0.03
-  ///   the worst case still crosses by 0.0625 - 0.03 = 0.0325.
+  ///   anywhere inside the band, so a press clears the band from ANY starting
+  ///   residual only while 2 * threshold < 0.0625. At 0.03 the worst case
+  ///   still crosses by 0.0625 - 0.03 = 0.0325; 0.032 would already lose that
+  ///   guarantee, so the margin here is 0.06 against 0.0625 and thin on
+  ///   purpose.
   ///
-  /// The cost is a steady-state lag: an external can sit up to one band, 3% of
-  /// range, behind its source. That is under half of the 9-unit raw swing the
-  /// storm produced on the Dell, and it does not oscillate.
+  /// Two costs, both deliberate. A press does not arrive all at once: eased
+  /// into sub-steps by `adoptExternal`, its first crossing releases 0.0347 of
+  /// the 0.0625, so about 55% lands promptly and the rest rides out with the
+  /// next movement. And a fine adjust is under the band entirely (1/64 =
+  /// 0.015625 on the system's own grid, a flat 0.01 through `step`), so one
+  /// fine press moves nothing and the second or third releases the pair or
+  /// triple together: still tracking, in coarser grain than it was asked for.
+  ///
+  /// The standing cost is a steady-state lag: an external can sit up to one
+  /// band, 3% of range, behind its source. That is under half of the 9-unit
+  /// raw swing the storm produced on the Dell, and it does not oscillate.
   public static let threshold = 0.03
 
   /// Source movement observed but not yet fanned out. Never reaches

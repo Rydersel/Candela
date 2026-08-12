@@ -72,14 +72,17 @@ struct SyncDeadbandTests {
     let sent = (0..<ticks).compactMap { _ in band.admit(step) }
     let travelled = Double(ticks) * step
 
-    // It tracks: the band can hold back at most one band's worth, never more.
-    #expect(sent.reduce(0, +) > travelled - SyncDeadband.threshold)
+    // Absolute, not stated against the threshold: a bound written as
+    // "travelled minus one band" degenerates to a tautology at any threshold
+    // wide enough to send nothing.
+    #expect(travelled == 0.20)
+    #expect(sent.reduce(0, +) > 0.17)
     // And it re-centres, so a long ramp arrives as repeated band-sized steps
     // rather than one send and then silence.
     #expect(sent.count >= 6)
     for delta in sent {
       #expect(delta >= SyncDeadband.threshold)
-      #expect(delta < SyncDeadband.threshold + step)
+      #expect(delta < 0.04)
     }
   }
 
@@ -167,7 +170,9 @@ struct BrightnessSyncDeadbandTests {
       BrightnessSync.fanOut(delta: 0.01, from: source.controller, to: controllers, isEnabled: true)
     }
 
-    #expect(external.controller.brightness > 0.5 + 0.20 - SyncDeadband.threshold)
+    // Absolute for this fixture: 0.20 of source movement, six releases of 0.03
+    // landing and the last 0.02 still held.
+    #expect(external.controller.brightness > 0.67)
     #expect(external.controller.brightness <= 0.70 + 1e-9)
   }
 
@@ -211,6 +216,111 @@ struct BrightnessSyncDeadbandTests {
     #expect(external.controller.brightness == 0.5)
     BrightnessSync.fanOut(delta: 0.02, from: source.controller, to: controllers, isEnabled: true)
     #expect(close(external.controller.brightness, 0.54))
+  }
+
+  /// The case `reset()` exists for. Starting the disabled phase from an empty
+  /// band tests nothing: it passes with the reset deleted. This starts it from
+  /// a residual the band was holding when sync went off.
+  @Test func aResidualHeldWhenSyncWentOffIsNotReleasedAfterwards() async {
+    let (source, external, _) = makeTrio()
+    external.controller.setBrightness(0.5)
+    let controllers = [source.controller, external.controller]
+
+    BrightnessSync.fanOut(delta: 0.029, from: source.controller, to: controllers, isEnabled: true)
+    #expect(external.controller.brightness == 0.5)
+    #expect(source.controller.syncDeadband.held == 0.029)
+
+    // Movement observed while off: this is what reaches the reset path.
+    for _ in 0..<5 {
+      BrightnessSync.fanOut(delta: 0.05, from: source.controller, to: controllers, isEnabled: false)
+    }
+    #expect(source.controller.syncDeadband.held == 0)
+
+    // Back on. Without the reset the pre-disable 0.029 would still be there and
+    // this nudge would push the total over the band on its own.
+    BrightnessSync.fanOut(delta: 0.005, from: source.controller, to: controllers, isEnabled: true)
+    #expect(external.controller.brightness == 0.5)
+  }
+
+  /// Acceptance item 2 in the shape the system actually produces it: a press
+  /// reaches sync already split by `adoptExternal` into eased steps that are
+  /// each below the band, so this is the case a per-delta threshold would have
+  /// swallowed whole. Deltas come from the real controller, not a fixture.
+  @Test func aRealEasedKeyPressPropagatesPromptlyAndTheRemainderRidesOut() async {
+    let source = Harness(withHDR: false, role: .builtIn, readNative: { _ in 0.5 })
+    let external = Harness()
+    external.controller.setBrightness(0.5)
+    let controllers = [source.controller, external.controller]
+
+    let first = feedEasedChange(to: 0.5 + keyStep, from: source, fanningOutTo: controllers)
+
+    // The decomposition itself: every sub-step is under the band.
+    #expect(first.deltas.count == 6)
+    #expect(first.deltas.allSatisfy { $0 < SyncDeadband.threshold })
+    #expect(close(first.deltas.reduce(0, +), keyStep, 1e-9))
+
+    // Prompt: the release fires on the second sub-step, and it carries the
+    // whole accumulation at the crossing (0.020833 + 0.013889).
+    #expect(first.releasedAt == [1])
+    #expect(close(external.controller.brightness, 0.5 + 0.0347222222, 1e-9))
+
+    // The remainder is parked, not lost: a second press carries it out, so two
+    // presses deliver 0.1176 of 0.125 rather than one band's worth of drift.
+    let second = feedEasedChange(to: 0.5 + 2 * keyStep, from: source, fanningOutTo: controllers)
+    #expect(second.deltas.allSatisfy { $0 < SyncDeadband.threshold })
+    #expect(close(external.controller.brightness, 0.5 + 0.1176543210, 1e-9))
+    #expect(close(source.controller.brightness, 0.5 + 2 * keyStep, 1e-9))
+  }
+
+  /// Drives one external brightness change through the poller's adoption path
+  /// and fans out each eased step, reporting which steps released.
+  private func feedEasedChange(
+    to value: Double,
+    from source: Harness,
+    fanningOutTo controllers: [BrightnessController]
+  ) -> (deltas: [Double], releasedAt: [Int]) {
+    var deltas: [Double] = []
+    var releasedAt: [Int] = []
+    for index in 0..<20 {
+      let generation = source.controller.expectedNative().generation
+      let delta = source.controller.adoptExternal(value, generation: generation)
+      guard delta != 0 else { break }
+      deltas.append(delta)
+      let heldBefore = source.controller.syncDeadband.held
+      BrightnessSync.fanOut(delta: delta, from: source.controller, to: controllers, isEnabled: true)
+      if source.controller.syncDeadband.held != heldBefore + delta { releasedAt.append(index) }
+      if !source.controller.isConvergingFromExternal() { break }
+    }
+    return (deltas, releasedAt)
+  }
+
+  /// A controller outlives a panel swap on the same display ID, so the band has
+  /// to be cleared where the rest of the per-panel state is: movement the old
+  /// panel's source was accumulating is not owed to the new one.
+  @Test func aPanelSwapClearsTheBand() async {
+    let source = Harness()
+    let external = Harness()
+    let controllers = [source.controller, external.controller]
+
+    BrightnessSync.fanOut(delta: 0.02, from: source.controller, to: controllers, isEnabled: true)
+    #expect(source.controller.syncDeadband.held == 0.02)
+
+    source.controller.rebind(writer: source.ddc, panelIdentity: "a-different-panel")
+    #expect(source.controller.syncDeadband.held == 0)
+  }
+
+  /// And only there: `performRefresh` rebinds every kept display on every pass,
+  /// so clearing on each rebind would drop a ramp in progress whenever the menu
+  /// opened.
+  @Test func aRoutineRebindKeepsTheBand() async {
+    let source = Harness()
+    let external = Harness()
+    let controllers = [source.controller, external.controller]
+
+    BrightnessSync.fanOut(delta: 0.02, from: source.controller, to: controllers, isEnabled: true)
+    source.controller.rebind(writer: source.ddc, panelIdentity: nil) // same panel
+
+    #expect(source.controller.syncDeadband.held == 0.02)
   }
 
   /// The band is the SOURCE's, so two sources hunting independently cannot
