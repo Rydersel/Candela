@@ -308,18 +308,27 @@ struct AllModesPage: View {
     let spokenRate = hz > 0
       ? (caps ? "caps at \(ModeSpeech.spokenRate(hz))" : ModeSpeech.spokenRate(hz))
       : nil
+    // The mode this row would APPLY, not its representative, for the same
+    // reason the rate above is the applied one (SO18). The two carry different
+    // provenance whenever a size holds both kinds: measured on the MAG after
+    // 1920×804 was engaged, CoreGraphics began publishing that rate while the
+    // other rates at the same framebuffer stayed ours, which is a published
+    // representative in front of an applied mode we added.
+    let badge = sourceBadge(catalog.modeKeepingCurrentRefreshRate(for: row).isRevealed)
 
     return modeRow(
       id: RowID.mode(row.id),
       title: DisplayModeCopy.size(row.mode),
       detail: ([rate].compactMap { $0 } + tags).joined(separator: " · "),
+      badge: badge,
       spoken: ([
         ModeSpeech.spoken(
           logicalWidth: row.mode.logicalWidth, logicalHeight: row.mode.logicalHeight,
           refreshHz: nil
         ),
         spokenRate,
-      ].compactMap { $0 } + tags).joined(separator: ", "),
+      ].compactMap { $0 } + tags + [badge].compactMap { $0 })
+        .joined(separator: ", "),
       // By SIZE, like the hub's pop-up: a curated row's representative mode is
       // its size's fastest, so an ID comparison would drop the checkmark
       // whenever the user is at that size's slower rate.
@@ -346,11 +355,12 @@ struct AllModesPage: View {
       title: DisplayModeCopy.size(mode),
       detail: ([hz.map(DisplayModeCopy.refresh)].compactMap { $0 } + tags)
         .joined(separator: " · "),
+      badge: sourceBadge(mode.isRevealed),
       spoken: ([
         ModeSpeech.spoken(
           logicalWidth: mode.logicalWidth, logicalHeight: mode.logicalHeight, refreshHz: hz
         ),
-      ] + tags).joined(separator: ", "),
+      ] + tags + [sourceBadge(mode.isRevealed)].compactMap { $0 }).joined(separator: ", "),
       // Exact here, unlike the curated rows: this list holds every rate of
       // every size, so the row the display is running is one specific mode.
       isCurrent: mode.ioModeID == catalog.current?.ioModeID
@@ -395,14 +405,30 @@ struct AllModesPage: View {
   }
 
   private func modeRow(
-    id: String, title: String, detail: String, spoken: String, isCurrent: Bool,
-    action: @escaping () -> Void
+    id: String, title: String, detail: String, badge: String? = nil, spoken: String,
+    isCurrent: Bool, action: @escaping () -> Void
   ) -> some View {
     ModeChoice(
-      title: title, detail: detail, spoken: spoken, isCurrent: isCurrent, action: action
+      title: title, detail: detail, badge: badge, spoken: spoken, isCurrent: isCurrent,
+      action: action
     )
     .id(id)
     .focused($focusedRow, equals: id)
+  }
+
+  /// The mark on an option our own enumeration added, on both lists: the
+  /// curated one, where it is why the row exists, and the full one, where it
+  /// separates a mode we found from its published neighbour at the same size.
+  ///
+  /// Takes the answer rather than a mode, because the two lists ask about
+  /// different modes: a full row IS one mode, and a curated row is a size whose
+  /// applied mode depends on the rate the display is running.
+  ///
+  /// A size row never carries it. A size can hold published and added modes at
+  /// once, so a mark on the closed row would be a claim about a set rather than
+  /// about a mode; open the size and each row answers for itself.
+  private func sourceBadge(_ isRevealed: Bool) -> String? {
+    isRevealed ? DisplayModeCopy.addedByApp : nil
   }
 
   /// The one id space the list, its focus and `scrollTo` all speak.
@@ -627,6 +653,14 @@ private extension DisplayModeCatalog.SizeGroup {
 private struct ModeChoice: View {
   let title: String
   let detail: String
+  /// A short mark at the trailing edge, or nothing. Drawn rather than folded
+  /// into `detail` so it reads as a note about the row instead of as one more
+  /// property of the mode, and so it lines up down the list: a run of marked
+  /// rows is the shape of what the app adds to this display.
+  ///
+  /// Hidden from accessibility here; the callers put the same words into
+  /// `spoken`, which is what VoiceOver reads.
+  var badge: String?
   /// The spoken form (`2,560 by 1,440 at 60 hertz`), which is not the visible
   /// one: "×" is read inconsistently at most verbosities and digit groups are
   /// read digit by digit without it.
@@ -655,6 +689,20 @@ private struct ModeChoice: View {
         Text(verbatim: detail)
           .foregroundStyle(.secondary)
         Spacer(minLength: 8)
+        if let badge {
+          // The app's own badge shape, to the point: same font, padding, radius
+          // and fill as the menu bar's HDR marker (`PanelView`). Two badges
+          // differing by a point of radius is how one shape becomes two. A tint
+          // would compete with the checkmark, which is the only thing in this
+          // list that says "you are here".
+          Text(verbatim: badge)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(RoundedRectangle(cornerRadius: 3, style: .continuous).fill(.quaternary))
+            .accessibilityHidden(true)
+        }
         if let chevron {
           Image(systemName: chevron)
             .font(.system(size: 10, weight: .semibold))

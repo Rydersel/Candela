@@ -206,8 +206,12 @@ struct DiagnosticsPage: View {
   /// that list" is a count we made. Neither asserts why macOS omitted them.
   @ViewBuilder private var resolutionSourceRows: some View {
     if let catalog = model.displayModes.catalogs[state.id] {
+      // Two counts, two predicates, and they are not each other's complement.
+      // "Listed by macOS" names ONE source explicitly; `isRevealed` switches
+      // over the provenance, so adding injection is a compile error there and a
+      // silent miscount here. When that lands this row pair becomes three.
       let publishedCount = catalog.all.count { $0.provenance == .coreGraphics }
-      let revealedCount = catalog.all.count { $0.provenance == .coreGraphicsServices }
+      let revealedCount = catalog.all.count(where: \.isRevealed)
 
       LabeledContent("Resolutions listed by macOS") {
         Text(verbatim: "\(publishedCount)").foregroundStyle(.secondary)

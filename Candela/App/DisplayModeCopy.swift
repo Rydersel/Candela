@@ -43,6 +43,22 @@ enum DisplayModeCopy {
     "\(descriptor.logicalWidth) × \(descriptor.logicalHeight)"
   }
 
+  /// The mark on an option that is in the list because this app's own
+  /// enumeration found it. Shown on the surfaces that OFFER a size to choose
+  /// from, so the value the app adds is legible at the moment it is delivered.
+  ///
+  /// Three constraints meet in these three words. It states what WE did and
+  /// never what macOS does: no API reports which resolutions the Displays
+  /// settings pane is showing, so "hidden by macOS" is a claim we cannot check.
+  /// It makes no quality claim (RM11): every one of these renders oversized and
+  /// downsamples, so "better", "extra sharp" or "full resolution" would all be
+  /// false. And it says nothing about the mechanism, which is the app's
+  /// business and not the reader's.
+  ///
+  /// Spoken and seen are the same words, deliberately: there is no symbol or
+  /// abbreviation here for a screen reader to mispronounce.
+  static var addedByApp: String { "Added by \(AppInfo.productName)" }
+
   /// Rates are quantized to one decimal at the CoreGraphics boundary, so 59.9
   /// is a real value and truncating it to "59 Hz" would both misreport it and
   /// collide with a genuine 59 Hz row.

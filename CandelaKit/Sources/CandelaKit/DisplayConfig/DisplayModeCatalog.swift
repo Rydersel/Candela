@@ -14,6 +14,12 @@ public struct DisplayModeRow: Sendable, Equatable, Identifiable {
   /// display and scaled on another.
   public let isScaled: Bool
 
+  // No `isRevealed` here, deliberately. A row is a SIZE, and the mode it
+  // applies is chosen at press time from the rate the display is running, so
+  // the representative's provenance is not the row's answer: a size can hold
+  // published and added modes at once. Surfaces marking a curated row ask
+  // whatever they would apply.
+
   public var id: Int32 { mode.ioModeID }
 
   public init(mode: DisplayMode, isScaled: Bool) {

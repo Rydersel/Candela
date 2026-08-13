@@ -16,6 +16,15 @@ import SwiftUI
 /// The full list, the refresh-rate picker, the badges and the remember toggle
 /// stay in Settings, where there is room.
 ///
+/// **Which surface is the headline, settled once:** this one is the most SEEN
+/// (it is behind the menu-bar icon, which is why a reapply report renders here
+/// even when the list does not), and the settings hub's Size pop-up is the
+/// offering surface of record: it holds every curated size, while this list is
+/// a shortcut capped at five rows that says so in its own overflow caption. So
+/// a mark that exists to be read while choosing goes there first, and comes
+/// here only if it can be shown without truncating a 280 pt row. The
+/// "Added by Candela" source mark is in Settings for exactly that reason.
+///
 /// This view never enumerates: `StatusItemController.warmModeCatalogs` does it
 /// outside the tracking session, because a `.task` here would be starved while
 /// the menu is open and the section would be missing on the open that wanted it.
