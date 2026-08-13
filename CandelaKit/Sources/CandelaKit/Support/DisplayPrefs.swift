@@ -680,6 +680,62 @@ public final class DisplayPrefs: @unchecked Sendable {
     "\(name).\(persistenceKey)"
   }
 
+  // MARK: - Virtual display slots (VD9)
+
+  // App-level, slot-suffixed keys (`virtualSlotConfigured.<slot>`), the
+  // per-command composition precedent. The keys are shipped schema; add,
+  // never rename. Defaults are the slot's remembered setup before anything
+  // was ever stored: an unconfigured 1920x1080 HiDPI display with the slot's
+  // default name.
+  private func vdKey(_ name: String, _ slot: Int) -> String { "\(name).\(slot)" }
+
+  public func virtualSlot(_ slot: Int) -> VirtualSlotDefinition {
+    VirtualSlotDefinition(
+      configured: defaults.bool(forKey: vdKey("virtualSlotConfigured", slot)),
+      name: defaults.string(forKey: vdKey("virtualSlotName", slot))
+        ?? VirtualDisplayIdentity.defaultName(slot: slot),
+      width: defaults.object(forKey: vdKey("virtualSlotWidth", slot)) as? Int ?? 1920,
+      height: defaults.object(forKey: vdKey("virtualSlotHeight", slot)) as? Int ?? 1080,
+      hiDPI: defaults.object(forKey: vdKey("virtualSlotHiDPI", slot)) as? Bool ?? true,
+      refreshHz: defaults.object(forKey: vdKey("virtualSlotRefreshHz", slot)) as? Double ?? 60,
+      recreateAtLaunch: defaults.bool(forKey: vdKey("virtualSlotRecreateAtLaunch", slot)),
+      uuid: defaults.string(forKey: vdKey("virtualSlotUUID", slot)).flatMap(UUID.init(uuidString:))
+    )
+  }
+
+  public func setVirtualSlot(_ definition: VirtualSlotDefinition, slot: Int) {
+    defaults.set(definition.configured, forKey: vdKey("virtualSlotConfigured", slot))
+    defaults.set(definition.name, forKey: vdKey("virtualSlotName", slot))
+    defaults.set(definition.width, forKey: vdKey("virtualSlotWidth", slot))
+    defaults.set(definition.height, forKey: vdKey("virtualSlotHeight", slot))
+    defaults.set(definition.hiDPI, forKey: vdKey("virtualSlotHiDPI", slot))
+    defaults.set(definition.refreshHz, forKey: vdKey("virtualSlotRefreshHz", slot))
+    defaults.set(definition.recreateAtLaunch, forKey: vdKey("virtualSlotRecreateAtLaunch", slot))
+    if let uuid = definition.uuid {
+      defaults.set(uuid.uuidString, forKey: vdKey("virtualSlotUUID", slot))
+    } else {
+      defaults.removeObject(forKey: vdKey("virtualSlotUUID", slot))
+    }
+  }
+
+  /// The slot definitions the reconciler consumes, keyed by slot.
+  public func virtualSlotDefinitions() -> [Int: VirtualSlotDefinition] {
+    Dictionary(uniqueKeysWithValues: VirtualDisplayIdentity.slotRange.map { ($0, virtualSlot($0)) })
+  }
+
+  /// VD15's second half: reset clears every slot key AFTER the live displays
+  /// were destroyed. Field-by-field removal, so a future added key needs its
+  /// own line here (the same property every reset path in this file has).
+  public func clearVirtualSlots() {
+    for slot in VirtualDisplayIdentity.slotRange {
+      for name in ["virtualSlotConfigured", "virtualSlotName", "virtualSlotWidth",
+                   "virtualSlotHeight", "virtualSlotHiDPI", "virtualSlotRefreshHz",
+                   "virtualSlotRecreateAtLaunch", "virtualSlotUUID"] {
+        defaults.removeObject(forKey: vdKey(name, slot))
+      }
+    }
+  }
+
   /// SO22: whether ANYTHING has ever been stored for this display — prefs,
   /// saved levels, tuning. Every per-display key ends `".<persistenceKey>"`
   /// (this type's `key`/`commandKey`, the brightness/volume/contrast stores'
