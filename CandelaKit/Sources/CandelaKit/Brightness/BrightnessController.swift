@@ -188,6 +188,17 @@ public final class BrightnessController: PendingWireDraining {
   private(set) var cachedHDRActive = false
   private(set) var cachedSupportsHDR = false
 
+  /// What the last REFRESH observed, which is a different fact from
+  /// `cachedHDRActive`: transitions write that one optimistically (an exit sets
+  /// it false before the drop goes out, and puts it back to true when it bails),
+  /// so it moves for reasons that are requests rather than observations.
+  ///
+  /// The memo invalidation is keyed to THIS one going true-to-false. Keyed to
+  /// the optimistic mirror instead, an exit's own confirming refresh would see
+  /// false-to-false and no edge would ever survive a transition that set the
+  /// mirror on its way in.
+  @ObservationIgnored private var observedHDRActive = false
+
   /// True from an HDR transition's start until its ~2 s settle window ends;
   /// gates `isNativeActive()` (reviews I5/I15) so the poller stays away while
   /// the display blanks and re-modes.
@@ -285,6 +296,25 @@ public final class BrightnessController: PendingWireDraining {
   /// never for the DDC or gamma write targets, which stay the raw panel ID.
   @ObservationIgnored private let mirrorTopology: any MirrorTopologyProviding
 
+  /// The other write queues on this display's wire (its volume and contrast
+  /// controllers), whose duplicate memos have to be dropped whenever an HDR
+  /// window closes: a write ACKed while the register was locked was swallowed,
+  /// so a memo built through the window names values the panel never took.
+  ///
+  /// Stored, and required at init, because the moment that needs them is not a
+  /// call. The invalidation is keyed to the mirror's observed true-to-false
+  /// edge in `refreshHDRCaches`, and that runs from the init refresh and from
+  /// the reconfiguration loop as well as from the doors: a route where HDR was
+  /// dropped in System Settings has no caller of ours to hand anything over.
+  /// A parameter cannot reach those paths at all, and a setter called later
+  /// could be forgotten in silence, which is the failure mode this shape is
+  /// chosen against.
+  ///
+  /// A fact about the wire rather than about a call, so it never changes: a
+  /// display's three controllers are built together and reused together, and a
+  /// replug rebinds their writers in place rather than replacing the objects.
+  @ObservationIgnored private let wireSiblings: [any PendingWireDraining]
+
   /// Gamma-interference hook (Task 9 wires the monitor): invoked ONLY when
   /// the gamma backend — not the shade — is about to apply and the sw dedupe
   /// did not skip. The C1 clearing's restore-to-1.0 bypasses it on purpose:
@@ -346,11 +376,17 @@ public final class BrightnessController: PendingWireDraining {
     legacyKey: String? = nil,
     panelIdentity: String? = nil,
     // Defaulted to an empty store, whose resolution is the identity function:
-    // an unwired engine degrades to exactly today's behaviour. Appended LAST so
-    // every existing construction site compiles unchanged.
-    mirrorTopology: any MirrorTopologyProviding = MirrorTopologyStore()
+    // an unwired engine degrades to exactly today's behaviour.
+    mirrorTopology: any MirrorTopologyProviding = MirrorTopologyStore(),
+    // NO DEFAULT, and the only place the wire's other queues are named. See the
+    // property: the invalidation edge fires on paths that have no caller, so
+    // this cannot be a parameter on the doors, and an empty default would make
+    // a display whose siblings were never wired look exactly like a display
+    // that has none.
+    wireSiblings: [any PendingWireDraining]
   ) {
     self.mirrorTopology = mirrorTopology
+    self.wireSiblings = wireSiblings
     self.writer = writer
     self.backends = backends
     self.prefs = prefs
@@ -806,16 +842,11 @@ public final class BrightnessController: PendingWireDraining {
 
   /// Panel entry point for the per-display HDR mode.
   ///
-  /// `alsoInvalidating` takes this display's other wire controllers (volume,
-  /// contrast) and has no default, for the reason the reset door's parameter has
-  /// none: the door decides which arm it takes, so a caller cannot know whether
-  /// this call is about to close an HDR window, and a defaulted parameter is a
-  /// wiring step a new call site can forget silently. What it buys is in
-  /// `performHDRExit`, which is where the window closes.
-  public func setHDRMode(
-    _ mode: HDRMode,
-    alsoInvalidating siblings: [any PendingWireDraining]
-  ) async {
+  /// Takes no sibling queues: the memos this can poison are dropped from the
+  /// wire the controller was built with, on the mirror's observed true-to-false
+  /// edge. A caller cannot know whether its call is about to close an HDR
+  /// window, and it no longer has to.
+  public func setHDRMode(_ mode: HDRMode) async {
     // Role fence (T10 fix round 1, minor): HDR modes are external-display
     // machinery — the built-in is constitutively native already, and a call
     // here would persist a meaningless mode under the builtIn prefs key.
@@ -915,17 +946,18 @@ public final class BrightnessController: PendingWireDraining {
         // misreport permanently. The C1 clearing already ran, so after the
         // caches settle, re-apply the current value through the normal path;
         // without it the screen is stranded un-dimmed under a low slider.
-        // No `resetDuplicateState()` here (deliberate asymmetry vs the
-        // disengage arm): neither way of reaching this arm switched modes BY
-        // ITSELF, so the last recorded DDC value normally still reflects the
-        // register.
+        // No memo drop written HERE (deliberate asymmetry vs the disengage arm):
+        // neither way of reaching this arm switched modes BY ITSELF, so the last
+        // recorded DDC value normally still reflects the register.
         //
-        // "Normally" is doing real work. One interleaving falsifies it and is
-        // knowingly left uncovered: an exit whose drop had already taken,
-        // superseded by this engage past its own fences, leaves the display out
-        // of HDR with memos built while the register was locked, and this arm
-        // then rolls back without dropping them. See `performHDRExit`'s note at
-        // the invalidation for why neither side can close it from here.
+        // "Normally" is doing real work, and the interleaving that falsifies it
+        // is now covered by the refresh below rather than by this arm: an exit
+        // whose drop had already taken, superseded by this engage past its own
+        // fences, leaves the display OUT of HDR with memos built while the
+        // register was locked. The rollback's `refreshHDRCaches` then observes
+        // the mirror go true-to-false and drops them, which is a thing this arm
+        // cannot decide for itself: what it knows is that ITS write did nothing,
+        // not where the panel is.
         //
         // TWO ways of reaching it, and they are different facts (#65). The
         // write was never issued (no panel, or the MonitorPanel lock was busy),
@@ -949,9 +981,7 @@ public final class BrightnessController: PendingWireDraining {
       // Leaving the native path (`.alwaysOn` → `.off`, the only remaining exit
       // now that Boost is gone).
       beginHDRTransition()
-      _ = await performHDRExit(
-        generation: hdrTransitionGeneration, alsoInvalidating: siblings
-      )
+      _ = await performHDRExit(generation: hdrTransitionGeneration)
     }
   }
 
@@ -963,14 +993,12 @@ public final class BrightnessController: PendingWireDraining {
   /// own brightness level, so the last DDC value we recorded no longer reflects
   /// the register (I10).
   ///
-  /// EVERY queue on this display's wire, not just this controller's, which is
-  /// why `alsoInvalidating` is here rather than at one door. A write issued
-  /// while the register was locked is ACKed and swallowed, so any memo built
-  /// through the window names values the panel never took, and the first thing
-  /// under a reset or under a person's own next click is usually the unmute:
-  /// skipped as a duplicate of a write that never landed, and reported applied.
-  /// The window closes here for every route out of HDR, so this is the one place
-  /// that knows the moment for all of them.
+  /// EVERY queue on this display's wire, not just this controller's. A write
+  /// issued while the register was locked is ACKed and swallowed, so any memo
+  /// built through the window names values the panel never took, and the first
+  /// thing under a reset or under a person's own next click is usually the
+  /// unmute: skipped as a duplicate of a write that never landed, and reported
+  /// applied.
   ///
   /// Shared by the mode door and the reset door so the two cannot drift: what
   /// differs between them is only WHO decides there is something to do, and
@@ -982,10 +1010,7 @@ public final class BrightnessController: PendingWireDraining {
   /// refresh at the bottom never ran. A caller that treats that as "HDR is off"
   /// is asserting the one thing it failed to learn.
   @discardableResult
-  private func performHDRExit(
-    generation: UInt64,
-    alsoInvalidating siblings: [any PendingWireDraining]
-  ) async -> Bool {
+  private func performHDRExit(generation: UInt64) async -> Bool {
     // Optimistic for the duration: the legs have to stop treating the display as
     // native while it leaves HDR.
     //
@@ -1024,23 +1049,26 @@ public final class BrightnessController: PendingWireDraining {
       return false // post-settle
     }
     settleInProgress = false
-    // Before the re-apply, and before this returns to whatever writes next: the
-    // window is closed, and everything the memos learned inside it is a claim
-    // about a register that never heard those writes. A bail above leaves them
-    // standing on purpose, in step with the assume-locked rule one line up: a
-    // superseded call establishes nothing, including that the window is over.
+    // KEPT after the invalidation moved to the mirror's edge, because of a
+    // window the edge cannot see: the edge fires from `refreshHDRCaches`, and
+    // this path's refresh is at the bottom, AFTER the re-apply. The re-apply is
+    // itself a DDC write whose memo is stale for I10's reason (the panel left
+    // HDR at its own brightness level), so it has to find the memos already
+    // dropped or it is skipped as a duplicate of a value the register no longer
+    // holds. Between here and the refresh below, no observation has happened
+    // yet, so nothing else in the file knows the window is over.
     //
-    // Usually the transition that took the display closes the window itself, on
-    // its own exit. ONE INTERLEAVING IS LEFT UNCOVERED, deliberately and not
-    // silently: this drop TAKES, a newer engage supersedes us past a fence, and
-    // that engage then fails to engage. The display is out of HDR with memos
-    // built while it was locked, and the engage's rollback arm does not drop
-    // them either (its own note says so). Nothing here can see that cell,
-    // because a superseded call is exactly the one that must not assert state.
-    // Closing it means keying the invalidation to the mirror's true-to-false
-    // edge rather than to a call, which is the shape the open follow-up for
-    // HDR dropped OUTSIDE the app needs anyway.
-    invalidateWireMemos(siblings)
+    // The refresh below then fires the edge and drops them a second time, which
+    // costs one redundant write later and is the same trade the reset door's
+    // overlap already takes.
+    //
+    // A bail above leaves them standing on purpose, in step with the
+    // assume-locked rule one line up: a superseded call establishes nothing,
+    // including that the window is over. What used to be uncovered there is now
+    // the edge's job: a superseded exit whose drop TOOK is seen by whichever
+    // refresh next observes the mirror go true-to-false, including the
+    // superseding engage's own rollback.
+    invalidateWireMemos()
     applyPaths()
     // Measured, for the reason the engage arm is: a write that returned success
     // is evidence of nothing. This arm does not roll back on a disengage that
@@ -1051,16 +1079,17 @@ public final class BrightnessController: PendingWireDraining {
   }
 
   /// Drops what every queue on this display's wire believes is in the register:
-  /// this controller's memo and the siblings' handed in by the caller.
+  /// this controller's memo and its siblings'.
   ///
-  /// One rule, one definition, two moments that need it (the exit, and a reset
-  /// asking about a window that closed before it was called). Over-invalidating
-  /// costs a redundant write; under-invalidating leaves a swallowed value
-  /// certified as landed, which on a write-only panel nothing downstream can
-  /// detect.
-  private func invalidateWireMemos(_ siblings: [any PendingWireDraining]) {
+  /// One rule, one definition, three moments that need it: the observed edge
+  /// (every route out of HDR, including the ones with no caller of ours), the
+  /// exit's own re-apply, and a reset asking about a window that closed before
+  /// it was called. Over-invalidating costs a redundant write;
+  /// under-invalidating leaves a swallowed value certified as landed, which on a
+  /// write-only panel nothing downstream can detect.
+  private func invalidateWireMemos() {
     resetWriteMemo()
-    for sibling in siblings { sibling.resetWriteMemo() }
+    for sibling in wireSiblings { sibling.resetWriteMemo() }
   }
 
   /// The reset paths' HDR disengage: makes the DISPLAY leave HDR, and asks the
@@ -1094,32 +1123,34 @@ public final class BrightnessController: PendingWireDraining {
   /// HDR button. What this rules out is a reset proceeding on a state it never
   /// established.
   ///
-  /// `alsoInvalidating` takes this display's other wire controllers, and it is
-  /// as load-bearing as the disengage itself. Each queue skips a write whose
-  /// value its memo says is already in the register, and under HDR an I2C write
-  /// is ACKed and swallowed: a memo built through an HDR window therefore
-  /// records values that never reached the panel. Left standing, the reset's own
-  /// unmute would be skipped as a duplicate of a write that never landed, and
-  /// the skip would be reported as applied. A rebind clears those memos too, but
-  /// it is neither synchronous with this nor ordered before the unmute: it lands
-  /// when a display is rediscovered, which is not a thing this path can wait
-  /// for. Doing it here is what puts the clearing between the HDR window and the
-  /// write that depends on it.
+  /// The unconditional memo sweep below is as load-bearing as the disengage
+  /// itself. Each queue skips a write whose value its memo says is already in
+  /// the register, and under HDR an I2C write is ACKed and swallowed: a memo
+  /// built through an HDR window therefore records values that never reached the
+  /// panel. Left standing, the reset's own unmute would be skipped as a
+  /// duplicate of a write that never landed, and the skip would be reported as
+  /// applied. A rebind clears those memos too, but it is neither synchronous
+  /// with this nor ordered before the unmute: it lands when a display is
+  /// rediscovered, which is not a thing this path can wait for. Doing it here is
+  /// what puts the clearing between the HDR window and the write that depends
+  /// on it.
   ///
-  /// The exit owns that clearing for every route out of HDR, so what is left
-  /// here is the part an exit cannot know. This door also runs on arms where no
-  /// exit runs at all (the built-in, and a display measured out of HDR already),
-  /// and a window that closed BEFORE this call left the same poisoned memos
-  /// behind with no exit of ours between them and the unmute: HDR dropped in
-  /// System Settings is the ordinary way to get there. On the arm where both
-  /// fire, dropping a memo twice costs nothing.
-  public func disengageHDRForReset(
-    alsoInvalidating siblings: [any PendingWireDraining]
-  ) async -> HDRResetDisengage {
-    // Unconditional, for the reason above: what makes a memo untrustworthy is
-    // the HDR window it was built through, which is in the past by the time
-    // anyone asks, and this path is about to write DDC on the strength of it.
-    defer { invalidateWireMemos(siblings) }
+  /// NOT made redundant by the observed edge, though it now covers most of what
+  /// this used to be the only answer to. The edge fires on a mirror going
+  /// true-to-false, so it can only see a window a refresh OBSERVED as live. A
+  /// window that opened and closed with no refresh in it produces no edge at
+  /// all, and the ordinary way to get one is not a missing reconfiguration but a
+  /// coalesced pair: the app's topology stream reports once per quiet window and
+  /// buffers the newest event, so HDR switched on and off again inside one
+  /// window arrives as a single delivery showing only the final state. A
+  /// non-measured read answering from the backend's own cache lags the engage
+  /// the same way. This path is about to write
+  /// DDC on the strength of those memos, and it is the one place that can pay
+  /// for certainty, because what makes a memo untrustworthy is the window it was
+  /// built through, which is in the past by the time anyone asks. Dropping a
+  /// memo the edge already dropped costs nothing.
+  public func disengageHDRForReset() async -> HDRResetDisengage {
+    defer { invalidateWireMemos() }
     guard role == .external else { return .disengaged(restoreAfterward: false) }
     // An observation, not a transition, so it takes the capture-and-compare
     // fence rather than the token: bumping the generation here would supersede
@@ -1144,9 +1175,7 @@ public final class BrightnessController: PendingWireDraining {
     // describes a display another transition has since moved.
     if !wasLive, !raced { return .disengaged(restoreAfterward: false) }
     beginHDRTransition()
-    let completed = await performHDRExit(
-      generation: hdrTransitionGeneration, alsoInvalidating: siblings
-    )
+    let completed = await performHDRExit(generation: hdrTransitionGeneration)
     guard completed else {
       pathLog.error(
         "reset HDR disengage was superseded: display=\(self.displayID) HDR state is unknown, so nothing below may write DDC"
@@ -1199,26 +1228,27 @@ public final class BrightnessController: PendingWireDraining {
   /// no rollback, because there is no mode to roll back to. A restore that does
   /// not take leaves the display where the disengage left it and says so.
   ///
-  /// `alsoDraining` is load-bearing and not a convenience. Re-engaging HDR
-  /// locks the DDC register, and a DDC submit is queued rather than sent: it
-  /// rides a coalescer that drains on its own task, so the reset's unmute can
-  /// still be in flight when this is called. Measured 2026-08-11: the queued
-  /// writes reached the panel after the re-engage, the last of them more than a
-  /// second later, and were swallowed while the app recorded an unmuted
+  /// Settling the WHOLE wire first is load-bearing and not a convenience.
+  /// Re-engaging HDR locks the DDC register, and a DDC submit is queued rather
+  /// than sent: it rides a coalescer that drains on its own task, so the reset's
+  /// unmute can still be in flight when this is called. Measured 2026-08-11: the
+  /// queued writes reached the panel after the re-engage, the last of them more
+  /// than a second later, and were swallowed while the app recorded an unmuted
   /// display, which is the strand D29 exists to prevent. So this settles its own
-  /// queue and every controller handed to it (the caller's siblings on the same
-  /// wire: volume, contrast) before the engage goes out. No default value on
-  /// purpose: a caller with nothing in flight says so by passing an empty list.
+  /// queue and its siblings' before the engage goes out. They come from the
+  /// controller's wire rather than from the caller, for the reason the
+  /// invalidation's do: which queues share this register is a fact about the
+  /// display, and a caller that has to remember it is a caller that can forget.
   ///
   /// A queue that cannot be settled SKIPS the re-engage, loudly. That is the
   /// safe direction by a wide margin: the cost is a display left out of HDR
   /// that the user set in System Settings, visible and one click from fixed,
   /// against a monitor stranded silent behind a locked register with the app
   /// reporting it unmuted.
-  public func restoreExternalHDR(alsoDraining siblings: [any PendingWireDraining]) async {
+  public func restoreExternalHDR() async {
     guard role == .external else { return }
     guard await WireQuiescence.settle(
-      [self] + siblings,
+      [self] + wireSiblings,
       betweenRounds: wireSettlePause,
       isWireOpen: { [weak self] in self?.isWireOpen ?? true }
     ) else {
@@ -1256,6 +1286,12 @@ public final class BrightnessController: PendingWireDraining {
   /// Re-evaluates the cached HDR state (Task 4's topology loop calls this for
   /// every surviving display after `HDRToggling.displaysReconfigured()`).
   /// Detecting an externally-toggled HDR entry runs the C1 clearing.
+  ///
+  /// The EXIT direction has no work here and is not missing: an HDR window
+  /// closing is handled inside `refreshHDRCaches`, where the observation is
+  /// made. That is what covers HDR dropped in System Settings or on the
+  /// display's own controls, which reaches Candela as a reconfiguration and
+  /// leaves the wire's memos naming values the panel swallowed.
   public func noteHDRStateMayHaveChanged() async {
     let wasNative = usesNative
     // Capture only — this is a state *observation*, not a transition, so it
@@ -1339,6 +1375,33 @@ public final class BrightnessController: PendingWireDraining {
     } else {
       cachedSupportsHDR = false
       cachedHDRActive = false
+    }
+    // The DDC register just came back, whoever unlocked it. Keyed to the
+    // OBSERVED edge rather than to a call because most of the routes out of HDR
+    // have no call of ours in them: HDR switched off in System Settings or on
+    // the display's own controls arrives here as a reconfiguration, and an exit
+    // superseded by an engage that then fails to engage arrives as the
+    // rollback's refresh. Both leave memos naming values the panel ACKed and
+    // swallowed while it was locked, and the first write over the top of one is
+    // usually the unmute.
+    //
+    // Only true-to-false. An ENTRY is a window opening, and nothing built
+    // through it exists yet.
+    //
+    // The bound, stated because it is what keeps the reset door's own sweep:
+    // this sees windows a refresh OBSERVED as live. A window that opened and
+    // closed between two refreshes never sets the flag and so never produces an
+    // edge.
+    let wasObservedActive = observedHDRActive
+    observedHDRActive = cachedHDRActive
+    if wasObservedActive, !cachedHDRActive {
+      // Logged because on a write-only panel this is the only observable that
+      // separates the fix from the bug: the swallowed write and the skip that
+      // certifies it both look like success from every other angle.
+      pathLog.log(
+        "HDR window closed on display=\(self.displayID): dropping the wire's duplicate memos"
+      )
+      invalidateWireMemos()
     }
     updateNativeActive()
   }

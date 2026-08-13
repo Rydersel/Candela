@@ -793,14 +793,14 @@ struct DisplayHubView: View {
       //    measured read taken after the drop settled, so it is what licenses
       //    the hardware writes below. `.unknown` withholds that licence.
       //
-      //    The other two controllers go in because their duplicate memos have
-      //    to be dropped here: a write ACKed while the display was in HDR was
-      //    swallowed by the panel, so a memo built through that window would let
-      //    the unmute below be skipped as a duplicate of a value the register
-      //    never took, and reported as applied.
-      let hdrState = await state.controller.disengageHDRForReset(
-        alsoInvalidating: [state.volume, state.contrast]
-      )
+      //    It also drops the duplicate memos of every queue on this display's
+      //    wire, which the unmute below depends on: a write ACKed while the
+      //    display was in HDR was swallowed by the panel, so a memo built
+      //    through that window would let the unmute be skipped as a duplicate of
+      //    a value the register never took, and reported as applied. The
+      //    controller holds its own wire, so this reset cannot name the wrong
+      //    queues or forget one.
+      let hdrState = await state.controller.disengageHDRForReset()
 
       // 2. This step is hardware too, and it runs before the evidence is acted
       //    on below: several of these keys fan out to `reapplyAfterPrefChange`,
@@ -929,13 +929,12 @@ struct DisplayHubView: View {
       // 5. LAST, and only for HDR this reset borrowed rather than owned. The
       //    restore is the door that settles the wire: every write above is
       //    QUEUED rather than sent, and re-engaging locks the register the
-      //    moment one lands. It is handed all three controllers because the
-      //    pref fan-out in step 2 re-applies brightness on the same wire, and
-      //    it refuses to re-engage at all if it cannot confirm they landed.
+      //    moment one lands. It settles all three queues, the brightness one
+      //    included, because the pref fan-out in step 2 re-applies brightness on
+      //    the same wire, and it refuses to re-engage at all if it cannot
+      //    confirm they landed.
       if case .disengaged(restoreAfterward: true) = hdrState {
-        await state.controller.restoreExternalHDR(
-          alsoDraining: [state.volume, state.contrast]
-        )
+        await state.controller.restoreExternalHDR()
       }
 
       nameDraft = ""

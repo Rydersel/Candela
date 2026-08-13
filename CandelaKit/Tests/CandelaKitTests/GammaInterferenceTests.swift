@@ -96,7 +96,8 @@ private struct Fixture {
       gamma: gamma
     ),
     prefs: DisplayPrefs(defaults: defaults, persistenceKey: "gi"),
-    displayID: 3
+    displayID: 3,
+    wireSiblings: []
   )
   controller.preGammaApplyHook = {
     monitor.checkBeforeApply(displayID: 3, displayName: "MAG341C", onSwitchToShade: {})
@@ -189,7 +190,8 @@ private struct Fixture {
       hdr: nil, shade: nil, gamma: gamma
     ),
     prefs: DisplayPrefs(defaults: defaults, persistenceKey: "rc"),
-    displayID: 5
+    displayID: 5,
+    wireSiblings: []
   )
   await controller.handleReconfigure(recapture: false)
   #expect(gamma.recaptured.isEmpty)

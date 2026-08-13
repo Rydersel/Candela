@@ -928,6 +928,21 @@ final class AppModel {
       // gates the volume/contrast readback (`refreshFromHardware` opens with
       // `guard prefs.startupAction == .read`) for all of them at once.
       let prefs = DisplayPrefs(persistenceKey: persistenceKey, safeMode: safeMode)
+      // Built BEFORE the brightness controller because they are part of its
+      // construction: it holds this display's other write queues for the life of
+      // the wire, and drops their duplicate memos whenever it sees an HDR window
+      // close. The engine's parameter has no default, so this ordering is not a
+      // convention anyone has to remember.
+      let volume = DDCValueController(
+        writer: entry.writer, command: .volume, prefs: prefs,
+        store: UserDefaultsBrightnessStore(), storageKey: "volume.\(persistenceKey)",
+        panelIdentity: persistenceKey
+      )
+      let contrast = DDCValueController(
+        writer: entry.writer, command: .contrast, prefs: prefs,
+        store: UserDefaultsBrightnessStore(), storageKey: "contrast.\(persistenceKey)",
+        panelIdentity: persistenceKey
+      )
       let controller = BrightnessController(
         writer: entry.writer,
         backends: BrightnessBackends(
@@ -950,17 +965,8 @@ final class AppModel {
         // Seeded here so the next pass's rebind — which happens on every
         // refresh — is not mistaken for a panel swap.
         panelIdentity: persistenceKey,
-        mirrorTopology: mirrorTopology
-      )
-      let volume = DDCValueController(
-        writer: entry.writer, command: .volume, prefs: prefs,
-        store: UserDefaultsBrightnessStore(), storageKey: "volume.\(persistenceKey)",
-        panelIdentity: persistenceKey
-      )
-      let contrast = DDCValueController(
-        writer: entry.writer, command: .contrast, prefs: prefs,
-        store: UserDefaultsBrightnessStore(), storageKey: "contrast.\(persistenceKey)",
-        panelIdentity: persistenceKey
+        mirrorTopology: mirrorTopology,
+        wireSiblings: [volume, contrast]
       )
       let state = DisplayState(
         display: entry.display, controller: controller, volume: volume, contrast: contrast,
@@ -1073,6 +1079,20 @@ final class AppModel {
       return
     }
     noteDisplayEvent("\(display.name) arrived")
+    // Inert value controllers: the built-in has no DDC wire, so their
+    // `isAvailable` stays true but every write no-ops on `NoopDDCWriter`.
+    // Nothing renders them (the panel shows volume/contrast for `displays`
+    // only); they exist so `DisplayState` has one shape for both slots, and so
+    // the brightness controller's wire is named here the same way it is for an
+    // external. It has no HDR backend, so nothing ever asks it to invalidate.
+    let volume = DDCValueController(
+      writer: NoopDDCWriter(), command: .volume,
+      prefs: DisplayPrefs(persistenceKey: "builtIn")
+    )
+    let contrast = DDCValueController(
+      writer: NoopDDCWriter(), command: .contrast,
+      prefs: DisplayPrefs(persistenceKey: "builtIn")
+    )
     let controller = BrightnessController(
       writer: NoopDDCWriter(), // no DDC wire; always-fails stub (re-review T10-D)
       backends: BrightnessBackends(
@@ -1092,22 +1112,13 @@ final class AppModel {
       // store/storageKey/legacyKey stay nil (re-review T10-E): macOS owns
       // built-in brightness across launches; the controller seeds from a
       // native read at init.
-      mirrorTopology: mirrorTopology
+      mirrorTopology: mirrorTopology,
+      wireSiblings: [volume, contrast]
     )
-    // Inert value controllers: the built-in has no DDC wire, so their
-    // `isAvailable` stays true but every write no-ops on `NoopDDCWriter`.
-    // Nothing renders them — the panel shows volume/contrast for `displays`
-    // only — they exist so `DisplayState` has one shape for both slots.
     builtIn = DisplayState(
       display: display, controller: controller,
-      volume: DDCValueController(
-        writer: NoopDDCWriter(), command: .volume,
-        prefs: DisplayPrefs(persistenceKey: "builtIn")
-      ),
-      contrast: DDCValueController(
-        writer: NoopDDCWriter(), command: .contrast,
-        prefs: DisplayPrefs(persistenceKey: "builtIn")
-      ),
+      volume: volume,
+      contrast: contrast,
       // No DDC wire, and nothing ever probes the built-in slot (the D24 pass
       // walks `displays`, which is external-only) — but `DisplayState` has one
       // shape for both slots, so the honest stub goes here too.
