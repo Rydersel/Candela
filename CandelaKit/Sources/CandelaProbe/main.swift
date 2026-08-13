@@ -2,6 +2,10 @@ import CandelaKit
 import CoreGraphics
 import Foundation
 
+// The vd host's re-exec contract: as `candela-probe --vd-engage <id> <w> <h>`
+// this process performs the HiDPI engage and exits before any probe logic.
+VirtualDisplayHost.handleEngageHelperInvocation()
+
 var arguments = Array(CommandLine.arguments.dropFirst())
 
 // Backlog #2: `--display <id>` narrows every subcommand to one display —

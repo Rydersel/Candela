@@ -92,6 +92,30 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
 
     reportProfileGrowth(before: profilesBefore, slot: slot)
 
+    // A new virtual display engages the 1x variant even when the 2x mode is
+    // in its ladder (measured 2026-08-13: hiDPI=1, single declared
+    // 1920x1080 mode, ceiling 8192x4320, engaged pixels == logical). The
+    // Retina promise is only real if the 2x mode is ENGAGED, so engage it
+    // and verify; the pane reports achieved state, never this spec's claim.
+    if normalized.hiDPI {
+      // In-process first (free when it works), then the re-exec helper: the
+      // creating process usually cannot enumerate the display's modes, and a
+      // fresh process always can (both measured 2026-08-13).
+      var engaged = Self.engageHiDPIModeInThisProcess(
+        displayID: displayID,
+        logicalWidth: normalized.logicalWidth, logicalHeight: normalized.logicalHeight
+      )
+      if !engaged {
+        engaged = spawnEngageHelper(
+          displayID: displayID,
+          logicalWidth: normalized.logicalWidth, logicalHeight: normalized.logicalHeight
+        )
+      }
+      if !engaged {
+        log.error("vd.create slot=\(slot) id=\(displayID): 2x mode did not engage; display stays 1x")
+      }
+    }
+
     let handle = VirtualDisplayHandle(
       uuid: uuid, slot: slot, displayID: displayID,
       identity: VirtualDisplayIdentity.configIdentity(slot: slot), spec: normalized
@@ -127,6 +151,93 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
       all = destroy(slot: slot, departureTimeout: departureTimeout) && all
     }
     return all
+  }
+
+  /// The argv contract every executable embedding this host must honour at
+  /// startup, BEFORE any UI or app machinery: when launched as
+  /// `<binary> --vd-engage <displayID> <width> <height>`, perform the HiDPI
+  /// engage in this fresh process and exit. A process can enumerate display
+  /// modes only for the FIRST virtual display it creates (the two-process
+  /// rig exists because of it, and both slots' in-process engages failed
+  /// measured 2026-08-13), so the engage must run in a process that created
+  /// nothing; re-executing our own binary is the smallest such process.
+  public static func handleEngageHelperInvocation() {
+    let arguments = ProcessInfo.processInfo.arguments
+    guard arguments.count == 5, arguments[1] == "--vd-engage",
+          let displayID = UInt32(arguments[2]),
+          let width = Int(arguments[3]), let height = Int(arguments[4])
+    else { return }
+    let achieved = engageHiDPIModeInThisProcess(
+      displayID: displayID, logicalWidth: width, logicalHeight: height
+    )
+    exit(achieved ? 0 : 1)
+  }
+
+  private func spawnEngageHelper(
+    displayID: CGDirectDisplayID, logicalWidth: Int, logicalHeight: Int
+  ) -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.arguments[0])
+    process.arguments = ["--vd-engage", String(displayID), String(logicalWidth), String(logicalHeight)]
+    do {
+      try process.run()
+    } catch {
+      log.error("vd.engage helper failed to spawn: \(error.localizedDescription, privacy: .public)")
+      return false
+    }
+    let deadline = Date(timeIntervalSinceNow: 8)
+    while process.isRunning, Date() < deadline {
+      CFRunLoopRunInMode(CFRunLoopMode.defaultMode, 0.1, false)
+    }
+    if process.isRunning {
+      process.terminate()
+      return false
+    }
+    return process.terminationStatus == 0
+  }
+
+  /// Engage the true-HiDPI variant of the requested logical size and verify
+  /// it took. The mode list can lag the display's arrival, so an empty list
+  /// is retried briefly and then reported false rather than fought.
+  ///
+  /// Reading `CGDisplayCopyDisplayMode` here does not violate the
+  /// nothing-is-read-back rule (VD5): that rule is about the private
+  /// CGVirtualDisplay object's own properties, which lie; the engaged mode is
+  /// public CoreGraphics topology state, the same source every mode feature
+  /// trusts.
+  private static func engageHiDPIModeInThisProcess(
+    displayID: CGDirectDisplayID, logicalWidth: Int, logicalHeight: Int
+  ) -> Bool {
+    let options = [kCGDisplayShowDuplicateLowResolutionModes: kCFBooleanTrue] as CFDictionary
+    var modes: [CGDisplayMode] = []
+    var waited = 0.0
+    while waited < 3.0 {
+      modes = (CGDisplayCopyAllDisplayModes(displayID, options) as? [CGDisplayMode]) ?? []
+      if !modes.isEmpty { break }
+      CFRunLoopRunInMode(CFRunLoopMode.defaultMode, 0.25, false)
+      waited += 0.25
+    }
+    guard let target = modes.first(where: {
+      $0.width == logicalWidth && $0.height == logicalHeight && $0.pixelWidth >= logicalWidth * 2
+    }) else { return false }
+    var config: CGDisplayConfigRef?
+    guard CGBeginDisplayConfiguration(&config) == .success, let config else { return false }
+    CGConfigureDisplayWithDisplayMode(config, displayID, target, nil)
+    guard CGCompleteDisplayConfiguration(config, .permanently) == .success else { return false }
+    // Achieved state, not the return code: the platform has returned .success
+    // without honouring a configuration before.
+    guard let achieved = CGDisplayCopyDisplayMode(displayID) else { return false }
+    return achieved.pixelWidth >= achieved.width * 2
+  }
+
+  /// The achieved mode of a live slot, for surfaces that must state what IS
+  /// rather than what was asked (nil when the display is gone).
+  public func achievedMode(slot: Int) -> (width: Int, height: Int, hiDPI: Bool)? {
+    lock.lock()
+    let displayID = slots[slot]?.handle.displayID
+    lock.unlock()
+    guard let displayID, let mode = CGDisplayCopyDisplayMode(displayID) else { return nil }
+    return (mode.width, mode.height, mode.pixelWidth >= mode.width * 2)
   }
 
   /// A display that MASTERS a mirror set must stop mastering it before
