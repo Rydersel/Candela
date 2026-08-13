@@ -1,11 +1,11 @@
 //  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
 //  Based on MediaKeyTap by Nicholas Hurden (MIT)
 
-import AppKit
 // @preconcurrency: same mutable-C-global import quirk as AccessibilityPermission.
 @preconcurrency import ApplicationServices
 import CandelaKit
 import CoreGraphics
+import Foundation
 import os
 
 /// CGEventTap island that intercepts brightness/volume media keys and the
@@ -32,6 +32,11 @@ import os
 ///   until `tapCreate` returns, after the callback closure is built).
 /// - Only the `Sendable` `MediaKeyPress` escapes the callback; `onPress` is
 ///   invoked on the tap thread and the consumer hops actors itself.
+/// - **No thread this island owns may touch AppKit or HIToolbox**: not the tap
+///   thread, not the prober, not the monitor. None of them is the main queue,
+///   and AppKit entry points reach HIToolbox code that asserts on it. That is
+///   why the island imports no AppKit at all and decodes the system-defined
+///   payload straight off the CGEvent (see `sysDefinedSubtypeField`).
 @MainActor
 final class MediaKeyEventTap {
   struct WatchConfig: Sendable {
@@ -41,7 +46,12 @@ final class MediaKeyEventTap {
     var interceptAlternateBrightnessKeys: Bool
   }
 
-  enum TapError: Error { case creationFailed }
+  enum TapError: Error {
+    case creationFailed
+    /// The private CGEvent field indices the system-defined decode depends on
+    /// did not read back what was written. See `sysDefinedFieldsUsable`.
+    case eventFieldsUnrecognized
+  }
 
   /// #59 watchdog logging. `notice` persists to the unified log by default,
   /// so a post-incident `log show` can reconstruct a wedge without a debug
@@ -111,6 +121,9 @@ final class MediaKeyEventTap {
   /// running.
   func start(config: WatchConfig) throws {
     stop()
+    // Arm nothing if the private field indices moved: an unverified decode
+    // would swallow every aux key on the system, silently.
+    guard Self.sysDefinedFieldsUsable else { throw TapError.eventFieldsUnrecognized }
     configLock.withLock { $0 = config }
 
     // Capture locals, not self: the trampoline lives for the tap thread's
@@ -402,6 +415,89 @@ final class MediaKeyEventTap {
 
   // MARK: - Tap-thread event handling
 
+  /// PRIVATE API: CGEvent integer field indices 99 and 149 are undocumented.
+  /// They hold an NX_SYSDEFINED event's subtype and its compound `data1`, the
+  /// same two values `NSEvent.subtype` and `NSEvent.data1` expose. The
+  /// tracking issue carries the `private-api` label.
+  ///
+  /// Degradation: if an index goes inert on a future macOS, the
+  /// `sysDefinedFieldsUsable` self-check below disarms interception loudly (a
+  /// `.fault` log, `start` throws, no tap is created) rather than misdecoding.
+  /// That is not a nicety. An inert field reads back 0 with no error, and 0 is
+  /// a valid payload meaning `NX_KEYTYPE_SOUND_UP` released, so without the
+  /// check a shift would silently swallow every aux key on the system.
+  ///
+  /// The check's reach is narrower than "the indices still mean what we think"
+  /// [MEASURED 2026-08-12]: it proves only that each index is still a live
+  /// writable compound slot. Going inert is the dominant failure and is caught,
+  /// but a shift ONTO another live slot is not: probing (99, 150) or
+  /// (100, 149) reports usable, while (98, 149), (99, 148), (97, 151) and
+  /// (250, 999) all disarm. Nothing cheaper closes that gap. A semantic check
+  /// would need `NSEvent`, which is the thing being removed.
+  ///
+  /// [MEASURED 2026-08-12] Subtypes 0...40 plus 100, 110, 134, 200, 202 and
+  /// 210, round-tripped through `NSEvent.otherEvent` and `.cgEvent`: index 99
+  /// is the subtype and index 149 the `data1` in every one of them EXCEPT 6
+  /// and 9, which carry no compound payload at all, so index 149 is neither
+  /// readable nor writable on them. Within that range the no-payload set is
+  /// exactly {6, 9}. Nobody needs to re-measure it.
+  ///
+  /// Why not `NSEvent(cgEvent:)`, which reads both without any of this: it
+  /// looks like a pure data wrapper and is not. On a subtype-8 event it runs
+  /// HIToolbox's caps-lock state machine (`CreateEventWithCGEvent` to
+  /// `TSMSetCapsLockKeyTransitionDetected` to `TSMGetInputSourceProperty`),
+  /// which asserts it is on the main dispatch queue. The tap callback is on
+  /// the tap thread by design, so one Caps Lock press trapped the process in
+  /// `_dispatch_assert_queue_fail`. Nothing mechanical stops someone adding
+  /// `import AppKit` back and reaching for NSEvent here; this comment is the
+  /// only guard.
+  private nonisolated static let sysDefinedSubtypeField = CGEventField(rawValue: 99)!
+  private nonisolated static let sysDefinedData1Field = CGEventField(rawValue: 149)!
+
+  /// The only NX_SYSDEFINED subtype that carries media keys, and the only one
+  /// this tap decodes.
+  private nonisolated static let auxControlSubtype = Int64(NX_SUBTYPE_AUX_CONTROL_BUTTONS)
+
+  /// Write-then-read probe of the two private field indices, run once before
+  /// the first tap is armed.
+  ///
+  /// Why this is safe to run [MEASURED 2026-08-12], because the obvious guess
+  /// is wrong: a bare event retyped to NX_SYSDEFINED ALREADY carries the
+  /// compound payload, with no subtype write at all. Setting the subtype does
+  /// not grant the payload; setting it to 6 or 9 TAKES IT AWAY, and the next
+  /// write to `sysDefinedData1Field` then aborts in
+  /// `SLSEventRecordSetCompoundInt` (CGSEvent.cc:1201, the write-side twin of
+  /// the read-side assertion). So the real invariant is narrow: this probe
+  /// must never write subtype 6 or 9. It holds because the value is
+  /// hard-coded to the aux-control subtype. Do not parameterize it believing
+  /// the write protects itself.
+  private static let sysDefinedFieldsUsable: Bool = {
+    let probeData1: Int64 = 0x0002_0A00 // brightness up, pressed, no repeat
+    guard let probe = CGEvent(source: nil),
+          let sysDefined = CGEventType(rawValue: UInt32(NX_SYSDEFINED))
+    else {
+      watchdogLog.fault("media keys: cannot build a probe event; interception disarmed")
+      return false
+    }
+    probe.type = sysDefined
+    probe.setIntegerValueField(sysDefinedSubtypeField, value: auxControlSubtype)
+    probe.setIntegerValueField(sysDefinedData1Field, value: probeData1)
+    let subtype = probe.getIntegerValueField(sysDefinedSubtypeField)
+    let data1 = probe.getIntegerValueField(sysDefinedData1Field)
+    guard subtype == auxControlSubtype, data1 == probeData1 else {
+      watchdogLog.fault(
+        """
+        media keys: CGEvent system-defined field indices moved \
+        (subtype read \(subtype), expected \(MediaKeyEventTap.auxControlSubtype); \
+        data1 read \(data1), expected \(probeData1)). \
+        Interception disarmed rather than misdecoding every aux key.
+        """
+      )
+      return false
+    }
+    return true
+  }()
+
   /// Runs on the tap thread. Returns the event to pass it through to the
   /// system, or nil to swallow it after delivering a `MediaKeyPress`.
   private nonisolated static func process(
@@ -441,38 +537,24 @@ final class MediaKeyEventTap {
     }
 
     if type.rawValue == UInt32(NX_SYSDEFINED) {
-      // NSEvent(cgEvent:) is a pure data wrapper over the CGEvent — no UI,
-      // no main-thread requirement — and is used off-main here deliberately:
-      // hopping to the main thread inside the callback (as the original
-      // library did with DispatchQueue.main.sync) blocks the tap thread for
-      // the whole of any menu-tracking session until the tap times out.
-      guard let nsEvent = NSEvent(cgEvent: event), nsEvent.subtype.rawValue == 8 else {
+      // Decoded straight off the CGEvent, never via NSEvent(cgEvent:): see
+      // `sysDefinedSubtypeField` for why building an NSEvent here traps.
+      // The gate order is load-bearing, not stylistic: reading the payload
+      // field on a subtype that carries no compound data trips a CoreGraphics
+      // assertion (`event_carries_compound_data_field`), so the subtype must
+      // be checked first.
+      guard event.getIntegerValueField(Self.sysDefinedSubtypeField) == Self.auxControlSubtype else {
         return event // not a media-key system event
       }
-      let data1 = nsEvent.data1
-      let keycode = Int32((data1 & 0xFFFF_0000) >> 16)
-      let keyFlags = data1 & 0x0000_FFFF
-      let isPressed = ((keyFlags & 0xFF00) >> 8) == 0xA
-      let isRepeat = (keyFlags & 0x1) == 0x1
-      let key: MediaKey?
-      switch keycode {
-      case NX_KEYTYPE_BRIGHTNESS_UP: key = .brightnessUp
-      case NX_KEYTYPE_BRIGHTNESS_DOWN: key = .brightnessDown
-      case NX_KEYTYPE_SOUND_UP: key = .volumeUp
-      case NX_KEYTYPE_SOUND_DOWN: key = .volumeDown
-      case NX_KEYTYPE_MUTE: key = .mute
-      default: key = nil
-      }
+      let press = AuxControlDecoder.decode(
+        data1: event.getIntegerValueField(Self.sysDefinedData1Field),
+        modifiers: modifiers(from: event.flags)
+      )
       // Unwatched keys pass through untouched: this is how volume keys reach
       // the system when the audio-routing rule releases them (M4), and how
       // brightness keys pass through when no external display is connected.
-      guard let key, config.watchedKeys.contains(key) else { return event }
-      onPress(MediaKeyPress(
-        key: key,
-        isPressed: isPressed,
-        isRepeat: isRepeat,
-        modifiers: modifiers(from: event.flags)
-      ))
+      guard let press, config.watchedKeys.contains(press.key) else { return event }
+      onPress(press)
       return nil
     }
 
