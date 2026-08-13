@@ -471,9 +471,16 @@ struct DisplayHubView: View {
       // A safety row (accessibility contract 3): what "On" costs is D29's mute
       // strand, so the sentence goes into the toggle's label rather than into a
       // hint a VoiceOver user may have switched off.
+      // The row draws the pref, and the pref is a request the display or the
+      // "Always disabled" override can demote to the volume-register mute.
+      // Nil in every cell where the engine is doing what the row says, so an On
+      // row with no status is a promise the engine keeps.
       SettingRow(
-        safety: .hardwareMute(isAvailable: state.volume.isAvailable),
-        label: "Mute with the display's own mute command"
+        safety: .hardwareMute(
+          isAvailable: state.volume.isAvailable,
+          dedicatedCommandInReach: model.dedicatedMuteCommandInReach(state)),
+        label: "Mute with the display's own mute command",
+        caption: model.degradedMuteReason(state).map { SettingsCaption(verbatim: $0) }
       ) { label in
         Toggle(label, isOn: Binding(
           get: { prefs.enableMuteUnmute },

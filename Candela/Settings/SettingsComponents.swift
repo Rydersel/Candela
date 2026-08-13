@@ -17,7 +17,17 @@ enum SafetySentence {
   /// A display's Sound section, D29's mute strand. `isAvailable` is the
   /// display's volume availability: SO5 gives the unavailable state a sentence
   /// of its own rather than letting a recoverable state borrow this one.
-  case hardwareMute(isAvailable: Bool)
+  ///
+  /// `dedicatedCommandInReach` is whether switching this ON would actually send
+  /// the display's own mute command: `VolumeSliderPolicy.usesDedicatedMuteCommand`
+  /// asked with the pref held on, so it answers the switch's promise rather than
+  /// its current position. A clean denial of that register, or the "always off"
+  /// volume-slider override, makes the promise false, and this sentence is the
+  /// UNSUPPRESSIBLE channel: it goes into the control's label, where a VoiceOver
+  /// user who has turned hints off hears it and nothing else. Stating the
+  /// dedicated command there while the engine writes the volume register put the
+  /// overclaim in the one place the reader cannot get past.
+  case hardwareMute(isAvailable: Bool, dedicatedCommandInReach: Bool)
   /// The Advanced page's hardware-control toggle. Takes the whole block rather
   /// than a bool so the row can be a safety row unconditionally: only live HDR
   /// is the safety case, and a row that changed shape when HDR engaged would
@@ -32,10 +42,22 @@ enum SafetySentence {
     switch self {
     case .blankDisplay:
       "The slider can reach 0% on any display dimming in software, which blanks it completely. If keyboard control is also off, a blank display can be hard to undo."
-    case let .hardwareMute(isAvailable):
-      isAvailable
-        ? "Off: muting sets volume to zero. On: sends the display's own mute command."
-        : "Volume control is off for this display, so mute is unavailable."
+    case let .hardwareMute(isAvailable, dedicatedCommandInReach):
+      if !isAvailable {
+        "Volume control is off for this display, so mute is unavailable."
+      } else if dedicatedCommandInReach {
+        // "All the way down" rather than "to zero": the degraded mute goes out
+        // through the volume command's own value path, so a floor set on that
+        // command sends the floor and Invert sends the top of the range.
+        "Off: muting turns the volume all the way down. On: sends the display's own mute command."
+      } else {
+        // Says what the SWITCH does, and leaves the level and the cause to the
+        // row's status caption rather than saying either twice. Scoped to the
+        // mute direction on purpose: an unmute still sends the mute command's
+        // release on the pref alone, ungated by the verdict (D29 rule 3), so a
+        // sentence about the command in general would be false.
+        "Off or On, a mute here goes to the volume command instead."
+      }
     case let .hdrBlock(block):
       block == .macOSDrivesBrightness ? Self.trafficBlockExplanation(.macOSDrivesBrightness) : nil
     }
@@ -113,7 +135,9 @@ struct SettingRow<Control: View>: View {
   /// spoken and the visible label cannot drift.
   ///
   /// `caption` is the row's ordinary explanation, which still becomes the hint.
-  /// Only the HDR block passes one: the other two cases ARE their caption.
+  /// The blank-display case IS its caption and passes none; the HDR block and
+  /// the mute row both pass one, the mute row's being the status that names WHY
+  /// the strategy in force is not the one the switch asks for.
   init(
     safety: SafetySentence,
     label: LocalizedStringKey,

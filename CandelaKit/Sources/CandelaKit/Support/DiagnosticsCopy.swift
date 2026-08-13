@@ -402,15 +402,78 @@ public enum DiagnosticsCopy {
 
   /// The SETTING that turns muting off is a different sentence from the DISPLAY
   /// denying the volume command, and this row is the one place both can reach.
+  ///
+  /// The row's help is "VCP 0x8D", so what it answers is whether the display's
+  /// own mute command is the one carrying a mute here. That is the STRATEGY IN
+  /// FORCE and not the pref: `VolumeSliderPolicy.usesDedicatedMuteCommand`
+  /// decides it, and the two demotions it applies (a clean denial of 0x8D, and
+  /// the "always off" override) each leave the engine writing the volume
+  /// register while the pref still asks for the mute command. Read from the pref
+  /// alone this row said "Available" about a command the mute never reached,
+  /// which on a page written for bug reports is the one thing it cannot do.
+  ///
+  /// Named apart for the reason the volume row names its two causes apart: a
+  /// user who set the slider to always off and is told the display refused goes
+  /// looking at their hardware.
+  ///
+  /// The prior two answers keep their precedence: the pref being off is why 0x8D
+  /// is out of use when it is off, and a switched-off volume command means no
+  /// mute is written at all, so neither may be replaced by a sentence about
+  /// where a mute would land.
+  ///
+  /// The consequence names the LEVEL a degraded mute reaches, never a register
+  /// value: it goes out through `rawValue(for: 0)`, so a volume floor sends that
+  /// floor and Invert sends the top of the range, and both fields have UI a
+  /// person can set. "All the way down" is the claim none of them falsifies.
+  ///
+  /// `muteSupport` takes the non-optional `VCPSupport` the policy layer speaks,
+  /// with the cache miss resolved at the call site the way every other reader of
+  /// these caches resolves it. The volume row's optional exists because nil and
+  /// `.unknown` earn different sentences there; here D24 sends both to the
+  /// dedicated command, so an optional would only be a second spelling of the
+  /// same answer.
   public static func muteAvailability(
-    muteEnabled: Bool, volumeAvailable: Bool, forceSoftware: Bool
+    muteEnabled: Bool,
+    volumeAvailable: Bool,
+    forceSoftware: Bool,
+    override: AudioSinkOverride,
+    muteSupport: VCPSupport
   ) -> String {
     if !muteEnabled {
       return "Unavailable: muting with the display's own mute command is turned off"
     }
-    return volumeAvailable
-      ? "Available"
-      : commandTurnedOff(command: "volume", forceSoftware: forceSoftware)
+    guard volumeAvailable else {
+      return commandTurnedOff(command: "volume", forceSoftware: forceSoftware)
+    }
+    guard !VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true, override: override, muteSupport: muteSupport)
+    else {
+      // The escape hatch names itself here for the reason the volume row names
+      // it: it is a setting, and a reader who does not know it is on cannot
+      // account for what follows. Over a clean denial it is also the one cell
+      // that writes 0x8D into a display saying it has no 0x8D, which is where a
+      // mute the app records and no register carries comes from: the page
+      // exists to put that in a bug report.
+      switch override {
+      case .forcePresent where muteSupport == .unsupported:
+        return "Available: you set this display's volume slider to always on, so muting uses the mute command this display's description does not list"
+      case .forcePresent:
+        return "Available: you set this display's volume slider to always on"
+      case .auto, .forceNone:
+        return "Available"
+      }
+    }
+    switch override {
+    case .forceNone:
+      return "Unavailable: you set this display's volume slider to always off, so muting turns the volume command all the way down instead"
+    case .auto:
+      return "Unavailable: this display's description parsed cleanly and does not list the mute command, so muting turns the volume command all the way down instead"
+    case .forcePresent:
+      // Unreachable: the override keeps the dedicated command whatever the
+      // display says, so the guard above answered. Stated rather than defaulted
+      // so a new case is a compile error here.
+      return "Available"
+    }
   }
 
   /// `DDCValueController.isAvailable` is `!unavailableDDC && !forceSoftware`,

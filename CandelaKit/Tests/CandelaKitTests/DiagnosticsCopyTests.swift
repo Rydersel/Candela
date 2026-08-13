@@ -137,7 +137,8 @@ struct DiagnosticsCopyTests {
 
     #expect(
       DiagnosticsCopy.muteAvailability(
-        muteEnabled: false, volumeAvailable: true, forceSoftware: false)
+        muteEnabled: false, volumeAvailable: true, forceSoftware: false,
+        override: .auto, muteSupport: .supported)
         == "Unavailable: muting with the display's own mute command is turned off")
 
     // The third and fourth reasons a command can be off, which name the setting
@@ -220,11 +221,129 @@ struct DiagnosticsCopyTests {
         == "Unavailable: hardware control is turned off for this display")
     #expect(
       DiagnosticsCopy.muteAvailability(
-        muteEnabled: true, volumeAvailable: true, forceSoftware: false) == "Available")
+        muteEnabled: true, volumeAvailable: true, forceSoftware: false,
+        override: .auto, muteSupport: .supported) == "Available")
     #expect(
       DiagnosticsCopy.muteAvailability(
-        muteEnabled: true, volumeAvailable: false, forceSoftware: false)
+        muteEnabled: true, volumeAvailable: false, forceSoftware: false,
+        override: .auto, muteSupport: .supported)
         == "Unavailable: the volume command is turned off for this display")
+  }
+
+  /// The row's help is "VCP 0x8D", so it answers whether the display's own mute
+  /// command is what carries a mute here. Reading the pref alone made it say
+  /// "Available" on a display that denies the register, where the engine degrades
+  /// the mute to a volume-register write: the row named a command the mute never
+  /// reaches.
+  @Test func theMuteRowNamesTheRegisterThatActuallyCarriesTheMute() {
+    #expect(
+      DiagnosticsCopy.muteAvailability(
+        muteEnabled: true, volumeAvailable: true, forceSoftware: false,
+        override: .auto, muteSupport: .unsupported)
+        == "Unavailable: this display's description parsed cleanly and does not list the mute command, so muting turns the volume command all the way down instead")
+  }
+
+  /// The escape hatch is the one cell that writes the mute command into a
+  /// display saying it has no mute command, which is where a mute the app
+  /// records and no register carries comes from. A bug report needs both facts,
+  /// and the setting is named the way the volume row names it.
+  @Test func theEscapeHatchNamesItselfAndWhatItIsOverriding() {
+    #expect(
+      DiagnosticsCopy.muteAvailability(
+        muteEnabled: true, volumeAvailable: true, forceSoftware: false,
+        override: .forcePresent, muteSupport: .unsupported)
+        == "Available: you set this display's volume slider to always on, so muting uses the mute command this display's description does not list")
+    // No denial to report: the override is still named, the phantom-mute half
+    // is not invented.
+    #expect(
+      DiagnosticsCopy.muteAvailability(
+        muteEnabled: true, volumeAvailable: true, forceSoftware: false,
+        override: .forcePresent, muteSupport: .unknown)
+        == "Available: you set this display's volume slider to always on")
+  }
+
+  /// The same falsifiable-consequence rule the hub caption follows: a degraded
+  /// mute goes out through the volume command's own value path, so a floor or
+  /// Invert decides the number on the wire. The row states the level instead.
+  @Test func theDiagnosticsConsequenceSurvivesAVolumeFloorAndInvert() {
+    for override in AudioSinkOverride.allCases {
+      for support in VCPSupport.allCases {
+        let answer = DiagnosticsCopy.muteAvailability(
+          muteEnabled: true, volumeAvailable: true, forceSoftware: false,
+          override: override, muteSupport: support)
+        #expect(!answer.contains("zero"), "override \(override), support \(support)")
+      }
+    }
+  }
+
+  /// The same split the volume row makes and the slider's tooltip was fixed to
+  /// make: "Always disabled" demotes the strategy as well, and that is the user's
+  /// own setting rather than the display refusing anything.
+  @Test func theMuteRowBlamesTheOverrideWhenTheOverrideIsWhatDemotedIt() {
+    let setting = DiagnosticsCopy.muteAvailability(
+      muteEnabled: true, volumeAvailable: true, forceSoftware: false,
+      override: .forceNone, muteSupport: .supported)
+    #expect(
+      setting
+        == "Unavailable: you set this display's volume slider to always off, so muting turns the volume command all the way down instead")
+    #expect(!setting.contains("does not list"))
+    // Both causes true at once: the user's choice is the one that decided it.
+    #expect(
+      DiagnosticsCopy.muteAvailability(
+        muteEnabled: true, volumeAvailable: true, forceSoftware: false,
+        override: .forceNone, muteSupport: .unsupported) == setting)
+  }
+
+  /// The pref is still the first word, and the row keeps the sentence it already
+  /// had: with the pref off, 0x8D is out of use because it was switched off, not
+  /// because anything was refused.
+  @Test func theMuteRowStillNamesThePrefFirst() {
+    for override in AudioSinkOverride.allCases {
+      for support in VCPSupport.allCases {
+        #expect(
+          DiagnosticsCopy.muteAvailability(
+            muteEnabled: false, volumeAvailable: true, forceSoftware: false,
+            override: override, muteSupport: support)
+            == "Unavailable: muting with the display's own mute command is turned off",
+          "override \(override), support \(support)")
+      }
+    }
+  }
+
+  /// A switched-off volume command outranks the strategy: nothing mutes at all,
+  /// so the row must not describe where a mute would land.
+  @Test func aSwitchedOffVolumeCommandOutranksTheStrategy() {
+    for override in AudioSinkOverride.allCases {
+      for support in VCPSupport.allCases {
+        #expect(
+          DiagnosticsCopy.muteAvailability(
+            muteEnabled: true, volumeAvailable: false, forceSoftware: true,
+            override: override, muteSupport: support)
+            == "Unavailable: hardware control is turned off for this display",
+          "override \(override), support \(support)")
+      }
+    }
+  }
+
+  /// The row reads Available exactly where the display's own mute command really
+  /// is the one carrying the mute, and the strategy is read from
+  /// `VolumeSliderPolicy` rather than restated here. The MAG's permanent
+  /// `.unknown` keeps the command, and so does "Always enabled" over a clean
+  /// denial. Asserted on the verdict word, not the whole sentence, because some
+  /// available cells name the setting that got them there.
+  @Test func theMuteRowSaysAvailableExactlyWhileTheDedicatedCommandIsInForce() {
+    for override in AudioSinkOverride.allCases {
+      for support in VCPSupport.allCases {
+        let dedicated = VolumeSliderPolicy.usesDedicatedMuteCommand(
+          prefEnabled: true, override: override, muteSupport: support)
+        let answer = DiagnosticsCopy.muteAvailability(
+          muteEnabled: true, volumeAvailable: true, forceSoftware: false,
+          override: override, muteSupport: support)
+        #expect(
+          answer.hasPrefix("Available") == dedicated,
+          "override \(override), support \(support)")
+      }
+    }
   }
 
   /// No row in Availability may read a bare "Unavailable" or "Not supported"
@@ -235,7 +354,14 @@ struct DiagnosticsCopyTests {
       DiagnosticsCopy.contrastAvailability(isAvailable: false, forceSoftware: false),
       DiagnosticsCopy.contrastAvailability(isAvailable: false, forceSoftware: true),
       DiagnosticsCopy.muteAvailability(
-        muteEnabled: false, volumeAvailable: true, forceSoftware: false),
+        muteEnabled: false, volumeAvailable: true, forceSoftware: false,
+        override: .auto, muteSupport: .supported),
+      DiagnosticsCopy.muteAvailability(
+        muteEnabled: true, volumeAvailable: true, forceSoftware: false,
+        override: .auto, muteSupport: .unsupported),
+      DiagnosticsCopy.muteAvailability(
+        muteEnabled: true, volumeAvailable: true, forceSoftware: false,
+        override: .forceNone, muteSupport: .supported),
       DiagnosticsCopy.hdrAvailability(
         displayServicesAvailable: false, supportsHDR: true, app: Self.app),
       DiagnosticsCopy.hdrAvailability(
@@ -820,10 +946,14 @@ struct DiagnosticsCopyTests {
           DiagnosticsCopy.contrastAvailability(
             isAvailable: available, forceSoftware: forceSoftware))
         for muteEnabled in [true, false] {
-          out.append(
-            DiagnosticsCopy.muteAvailability(
-              muteEnabled: muteEnabled, volumeAvailable: available,
-              forceSoftware: forceSoftware))
+          for override in AudioSinkOverride.allCases {
+            for support in VCPSupport.allCases {
+              out.append(
+                DiagnosticsCopy.muteAvailability(
+                  muteEnabled: muteEnabled, volumeAvailable: available,
+                  forceSoftware: forceSoftware, override: override, muteSupport: support))
+            }
+          }
         }
         out.append(
           DiagnosticsCopy.hdrAvailability(

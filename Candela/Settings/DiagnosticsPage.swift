@@ -474,7 +474,9 @@ struct DiagnosticsPage: View {
         Text(verbatim: DiagnosticsCopy.muteAvailability(
           muteEnabled: prefs.enableMuteUnmute,
           volumeAvailable: state.volume.isAvailable,
-          forceSoftware: prefs.forceSoftware
+          forceSoftware: prefs.forceSoftware,
+          override: prefs.audioSinkOverride,
+          muteSupport: model.muteSupport[persistenceKey] ?? .unknown
         )).foregroundStyle(.secondary)
       }
       .help(DiagnosticsPageCopy.muteHelp)

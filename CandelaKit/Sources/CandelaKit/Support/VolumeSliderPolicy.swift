@@ -103,6 +103,52 @@ public enum VolumeSliderPolicy {
     prefEnabled && isEnabled(override: override, volumeSupport: muteSupport)
   }
 
+  /// Why the mute this display will actually take is not the one its settings
+  /// row promises. `nil` when the row is telling the truth, which is every cell
+  /// where the strategy in force equals the pref.
+  ///
+  /// The row draws the PREF, and the pref is only a request: `.forceNone` and
+  /// the display's own denial of 0x8D each demote it to the volume-register
+  /// mute, leaving the row reading On over an engine that will write 0x62. The
+  /// guard calls `usesDedicatedMuteCommand` rather than restating its rule, so
+  /// the caption appears in exactly the cells the engine degrades in and cannot
+  /// outlive its cause: the same delegation `disabledReason` uses for the slider.
+  ///
+  /// TWO causes, worded apart, because the slider's tooltip already paid for
+  /// collapsing them (Checkpoint 1 item 81): a user who set the slider to always
+  /// off and is told their monitor refused goes to check a cable.
+  ///
+  /// `commandIsAvailable` is the volume command's own availability, which
+  /// `toggleMute` guards on under either strategy. False means no mute is
+  /// written at all, so there is no register to name, and the row's own
+  /// unavailable sentence (SO5) is what applies instead.
+  ///
+  /// The consequence is worded as the LEVEL the degrade reaches and not as a
+  /// register value, because the register value is not knowable from here: the
+  /// degrade goes out through `rawValue(for: 0)`, so a volume floor writes that
+  /// floor and Invert writes the top of the range. "All the way down" is true of
+  /// every one of them, and it is the only claim a person setting a floor cannot
+  /// falsify.
+  public static func degradedMuteReason(
+    commandIsAvailable: Bool, prefEnabled: Bool, override: AudioSinkOverride, muteSupport: VCPSupport
+  ) -> String? {
+    guard commandIsAvailable, prefEnabled,
+          !usesDedicatedMuteCommand(
+            prefEnabled: prefEnabled, override: override, muteSupport: muteSupport)
+    else { return nil }
+    switch override {
+    case .forceNone:
+      return "The volume slider for this display is set to always off, so muting turns its volume all the way down."
+    case .auto:
+      return "This display lists no mute command in its description, so muting turns its volume all the way down."
+    case .forcePresent:
+      // Unreachable: forcePresent keeps the dedicated command whatever the
+      // display says, so the guard above returned. Stated rather than defaulted
+      // so a new case is a compile error here.
+      return nil
+    }
+  }
+
   /// Should the event tap WATCH the volume keys on this display's account?
   ///
   /// `acceptsVolumeKeys` answers who a press ACTS on, and the tap has to decide
