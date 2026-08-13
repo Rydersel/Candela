@@ -2,6 +2,7 @@ import CandelaKit
 import CoreGraphics
 import Foundation
 import Observation
+import os
 import ServiceManagement
 
 @MainActor @Observable
@@ -110,6 +111,104 @@ final class AppModel {
   /// OLED care's timers and care dim (W3a). Owned here for `displayModes`'
   /// reason — the idle timers must outlive whatever pane configured them.
   @ObservationIgnored private(set) lazy var oledCare = OledCareCoordinator()
+
+  /// Displays Candela creates (VD4). In-process ownership is what makes a
+  /// crash reclaim them; the host's owned set is the ONLY authority on "is
+  /// this one of ours" and feeds discovery's DDC-pool exclusion.
+  @ObservationIgnored let virtualDisplays = VirtualDisplayHost()
+
+  @ObservationIgnored private let log = Logger(
+    subsystem: "com.rydersel.Candela", category: "virtualdisplay"
+  )
+
+  /// Serializes every create/destroy off the main actor: the host blocks
+  /// (it polls the online list), and menu tracking starves main-actor work.
+  @ObservationIgnored private let virtualDisplayQueue = DispatchQueue(
+    label: "com.rydersel.Candela.vdsync", qos: .userInitiated
+  )
+
+  /// The `.syncVirtualDisplays` effect (VD14): converge live virtual displays
+  /// to the slot prefs. Reconciliation is pure (`VirtualDisplayReconciler`);
+  /// this only executes what it returns, one action set at a time.
+  func syncVirtualDisplays() {
+    let definitions = appPrefs.virtualSlotDefinitions()
+    let host = virtualDisplays
+    virtualDisplayQueue.async { [weak self] in
+      let actions = VirtualDisplayReconciler.actions(
+        definitions: definitions, live: host.live(), isAvailable: host.isAvailable
+      )
+      for action in actions {
+        switch action {
+        case let .create(slot):
+          guard let definition = definitions[slot] else { break }
+          _ = host.create(
+            definition.spec, slot: slot, uuid: definition.uuid ?? UUID(), appearanceTimeout: 10
+          )
+        case let .destroy(slot):
+          host.destroy(slot: slot, departureTimeout: 5)
+        case let .recreate(slot):
+          guard let definition = definitions[slot] else { break }
+          host.destroy(slot: slot, departureTimeout: 5)
+          _ = host.create(
+            definition.spec, slot: slot, uuid: definition.uuid ?? UUID(), appearanceTimeout: 10
+          )
+        }
+      }
+      guard !actions.isEmpty else { return }
+      Task { @MainActor [weak self] in self?.notePrefsChanged() }
+    }
+  }
+
+  /// Launch prelude (VD6, VD13). Normalizes the slot prefs first: a
+  /// configured slot without recreate-at-launch died with the last session
+  /// and its pref must say so before the first sync. Then logs any online
+  /// display carrying a slot identity nothing owns (the asleep-panel crash
+  /// orphan, S1 §5A) — the recreation that follows triggers the WindowServer
+  /// re-enumeration measured to clear such orphans. Safe Mode stops before
+  /// the sync: recreation is automatic startup behavior; an explicit Create
+  /// in the pane still works (VD13).
+  func syncVirtualDisplaysAtLaunch() {
+    let (normalized, changed) = VirtualDisplayReconciler.launchNormalized(
+      definitions: appPrefs.virtualSlotDefinitions()
+    )
+    for slot in changed {
+      if let definition = normalized[slot] { appPrefs.setVirtualSlot(definition, slot: slot) }
+    }
+    logOrphanedVirtualDisplays()
+    guard !safeMode else { return }
+    syncVirtualDisplays()
+  }
+
+  private func logOrphanedVirtualDisplays() {
+    var ids = [CGDirectDisplayID](repeating: 0, count: 16)
+    var count: UInt32 = 0
+    guard CGGetOnlineDisplayList(16, &ids, &count) == .success else { return }
+    let owned = virtualDisplays.ownedDisplayIDs
+    for id in ids.prefix(Int(count)) where !owned.contains(id) {
+      let vendor = CGDisplayVendorNumber(id)
+      let model = CGDisplayModelNumber(id)
+      guard vendor == VirtualDisplayIdentity.vendorID,
+            VirtualDisplayIdentity.slotRange
+            .map(VirtualDisplayIdentity.productID(slot:)).contains(model)
+      else { continue }
+      log.error(
+        "vd: orphaned slot display online at launch (id \(id), model 0x\(String(model, radix: 16), privacy: .public)); a previous instance likely died with the built-in panel asleep"
+      )
+    }
+  }
+
+  /// VD15's first half, called by the settings reset BEFORE the domain wipe
+  /// removes the slot keys: a wiped `configured` with the display still
+  /// standing would be state the pane can no longer explain.
+  func destroyAllVirtualDisplaysForReset() async {
+    let host = virtualDisplays
+    await withCheckedContinuation { continuation in
+      virtualDisplayQueue.async {
+        host.destroyAll(departureTimeout: 5)
+        continuation.resume()
+      }
+    }
+  }
 
   /// App-level M4 prefs (startupAction, multiKeyboardVolume, showContrast)
   /// read through one DisplayPrefs like the engine does; the persistence key
@@ -927,7 +1026,7 @@ final class AppModel {
     var existing = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
     var appeared: [DisplayState] = []
     var kept: [DisplayState] = []
-    displays = DisplayDiscovery.discover().map { entry in
+    displays = DisplayDiscovery.discover(excluding: virtualDisplays.ownedDisplayIDs).map { entry in
       // B8: discovery has always read these and always thrown them away. Kept
       // for BOTH branches below — a kept display re-reports its facts on every
       // pass, and a link renegotiation is exactly when the transport string can

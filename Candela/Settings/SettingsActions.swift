@@ -68,6 +68,11 @@ final class SettingsActions {
       // to work on every timeout tweak.
       model.oledCare.reapplyAfterPrefChange(persistenceKey: persistenceKey)
     }
+    if effects.contains(.syncVirtualDisplays) {
+      // VD14: converge live virtual displays to the slot prefs. The model
+      // hops off the main actor itself; nothing here blocks.
+      model?.syncVirtualDisplays()
+    }
   }
 }
 
