@@ -53,6 +53,12 @@ public enum VolumeSliderPolicy {
   /// mute key under the dedicated strategy; a single 0x62 gate would have taken
   /// it away.
   ///
+  /// `usesDedicatedMuteCommand` is the STRATEGY IN FORCE, not the raw pref:
+  /// `usesDedicatedMuteCommand(prefEnabled:override:muteSupport:)` computes it,
+  /// and on a display that denies 0x8D the answer is false because the write
+  /// degrades to the volume register. Passing the pref instead would judge the
+  /// key on a register the write will not touch.
+  ///
   /// Refusing here does NOT put unmuting out of reach, which is what D29 rule 3
   /// demands of any gate near this register. Every route back drives the
   /// controller directly and consults no capability verdict: the display's own
@@ -70,6 +76,31 @@ public enum VolumeSliderPolicy {
       override: override,
       writtenRegister: usesDedicatedMuteCommand ? muteSupport : volumeSupport
     )
+  }
+
+  /// Which register a mute on this display actually lands on: its own mute
+  /// command (VCP 0x8D), or the volume register driven to 0.
+  ///
+  /// The pref asks for the dedicated command; the display's own capabilities
+  /// string can refuse it, under the same D24 rule that greys the slider, one
+  /// register over. A refusal DEGRADES this display to the strategy every
+  /// display without a dedicated mute command already uses, which is why this
+  /// answers "which register" rather than "may we mute": a mute the app
+  /// records and no register carries is the phantom state D24 exists to
+  /// prevent, not a safer outcome than muting.
+  ///
+  /// The verdict gates the MUTE direction only. Every unmute is ungated
+  /// wherever it is written, because the verdict comes off a string the
+  /// display supplied and can arrive after the mute did: a display muted over
+  /// 0x8D while the probe was still pending must not have its way back decided
+  /// by the verdict that landed since (D29 rule 3).
+  ///
+  /// One definition for the engine's mute writes and for the mute key's gate,
+  /// so a keypress and a slider crossing cannot disagree about the register.
+  public static func usesDedicatedMuteCommand(
+    prefEnabled: Bool, override: AudioSinkOverride, muteSupport: VCPSupport
+  ) -> Bool {
+    prefEnabled && isEnabled(override: override, volumeSupport: muteSupport)
   }
 
   /// Should the event tap WATCH the volume keys on this display's account?
@@ -111,6 +142,13 @@ public enum VolumeSliderPolicy {
   /// strategies, and that is not an approximation: `toggleMute` runs on the
   /// volume controller and guards on its `isAvailable` even when the wire it
   /// writes is 0x8D. Switching the volume command off takes the mute key with it.
+  ///
+  /// `usesDedicatedMuteCommand` is the STRATEGY IN FORCE, computed by
+  /// `usesDedicatedMuteCommand(prefEnabled:override:muteSupport:)`, exactly as
+  /// `acceptsMuteKey` takes it. Passing the raw pref would arm this key on the
+  /// verdict for a register the write does not touch: on a display that denies
+  /// 0x8D and takes 0x62, the engine degrades the mute to the volume register,
+  /// so the tap must watch the key rather than hand it to macOS.
   public static func armsMuteKey(
     commandIsAvailable: Bool,
     override: AudioSinkOverride,

@@ -288,6 +288,58 @@ struct MuteKeyAcceptanceTests {
   }
 }
 
+/// Which register a mute lands on. The pref asks for the display's own mute
+/// command; the display's capabilities string can refuse it, and a refusal
+/// degrades the display to the volume-register 0 every display without a
+/// dedicated mute command already uses.
+@Suite("The mute strategy in force")
+struct DedicatedMuteCommandTests {
+  @Test func thePrefIsTheFirstWord() {
+    for support in [VCPSupport.supported, .unsupported, .unknown] {
+      #expect(!VolumeSliderPolicy.usesDedicatedMuteCommand(
+        prefEnabled: false, override: .auto, muteSupport: support),
+        "mute support \(support)")
+    }
+  }
+
+  /// The defect this exists for: a display advertising volume and denying mute
+  /// took an ungated 0x8D write from the volume path.
+  @Test func aCleanDenialOfTheMuteRegisterRetiresTheDedicatedCommand() {
+    #expect(!VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true, override: .auto, muteSupport: .unsupported))
+  }
+
+  /// D24's other half, and the MAG's whole case: absence of evidence never
+  /// takes a command away.
+  @Test func noEvidenceKeepsTheDedicatedCommand() {
+    #expect(VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true, override: .auto, muteSupport: .unknown))
+    #expect(VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true, override: .auto, muteSupport: .supported))
+  }
+
+  @Test func theOverrideOutranksTheDisplayOnThisRegisterToo() {
+    #expect(VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true, override: .forcePresent, muteSupport: .unsupported))
+    #expect(!VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true, override: .forceNone, muteSupport: .supported))
+  }
+
+  /// One copy of D24's rule: with the pref on, the strategy IS `isEnabled`
+  /// read against 0x8D's verdict, for every input.
+  @Test func theStrategyReachesD24sVerdictOnTheMuteRegister() {
+    for override in [AudioSinkOverride.auto, .forceNone, .forcePresent] {
+      for support in [VCPSupport.supported, .unsupported, .unknown] {
+        #expect(
+          VolumeSliderPolicy.usesDedicatedMuteCommand(
+            prefEnabled: true, override: override, muteSupport: support)
+            == VolumeSliderPolicy.isEnabled(override: override, volumeSupport: support),
+          "override \(override), mute support \(support)")
+      }
+    }
+  }
+}
+
 /// The tap decides what to WATCH before it knows what a press would act on, and
 /// a watched key is CONSUMED: it reaches neither the app's displays nor macOS.
 /// So the arming question is not the acting question. It asks everything that
@@ -425,5 +477,26 @@ struct VolumeKeyArmingTests {
         }
       }
     }
+  }
+
+  /// The cell where arming and acting can silently part company: the pref is
+  /// on, the display denies 0x8D and takes 0x62, so the engine degrades the
+  /// mute to the volume register. Both gates have to be told the STRATEGY, and
+  /// the raw pref is kept here as the counterexample: passed instead, it hands
+  /// the mute key to macOS on the one display whose mute the degrade just made
+  /// work.
+  @Test func theDegradedMuteKeyIsArmedAndAcceptedFromTheSameStrategy() {
+    let strategy = VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true, override: .auto, muteSupport: .unsupported)
+    #expect(strategy == false)
+    #expect(VolumeSliderPolicy.armsMuteKey(
+      commandIsAvailable: true, override: .auto, volumeSupport: .supported,
+      muteSupport: .unsupported, usesDedicatedMuteCommand: strategy))
+    #expect(VolumeSliderPolicy.acceptsMuteKey(
+      isKeyboardDisabled: false, override: .auto, volumeSupport: .supported,
+      muteSupport: .unsupported, usesDedicatedMuteCommand: strategy))
+    #expect(!VolumeSliderPolicy.armsMuteKey(
+      commandIsAvailable: true, override: .auto, volumeSupport: .supported,
+      muteSupport: .unsupported, usesDedicatedMuteCommand: true))
   }
 }
