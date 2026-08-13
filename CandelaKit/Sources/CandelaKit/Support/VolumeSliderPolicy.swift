@@ -72,6 +72,62 @@ public enum VolumeSliderPolicy {
     )
   }
 
+  /// Should the event tap WATCH the volume keys on this display's account?
+  ///
+  /// `acceptsVolumeKeys` answers who a press ACTS on, and the tap has to decide
+  /// what to swallow before any of that is known. Arming asks everything that
+  /// makes a press IMPOSSIBLE here and nothing that makes it a deliberate no-op,
+  /// because a watched key is CONSUMED: watching one on the account of a display
+  /// that cannot take it leaves the key dead in both directions, reaching neither
+  /// this app nor macOS.
+  ///
+  /// So the per-display keyboard switch is left out, and it is the only thing
+  /// left out: a display whose keyboard control the user turned off swallows its
+  /// press (R1), the same as it does for brightness, and must keep the keys
+  /// watched.
+  ///
+  /// `commandIsAvailable` is `DDCValueController.isAvailable` for the volume
+  /// command, which is the engine's own gate: false when the per-command On
+  /// switch is off, or when the display is forced to software dimming and gets no
+  /// DDC volume traffic at all. It is passed in rather than re-derived from prefs
+  /// so that the tap and the controller cannot come to different conclusions
+  /// about the same wire. It outranks both the capability verdict and the user's
+  /// override, neither of which can make a switched-off wire carry a write.
+  public static func armsVolumeKeys(
+    commandIsAvailable: Bool, override: AudioSinkOverride, volumeSupport: VCPSupport
+  ) -> Bool {
+    commandIsAvailable
+      && acceptsVolumeKeys(
+        isKeyboardDisabled: false, override: override, volumeSupport: volumeSupport
+      )
+  }
+
+  /// The same question for the mute key, asked about the register it would
+  /// write. The two families arm separately because they are denied separately:
+  /// a display that lists 0x8D and not 0x62 keeps its mute key while its volume
+  /// keys go to macOS.
+  ///
+  /// `commandIsAvailable` is the VOLUME command's availability under both mute
+  /// strategies, and that is not an approximation: `toggleMute` runs on the
+  /// volume controller and guards on its `isAvailable` even when the wire it
+  /// writes is 0x8D. Switching the volume command off takes the mute key with it.
+  public static func armsMuteKey(
+    commandIsAvailable: Bool,
+    override: AudioSinkOverride,
+    volumeSupport: VCPSupport,
+    muteSupport: VCPSupport,
+    usesDedicatedMuteCommand: Bool
+  ) -> Bool {
+    commandIsAvailable
+      && acceptsMuteKey(
+        isKeyboardDisabled: false,
+        override: override,
+        volumeSupport: volumeSupport,
+        muteSupport: muteSupport,
+        usesDedicatedMuteCommand: usesDedicatedMuteCommand
+      )
+  }
+
   /// `isEnabled` reads its argument as the verdict for the register in
   /// question: D24's rule (a clean denial refuses, no evidence allows, the
   /// user's override outranks both) is per command, not specific to 0x62.

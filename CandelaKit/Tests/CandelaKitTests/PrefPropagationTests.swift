@@ -97,11 +97,23 @@ struct PrefPropagationTests {
     //   audioDeviceNameOverride  — via `audioMatchingDisplays(for:)`
     //   disableAltBrightnessKeys — directly, in the WatchConfig
     // Task 7 adds two more (`keyboardBrightness`/`keyboardVolume` decide
-    // whether the tap runs at all), for six.
+    // whether the tap runs at all), for six. Gating the watched set on whether a
+    // volume or mute press could land at all adds the last three:
+    //   audioSinkOverride: the user's override half of that verdict
+    //   enableMuteUnmute: picks WHICH register the mute key would write, so it
+    //                     picks which verdict arms the mute key
+    //   unavailableDDC: the engine's own switch, checked before every DDC write,
+    //                   so a volume command switched off can take no key
     for name: PrefName in [.multiKeyboardVolume, .forceSw, .audioDeviceNameOverride,
-                           .disableAltBrightnessKeys, .keyboardBrightness, .keyboardVolume] {
+                           .disableAltBrightnessKeys, .keyboardBrightness, .keyboardVolume,
+                           .audioSinkOverride, .enableMuteUnmute, .unavailableDDC] {
       #expect(PrefPropagation.effects(forChange: name).contains(.rearmTap), "\(name.rawValue)")
     }
+    // NOT `isDisabled`, and that is a ruling rather than an oversight: a display
+    // whose keyboard control is off swallows its press (R1), the same as it does
+    // for brightness, so it must keep the keys armed rather than hand them to
+    // macOS. Only what makes the press impossible releases them.
+    #expect(!PrefPropagation.effects(forChange: .isDisabled).contains(.rearmTap))
     // Fork bug 3 (D2) is closed by CONSTRUCTION, not by this table:
     // `StatusItemController` builds `KeyRouterConfig` inside the tap's press
     // closure, so the fine-scale prefs are read at event time on every press.
@@ -170,6 +182,16 @@ struct PrefPropagationTests {
     #expect(PrefPropagation.effects(forChange: .forceSw)
       == [.refreshUI, .rearmTap, .reapplyDimming, .rebuildPanel])
     #expect(PrefPropagation.effects(forChange: .startupAction) == [.refreshUI])
+    // Both halves of the volume verdict, exact: neither may drag the DDC bus.
+    // `audioSinkOverride` greys a slider and releases a key; it writes nothing.
+    #expect(PrefPropagation.effects(forChange: .audioSinkOverride)
+      == [.refreshUI, .rearmTap, .rebuildPanel])
+    #expect(PrefPropagation.effects(forChange: .enableMuteUnmute)
+      == [.refreshUI, .rearmTap])
+    // The engine's availability switch keeps its dimming and panel work; the tap
+    // row is added to it, not swapped in.
+    #expect(PrefPropagation.effects(forChange: .unavailableDDC)
+      == [.refreshUI, .rearmTap, .reapplyDimming, .rebuildPanel])
   }
 
   @Test func oledCarePrefsFanOutToOledCare() {
@@ -213,7 +235,9 @@ struct PrefPropagationTests {
   @Test func promotedReadAtUsePrefsAreCasesWithUIOnlyRows() {
     // Settings overhaul SO/A1: these gained real UI, so D27 requires cases.
     // They are read at use (DDC-read time / key time), so their row is
-    // refreshUI alone — a deliberate answer, matching enableMuteUnmute.
+    // refreshUI alone, which is a deliberate answer rather than a missing one.
+    // `enableMuteUnmute` used to sit here and no longer does: it also decides
+    // which register the mute key would write, and so which verdict arms it.
     for name in [PrefName.pollingMode, .pollingCount, .separateCombinedScale] {
       #expect(PrefPropagation.effects(forChange: name) == [.refreshUI])
     }

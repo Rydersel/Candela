@@ -469,10 +469,21 @@ public enum DiagnosticsCopy {
 
   /// Split out so a row can tell "watching nothing" from "not running" without
   /// recomputing the words.
-  public static func watchedKeyFamilies(brightness: Bool, volumeOrMute: Bool) -> [String] {
+  /// Volume and mute are armed on separate verdicts (they write separate
+  /// registers, and a display can list one and deny the other), so the report
+  /// names them apart when only one is watched. Watching both keeps the single
+  /// phrase: that is the ordinary state, and splitting it there would make every
+  /// report read like a special case.
+  public static func watchedKeyFamilies(brightness: Bool, volume: Bool, mute: Bool) -> [String] {
     var families: [String] = []
     if brightness { families.append("brightness") }
-    if volumeOrMute { families.append("volume and mute") }
+    if volume, mute {
+      families.append("volume and mute")
+    } else if volume {
+      families.append("volume")
+    } else if mute {
+      families.append("mute")
+    }
     return families
   }
 

@@ -5,7 +5,7 @@ import Foundation
 /// and it must resolve to *enabled*, because a false grey removes a working
 /// control with no visible reason while a false enable costs one pointless
 /// slider.
-public enum VCPSupport: Sendable, Equatable {
+public enum VCPSupport: Sendable, Equatable, CaseIterable {
   case supported
   case unsupported
   case unknown

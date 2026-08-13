@@ -551,13 +551,26 @@ struct DiagnosticsCopyTests {
   }
 
   @Test func keyFamiliesAreNamedInAFixedOrder() {
-    #expect(DiagnosticsCopy.watchedKeyFamilies(brightness: false, volumeOrMute: false) == [])
+    #expect(DiagnosticsCopy.watchedKeyFamilies(brightness: false, volume: false, mute: false) == [])
     #expect(
-      DiagnosticsCopy.watchedKeyFamilies(brightness: true, volumeOrMute: true)
+      DiagnosticsCopy.watchedKeyFamilies(brightness: true, volume: true, mute: true)
         == ["brightness", "volume and mute"])
     #expect(
-      DiagnosticsCopy.watchedKeyFamilies(brightness: false, volumeOrMute: true)
+      DiagnosticsCopy.watchedKeyFamilies(brightness: false, volume: true, mute: true)
         == ["volume and mute"])
+  }
+
+  /// The volume keys and the mute key are armed on separate verdicts, because
+  /// they write separate registers: a display can list one and deny the other.
+  /// The report has to be able to say so, or it describes a tap that is not the
+  /// one running.
+  @Test func volumeAndMuteAreNamedApartWhenOnlyOneIsWatched() {
+    #expect(
+      DiagnosticsCopy.watchedKeyFamilies(brightness: false, volume: true, mute: false)
+        == ["volume"])
+    #expect(
+      DiagnosticsCopy.watchedKeyFamilies(brightness: true, volume: false, mute: true)
+        == ["brightness", "mute"])
   }
 
   @Test func theSoundOutputRowNamesTheDeviceEitherWay() {
@@ -748,7 +761,9 @@ struct DiagnosticsCopyTests {
     ]
     out += notices.map { DiagnosticsCopy.reapplyProblem($0, app: app) }
     out += notices.map { DiagnosticsCopy.reapplyEvent($0) }
-    out += DiagnosticsCopy.watchedKeyFamilies(brightness: true, volumeOrMute: true)
+    out += DiagnosticsCopy.watchedKeyFamilies(brightness: true, volume: true, mute: true)
+    out += DiagnosticsCopy.watchedKeyFamilies(brightness: false, volume: true, mute: false)
+    out += DiagnosticsCopy.watchedKeyFamilies(brightness: false, volume: false, mute: true)
     out += evidences.map { DiagnosticsCopy.readEvidence($0, app: app) }
     out += evidences.map { DiagnosticsCopy.readbackVerdict($0) }
     out += paths.map { DiagnosticsCopy.brightnessPath($0) }

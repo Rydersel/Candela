@@ -48,21 +48,42 @@ public enum AudioRoutingPolicy {
   }
 
   /// The fork's tap rule (updateMediaKeyTap): watch volume keys only when DDC
-  /// displays exist AND NOT (name-matching mode with zero matches) AND NOT
-  /// (any other mode with a default output that sets its own volume). No
-  /// default output → keys stay watched (the fork's removal block sits inside
-  /// `if let defaultAudioDevice`).
+  /// displays exist AND NOT (any mode with zero displays a press could act on)
+  /// AND NOT (any mode other than name-matching with a default output that sets
+  /// its own volume). No default output → keys stay watched (the fork's removal
+  /// block sits inside `if let defaultAudioDevice`).
+  ///
+  /// `actionableDisplayCount` is how many displays the press could ACT on: the
+  /// caller's own candidate pool for `mode`, filtered by everything that would
+  /// make the press impossible on a display, which is the capability verdict
+  /// (`VolumeSliderPolicy.armsVolumeKeys`/`armsMuteKey`) AND the engine's own
+  /// availability switch for the register. What it leaves in is exactly what the
+  /// executor would drop for a reason of its own: a keyboard-disabled display
+  /// still counts, because its press is swallowed on purpose (R1). It is
+  /// deliberately not "how many displays are attached". A watched key is CONSUMED
+  /// by the tap, so watching it while nothing can act takes the press away from
+  /// macOS too and the key does nothing at all, which is worse than either
+  /// outcome the rule chooses between. One display that can act keeps the family
+  /// armed for the whole rig, so a press aimed at a display that refuses is still
+  /// swallowed by that display rather than sprayed at the others (R1).
+  ///
+  /// The no-default-output branch sits AHEAD of the count on purpose. It keeps
+  /// fork parity, and it has to: in name-matching mode the pool is derived from
+  /// the default output, so it is empty whenever there is none, and a count read
+  /// before that branch would release the keys in that mode 100% of the time.
+  /// With no output device there is also no system volume for a released key to
+  /// move, so releasing would trade a dead key for a dead key.
   public static func shouldWatchVolumeKeys(
     mode: MultiKeyboardVolume,
     ddcDisplaysExist: Bool,
-    matchingDisplayCount: Int,
+    actionableDisplayCount: Int,
     defaultOutput: AudioOutputDevice?
   ) -> Bool {
     guard ddcDisplaysExist else { return false }
     guard let defaultOutput else { return true }
     if mode == .audioDeviceNameMatching {
-      return matchingDisplayCount > 0
+      return actionableDisplayCount > 0
     }
-    return !defaultOutput.canSetOwnVolume
+    return actionableDisplayCount > 0 && !defaultOutput.canSetOwnVolume
   }
 }

@@ -100,11 +100,21 @@ public enum PrefPropagation {
 
     case .showContrast, .enableSliderSnap, .enableSliderPercent,
          .hideVolumeSlider, .friendlyName, .isDisabled, .hideOsd,
-         .audioSinkOverride, .enableBrightnessSync:
+         .enableBrightnessSync:
+      // `isDisabled` carries no `.rearmTap` row deliberately: a display whose
+      // keyboard control is off swallows its press (R1) rather than handing it
+      // to macOS, so it must leave the watched set alone.
       [.rebuildPanel]
 
     case .audioDeviceNameOverride:
       // Feeds `AppModel.audioMatchingDisplays`, i.e. `tapConfig`.
+      [.rebuildPanel, .rearmTap]
+
+    case .audioSinkOverride:
+      // The user's half of the volume verdict. It greys the slider AND decides
+      // whether a volume or mute key can act on this display, and the tap now
+      // arms on that: an override that leaves no display able to act releases
+      // the keys to macOS.
       [.rebuildPanel, .rearmTap]
 
     case .rememberDisplayMode, .storedDisplayMode:
@@ -122,12 +132,19 @@ public enum PrefPropagation {
       // `.refreshUI` is unioned in below and is the whole row.
       []
 
-    case .enableMuteUnmute, .startupAction, .multiKeyboardBrightness,
+    case .startupAction, .multiKeyboardBrightness,
          .useFineScaleBrightness, .useFineScaleVolume,
          .pollingMode, .pollingCount, .separateCombinedScale:
       // Read at key time / launch time / DDC-read time. `.refreshUI` alone is
       // the whole row — that is a deliberate answer, not a missing one.
       []
+
+    case .enableMuteUnmute:
+      // Read at key time as well, but it also SELECTS the register the mute key
+      // would write (0x8D with it, the volume register without it), and the tap
+      // arms the mute key on that register's verdict. Flipping it can therefore
+      // hand the mute key to macOS or take it back.
+      [.rearmTap]
 
     case .keyboardBrightness, .keyboardVolume:
       [.rearmTap, .recheckPermissions]
@@ -139,10 +156,19 @@ public enum PrefPropagation {
          .minDDCOverride, .maxDDCOverride, .curveDDC, .invertDDC, .remapDDC:
       [.reapplyDimming]
 
-    case .avoidGamma, .unavailableDDC:
-      // Both change what the panel shows as well: the control-method caption,
-      // and whether a slider renders at all.
+    case .avoidGamma:
+      // Changes what the panel shows as well: the control-method caption.
       [.reapplyDimming, .rebuildPanel]
+
+    case .unavailableDDC:
+      // The same two, plus the tap: this is the switch the engine itself checks
+      // before any DDC write, so turning the volume command off leaves nothing
+      // for a volume or mute key to do on that display, and the keys belong to
+      // macOS once no display can take them. The name is one pref for all three
+      // commands, so a brightness or contrast flip re-arms too: idempotent, and
+      // cheaper than a per-command row that would have to be kept in step with
+      // which commands the tap reads.
+      [.reapplyDimming, .rebuildPanel, .rearmTap]
 
     case .forceSw:
       [.reapplyDimming, .rebuildPanel, .rearmTap]
