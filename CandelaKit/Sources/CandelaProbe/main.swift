@@ -41,6 +41,8 @@ usage: candela-probe [--display <id>] <subcommand>
   gamma <0-1> [holdSeconds=15]            uniform gamma scale, held then reset
   gamma reset                             CGDisplayRestoreColorSyncSettings
   watch [seconds=10]                      100 ms native-brightness delta log
+  topology                                online displays: kind, identity, virtual verdict, DDC pool
+  vd create <slot> <w> <h> [--hidpi] [--hold <s>]  create a virtual display, hold, destroy
 """
 
 /// The DDC subcommands need a DDC-capable external display. The private-API
@@ -131,6 +133,79 @@ case "list", nil:
     // key is suffixed with it (docs/ADVANCED-SETTINGS.md).
     print("\(entry.display.id)\t\(entry.display.persistenceKey)\t\(entry.display.name)")
   }
+case "topology":
+  // Every online display with its kind and identity, then the DDC candidate
+  // pool as the shipping filter computes it: the rig's oracle for VD3.
+  var ids = [CGDirectDisplayID](repeating: 0, count: 16)
+  var count: UInt32 = 0
+  _ = CGGetOnlineDisplayList(16, &ids, &count)
+  let onlineIDs = Array(ids.prefix(Int(count)))
+  print("online-count=\(onlineIDs.count)")
+  print("main-display-id=\(CGMainDisplayID())")
+  for id in onlineIDs where displayFilter == nil || id == displayFilter {
+    let identity = DisplayConfigIdentity(
+      vendor: CGDisplayVendorNumber(id), model: CGDisplayModelNumber(id),
+      serial: CGDisplaySerialNumber(id), isBuiltIn: CGDisplayIsBuiltin(id) != 0
+    )
+    let virtualVerdict = VirtualDisplayDetection.isVirtual(id).map { $0 ? "1" : "0" } ?? "unknown"
+    print("display id=\(id) identity=\(identity.key) built-in=\(CGDisplayIsBuiltin(id) != 0 ? 1 : 0) virtual=\(virtualVerdict) mirrors=\(CGDisplayMirrorsDisplay(id))")
+  }
+  let pool = DDCCandidatePolicy.candidates(
+    online: onlineIDs,
+    isBuiltIn: { CGDisplayIsBuiltin($0) != 0 },
+    ownedVirtualIDs: [],
+    isForeignVirtual: VirtualDisplayDetection.isVirtual
+  )
+  print("ddc-pool=\(pool.map(String.init).joined(separator: ","))")
+
+case "vd":
+  // Exercises the SHIPPING VirtualDisplayHost without the app: creation,
+  // appearance, departure, and (with --hold and an external kill -9) the
+  // crash-reclaim behavior. Colour profile counts print around the create so
+  // a repeat-run growth is visible immediately (VD11).
+  let profilesDir = "/Library/ColorSync/Profiles/Displays"
+  func profileCount() -> Int {
+    (try? FileManager.default.contentsOfDirectory(atPath: profilesDir).count) ?? -1
+  }
+  guard arguments.count >= 2, arguments[1] == "create" else {
+    print(usage)
+    exit(2)
+  }
+  guard arguments.count >= 4, let slot = Int(arguments[2]),
+        let width = Int(arguments[3]), arguments.count >= 5, let height = Int(arguments[4])
+  else {
+    print("usage: vd create <slot 1-3> <width> <height> [--hidpi] [--hold <seconds>]")
+    exit(2)
+  }
+  let hiDPI = arguments.contains("--hidpi")
+  var hold: Double = 10
+  if let holdIndex = arguments.firstIndex(of: "--hold"), holdIndex + 1 < arguments.count,
+     let seconds = Double(arguments[holdIndex + 1]) {
+    hold = seconds
+  }
+  let host = VirtualDisplayHost()
+  guard host.isAvailable else {
+    print("vd: private class family unavailable on this macOS")
+    exit(1)
+  }
+  print("profiles-before=\(profileCount())")
+  let spec = VirtualDisplaySpec(
+    name: VirtualDisplayIdentity.defaultName(slot: slot),
+    logicalWidth: width, logicalHeight: height, hiDPI: hiDPI, refreshHz: 60
+  )
+  switch host.create(spec, slot: slot, uuid: UUID(), appearanceTimeout: 10) {
+  case let .success(handle):
+    print("created id=\(handle.displayID) slot=\(handle.slot) \(handle.spec.logicalWidth)x\(handle.spec.logicalHeight) hiDPI=\(handle.spec.hiDPI ? 1 : 0)")
+    print("profiles-after=\(profileCount())")
+    print("holding \(hold)s (kill -9 me now to test crash reclaim)")
+    try? await Task.sleep(nanoseconds: UInt64(hold * 1_000_000_000))
+    let departed = host.destroy(slot: slot, departureTimeout: 10)
+    print("destroyed=1 departed=\(departed ? 1 : 0)")
+  case let .failure(failure):
+    print("create failed: \(failure)")
+    exit(1)
+  }
+
 case "modes":
   // Reports the merged list THROUGH CoreGraphicsDisplayConfigurator, so what
   // prints here is exactly what the app's pickers see — revelation included.
