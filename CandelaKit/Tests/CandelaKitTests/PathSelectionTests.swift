@@ -258,6 +258,14 @@ private func eventually(_ condition: @MainActor () async -> Bool) async -> Bool 
   return await condition()
 }
 
+/// The 0x8D traffic a recording writer saw, in order. On a write-only panel
+/// which values reached the wire is the whole of the evidence about a mute.
+private func muteWrites(_ writer: FakeDDC) async -> [UInt16] {
+  await writer.recordedWrites()
+    .filter { $0.command == VCP.audioMuteScreenBlank }
+    .map(\.value)
+}
+
 // MARK: - Path routing (the 4-row fork contract, s = 0.5 defaults)
 
 @MainActor
@@ -359,7 +367,7 @@ struct PathSelectionTests {
     await h.prime()
     h.controller.setBrightness(0.25) // gamma dim active (0.575)
     #expect(h.gamma.scales.count == 1 && approx(h.gamma.scales[0], 0.575))
-    await h.controller.setHDRMode(.alwaysOn)
+    await h.controller.setHDRMode(.alwaysOn, alsoInvalidating: [])
     // C1: shade removed, gamma restored to 1.0.
     #expect(h.shade.removed.contains(Harness.displayID))
     #expect(approx(h.gamma.scales.last ?? -1, 1.0))
@@ -370,7 +378,7 @@ struct PathSelectionTests {
     #expect(h.gamma.scales.count == scalesAfterEntry)
     // Memo was invalidated at entry: after leaving HDR the same sw value
     // re-applies instead of being dedupe-skipped (the recovery C1 protects).
-    await h.controller.setHDRMode(.off)
+    await h.controller.setHDRMode(.off, alsoInvalidating: [])
     #expect(approx(h.gamma.scales.last ?? -1, 0.575))
     #expect(await h.hdr!.recordedSetCalls() == [true, false])
   }
@@ -400,7 +408,7 @@ struct PathSelectionTests {
     #expect(h.controller.hdrMode == .off) // Candela never set a mode
     #expect(h.controller.isHDREngaged)
 
-    await h.controller.setHDRMode(.off)
+    await h.controller.setHDRMode(.off, alsoInvalidating: [])
 
     #expect(await h.hdr!.recordedSetCalls() == [true, false])
     #expect(!h.controller.isHDREngaged)
@@ -420,7 +428,7 @@ struct PathSelectionTests {
     #expect(!h.controller.isHDREngaged)
     #expect(h.controller.hdrMode == .alwaysOn) // the mode is now stale
 
-    await h.controller.setHDRMode(.alwaysOn)
+    await h.controller.setHDRMode(.alwaysOn, alsoInvalidating: [])
 
     #expect(await h.hdr!.recordedSetCalls() == [false, true])
     #expect(h.controller.isHDREngaged)
@@ -432,7 +440,7 @@ struct PathSelectionTests {
   @Test func offOnADisplayAlreadyOutOfHDRStaysANoOp() async {
     let h = Harness(settle: .milliseconds(5))
     await h.prime()
-    await h.controller.setHDRMode(.off)
+    await h.controller.setHDRMode(.off, alsoInvalidating: [])
     #expect(await h.hdr!.recordedSetCalls().isEmpty)
   }
 
@@ -460,7 +468,7 @@ struct PathSelectionTests {
     let h = Harness(settle: .milliseconds(5))
     await h.prime()
     h.controller.setBrightness(0.25)
-    await h.controller.setHDRMode(.alwaysOn)
+    await h.controller.setHDRMode(.alwaysOn, alsoInvalidating: [])
     #expect(h.submitted.last == .native(0.25))
     #expect(h.controller.isNativeActive())
   }
@@ -476,7 +484,7 @@ struct PathSelectionTests {
     await h.prime()
     await h.hdr!.stubAchieves(false)
 
-    await h.controller.setHDRMode(.alwaysOn)
+    await h.controller.setHDRMode(.alwaysOn, alsoInvalidating: [])
 
     #expect(await h.hdr!.recordedSetCalls() == [true], "the write is still issued")
     #expect(h.controller.hdrMode == .off, "the published mirror rolls back")
@@ -490,7 +498,7 @@ struct PathSelectionTests {
     let h = Harness(settle: .milliseconds(5))
     await h.prime()
 
-    await h.controller.setHDRMode(.alwaysOn)
+    await h.controller.setHDRMode(.alwaysOn, alsoInvalidating: [])
 
     #expect(h.controller.hdrMode == .alwaysOn)
     #expect(h.prefs.hdrMode == .alwaysOn)
@@ -554,7 +562,7 @@ struct PathSelectionTests {
     await h.prime()
     let before = await h.hdr!.recordedMeasuredReads()
 
-    await h.controller.setHDRMode(.alwaysOn)
+    await h.controller.setHDRMode(.alwaysOn, alsoInvalidating: [])
 
     #expect(await h.hdr!.recordedMeasuredReads() > before)
   }
@@ -592,7 +600,7 @@ struct PathSelectionTests {
     await h.prime()
     await h.hdr!.stubEnabled(true)
 
-    await h.controller.setHDRMode(.off)
+    await h.controller.setHDRMode(.off, alsoInvalidating: [])
 
     #expect(await h.hdr!.recordedSetCalls().isEmpty)
     #expect(h.controller.hdrMode == .off)
@@ -683,6 +691,118 @@ struct PathSelectionTests {
 
     #expect(volume.memoResets == 1)
     #expect(contrast.memoResets == 1)
+  }
+
+  // MARK: The ordinary exit, which closes the same window the reset door does
+
+  /// The defect at the wire, and the reason the invalidation belongs to the exit
+  /// rather than to one careful caller: the panel ACKs a write it swallowed
+  /// while the register was locked, so the memo comes out of an HDR window
+  /// naming a value the register never took. Here the swallowed value is the
+  /// unmute wire, and the display is left silent behind a skip the queue reports
+  /// as applied.
+  @Test func anOrdinaryHDRExitLetsTheSameMuteWireValueGoOutAgain() async {
+    let h = Harness(hdrEnabled: true, settle: .milliseconds(5)) { prefs, _ in
+      prefs.hdrMode = .alwaysOn
+      prefs.enableMuteUnmute = true
+      prefs.muted = true
+    }
+    await h.prime()
+    let wire = FakeDDC(readResult: nil)
+    let store = PathMemoryStore()
+    store.values["volume.t"] = 0.5
+    let volume = DDCValueController(
+      writer: wire, command: .volume, prefs: h.prefs, store: store, storageKey: "volume.t"
+    )
+    // Under HDR: the wire value goes out, the panel ACKs it, and the register
+    // stays muted. Nothing here can tell the difference, which is the premise.
+    _ = volume.toggleMute()
+    await volume.waitForPendingWrites()
+    #expect(await muteWrites(wire) == [2])
+
+    await h.controller.setHDRMode(.off, alsoInvalidating: [volume])
+
+    // The app re-asserting what it believes: unmuted, on a panel that is not.
+    volume.restoreToHardware()
+    await volume.waitForPendingWrites()
+    #expect(
+      await muteWrites(wire) == [2, 2],
+      "the value the panel swallowed has to be allowed onto the wire again"
+    )
+  }
+
+  /// Both queues, and the same one call: the exit owns the rule for every route
+  /// out of HDR, so a caller cannot forget it and a new exit route cannot miss
+  /// it.
+  @Test func anOrdinaryHDRExitDropsEveryOtherQueuesMemo() async {
+    let h = Harness(hdrEnabled: true, settle: .milliseconds(5)) { prefs, _ in
+      prefs.hdrMode = .alwaysOn
+    }
+    await h.prime()
+    let volume = MemoInvalidationRecorder()
+    let contrast = MemoInvalidationRecorder()
+
+    await h.controller.setHDRMode(.off, alsoInvalidating: [volume, contrast])
+
+    #expect(volume.memoResets == 1)
+    #expect(contrast.memoResets == 1)
+  }
+
+  /// Below the fences, which is why the invalidation is a statement in the
+  /// completed path and not a `defer`. A superseded exit establishes nothing,
+  /// including that the HDR window is over, so it leaves the sibling memos
+  /// exactly as it found them: the same belief as the assume-locked mirror it
+  /// restores one line up. The known cost of that rule is written at the
+  /// invalidation site.
+  @Test func aSupersededExitDropsNoMemos() async {
+    let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "t")
+    prefs.hdrMode = .alwaysOn
+    let gated = GatedTransitionHDR()
+    let controller = BrightnessController(
+      writer: FakeDDC(readResult: nil),
+      backends: BrightnessBackends(
+        applierNative: FakeNativeApplier(), hdr: gated,
+        shade: RecordingShade(), gamma: RecordingGamma()
+      ),
+      prefs: prefs,
+      displayID: 7
+    )
+    controller.settleDelay = .milliseconds(5)
+    await controller.initialHDRRefresh?.value
+    let volume = MemoInvalidationRecorder()
+    let contrast = MemoInvalidationRecorder()
+
+    // The exit parks inside its own disengage, holding both siblings.
+    let exit = Task { await controller.setHDRMode(.off, alsoInvalidating: [volume, contrast]) }
+    #expect(await eventually { await gated.disengageCallCount() == 1 })
+    // A newer transition takes the display: the token moves while the exit is
+    // still parked, so it resumes into a bail.
+    let engage = Task { await controller.setHDRMode(.alwaysOn, alsoInvalidating: []) }
+    #expect(await eventually { await gated.engageCallCount() == 1 })
+
+    await gated.releaseDisengage()
+    await exit.value
+
+    #expect(volume.memoResets == 0)
+    #expect(contrast.memoResets == 0)
+
+    await gated.releaseEngage()
+    await engage.value
+  }
+
+  /// The scoping half. A door that decides there is nothing to do opened no HDR
+  /// window and closed none, so it must not drop a memo either: the suppression
+  /// that keeps ordinary pref paths from re-moding every panel keeps them out of
+  /// the sibling queues too.
+  @Test func aSuppressedModeDoorDropsNoMemos() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    let volume = MemoInvalidationRecorder()
+
+    await h.controller.setHDRMode(.off, alsoInvalidating: [volume])
+
+    #expect(await h.hdr!.recordedSetCalls().isEmpty)
+    #expect(volume.memoResets == 0)
   }
 
   /// A drop that is ISSUED and does not take is not a disengage, whatever the
@@ -855,7 +975,7 @@ struct PathSelectionTests {
 
     let door = Task { await controller.disengageHDRForReset(alsoInvalidating: []) }
     while await hdr.measureCallCount() == 0 { await Task.yield() }
-    let other = Task { await controller.setHDRMode(.alwaysOn) }
+    let other = Task { await controller.setHDRMode(.alwaysOn, alsoInvalidating: []) }
     while !controller.isHDRSettling { await Task.yield() }
     await hdr.release()
     let outcome = await door.value
@@ -1254,7 +1374,7 @@ struct DDCLegHandBackTests {
     await h.prime()
     h.controller.setBrightness(0.4) // combined: the register goes to its floor
     #expect(h.submitted == [.ddc(raw: 0)])
-    await h.controller.setHDRMode(.alwaysOn)
+    await h.controller.setHDRMode(.alwaysOn, alsoInvalidating: [])
 
     h.prefs.forceSoftware = true
     h.controller.reapplyAfterPrefChange()
@@ -1787,7 +1907,7 @@ struct BuiltInRoleTests {
   @Test func setHDRModeOnBuiltInIsNoOp() async {
     let h = Harness(role: .builtIn)
     await h.prime()
-    await h.controller.setHDRMode(.alwaysOn)
+    await h.controller.setHDRMode(.alwaysOn, alsoInvalidating: [])
     #expect(h.controller.hdrMode == .off)
     #expect(h.prefs.hdrMode == .off) // pref never written
     #expect(await h.hdr!.recordedSetCalls().isEmpty)
@@ -1810,7 +1930,7 @@ struct HDRModeEngageFailureTests {
     await h.hdr!.stubSetResult(false)
     h.controller.setBrightness(0.25) // combined: gamma dim 0.575 active
     #expect(h.gamma.scales.count == 1 && approx(h.gamma.scales[0], 0.575))
-    await h.controller.setHDRMode(.alwaysOn)
+    await h.controller.setHDRMode(.alwaysOn, alsoInvalidating: [])
     // Mode and pref rolled back to the previous mode.
     #expect(h.controller.hdrMode == .off)
     #expect(h.prefs.hdrMode == .off)
@@ -1879,13 +1999,13 @@ struct HDRModeEngageFailureTests {
     controller.setBrightness(0.75)
 
     // First call commits .alwaysOn, then parks inside the gated engage.
-    let first = Task { await controller.setHDRMode(.alwaysOn) }
+    let first = Task { await controller.setHDRMode(.alwaysOn, alsoInvalidating: []) }
     #expect(await eventually { await gated.engageCallCount() == 1 })
     #expect(controller.hdrMode == .alwaysOn)
 
     // Second call retargets while the first is parked (the exit arm's
     // setHDR(false) passes straight through the gate) and now owns the state.
-    await controller.setHDRMode(.off)
+    await controller.setHDRMode(.off, alsoInvalidating: [])
     #expect(controller.hdrMode == .off)
     let submittedBeforeRelease = submitted.count
 
@@ -1926,14 +2046,14 @@ struct HDRModeEngageFailureTests {
     controller.setBrightness(0.75)
 
     // A: commits .alwaysOn, then parks inside the gated engage.
-    let first = Task { await controller.setHDRMode(.alwaysOn) }
+    let first = Task { await controller.setHDRMode(.alwaysOn, alsoInvalidating: []) }
     #expect(await eventually { await gated.engageCallCount() == 1 })
     #expect(controller.hdrMode == .alwaysOn)
 
     // B then C: the mode leaves .alwaysOn and comes back — the ABA a mode
     // comparison cannot see. C completes normally (its engage succeeds).
-    await controller.setHDRMode(.off)
-    await controller.setHDRMode(.alwaysOn)
+    await controller.setHDRMode(.off, alsoInvalidating: [])
+    await controller.setHDRMode(.alwaysOn, alsoInvalidating: [])
     #expect(await gated.engageCallCount() == 2)
     #expect(controller.hdrMode == .alwaysOn)
     #expect(prefs.hdrMode == .alwaysOn)
@@ -1973,14 +2093,14 @@ struct HDRModeEngageFailureTests {
     controller.setBrightness(0.75)
 
     // A: leaves the native path and parks inside the gated disengage.
-    let first = Task { await controller.setHDRMode(.off) }
+    let first = Task { await controller.setHDRMode(.off, alsoInvalidating: []) }
     #expect(await eventually { await gated.disengageCallCount() == 1 })
     #expect(controller.hdrMode == .off)
 
     // B: retargets back to .alwaysOn and parks inside its own engage, so its
     // settle window is still open (settleInProgress true, poller gate shut)
     // when A resumes.
-    let second = Task { await controller.setHDRMode(.alwaysOn) }
+    let second = Task { await controller.setHDRMode(.alwaysOn, alsoInvalidating: []) }
     #expect(await eventually { await gated.engageCallCount() == 1 })
     #expect(controller.hdrMode == .alwaysOn)
     #expect(controller.isNativeActive() == false)
@@ -2002,7 +2122,7 @@ struct HDRModeEngageFailureTests {
 
 /// HDRToggling fake whose ENGAGE calls (`enabled == true`) suspend until
 /// `release()` and then fail; disengage calls pass straight through. Lets a
-/// test park one `setHDRMode(.alwaysOn)` mid-engage while another call
+/// test park one `setHDRMode(.alwaysOn, alsoInvalidating: [])` mid-engage while another call
 /// retargets the controller.
 ///
 /// With `gateFirstEngageOnly`, only the FIRST engage is gated; later engages
@@ -2115,12 +2235,12 @@ struct EngageFailureReguardTests {
     await controller.initialHDRRefresh?.value
 
     await gated.armGate()
-    let first = Task { await controller.setHDRMode(.alwaysOn) } // engage FAILS → rollback parks in refreshHDRCaches
+    let first = Task { await controller.setHDRMode(.alwaysOn, alsoInvalidating: []) } // engage FAILS → rollback parks in refreshHDRCaches
     #expect(await eventually { await gated.hasParked() })
     #expect(controller.hdrMode == .off) // rollback already committed pre-park
 
     // A newer transition supersedes the parked rollback and runs to completion.
-    await controller.setHDRMode(.alwaysOn)
+    await controller.setHDRMode(.alwaysOn, alsoInvalidating: [])
     #expect(controller.hdrMode == .alwaysOn)
     #expect(controller.isHDREngaged)
 
@@ -2156,7 +2276,7 @@ struct AlreadyLiveEngageTests {
   @Test func alwaysOnWithHDRAlreadyLiveSkipsSetHDRAndSettle() async {
     let h = Harness(hdrEnabled: true, settle: .milliseconds(50))
     await h.prime() // mode .off + HDR live: NOT native yet (policy off), no entry work
-    await h.controller.setHDRMode(.alwaysOn)
+    await h.controller.setHDRMode(.alwaysOn, alsoInvalidating: [])
     #expect(h.controller.hdrMode == .alwaysOn)
     #expect(h.controller.isHDREngaged)
     // The already-live door: no redundant setHDR(true), no transition window.
@@ -2177,7 +2297,7 @@ struct AlreadyLiveEngageTests {
     await h.prime() // cache: HDR live
     // External toggle the controller has NOT observed — the cache is now stale.
     await h.hdr?.setHDR(displayID: Harness.displayID, enabled: false)
-    await h.controller.setHDRMode(.alwaysOn)
+    await h.controller.setHDRMode(.alwaysOn, alsoInvalidating: [])
     #expect(h.controller.hdrMode == .alwaysOn)
     #expect(h.controller.isHDREngaged)
     #expect(h.controller.isNativeActive())
@@ -2210,7 +2330,7 @@ struct HDRSettleAccessorTests {
     await controller.initialHDRRefresh?.value
     #expect(controller.isHDRSettling == false)
 
-    let exit = Task { await controller.setHDRMode(.off) }
+    let exit = Task { await controller.setHDRMode(.off, alsoInvalidating: []) }
     // Parked inside the disengage: `beginHDRTransition()` has run, so the
     // settle window is open and stays open until the gate is released.
     #expect(await eventually { await gated.disengageCallCount() == 1 })
