@@ -1,10 +1,15 @@
 import CandelaKit
 import SwiftUI
 
-/// The menu-bar icon and the panel's sliders — the two things that decide what
-/// the user sees when they click the status item.
+/// The menu-bar icon, the panel's sliders and the on-screen indicators: what
+/// Candela puts on screen outside its own windows.
 ///
-/// Deliberately five controls. D26 cut the fork's "General menu items style"
+/// The indicator positions live here rather than under Keyboard because they
+/// are an appearance choice, and this is the pane that owns those. Keyboard
+/// decides which display a press acts on; this decides where the answer is
+/// drawn.
+///
+/// Deliberately five slider and menu-bar controls. D26 cut the fork's "General menu items style"
 /// popup and "Show slider tick marks" toggle, and D32 files both prefs as
 /// reserved-and-inert: `menuItemStyle` and `showTickMarks` keep their keys so
 /// the schema slots can never be reused, but nothing in Candela reads them,
@@ -114,8 +119,69 @@ struct AppMenuPane: View {
           ))
         }
       }
+
+      indicatorSection
     }
     .formStyle(.grouped)
+  }
+
+  /// Where the pills a key press puts on screen sit. Two pickers rather than
+  /// one so each kind has a stable home: volume always reports in one place,
+  /// brightness in another. Not a way to see both at once: the HUD keys one
+  /// window per display, so on a single display the two kinds take turns in it.
+  ///
+  /// Each row's caption describes ITS OWN control, because `SettingRow`
+  /// republishes the caption as that control's accessibility hint: a shared
+  /// sentence under one picker would be spoken as a fact about that picker
+  /// alone.
+  ///
+  /// "Indicator" is the house term for these (the Keyboard pane and each
+  /// display's Advanced page both use it); "OSD" and "HUD" are internal words
+  /// and never appear here.
+  @ViewBuilder private var indicatorSection: some View {
+    Section("On-Screen Indicators") {
+      SettingRow("Contrast uses this position too.") {
+        Picker("Brightness indicator position:", selection: Binding(
+          get: { prefs.hudPositionBrightness },
+          set: { position in
+            prefs.hudPositionBrightness = position
+            actions.prefDidChange(.hudPositionBrightness)
+          }
+        )) {
+          // `HUDPlacement.pickerOrder`, never `allCases`: raw 0 is the top-right
+          // position (the one every earlier build drew), so raw order is not
+          // reading order. Same rule as the menu-bar icon popup above.
+          ForEach(HUDPlacement.pickerOrder, id: \.self) { position in
+            Text(label(for: position)).tag(position)
+          }
+        }
+      }
+
+      SettingRow("Mute uses this position too. The indicator appears on the display the keys act on.") {
+        Picker("Volume indicator position:", selection: Binding(
+          get: { prefs.hudPositionVolume },
+          set: { position in
+            prefs.hudPositionVolume = position
+            actions.prefDidChange(.hudPositionVolume)
+          }
+        )) {
+          ForEach(HUDPlacement.pickerOrder, id: \.self) { position in
+            Text(label(for: position)).tag(position)
+          }
+        }
+      }
+    }
+  }
+
+  /// Reads as one sentence with the row label: "Brightness indicator position:
+  /// Top left". Exhaustive, so a future `HUDPosition` case is a compile error
+  /// rather than a blank row.
+  private func label(for position: HUDPosition) -> LocalizedStringKey {
+    switch position {
+    case .topLeft: "Top left"
+    case .topCenter: "Top center"
+    case .topRight: "Top right"
+    }
   }
 
   /// Written so the popup reads as one sentence with its label — "Show the menu

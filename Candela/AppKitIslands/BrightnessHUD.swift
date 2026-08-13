@@ -2,6 +2,7 @@
 //  Transplanted from the MonitorControl project (MIT), from Support/CustomHUD.swift.
 
 import AppKit
+import CandelaKit
 
 /// The on-screen display Candela presents when it changes a display's brightness.
 ///
@@ -9,19 +10,13 @@ import AppKit
 /// `BrightnessHUDPresenting`, so the engine can announce a value change without
 /// knowing anything about windows.
 protocol BrightnessHUDPresenting: AnyObject {
-  // Protocol requirements cannot carry default arguments, so the requirement
-  // spells out the full list and the extension below supplies the short form.
-  @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double, nameSuffix: String?)
+  @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double,
+                                 nameSuffix: String?, position: HUDPosition)
   /// Generic pill (M4): volume/contrast/mute. Exposed through the protocol so
   /// the executor talks to a presenter, not the concrete panel.
   @MainActor func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String,
-                          value: Float, maxValue: Float, nameSuffix: String?)
-}
-
-extension BrightnessHUDPresenting {
-  @MainActor func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String, value: Float) {
-    self.showHUD(displayID: displayID, type: type, name: name, value: value, maxValue: 1, nameSuffix: nil)
-  }
+                          value: Float, maxValue: Float, nameSuffix: String?,
+                          position: HUDPosition)
 }
 
 enum HUDType {
@@ -91,6 +86,14 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     max(screen.frame.maxY - screen.visibleFrame.maxY, NSStatusBar.system.thickness) + self.menuBarClearance
   }
 
+  /// ONE window per display, shared by every pill kind. Brightness, volume,
+  /// contrast and mute cannot be on screen together on one display, and never
+  /// could be: a show reuses the window the last one left, retitles it and
+  /// re-places it. With per-kind positions that reuse is visible as a move,
+  /// because a volume press followed by a brightness press inside the 1.5 s
+  /// fade takes the same window from one anchor to the other. Keying by kind as
+  /// well as by display would make simultaneous pills possible, which is a
+  /// product change nobody has ruled on, not a bug fix.
   private var huds: [CGDirectDisplayID: HUD] = [:]
   private var fadeTimers: [CGDirectDisplayID: Timer] = [:]
   /// Monotonic per display, bumped by every `showHUD` and by `cleanupDisplay`.
@@ -100,8 +103,10 @@ final class BrightnessHUD: BrightnessHUDPresenting {
 
   // MARK: - BrightnessHUDPresenting
 
-  func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double, nameSuffix: String?) {
-    self.showHUD(displayID: displayID, type: .brightness, name: name, value: Float(value), nameSuffix: nameSuffix)
+  func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double,
+                      nameSuffix: String?, position: HUDPosition) {
+    self.showHUD(displayID: displayID, type: .brightness, name: name, value: Float(value),
+                 nameSuffix: nameSuffix, position: position)
   }
 
   // MARK: - Presentation
@@ -122,7 +127,9 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   /// window, and calling this once per member leaves the last call's name and
   /// value on screen. `HUDGrouping` exists so that choice is made once and on
   /// purpose rather than by iteration order (#123).
-  func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String, value: Float, maxValue: Float = 1, nameSuffix: String? = nil) {
+  func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String, value: Float,
+               maxValue: Float = 1, nameSuffix: String? = nil,
+               position: HUDPosition) {
     guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
       return
     }
@@ -146,13 +153,17 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     hud.effectView.effectiveAppearance.performAsCurrentDrawingAppearance {
       hud.effectView.layer?.borderColor = NSColor.separatorColor.cgColor
     }
-    // Vertical position is measured from the full frame, not `visibleFrame`:
-    // with the menu bar auto-hidden `visibleFrame` reaches the top of the
-    // screen, and the pill would then sit exactly where the bar reveals itself.
-    // `menuBarAllowance` reserves that strip unconditionally.
-    hud.panel.setFrameOrigin(NSPoint(
-      x: screen.visibleFrame.maxX - Self.hudSize.width - Self.screenMargin,
-      y: screen.frame.maxY - Self.menuBarAllowance(for: screen) - Self.hudSize.height - Self.screenMargin
+    // The anchor arrives from the caller and the arithmetic lives in the Kit,
+    // where a rotated display's bounds can be tested (DT16: the island holds no
+    // judgement). `screen.frame` is already the EFFECTIVE geometry, so a
+    // display mounted at 270° needs nothing special here.
+    hud.panel.setFrameOrigin(HUDPlacement.origin(
+      position,
+      size: Self.hudSize,
+      frame: screen.frame,
+      visibleFrame: screen.visibleFrame,
+      topInset: Self.menuBarAllowance(for: screen),
+      margin: Self.screenMargin
     ))
     self.fadeTimers[displayID]?.invalidate()
     self.fadeGenerations[displayID, default: 0] &+= 1

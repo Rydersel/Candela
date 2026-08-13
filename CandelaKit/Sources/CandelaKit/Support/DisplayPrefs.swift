@@ -585,6 +585,31 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: "enableSliderPercent") }
   }
 
+  /// Where the brightness and contrast pills sit on the display they are drawn
+  /// on. `HUDPosition` (defined with its placement math in `HUDPlacement`)
+  /// stores `topRight` as 0, so an install that has never touched this keeps
+  /// exactly the position the app always used.
+  public var hudPositionBrightness: HUDPosition {
+    get { HUDPosition(rawValue: defaults.integer(forKey: "hudPositionBrightness")) ?? .topRight }
+    set { defaults.set(newValue.rawValue, forKey: "hudPositionBrightness") }
+  }
+
+  /// The volume and mute pills' own position, split along the same line
+  /// `hideOsd` already draws: volume and mute on one side, brightness and
+  /// contrast on the other.
+  ///
+  /// Two keys give each KIND a stable home of its own, so volume always reports
+  /// in one place and brightness in another. They are not a way to see both at
+  /// once: `BrightnessHUD` keys one window per DISPLAY, so on any one display
+  /// the two kinds take turns in the same window. Pressing volume and then
+  /// brightness inside the 1.5 s fade moves that window from one anchor to the
+  /// other, which is the single-window behaviour the app has always had and not
+  /// something these keys introduce.
+  public var hudPositionVolume: HUDPosition {
+    get { HUDPosition(rawValue: defaults.integer(forKey: "hudPositionVolume")) ?? .topRight }
+    set { defaults.set(newValue.rawValue, forKey: "hudPositionVolume") }
+  }
+
   /// Hide the built-in display's panel section (Candela's positive-default
   /// equivalent of the fork's dead hideAppleFromMenu — the filter WORKS here, D2).
   public var hideBuiltInDisplay: Bool {
