@@ -14,7 +14,14 @@ public enum DisplayDiscovery {
   /// widening it would touch every construction site and every fixture for the
   /// benefit of one read-only pane. Callers that want only the display and the
   /// writer keep compiling — they already destructure by label.
-  public static func discover()
+  ///
+  /// - Parameter ownedVirtualIDs: displays Candela itself created. They are
+  ///   removed from the candidate pool BEFORE `Arm64DDC.getServiceMatches`
+  ///   sees it, alongside foreign virtual displays; see `DDCCandidatePolicy`
+  ///   for what happens if they are not. Empty by default so a caller that
+  ///   owns no virtual displays reads naturally; the app passes
+  ///   `AppModel.ownedVirtualDisplayIDs`.
+  public static func discover(excluding ownedVirtualIDs: Set<CGDirectDisplayID> = [])
     -> [(display: ExternalDisplay, writer: any DDCWriting, facts: DisplayHardwareFacts)] {
     #if arch(arm64)
       var displayIDs = [CGDirectDisplayID](repeating: 0, count: 16)
@@ -22,7 +29,12 @@ public enum DisplayDiscovery {
       guard CGGetOnlineDisplayList(16, &displayIDs, &count) == .success else {
         return []
       }
-      let externalIDs = displayIDs.prefix(Int(count)).filter { CGDisplayIsBuiltin($0) == 0 }
+      let externalIDs = DDCCandidatePolicy.candidates(
+        online: Array(displayIDs.prefix(Int(count))),
+        isBuiltIn: { CGDisplayIsBuiltin($0) != 0 },
+        ownedVirtualIDs: ownedVirtualIDs,
+        isForeignVirtual: VirtualDisplayDetection.isVirtual
+      )
       return Arm64DDC.getServiceMatches(displayIDs: Array(externalIDs))
         .filter { !$0.dummy && $0.service != nil }
         .map { match in
