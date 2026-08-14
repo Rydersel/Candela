@@ -70,11 +70,20 @@ struct ArrangementPane: View {
   /// two altitudes. The pane has one group, so the header carried no
   /// information beyond the repetition.
   private var arrangementSection: some View {
-    Section {
+    // Ours by ownership, everyone else's by the optional-returning predicate
+    // (nil reads as an ordinary panel). Snapshotted ONCE per render rather
+    // than asked per tile: the canvas calls its closure per tile per drag
+    // frame, and the predicate behind it fetches a CoreDisplay dictionary.
+    let virtualIDs = Set(coordinator.arrangement.tiles.map(\.id).filter { id in
+      model.virtualDisplays.ownedDisplayIDs.contains(id)
+        || VirtualDisplayDetection.isVirtual(id) == true
+    })
+    return Section {
       VStack(alignment: .leading, spacing: 8) {
         ArrangementCanvasView(
           arrangement: coordinator.arrangement,
           name: coordinator.displayName,
+          isVirtual: { virtualIDs.contains($0) },
           selection: reconciledSelection,
           onPropose: { coordinator.apply($0) },
           onRefuse: { problems in

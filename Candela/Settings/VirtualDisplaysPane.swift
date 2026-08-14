@@ -16,6 +16,9 @@ import SwiftUI
 struct VirtualDisplaysPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
+  /// Which slot the controls below describe, chosen on the tile row the way
+  /// the arrangement map chooses a display.
+  @State private var selectedSlot = 1
 
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
@@ -24,14 +27,61 @@ struct VirtualDisplaysPane: View {
     Form {
       if model.virtualDisplays.isAvailable {
         introSection
-        ForEach(Array(VirtualDisplayIdentity.slotRange), id: \.self) { slot in
-          slotSection(slot)
-        }
+        selectorSection
+        slotSection(selectedSlot)
       } else {
         unavailableSection
       }
     }
     .formStyle(.grouped)
+  }
+
+  // MARK: - Slot selector
+
+  /// The three slots as display tiles, the arrangement map's visual language:
+  /// a running slot is a purple (virtual) tile carrying its achieved size, a
+  /// not-created slot is an empty grey one. Clicking a tile selects the slot
+  /// the controls below describe.
+  private var selectorSection: some View {
+    Section {
+      HStack(spacing: 14) {
+        ForEach(Array(VirtualDisplayIdentity.slotRange), id: \.self) { slot in
+          slotTile(slot)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .center)
+      .padding(.vertical, 6)
+    }
+  }
+
+  @ViewBuilder private func slotTile(_ slot: Int) -> some View {
+    let definition = prefs.virtualSlot(slot)
+    let running = liveHandle(slot: slot) != nil
+    let achieved = model.virtualDisplays.achievedMode(slot: slot)
+    let status = achieved.map { "\(String($0.width)) x \(String($0.height))" } ?? "Not created"
+    // The tile keeps the slot's configured shape so the row previews what
+    // Create will make; a uniform height keeps the row from jumping as
+    // definitions change.
+    let height = 76.0
+    let width = min(150, max(96, height * Double(definition.width) / Double(max(1, definition.height))))
+    DisplayTile(
+      name: definition.name,
+      pointSize: status,
+      mirroredCount: 0,
+      isMain: false,
+      isSelected: selectedSlot == slot,
+      isFocused: false,
+      isInvalid: false,
+      isDragging: false,
+      isVirtual: running,
+      labels: TileLabelStyle(detail: .nameAndSize, nameSize: 11, showsMirrored: false)
+    )
+    .frame(width: width, height: height)
+    .contentShape(RoundedRectangle(cornerRadius: 5))
+    .onTapGesture { selectedSlot = slot }
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(Text(verbatim: "\(definition.name), \(running ? "running at \(status)" : "not created")"))
+    .accessibilityAddTraits(selectedSlot == slot ? [.isButton, .isSelected] : [.isButton])
   }
 
   private var introSection: some View {

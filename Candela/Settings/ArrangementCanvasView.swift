@@ -23,6 +23,11 @@ struct ArrangementCanvasView: View {
   /// The user's name for a display, or "" when nothing can name it. Resolution
   /// belongs to the surface, so the canvas asks rather than deciding.
   let name: (CGDirectDisplayID) -> String
+  /// Is this a software-only display: one of Candela's own, or a foreign
+  /// synthetic one. Asked, not decided, for `name`'s reason; the tile draws
+  /// virtual displays in the Virtual Displays pane's purple. Defaults to "no"
+  /// so previews and callers without an opinion keep compiling.
+  var isVirtual: (CGDirectDisplayID) -> Bool = { _ in false }
   @Binding var selection: CGDirectDisplayID?
   /// Called ONLY with a valid layout that differs from the current one. Starts
   /// the preview and its countdown.
@@ -160,6 +165,7 @@ struct ArrangementCanvasView: View {
       isFocused: focused == tile.id,
       isInvalid: invalidIDs.contains(tile.id),
       isDragging: isDragging,
+      isVirtual: isVirtual(tile.id),
       labels: labelStyle
     )
     // ORDER IS LOAD-BEARING, and this is the top-ranked risk in the feature.
@@ -253,6 +259,7 @@ struct ArrangementCanvasView: View {
   private func accessibilityValue(_ tile: ArrangementTile) -> String {
     var parts = ["positioned at x \(tile.rect.x), y \(tile.rect.y)"]
     if isMain(tile.id) { parts.append("main display") }
+    if isVirtual(tile.id) { parts.append("virtual display") }
     if !tile.mirroredIDs.isEmpty { parts.append("mirrored to \(tile.mirroredIDs.count) more") }
     return parts.joined(separator: ", ")
   }
