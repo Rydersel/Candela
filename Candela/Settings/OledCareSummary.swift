@@ -41,38 +41,66 @@ struct PanelExposureSurface: View {
   let cells: [Double]
   let highlighted: Int?
   let aspect: CGFloat
+  /// 0 disables the emission glow; the strip runs it low, the hero higher.
+  /// The glow is the same rasterized data blurred, so it can only bloom where
+  /// the panel has actually been lit.
+  var glowStrength: Double = 0
+  /// Draw fine corner ticks, the hero's instrument framing.
+  var reticle: Bool = false
+
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
-    Group {
-      if let image = Self.rasterize(cells) {
+    let image = Self.rasterize(cells)
+    ZStack {
+      if glowStrength > 0, let image {
         Image(decorative: image, scale: 1)
           .resizable()
           .interpolation(.high)
-      } else {
-        Rectangle().fill(.quaternary)
+          .aspectRatio(aspect, contentMode: .fit)
+          .blur(radius: 18)
+          .opacity(glowStrength)
+          .blendMode(.screen)
       }
-    }
-    .aspectRatio(aspect, contentMode: .fit)
-    .overlay {
-      if let highlighted, cells.indices.contains(highlighted) {
-        Canvas { context, size in
-          let width = size.width / CGFloat(PanelGrid.cols)
-          let height = size.height / CGFloat(PanelGrid.rows)
-          let rect = CGRect(
-            x: CGFloat(highlighted % PanelGrid.cols) * width,
-            y: CGFloat(highlighted / PanelGrid.cols) * height,
-            width: width, height: height
-          ).insetBy(dx: 0.75, dy: 0.75)
-          context.stroke(
-            Path(roundedRect: rect, cornerRadius: 2), with: .color(.primary), lineWidth: 1.5)
+      Group {
+        if let image {
+          Image(decorative: image, scale: 1)
+            .resizable()
+            .interpolation(.high)
+        } else {
+          Rectangle().fill(.quaternary)
         }
       }
+      .aspectRatio(aspect, contentMode: .fit)
+      .overlay {
+        if let highlighted, cells.indices.contains(highlighted) {
+          Canvas { context, size in
+            let width = size.width / CGFloat(PanelGrid.cols)
+            let height = size.height / CGFloat(PanelGrid.rows)
+            let rect = CGRect(
+              x: CGFloat(highlighted % PanelGrid.cols) * width,
+              y: CGFloat(highlighted / PanelGrid.cols) * height,
+              width: width, height: height
+            ).insetBy(dx: 0.75, dy: 0.75)
+            context.stroke(
+              Path(roundedRect: rect, cornerRadius: 2), with: .color(.primary), lineWidth: 1.5)
+          }
+        }
+      }
+      .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+      .overlay {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+          .strokeBorder(.separator, lineWidth: 1)
+      }
+      .overlay {
+        if reticle { ReticleTicks() }
+      }
     }
-    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-    .overlay {
-      RoundedRectangle(cornerRadius: 5, style: .continuous)
-        .strokeBorder(.separator, lineWidth: 1)
-    }
+    // The id swap makes a data change an insertion the transition can
+    // crossfade; without it a replaced CGImage snaps. Reduce Motion snaps on
+    // purpose.
+    .id(reduceMotion ? 0 : cells.hashValue)
+    .animation(reduceMotion ? nil : .easeInOut(duration: 0.8), value: cells.hashValue)
     .accessibilityHidden(true)
   }
 
@@ -149,6 +177,9 @@ struct OledCareGlanceTile: View {
   @ScaledMetric(relativeTo: .subheadline) private var boxWidth: CGFloat = 190
   @ScaledMetric(relativeTo: .subheadline) private var boxHeight: CGFloat = 84
 
+  @State private var hovering = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   private var persistenceKey: String { state.display.persistenceKey }
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: persistenceKey) }
 
@@ -176,7 +207,16 @@ struct OledCareGlanceTile: View {
       .frame(maxWidth: boxWidth * 1.25)
       .contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
+    .buttonStyle(OledTileButtonStyle())
+    // Lift, not tint: an inactive window draws every accent grey, so a hover
+    // treatment that only recolored would vanish exactly when screenshots are
+    // taken. Scale and shadow survive focus.
+    .scaleEffect(hovering && !reduceMotion ? 1.03 : 1)
+    .shadow(
+      color: .black.opacity(hovering ? 0.35 : 0),
+      radius: hovering ? 10 : 0, y: 3)
+    .animation(reduceMotion ? nil : .spring(duration: 0.25), value: hovering)
+    .onHover { hovering = $0 }
     .accessibilityLabel(Text(verbatim: "\(name). \(stateLine(summary: summary))"))
     .accessibilityHint(Text("Shows this display's OLED care settings."))
   }
@@ -192,7 +232,8 @@ struct OledCareGlanceTile: View {
         PanelExposureSurface(
           cells: summary.cells,
           highlighted: OledPanelGeometry.hottestIndex(summary.cells),
-          aspect: aspect)
+          aspect: aspect,
+          glowStrength: 0.35)
       } else {
         // No dotted placeholder: a blank surface with the state line under it
         // is quieter and does not read as faint data.
@@ -227,10 +268,141 @@ struct OledCareGlanceTile: View {
       }
       return hours
     case .insufficient:
-      return "\(hours) · not enough readings yet"
+      return "\(hours) · \(summary.sampleCount) of \(ExposureAccumulator.minimumSamplesForAnalysis) readings"
     case .estimated:
       return "\(hours) · brightness not measured"
     }
   }
 
+}
+
+/// Pressed-state scale for the strip tiles; hover lift lives on the tile so
+/// both read from one animation.
+struct OledTileButtonStyle: ButtonStyle {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+      .animation(reduceMotion ? nil : .spring(duration: 0.2), value: configuration.isPressed)
+  }
+}
+
+/// Fine corner ticks over the hero surface: instrument framing, drawn, never
+/// data. Decorative to VoiceOver by way of the surface's own hidden marker.
+struct ReticleTicks: View {
+  var body: some View {
+    Canvas { context, size in
+      let length: CGFloat = 9
+      let inset: CGFloat = 3.5
+      var path = Path()
+      for (x, xDirection): (CGFloat, CGFloat) in [(inset, 1), (size.width - inset, -1)] {
+        for (y, yDirection): (CGFloat, CGFloat) in [(inset, 1), (size.height - inset, -1)] {
+          path.move(to: CGPoint(x: x + xDirection * length, y: y))
+          path.addLine(to: CGPoint(x: x, y: y))
+          path.addLine(to: CGPoint(x: x, y: y + yDirection * length))
+        }
+      }
+      context.stroke(path, with: .color(.white.opacity(0.35)), lineWidth: 1)
+    }
+    .allowsHitTesting(false)
+  }
+}
+
+/// The mission-control strip under the hero map. Every field is a real
+/// reading: the count and timestamp come off the map itself and the grant is
+/// the live preflight, so this line cannot describe a pipeline that is not
+/// running.
+struct OledTelemetryTicker: View {
+  let sampleCount: Int
+  let lastSample: Date?
+  let grantPresent: Bool
+
+  var body: some View {
+    Text(verbatim: line)
+      .font(.caption2.monospaced())
+      .foregroundStyle(.tertiary)
+      .contentTransition(.numericText())
+      .animation(.default, value: sampleCount)
+  }
+
+  private var line: String {
+    var fields = [String(format: "R#%04d", sampleCount)]
+    if let lastSample {
+      fields.append(lastSample.formatted(date: .omitted, time: .standard))
+    }
+    fields.append("\(PanelGrid.cellCount) cells")
+    fields.append(grantPresent ? "grant OK" : "no grant")
+    return fields.joined(separator: " · ")
+  }
+}
+
+/// The breathing measurement indicator. It may only breathe while readings
+/// genuinely land (`lastSample` within two sampling intervals), so the motion
+/// IS the telemetry: a dead grant stills it within two minutes, which is the
+/// honesty tie the stalled 2026-08-11 soak earned.
+struct OledMeasuringDot: View {
+  let live: Bool
+
+  @State private var breathing = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  var body: some View {
+    Circle()
+      .fill(live ? Color.green : Color.secondary.opacity(0.5))
+      .frame(width: 7, height: 7)
+      .opacity(breathing ? 1 : 0.35)
+      .animation(
+        live && !reduceMotion
+          ? .easeInOut(duration: 1.2).repeatForever(autoreverses: true) : nil,
+        value: breathing)
+      .onAppear { breathing = live }
+      .onChange(of: live) { _, isLive in breathing = isLive }
+      .accessibilityHidden(true)
+  }
+}
+
+/// Time at brightness, from the wear signal histogram nothing displayed
+/// before. Ten bars, one per stored level bucket, each scaled to the busiest
+/// bucket and colored through the shared ramp so dark-to-bright reads
+/// left-to-right. Seconds are real accumulated counts (OC20); the dim share
+/// is `wearWeightableFraction`, a count of seconds with no model in it.
+struct OledBrightnessHistogram: View {
+  let secondsByBucket: [Double]
+
+  private var peak: Double { secondsByBucket.max() ?? 0 }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(alignment: .bottom, spacing: 5) {
+        ForEach(secondsByBucket.indices, id: \.self) { bucket in
+          let fraction = peak > 0 ? secondsByBucket[bucket] / peak : 0
+          UnevenRoundedRectangle(topLeadingRadius: 2, topTrailingRadius: 2)
+            .fill(PanelExposureScale.color(Double(bucket) / 9))
+            .opacity(secondsByBucket[bucket] > 0 ? 1 : 0.18)
+            .frame(height: max(2, 44 * fraction))
+            .frame(maxWidth: .infinity, alignment: .bottom)
+        }
+      }
+      .frame(height: 44, alignment: .bottom)
+      HStack {
+        Text("Dimmest")
+        Spacer(minLength: 0)
+        Text("Brightest")
+      }
+      .font(.caption2)
+      .foregroundStyle(.tertiary)
+    }
+    .accessibilityElement()
+    .accessibilityLabel(Text(verbatim: spoken))
+  }
+
+  private var spoken: String {
+    guard peak > 0, let busiest = secondsByBucket.firstIndex(of: peak) else {
+      return "Time at brightness, nothing recorded yet"
+    }
+    let low = busiest * 10
+    let high = low + 10
+    return "Time at brightness. Most time was spent between \(low) and \(high) percent."
+  }
 }

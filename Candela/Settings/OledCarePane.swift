@@ -345,6 +345,14 @@ private struct OledCareDisplaySection: View {
   /// (OC19): it is a page of its own, and a 24×10 heat map inside a `Form` row
   /// would read as one more setting.
   @State private var showingHealth = false
+  /// Which lens the hero surface shows. Session state, not a pref.
+  @State private var heroMode: HeroSurfaceMode = .history
+  @State private var showsWindowGhosts = false
+  /// Pointer location over the hero surface, for the crosshair inspection.
+  @State private var hoverPoint: CGPoint?
+  /// The instrument layer's disclosure. Session state; collapsed is the story
+  /// view, expanded is the lab bench.
+  @State private var showsTechnicalDetails = false
 
   private var persistenceKey: String { state.display.persistenceKey }
   private var writer: DisplayPrefWriter {
@@ -386,8 +394,8 @@ private struct OledCareDisplaySection: View {
         unfocusedControls
         hoursControls
         measurementControls
-        comparisonControls
         healthRow
+        technicalDetails
       }
     } header: {
       Text(verbatim: name).settingsHeading()
@@ -430,53 +438,60 @@ private struct OledCareDisplaySection: View {
   /// map draws is stated in words in the stat column, the display hero's rule,
   /// so the map stays decorative to VoiceOver and the honesty precedence is
   /// the health view's exactly: Safe Mode, then the grant, then confidence.
+  private enum HeroSurfaceMode { case history, now }
+
   @ViewBuilder private var hero: some View {
     let summary = model.oledCare.healthSummary(for: persistenceKey)
     let tracker = model.oledCare.hoursTracker(for: persistenceKey)
-    let blank = summary.confidence != .measured
+    let live = model.oledCare.latestSample(for: persistenceKey)
+    let historyBlank = summary.confidence != .measured
     let aspect =
       OledPanelGeometry.panelNativeAspect(for: state.display.id)
       ?? CGFloat(PanelGrid.cols) / CGFloat(PanelGrid.rows)
+    // The displayed cells are the one truth every sub-layer (surface, ghosts,
+    // crosshair readout) shares, so the inspection can never describe a frame
+    // the surface is not drawing.
+    let displayed: [Double]? =
+      heroMode == .history ? (historyBlank ? nil : summary.cells) : live?.cells
+
     HStack(alignment: .top, spacing: 20) {
       VStack(alignment: .leading, spacing: 8) {
-        // The smooth glance surface, not the health sheet's discrete grid:
-        // at this size inset cells read as floating squares. Blank state is a
-        // plain shape, not a faint pattern that reads as data.
-        if blank {
-          RoundedRectangle(cornerRadius: 5, style: .continuous)
-            .fill(.quaternary)
-            .overlay {
-              RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .strokeBorder(.separator, lineWidth: 1)
-            }
-            .aspectRatio(aspect, contentMode: .fit)
-            .accessibilityHidden(true)
-        } else {
-          PanelExposureSurface(
-            cells: summary.cells,
-            highlighted: OledPanelGeometry.hottestIndex(summary.cells),
-            aspect: aspect)
-        }
-        if blank {
-          Text(verbatim: mapPlaceholder(summary))
+        heroSurface(displayed: displayed, summary: summary, aspect: aspect)
+        if displayed == nil {
+          Text(verbatim: mapPlaceholder(summary, mode: heroMode))
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         } else {
           PanelExposureLegend()
         }
+        if heroMode == .now, let live {
+          Text(verbatim: "Reading from \(live.at.formatted(date: .omitted, time: .standard)); brightness of what the display was showing.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        heroControls(hasHistory: !historyBlank, hasLive: live != nil)
       }
       .frame(maxWidth: 300)
 
       VStack(alignment: .leading, spacing: 10) {
         heroStat("Status") { Text(statusText) }
-        heroStat("Hours of use") { Text(verbatim: hoursLine(tracker)) }
-        if !blank, let relative = summary.hottestRelative,
+        heroStat("Hours of use") {
+          Text(verbatim: hoursLine(tracker))
+            .monospacedDigit()
+            .contentTransition(.numericText())
+            .animation(.default, value: hoursLine(tracker))
+        }
+        if !historyBlank, let relative = summary.hottestRelative,
           let multiple = PanelHealthCopy.multiple(relative)
         {
           heroStat("Hottest area") {
             VStack(alignment: .leading, spacing: 2) {
               Text(verbatim: "\(multiple) this display's average")
+                .monospacedDigit()
+                .contentTransition(.numericText())
+                .animation(.default, value: multiple)
               if let sentence = hottestSentence(summary) {
                 Text(verbatim: sentence)
                   .font(.caption)
@@ -486,16 +501,252 @@ private struct OledCareDisplaySection: View {
             }
           }
         }
-        heroStat("Measurement") { Text(verbatim: measurementStateLine(summary)) }
-        if let stats = model.oledCare.modelComparison(for: persistenceKey).statistics() {
-          heroStat("Estimate agreement") {
-            Text(verbatim: String(format: "%.2f", stats.pearson))
+        heroStat("Measurement") {
+          VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+              OledMeasuringDot(live: isMeasuringLive(summary))
+              Text(verbatim: measurementStateLine(summary))
+            }
+            if summary.confidence == .insufficient, prefs.oledTelemetry {
+              ProgressView(
+                value: Double(min(
+                  summary.sampleCount, ExposureAccumulator.minimumSamplesForAnalysis)),
+                total: Double(ExposureAccumulator.minimumSamplesForAnalysis))
+                .controlSize(.small)
+                .frame(maxWidth: 140)
+            }
           }
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
     .padding(.vertical, 4)
+  }
+
+  /// The surface stack: heat surface, window ghosts, crosshair inspection.
+  @ViewBuilder private func heroSurface(
+    displayed: [Double]?, summary: PanelHealthSummary, aspect: CGFloat
+  ) -> some View {
+    if let displayed {
+      PanelExposureSurface(
+        cells: displayed,
+        highlighted: heroMode == .history
+          ? OledPanelGeometry.hottestIndex(summary.cells) : nil,
+        aspect: aspect,
+        glowStrength: 0.6,
+        reticle: true)
+      .overlay {
+        if showsWindowGhosts {
+          ghostCanvas
+            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        }
+      }
+      .overlay {
+        GeometryReader { geometry in
+          heroInspection(displayed: displayed, summary: summary, size: geometry.size)
+        }
+      }
+    } else {
+      RoundedRectangle(cornerRadius: 5, style: .continuous)
+        .fill(.quaternary)
+        .overlay {
+          RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .strokeBorder(.separator, lineWidth: 1)
+        }
+        .aspectRatio(aspect, contentMode: .fit)
+        .accessibilityHidden(true)
+    }
+  }
+
+  /// The mode picker and the ghost toggle, shown once there is anything to
+  /// switch between. Session state, not prefs: which lens is up is not a
+  /// setting.
+  @ViewBuilder private func heroControls(hasHistory: Bool, hasLive: Bool) -> some View {
+    if hasHistory || hasLive {
+      HStack(spacing: 10) {
+        Picker("Map", selection: $heroMode) {
+          Text("History").tag(HeroSurfaceMode.history)
+          Text("Right now").tag(HeroSurfaceMode.now)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 170)
+        .accessibilityLabel("Map shows")
+        Toggle("Windows", isOn: $showsWindowGhosts)
+          .toggleStyle(.button)
+          .controlSize(.small)
+          .help("Outline the windows on this display, from the same permission-free snapshot app attribution uses.")
+        Spacer(minLength: 0)
+      }
+    }
+  }
+
+  /// Current window rectangles over the surface, the geometry model made
+  /// visible. Same layer policy as the exposure model, so what is outlined is
+  /// what the estimate counts; below-zero backdrop layers stay out.
+  private var ghostCanvas: some View {
+    let windows = model.oledCare.latestWindowSnapshots(for: persistenceKey)
+    let transform = OledCareCoordinator.transform(for: state.display.id)
+    return Canvas { context, size in
+      guard let transform else { return }
+      let display = transform.displaySize
+      guard display.width > 0, display.height > 0 else { return }
+      for window in windows where ExposureModel.includedLayers.contains(window.layer) {
+        let bounds = window.bounds
+        guard bounds.origin.x.isFinite, bounds.origin.y.isFinite,
+          bounds.width.isFinite, bounds.height.isFinite
+        else { continue }
+        let clamped = bounds.intersection(CGRect(origin: .zero, size: display))
+        guard !clamped.isNull, clamped.width > 0, clamped.height > 0 else { continue }
+        let a = transform.panelPointForDisplay(
+          u: clamped.minX / display.width, v: clamped.minY / display.height)
+        let b = transform.panelPointForDisplay(
+          u: clamped.maxX / display.width, v: clamped.maxY / display.height)
+        let rect = CGRect(
+          x: min(a.p, b.p) * size.width, y: min(a.q, b.q) * size.height,
+          width: abs(b.p - a.p) * size.width, height: abs(b.q - a.q) * size.height
+        ).insetBy(dx: 0.5, dy: 0.5)
+        context.stroke(
+          Path(roundedRect: rect, cornerRadius: 2),
+          with: .color(.white.opacity(0.55)), lineWidth: 1)
+      }
+    }
+    .allowsHitTesting(false)
+  }
+
+  /// Crosshair and readout under the pointer: the map as an instrument you
+  /// can interrogate. History mode reads the accumulated cell against the
+  /// map's own mean; Right now reads the live luminance. Both say only what
+  /// the displayed array holds.
+  @ViewBuilder private func heroInspection(
+    displayed: [Double], summary: PanelHealthSummary, size: CGSize
+  ) -> some View {
+    Color.clear
+      .contentShape(Rectangle())
+      .onContinuousHover { phase in
+        switch phase {
+        case .active(let location): hoverPoint = location
+        case .ended: hoverPoint = nil
+        }
+      }
+      .overlay {
+        if let point = hoverPoint, size.width > 0, size.height > 0 {
+          let col = min(PanelGrid.cols - 1, max(0, Int(point.x / size.width * CGFloat(PanelGrid.cols))))
+          let row = min(PanelGrid.rows - 1, max(0, Int(point.y / size.height * CGFloat(PanelGrid.rows))))
+          let cell = row * PanelGrid.cols + col
+          Canvas { context, canvasSize in
+            var lines = Path()
+            lines.move(to: CGPoint(x: point.x, y: 0))
+            lines.addLine(to: CGPoint(x: point.x, y: canvasSize.height))
+            lines.move(to: CGPoint(x: 0, y: point.y))
+            lines.addLine(to: CGPoint(x: canvasSize.width, y: point.y))
+            context.stroke(lines, with: .color(.white.opacity(0.3)), lineWidth: 0.5)
+          }
+          .allowsHitTesting(false)
+          inspectionReadout(cell: cell, displayed: displayed, summary: summary)
+            .position(
+              x: min(max(point.x + 70, 70), size.width - 70),
+              y: max(point.y - 26, 18))
+            .allowsHitTesting(false)
+        }
+      }
+  }
+
+  @ViewBuilder private func inspectionReadout(
+    cell: Int, displayed: [Double], summary: PanelHealthSummary
+  ) -> some View {
+    let lines = inspectionLines(cell: cell, displayed: displayed, summary: summary)
+    if !lines.isEmpty {
+      VStack(alignment: .leading, spacing: 1) {
+        ForEach(lines, id: \.self) { line in
+          Text(verbatim: line)
+        }
+      }
+      .font(.caption2.monospaced())
+      .foregroundStyle(.white)
+      .padding(.horizontal, 7)
+      .padding(.vertical, 4)
+      .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 4))
+    }
+  }
+
+  private func inspectionLines(
+    cell: Int, displayed: [Double], summary: PanelHealthSummary
+  ) -> [String] {
+    guard displayed.indices.contains(cell) else { return [] }
+    var lines: [String] = []
+    switch heroMode {
+    case .history:
+      let mean = displayed.reduce(0, +) / Double(displayed.count)
+      if mean > 0, let multiple = PanelHealthCopy.multiple(displayed[cell] / mean) {
+        lines.append("\(multiple) average")
+      }
+    case .now:
+      lines.append("\(Int((displayed[cell] * 100).rounded()))% luminance")
+    }
+    if let owner = summary.dominantOwnerByCell?[cell] {
+      lines.append(owner)
+    }
+    return lines
+  }
+
+  /// The instrument-grade layer, collapsed by default so the section's
+  /// default read is the story above it: map, status, hours, hottest area.
+  /// Everything here stays on the page rather than in a sheet, which is what
+  /// EM9 requires of the comparison; a disclosure is placement, not burial.
+  @ViewBuilder private var technicalDetails: some View {
+    let summary = model.oledCare.healthSummary(for: persistenceKey)
+    DisclosureGroup(isExpanded: $showsTechnicalDetails) {
+      VStack(alignment: .leading, spacing: 14) {
+        if prefs.oledTelemetry {
+          OledTelemetryTicker(
+            sampleCount: summary.sampleCount,
+            lastSample: summary.lastSample,
+            grantPresent: CGPreflightScreenCaptureAccess())
+        }
+        usageHistogram
+        comparisonControls
+      }
+      .padding(.top, 8)
+    } label: {
+      Text("Technical details")
+    }
+  }
+
+  /// The wear signal's first reader (OC20 built it; nothing displayed it):
+  /// how long this display has run at each brightness, and the share of
+  /// tracked time spent in a protective dim, which is OC17's own gate number.
+  /// Both are counts of seconds; neither is a model.
+  @ViewBuilder private var usageHistogram: some View {
+    let tracker = model.oledCare.wearTracker(for: persistenceKey)
+    let buckets = tracker.secondsByBucket()
+    if buckets.contains(where: { $0 > 0 }) {
+      VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .firstTextBaseline) {
+          Text("Time at brightness")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Spacer(minLength: 8)
+          if let fraction = tracker.wearWeightableFraction, fraction > 0 {
+            Text(verbatim: "\(Int((fraction * 100).rounded()))% of tracked time in a protective dim")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+        OledBrightnessHistogram(secondsByBucket: buckets)
+      }
+      .padding(.vertical, 2)
+    }
+  }
+
+  /// The pulse's honesty: live means the pipeline produced a reading inside
+  /// the last two sampling intervals, so a dead grant stills the dot within
+  /// two minutes whatever the prefs claim.
+  private func isMeasuringLive(_ summary: PanelHealthSummary) -> Bool {
+    guard !model.isSafeMode, prefs.oledTelemetry, CGPreflightScreenCaptureAccess(),
+      let last = summary.lastSample
+    else { return false }
+    return Date().timeIntervalSince(last) < 180
   }
 
   private func heroStat(_ label: String, @ViewBuilder value: () -> some View) -> some View {
@@ -510,7 +761,10 @@ private struct OledCareDisplaySection: View {
   /// Caption under a blank hero map. `summary.cells` stays populated whatever
   /// the confidence, so blanking the drawing must not also claim there is no
   /// history behind it (the health view's own rule).
-  private func mapPlaceholder(_ summary: PanelHealthSummary) -> String {
+  private func mapPlaceholder(_ summary: PanelHealthSummary, mode: HeroSurfaceMode) -> String {
+    if mode == .now {
+      return "No reading this session yet. One lands within a minute while this display is awake, in use, and Screen Recording is granted."
+    }
     if model.isSafeMode {
       return "Paused for this session (Safe Mode). History recorded before it is kept."
     }
@@ -529,19 +783,18 @@ private struct OledCareDisplaySection: View {
     }
     switch summary.confidence {
     case .measured: return "Measuring, one reading a minute"
-    case .insufficient: return "Measuring, not enough readings yet"
+    case .insufficient:
+      return "\(summary.sampleCount) of \(ExposureAccumulator.minimumSamplesForAnalysis) readings"
     case .estimated: return "Off"
     }
   }
 
-  /// Words for what the outline draws. Past tense for the owner, the health
-  /// view's reason: the snapshot behind it is up to a minute old.
+  /// The outline is the pointer; prose coordinates ("toward the top, on the
+  /// right") were cut as noise. Past tense for the owner, the health view's
+  /// reason: the snapshot behind it is up to a minute old.
   private func hottestSentence(_ summary: PanelHealthSummary) -> String? {
-    guard let index = OledPanelGeometry.hottestIndex(summary.cells),
-      let region = PanelHealthCopy.region(cell: index)
-    else { return nil }
-    guard let owner = summary.hottestOwner else { return "Outlined on the map, \(region)." }
-    return "Outlined on the map, \(region). \(owner) was there at the last reading."
+    guard let owner = summary.hottestOwner else { return "Outlined on the map." }
+    return "Outlined on the map. \(owner) was there at the last reading."
   }
 
   /// What the engine is doing right now. `dimStates` is the coordinator's own

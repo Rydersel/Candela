@@ -90,12 +90,14 @@ public struct PanelSpaceTransform: Equatable, Sendable {
   }
 
   /// `panelPoint` for `OverlayMask`, which needs the same mapping to walk a
-  /// display-oriented grid back into panel cells.
+  /// display-oriented grid back into panel cells, and for the window ghost
+  /// overlay, which maps display-local window corners onto the drawn surface.
   ///
   /// Exposed rather than duplicated: the rotation convention is subtle enough
   /// that it already shipped with a backwards doc comment, and two spellings of
   /// it would be two places a correction has to find. This is the one place.
-  func panelPointForDisplay(u: Double, v: Double) -> (p: Double, q: Double) {
+  /// Public for the app-target overlay, same reasoning at one remove.
+  public func panelPointForDisplay(u: Double, v: Double) -> (p: Double, q: Double) {
     panelPoint(u: u, v: v)
   }
 

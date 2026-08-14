@@ -333,13 +333,37 @@ struct PanelHealthView: View {
       } else {
         // Index-keyed: the elements are tuples, which cannot be `Identifiable`,
         // and an owner name is not guaranteed unique across the list.
+        // The bar is proportional to the LIST's own leader, so the top row is
+        // always full and the rest read against it; an absolute scale would
+        // need a total this list deliberately truncates.
+        let leader = owners.map(\.hours).max() ?? 0
         ForEach(Array(owners.enumerated()), id: \.offset) { _, entry in
-          HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(verbatim: entry.owner)
-            Spacer(minLength: 0)
-            Text(verbatim: Self.panelTimePhrase(entry.hours))
-              .foregroundStyle(.secondary)
-              .monospacedDigit()
+          VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+              Text(verbatim: entry.owner)
+              Spacer(minLength: 0)
+              Text(verbatim: Self.panelTimePhrase(entry.hours))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            }
+            GeometryReader { geometry in
+              Capsule()
+                .fill(.quaternary)
+                .overlay(alignment: .leading) {
+                  if leader > 0 {
+                    Capsule()
+                      .fill(
+                        LinearGradient(
+                          colors: [
+                            PanelExposureScale.color(0.35), PanelExposureScale.color(0.9),
+                          ],
+                          startPoint: .leading, endPoint: .trailing))
+                      .frame(width: geometry.size.width * entry.hours / leader)
+                  }
+                }
+            }
+            .frame(height: 4)
+            .accessibilityHidden(true)
           }
         }
       }
