@@ -458,26 +458,31 @@ private struct OledCareDisplaySection: View {
 
     HStack(alignment: .top, spacing: 20) {
       VStack(alignment: .leading, spacing: 8) {
-        heroSurface(displayed: displayed, summary: summary, aspect: aspect)
-        if displayed == nil {
-          Text(verbatim: mapPlaceholder(summary, mode: heroMode))
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-        } else {
-          PanelExposureLegend()
+        VStack(alignment: .leading, spacing: 8) {
+          heroSurface(displayed: displayed, summary: summary, aspect: aspect)
+          if displayed == nil {
+            Text(verbatim: mapPlaceholder(summary, mode: heroMode))
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          } else {
+            PanelExposureLegend()
+          }
+          if heroMode == .now, let live {
+            Text(verbatim: "Reading from \(live.at.formatted(date: .omitted, time: .standard)); brightness of what the display was showing.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
         }
-        if heroMode == .now, let live {
-          Text(verbatim: "Reading from \(live.at.formatted(date: .omitted, time: .standard)); brightness of what the display was showing.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-        }
+        // A portrait display at the landscape width would tower over the stat
+        // column, so only the map and its captions take the narrow cap. The
+        // controls row stays OUTSIDE it: inside, a portrait column left the
+        // Windows toggle ~20 pt after the picker and its label truncated to an
+        // empty capsule.
+        .frame(maxWidth: aspect < 1 ? 200 : 300)
         heroControls(hasHistory: !historyBlank, hasLive: live != nil)
       }
-      // A portrait display at the landscape width would tower over the stat
-      // column; capping the width keeps both orientations at a similar height.
-      .frame(maxWidth: aspect < 1 ? 200 : 300)
 
       VStack(alignment: .leading, spacing: 10) {
         heroStat("Status") { Text(statusText) }
