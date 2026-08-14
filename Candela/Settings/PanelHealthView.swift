@@ -247,23 +247,11 @@ struct PanelHealthView: View {
     }
   }
 
-  /// The map's drawn aspect, panel-native (the manufactured landscape
-  /// rectangle), because that is the geometry the cells were binned in.
-  ///
-  /// Not the grid's own 24:10: that ratio is the MAG's, and `PanelGrid` is
-  /// fixed so one stored shape serves every display, which leaves the Dell's
-  /// cells 160×216 px. Drawing those square stretches its history sideways by
-  /// 35%. Nil when the geometry cannot be read or the rotation is not one of
-  /// the four `DisplayRotation` answers, and the map then falls back to the
-  /// grid's ratio rather than guessing.
+  /// The shared computation (`OledPanelGeometry`), so the glance strip, the
+  /// hero and this page cannot drift on what shape a display's history draws
+  /// at. The rationale lives on the helper.
   private var panelNativeAspect: CGFloat? {
-    guard let displayID else { return nil }
-    let width = CGFloat(CGDisplayPixelsWide(displayID))
-    let height = CGFloat(CGDisplayPixelsHigh(displayID))
-    guard width > 0, height > 0,
-      let rotation = DisplayRotation(degrees: CGDisplayRotation(displayID))
-    else { return nil }
-    return rotation.swapsAxes ? height / width : width / height
+    OledPanelGeometry.panelNativeAspect(for: displayID)
   }
 
   /// Panel-native means the geometry the glass was manufactured with, the
@@ -279,19 +267,10 @@ struct PanelHealthView: View {
       + " This display is currently rotated, so the map will not line up with what you see on screen."
   }
 
-  /// The peak cell, found from the normalized array rather than carried on the
-  /// summary: `PanelHealthSummary.cells` is divided through by the map's own
-  /// peak, so the hottest cell is exactly 1.0, and `ExposureMap.hottestCell`
-  /// resolves ties to the first index the same way `firstIndex` does.
-  ///
-  /// TODO: move to CandelaKit and call `ExposureMap.hottestCell` instead of
-  /// restating its tie-break. It cannot call through today: the summary
-  /// publishes `cells` but not the `ExposureMap` behind them, and `ExposureMap`
-  /// has no public initialiser outside CandelaKit, so there is no map here to
-  /// ask. Publishing the index on `PanelHealthSummary` is the fix.
+  /// The shared tie-break (`OledPanelGeometry.hottestIndex`), one answer for
+  /// this page, the hero and the glance strip.
   private static func hottestIndex(_ cells: [Double]) -> Int? {
-    guard let peak = cells.max(), peak > 0 else { return nil }
-    return cells.firstIndex(of: peak)
+    OledPanelGeometry.hottestIndex(cells)
   }
 
   // MARK: - Findings
@@ -519,18 +498,20 @@ enum PanelExposureScale {
   ]
 
   static func color(_ value: Double) -> Color {
+    let (red, green, blue) = components(value)
+    return Color(.sRGB, red: red, green: green, blue: blue, opacity: 1)
+  }
+
+  /// The raw sRGB triple, for the surface rendering that rasterizes the ramp
+  /// itself rather than asking SwiftUI to.
+  static func components(_ value: Double) -> (r: Double, g: Double, b: Double) {
     let clamped = min(1, max(0, value.isFinite ? value : 0))
     let scaled = clamped * Double(anchors.count - 1)
     let lower = min(anchors.count - 2, Int(scaled))
     let t = scaled - Double(lower)
     let a = anchors[lower]
     let b = anchors[lower + 1]
-    return Color(
-      .sRGB,
-      red: a.r + (b.r - a.r) * t,
-      green: a.g + (b.g - a.g) * t,
-      blue: a.b + (b.b - a.b) * t,
-      opacity: 1)
+    return (a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t)
   }
 }
 
