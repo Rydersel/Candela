@@ -1,3 +1,5 @@
+import Foundation
+
 /// Health-view-ready snapshot of one panel's exposure and window attribution.
 ///
 /// **OC11** — every value here reduces to *measured relative exposure*, *what
@@ -56,6 +58,23 @@ public struct PanelHealthSummary: Sendable {
   /// user stopped us watching, possibly hours after it quit.
   public let hottestOwner: String?
 
+  /// Readings folded into the map so far. Drives the progress-to-analysis
+  /// line and the telemetry ticker; it is a count, not a claim.
+  public let sampleCount: Int
+
+  /// When the last reading landed, nil before the first. The live-measurement
+  /// pulse keys off this so it can only breathe while readings genuinely
+  /// arrive; a pulse keyed off the prefs alone would keep animating through a
+  /// dead Screen Recording grant, which is this project's most repeated lie.
+  public let lastSample: Date?
+
+  /// Per-cell dominant owner from the latest observation, for the hover
+  /// inspection readout. Nil whenever `observationEnabled` is false, the
+  /// `hottestOwner` gate's reason exactly: the coordinator keeps the last
+  /// observation for the life of the process, and naming an app the user
+  /// stopped us watching is a claim without a producer.
+  public let dominantOwnerByCell: [String?]?
+
   /// The heaviest apps by **panel-hours attributable to them** — *not*
   /// wall-clock hours the app was open. A full-screen app books an hour per
   /// hour; an app covering a quarter of the panel books fifteen minutes per
@@ -103,6 +122,9 @@ public struct PanelHealthSummary: Sendable {
       cells: normalized(map.cells),
       hottestRelative: hottestRelative,
       hottestOwner: hottestOwner,
+      sampleCount: map.sampleCount,
+      lastSample: map.lastSample,
+      dominantOwnerByCell: observationEnabled ? observation?.dominantOwnerByCell : nil,
       topOwnersByHours: ownerHours.topOwners(limit: topOwnerLimit))
   }
 
@@ -137,6 +159,9 @@ extension PanelHealthSummary: Equatable {
       && lhs.cells == rhs.cells
       && lhs.hottestRelative == rhs.hottestRelative
       && lhs.hottestOwner == rhs.hottestOwner
+      && lhs.sampleCount == rhs.sampleCount
+      && lhs.lastSample == rhs.lastSample
+      && lhs.dominantOwnerByCell == rhs.dominantOwnerByCell
       && lhs.topOwnersByHours.count == rhs.topOwnersByHours.count
       && zip(lhs.topOwnersByHours, rhs.topOwnersByHours).allSatisfy {
         $0.owner == $1.owner && $0.hours == $1.hours
