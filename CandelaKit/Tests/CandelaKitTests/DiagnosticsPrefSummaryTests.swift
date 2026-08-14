@@ -125,6 +125,11 @@ struct DiagnosticsPrefSummaryTests {
     .useFineScaleBrightness, .useFineScaleVolume,
     // App-level, and about a display SET rather than a display.
     .restoreArrangement, .savedArrangements,
+    // App-level virtual display slots: not per-display prefs (a virtual
+    // display has no persistence key and no per-display pane), so the
+    // per-display summary never reports them.
+    .virtualSlotConfigured, .virtualSlotName, .virtualSlotWidth, .virtualSlotHeight,
+    .virtualSlotHiDPI, .virtualSlotRefreshHz, .virtualSlotRecreateAtLaunch, .virtualSlotUUID,
     // Per-display, deliberately not summarised: it is the pinned mode
     // descriptor, and `rememberDisplayMode = true` already reports that a pin
     // is in force. The descriptor belongs in the report's `current mode` line,

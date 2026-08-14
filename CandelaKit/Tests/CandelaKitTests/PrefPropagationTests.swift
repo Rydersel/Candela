@@ -89,7 +89,12 @@ struct PrefPropagationTests {
     // one pill and strand the position the user chose for the other.
     #expect(PrefName.hudPositionBrightness.rawValue == "hudPositionBrightness")
     #expect(PrefName.hudPositionVolume.rawValue == "hudPositionVolume")
-    #expect(PrefName.allCases.count == 55)
+    // #14 added the eight virtual-display slot keys: 55 -> 63. The raw values
+    // are the base names `DisplayPrefs` composes with `.<slot>`, the
+    // per-command precedent.
+    #expect(PrefName.virtualSlotConfigured.rawValue == "virtualSlotConfigured")
+    #expect(PrefName.virtualSlotUUID.rawValue == "virtualSlotUUID")
+    #expect(PrefName.allCases.count == 63)
   }
 
   // MARK: - Rows
@@ -245,6 +250,19 @@ struct PrefPropagationTests {
     // which register the mute key would write, and so which verdict arms it.
     for name in [PrefName.pollingMode, .pollingCount, .separateCombinedScale] {
       #expect(PrefPropagation.effects(forChange: name) == [.refreshUI])
+    }
+  }
+
+  @Test func virtualSlotLifecycleRidesOnConfiguredAlone() {
+    // VD14/VD17: only the `configured` write converges live displays, so
+    // editing a running slot's fields never yanks a display under the user;
+    // the pane's Create/Apply/Remove buttons are `configured` writes.
+    #expect(PrefPropagation.effects(forChange: .virtualSlotConfigured)
+      == [.refreshUI, .syncVirtualDisplays])
+    for name in [PrefName.virtualSlotName, .virtualSlotWidth, .virtualSlotHeight,
+                 .virtualSlotHiDPI, .virtualSlotRefreshHz, .virtualSlotRecreateAtLaunch,
+                 .virtualSlotUUID] {
+      #expect(PrefPropagation.effects(forChange: name) == [.refreshUI], "\(name.rawValue)")
     }
   }
 

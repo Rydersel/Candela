@@ -70,6 +70,13 @@ public enum PrefName: String, Sendable, CaseIterable {
   case restoreArrangement, savedArrangements
   // Per-command (base names; `DisplayPrefs.setTuning` adds the `.<cmd>` part)
   case unavailableDDC, minDDCOverride, maxDDCOverride, curveDDC, invertDDC, remapDDC
+  // App-level — virtual display slots (VD14). Base names; `DisplayPrefs`
+  // composes the real key with `.<slot>`, the per-command precedent. Only
+  // `virtualSlotConfigured` converges live displays; the field cases carry
+  // `refreshUI` alone so editing a running slot never yanks a display under
+  // the user (VD17).
+  case virtualSlotConfigured, virtualSlotName, virtualSlotWidth, virtualSlotHeight
+  case virtualSlotHiDPI, virtualSlotRefreshHz, virtualSlotRecreateAtLaunch, virtualSlotUUID
 }
 
 /// Engine work a pref edit fans out to (D20). The settings UI writes a pref,
@@ -88,6 +95,10 @@ public enum PrefEffect: Sendable, Hashable {
   /// timers and re-evaluate the care dim. Distinct from `.reapplyDimming` —
   /// OLED care owns its own dimming leg and must not drag the DDC bus.
   case reapplyOledCare
+  /// `AppModel.syncVirtualDisplays()`: run the reconciler and converge live
+  /// virtual displays to the slot prefs (VD14). Carried by
+  /// `virtualSlotConfigured` alone.
+  case syncVirtualDisplays
 }
 
 public enum PrefPropagation {
@@ -136,6 +147,17 @@ public enum PrefPropagation {
       // The failure that would cause is worse than the mode one — the menu bar
       // and the Dock follow whichever display ends up at the origin.
       // `.refreshUI` is unioned in below and is the whole row.
+      []
+
+    case .virtualSlotConfigured:
+      // The one write that converges live virtual displays (VD14). The pane's
+      // Create, Apply and Remove buttons all end in this write.
+      [.syncVirtualDisplays]
+
+    case .virtualSlotName, .virtualSlotWidth, .virtualSlotHeight, .virtualSlotHiDPI,
+         .virtualSlotRefreshHz, .virtualSlotRecreateAtLaunch, .virtualSlotUUID:
+      // Field edits apply on the next Create/Apply (VD17): `.refreshUI` is
+      // unioned in below and is the whole row, a deliberate answer.
       []
 
     case .startupAction, .multiKeyboardBrightness,

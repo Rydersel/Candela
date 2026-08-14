@@ -185,6 +185,12 @@ struct DisplayTile: View {
   let isFocused: Bool
   let isInvalid: Bool
   let isDragging: Bool
+  /// A display that exists in software only: one of Candela's own slots, or a
+  /// foreign synthetic display (Sidecar, AirPlay, a dummy). Drawn in the
+  /// Virtual Displays pane's purple so the map says which tiles are glass and
+  /// which are not. Never the ONLY signal: the tile's name says what it is,
+  /// and the canvas appends "virtual display" to the accessibility value.
+  var isVirtual: Bool = false
   /// The map's decision, not this tile's. See `TileLabelStyle`.
   let labels: TileLabelStyle
 
@@ -272,12 +278,17 @@ struct DisplayTile: View {
   private var fill: AnyShapeStyle {
     if isInvalid { return AnyShapeStyle(Color.red.opacity(0.16)) }
     if isSelected { return AnyShapeStyle(.tint.opacity(0.30)) }
+    // The second colour literal here, and like red it carries a meaning no
+    // hierarchical grey does: purple is the Virtual Displays pane's own tint,
+    // so a purple tile on the map is the same statement as its sidebar row.
+    if isVirtual { return AnyShapeStyle(Color.purple.opacity(0.18)) }
     return AnyShapeStyle(.fill.tertiary)
   }
 
   private var border: AnyShapeStyle {
     if isInvalid { return AnyShapeStyle(Color.red) }
     if isSelected { return AnyShapeStyle(.tint) }
+    if isVirtual { return AnyShapeStyle(Color.purple.opacity(0.6)) }
     return AnyShapeStyle(.separator)
   }
 }

@@ -35,4 +35,23 @@ extern CFDictionaryRef CoreDisplay_DisplayCreateInfoDictionary(CGDirectDisplayID
 // Used by IntelDDC.servicePortUsingDisplayPropertiesMatching (SkyLight/CGS private symbol).
 extern void CGSServiceForDisplayNumber(CGDirectDisplayID display, io_service_t *service);
 
+// Virtual display creation core (vdcore.m): the ONLY code touching the
+// private CGVirtualDisplay family, runtime-resolved with NSClassFromString.
+// Consumed by CandelaKit's VirtualDisplayHost and nothing else.
+//
+// CandelaVDCreate returns a retained opaque token (NULL on failure, with
+// outFailure set to a kCandelaVDFailure* value mirrored in
+// VirtualDisplayFailure); the display stays alive until CandelaVDDestroy
+// releases the token. CandelaVDDestroy returns true when the display left the
+// online list before the timeout. Both block and pump the calling thread's
+// run loop; never call them on the main thread during menu tracking.
+extern bool CandelaVDAvailable(void);
+extern void *CandelaVDCreate(const char *name, uint32_t vendorID, uint32_t productID,
+                             uint32_t serialNum, double widthMm, double heightMm,
+                             uint32_t maxPixelsWide, uint32_t maxPixelsHigh,
+                             uint32_t logicalWidth, uint32_t logicalHeight,
+                             bool hiDPI, double refreshHz, double appearanceTimeout,
+                             uint32_t *outDisplayID, int *outFailure);
+extern bool CandelaVDDestroy(void *token, uint32_t displayID, double departureTimeout);
+
 #endif

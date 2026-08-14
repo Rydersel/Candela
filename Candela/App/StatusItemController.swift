@@ -599,6 +599,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // fires only on actual reconfigurations), so the initial OLED-care
       // enrollment resolve happens here, against the freshly discovered list.
       model.oledCare.displaysReconfigured()
+      // Virtual display launch prelude (VD6/VD13): normalize the slot prefs,
+      // log any orphan from a previous instance, and recreate the
+      // recreate-at-launch slots (skipped in Safe Mode). Non-blocking: the
+      // creation itself runs on the model's serial vd queue.
+      model.syncVirtualDisplaysAtLaunch()
       #if DEBUG
         // Screenshot hook (DT6). After `model.refresh()`, so `display:first`
         // has a display list to resolve against.
@@ -606,6 +611,20 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
           externalKeys: model.displays.map(\.display.persistenceKey)
         )
       #endif
+    }
+
+    // Destroy owned virtual displays on quit for a tidy topology handoff; a
+    // crash gets the same result from mach-port teardown (VD4). Blocking the
+    // terminate notification briefly is fine, and the short timeout bounds it.
+    let virtualDisplayHost = model.virtualDisplays
+    NotificationCenter.default.addObserver(
+      forName: NSApplication.willTerminateNotification, object: nil, queue: nil
+    ) { _ in
+      // Synchronous on purpose: after this notification returns, the process
+      // is gone, and a queued task would never run. The host is captured
+      // directly (it is Sendable); the MainActor model may not be touched
+      // from this nonisolated closure.
+      virtualDisplayHost.destroyAll(departureTimeout: 1.5)
     }
 
     // D13: nobody else calls this. It is a no-op while the version key is
@@ -1042,6 +1061,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //         dim installed with no pref recording it.
     gammaController.resetAllGamma()
     shadeOverlay.removeAllShades()
+
+    // ---- 2b. Virtual displays down BEFORE the wipe removes their slot keys
+    //          (VD15): a wiped `configured` with the display still standing
+    //          would be state the pane can no longer explain, and the display
+    //          would then survive until quit with no control that knows it.
+    await model.destroyAllVirtualDisplaysForReset()
 
     // ---- 3. D12(c): the login item is part of "all settings" and the copy says
     //         so. `LoginItem.isEnabled` reads `SMAppService.mainApp.status` live

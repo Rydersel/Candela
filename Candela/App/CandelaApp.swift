@@ -1,7 +1,20 @@
 import CandelaKit
 import SwiftUI
 
+/// The real entry point. The one job it has beyond launching the app: honour
+/// the `--vd-engage` helper contract BEFORE any app machinery runs, so the
+/// virtual display host can re-execute this binary as a fresh process that
+/// can enumerate display modes (the creating process cannot; see
+/// `VirtualDisplayHost.handleEngageHelperInvocation`). When the argument is
+/// present the call never returns.
 @main
+enum CandelaMain {
+  static func main() {
+    VirtualDisplayHost.handleEngageHelperInvocation()
+    CandelaApp.main()
+  }
+}
+
 struct CandelaApp: App {
   // The menu-bar panel is AppKit-owned: StatusItemController hosts PanelView
   // in a real NSMenu so an auto-hidden menu bar stays visible while the panel

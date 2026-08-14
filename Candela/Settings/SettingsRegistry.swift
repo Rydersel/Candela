@@ -53,6 +53,13 @@ enum SettingsRegistry {
         id: id, title: "OLED Care", symbol: "sun.min", tint: .orange,
         content: { AnyView(OledCarePane()) }
       )
+    case .virtualDisplays:
+      SettingsPaneDescriptor(
+        // NOT `display` (every per-display row draws that glyph); the badge
+        // reads as "add a display", which is what the pane does.
+        id: id, title: "Virtual Displays", symbol: "rectangle.badge.plus", tint: .purple,
+        content: { AnyView(VirtualDisplaysPane()) }
+      )
     case .keyboard:
       SettingsPaneDescriptor(
         id: id, title: "Keyboard", symbol: "keyboard", tint: .indigo,
