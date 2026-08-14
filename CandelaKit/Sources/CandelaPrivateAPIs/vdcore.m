@@ -15,6 +15,7 @@
 
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>
+#include <unistd.h>
 
 #if __has_feature(objc_arc)
 #define VD_RELEASE_LOCAL(x)
@@ -77,10 +78,25 @@ static BOOL CandelaVDDisplayIsOnline(CGDirectDisplayID want) {
 }
 
 // The displayID assignment and WindowServer arrival both need the creating
-// thread's run loop pumped; a bare sleep never sees them (rig holder,
-// measured).
+// thread's run loop pumped when that thread HAS run-loop sources (the rig
+// holder's main thread, measured). On a background dispatch-queue thread the
+// default mode is source-less and CFRunLoopRunInMode returns in ~80 us
+// (measured 2026-08-13), so a naive pump makes every poll loop's "waited"
+// accounting fictional: a 10 s appearance budget collapses to ~4 ms. This
+// pump therefore honours WALL CLOCK on any thread: pump while the run loop
+// has work, sleep out the remainder when it does not.
 static void CandelaVDPump(double seconds) {
-  CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false);
+  CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + seconds;
+  for (;;) {
+    CFTimeInterval left = deadline - CFAbsoluteTimeGetCurrent();
+    if (left <= 0) return;
+    if (CFRunLoopRunInMode(kCFRunLoopDefaultMode, left, false) == kCFRunLoopRunFinished) {
+      // No sources on this thread; time still has to pass for the poll
+      // above this pump to mean anything.
+      usleep((useconds_t)(left * 1e6));
+      return;
+    }
+  }
 }
 
 bool CandelaVDAvailable(void) {

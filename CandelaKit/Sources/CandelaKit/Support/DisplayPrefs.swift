@@ -689,21 +689,43 @@ public final class DisplayPrefs: @unchecked Sendable {
   // default name.
   private func vdKey(_ name: String, _ slot: Int) -> String { "\(name).\(slot)" }
 
+  /// Numeric fields read through the COERCING accessors behind a presence
+  /// check, never `object(forKey:) as? Int`: prefs are an escape-hatch
+  /// surface, and a shell `defaults write ... virtualSlotWidth.1 3440` stores
+  /// a STRING that the typed cast silently rejects while `defaults.bool`
+  /// accepts "YES" for `configured`, so a staged slot would half-apply (a
+  /// 1920x1080 display from a 3440-wide pref, with no error anywhere).
+  /// Width and height are clamped to the pane's own entry range so a wild
+  /// stored value cannot reach the engine.
   public func virtualSlot(_ slot: Int) -> VirtualSlotDefinition {
-    VirtualSlotDefinition(
-      configured: defaults.bool(forKey: vdKey("virtualSlotConfigured", slot)),
+    func presentInt(_ name: String, default fallback: Int, clampedTo range: ClosedRange<Int>) -> Int {
+      defaults.object(forKey: vdKey(name, slot)) == nil
+        ? fallback
+        : min(range.upperBound, max(range.lowerBound, defaults.integer(forKey: vdKey(name, slot))))
+    }
+    let configured = defaults.bool(forKey: vdKey("virtualSlotConfigured", slot))
+    return VirtualSlotDefinition(
+      // Absent key falls back to `configured` so a slot staged before the
+      // defined marker existed (or by a shell write that only set
+      // configured) still shows its tile.
+      defined: defaults.object(forKey: vdKey("virtualSlotDefined", slot)) == nil
+        ? configured : defaults.bool(forKey: vdKey("virtualSlotDefined", slot)),
+      configured: configured,
       name: defaults.string(forKey: vdKey("virtualSlotName", slot))
         ?? VirtualDisplayIdentity.defaultName(slot: slot),
-      width: defaults.object(forKey: vdKey("virtualSlotWidth", slot)) as? Int ?? 1920,
-      height: defaults.object(forKey: vdKey("virtualSlotHeight", slot)) as? Int ?? 1080,
-      hiDPI: defaults.object(forKey: vdKey("virtualSlotHiDPI", slot)) as? Bool ?? true,
-      refreshHz: defaults.object(forKey: vdKey("virtualSlotRefreshHz", slot)) as? Double ?? 60,
+      width: presentInt("virtualSlotWidth", default: 1920, clampedTo: 320 ... 8192),
+      height: presentInt("virtualSlotHeight", default: 1080, clampedTo: 320 ... 8192),
+      hiDPI: defaults.object(forKey: vdKey("virtualSlotHiDPI", slot)) == nil
+        ? true : defaults.bool(forKey: vdKey("virtualSlotHiDPI", slot)),
+      refreshHz: defaults.object(forKey: vdKey("virtualSlotRefreshHz", slot)) == nil
+        ? 60 : defaults.double(forKey: vdKey("virtualSlotRefreshHz", slot)),
       recreateAtLaunch: defaults.bool(forKey: vdKey("virtualSlotRecreateAtLaunch", slot)),
       uuid: defaults.string(forKey: vdKey("virtualSlotUUID", slot)).flatMap(UUID.init(uuidString:))
     )
   }
 
   public func setVirtualSlot(_ definition: VirtualSlotDefinition, slot: Int) {
+    defaults.set(definition.defined, forKey: vdKey("virtualSlotDefined", slot))
     defaults.set(definition.configured, forKey: vdKey("virtualSlotConfigured", slot))
     defaults.set(definition.name, forKey: vdKey("virtualSlotName", slot))
     defaults.set(definition.width, forKey: vdKey("virtualSlotWidth", slot))
@@ -713,9 +735,11 @@ public final class DisplayPrefs: @unchecked Sendable {
     defaults.set(definition.recreateAtLaunch, forKey: vdKey("virtualSlotRecreateAtLaunch", slot))
     if let uuid = definition.uuid {
       defaults.set(uuid.uuidString, forKey: vdKey("virtualSlotUUID", slot))
-    } else {
-      defaults.removeObject(forKey: vdKey("virtualSlotUUID", slot))
     }
+    // A nil uuid is a NO-OP, never a removal: the accessor reads nil for an
+    // unparseable stored string too, and a read-modify-write from any pane
+    // control would then delete the identity as a side effect of toggling
+    // Retina. Removal is `clearVirtualSlots` alone.
   }
 
   /// The slot definitions the reconciler consumes, keyed by slot.
@@ -723,16 +747,26 @@ public final class DisplayPrefs: @unchecked Sendable {
     Dictionary(uniqueKeysWithValues: VirtualDisplayIdentity.slotRange.map { ($0, virtualSlot($0)) })
   }
 
-  /// VD15's second half: reset clears every slot key AFTER the live displays
-  /// were destroyed. Field-by-field removal, so a future added key needs its
-  /// own line here (the same property every reset path in this file has).
+  /// VD15's second half: the reset calls this AFTER the live displays were
+  /// destroyed and immediately before the domain wipe (redundant with the
+  /// wipe today, load-bearing for any future partial reset). Field-by-field
+  /// removal, so a future added key needs its own line here (the same
+  /// property every reset path in this file has), and the ONLY place a
+  /// stored uuid is ever removed.
   public func clearVirtualSlots() {
     for slot in VirtualDisplayIdentity.slotRange {
-      for name in ["virtualSlotConfigured", "virtualSlotName", "virtualSlotWidth",
-                   "virtualSlotHeight", "virtualSlotHiDPI", "virtualSlotRefreshHz",
-                   "virtualSlotRecreateAtLaunch", "virtualSlotUUID"] {
-        defaults.removeObject(forKey: vdKey(name, slot))
-      }
+      clearVirtualSlot(slot)
+    }
+  }
+
+  /// The pane's Remove: the slot's whole stored definition goes, tile
+  /// included. The caller unconfigures FIRST so the departing display is
+  /// destroyed from a snapshot that still described it (VD15's ordering).
+  public func clearVirtualSlot(_ slot: Int) {
+    for name in ["virtualSlotDefined", "virtualSlotConfigured", "virtualSlotName",
+                 "virtualSlotWidth", "virtualSlotHeight", "virtualSlotHiDPI",
+                 "virtualSlotRefreshHz", "virtualSlotRecreateAtLaunch", "virtualSlotUUID"] {
+      defaults.removeObject(forKey: vdKey(name, slot))
     }
   }
 

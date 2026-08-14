@@ -624,7 +624,20 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // is gone, and a queued task would never run. The host is captured
       // directly (it is Sendable); the MainActor model may not be touched
       // from this nonisolated closure.
-      virtualDisplayHost.destroyAll(departureTimeout: 1.5)
+      //
+      // The destroy runs on a BACKGROUND thread while main blocks on a
+      // semaphore, never on main itself: the departure poll would otherwise
+      // pump a nested main run loop mid-termination, servicing the departing
+      // displays' own screen-parameter notifications into topology refreshes,
+      // shade rebuilds and DDC traffic on a process that is going away. The
+      // bounded wait means a hung teardown just falls through to mach-port
+      // reclaim (VD4).
+      let finished = DispatchSemaphore(value: 0)
+      DispatchQueue.global(qos: .userInitiated).async {
+        virtualDisplayHost.destroyAll(departureTimeout: 1.5)
+        finished.signal()
+      }
+      _ = finished.wait(timeout: .now() + 4)
     }
 
     // D13: nobody else calls this. It is a no-op while the version key is
@@ -1066,7 +1079,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //          (VD15): a wiped `configured` with the display still standing
     //          would be state the pane can no longer explain, and the display
     //          would then survive until quit with no control that knows it.
+    //          The explicit key clear is redundant with the domain wipe below
+    //          today, and load-bearing for any future partial reset.
     await model.destroyAllVirtualDisplaysForReset()
+    DisplayPrefs(persistenceKey: "app").clearVirtualSlots()
 
     // ---- 3. D12(c): the login item is part of "all settings" and the copy says
     //         so. `LoginItem.isEnabled` reads `SMAppService.mainApp.status` live

@@ -12,10 +12,22 @@ import os
 /// the online list and pump the calling thread's run loop); callers hop off
 /// the main actor first.
 public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Sendable {
-  // Confinement: every access to `slots` is under `lock`; the C tokens are
-  // owned by this instance alone and released exactly once in destroy paths.
+  // Confinement: every access to `slots`, `reserved` and `stranded` is under
+  // `lock`; the C tokens are owned by this instance alone and released
+  // exactly once in destroy paths.
   private let lock = NSLock()
   private var slots: [Int: (token: UnsafeMutableRawPointer, handle: VirtualDisplayHandle)] = [:]
+  /// Slots with a create in flight. Reserved UNDER THE LOCK before the C call
+  /// so two concurrent creates cannot both pass the occupancy check and the
+  /// second overwrite the first's token (a leaked display with no destroy
+  /// path). Today every app create rides one serial queue; this makes the
+  /// invariant structural rather than a convention a future caller can break.
+  private var reserved: Set<Int> = []
+  /// Slots whose display did not depart at destroy. The token is gone, so the
+  /// display cannot be destroyed again, and its identity is still advertised;
+  /// a later create for the slot would only collect the duplicate-identity
+  /// refusal after a full timeout, so create refuses these up front.
+  private var stranded: Set<Int> = []
   private let log = Logger(subsystem: "com.rydersel.Candela", category: "virtualdisplay")
 
   private static let profilesDirectory = "/Library/ColorSync/Profiles/Displays"
@@ -42,10 +54,20 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
     guard isAvailable else { return .failure(.classFamilyUnavailable) }
     guard VirtualDisplayIdentity.slotRange.contains(slot) else { return .failure(.capExceeded) }
     lock.lock()
-    let occupied = slots[slot] != nil
+    let refusal: VirtualDisplayFailure? = if slots[slot] != nil || reserved.contains(slot) {
+      .capExceeded
+    } else if stranded.contains(slot) {
+      // The identity is still advertised by a display we lost the handle to;
+      // a create would only collect the duplicate refusal after a timeout.
+      .identityInUse
+    } else {
+      nil
+    }
+    if refusal == nil { reserved.insert(slot) }
     lock.unlock()
-    guard !occupied else { return .failure(.capExceeded) }
-
+    if let refusal { return .failure(refusal) }
+    // Every exit below must release the reservation; success replaces it with
+    // the slot entry under the same lock acquisition.
     let normalized = spec.normalized
     let mainBefore = CGMainDisplayID()
     let profilesBefore = profileListing()
@@ -78,6 +100,7 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
       default: .refused
       }
       log.error("vd.create slot=\(slot) failed=\(String(describing: failure))")
+      release(reservation: slot)
       return .failure(failure)
     }
 
@@ -85,10 +108,29 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
     // Destroy-and-report rather than move-it-back: main-display transaction
     // semantics are unverified, and nothing may risk outliving the process.
     if CGMainDisplayID() != mainBefore {
-      _ = CandelaVDDestroy(token, displayID, appearanceTimeout)
-      log.error("vd.create slot=\(slot) refused: main display moved")
+      let departed = CandelaVDDestroy(token, displayID, appearanceTimeout)
+      log.error("vd.create slot=\(slot) refused: main display moved; departed=\(departed ? 1 : 0)")
+      lock.lock()
+      reserved.remove(slot)
+      if !departed { stranded.insert(slot) }
+      lock.unlock()
       return .failure(.wouldBecomeMainDisplay)
     }
+
+    // Registered BEFORE the profile check and the engage below: the display
+    // has been online since the C call's appearance poll, and its arrival
+    // fires a topology refresh whose DDC-pool exclusion reads
+    // `ownedDisplayIDs`. The engage can take seconds; a window that long with
+    // the owned set stale would leave the exclusion to the foreign predicate
+    // alone.
+    let handle = VirtualDisplayHandle(
+      uuid: uuid, slot: slot, displayID: displayID,
+      identity: VirtualDisplayIdentity.configIdentity(slot: slot), spec: normalized
+    )
+    lock.lock()
+    slots[slot] = (token, handle)
+    reserved.remove(slot)
+    lock.unlock()
 
     reportProfileGrowth(before: profilesBefore, slot: slot)
 
@@ -97,34 +139,39 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
     // 1920x1080 mode, ceiling 8192x4320, engaged pixels == logical). The
     // Retina promise is only real if the 2x mode is ENGAGED, so engage it
     // and verify; the pane reports achieved state, never this spec's claim.
+    //
+    // Gated on the ceiling: macOS emits a 2x variant only when the doubled
+    // framebuffer fits under maxPixels, so a request it can never satisfy
+    // must not burn the two engage attempts before failing.
     if normalized.hiDPI {
+      let fitsCeiling = normalized.logicalWidth * 2 <= VirtualDisplayIdentity.maxPixels.wide
+        && normalized.logicalHeight * 2 <= VirtualDisplayIdentity.maxPixels.high
       // In-process first (free when it works), then the re-exec helper: the
       // creating process usually cannot enumerate the display's modes, and a
       // fresh process always can (both measured 2026-08-13).
-      var engaged = Self.engageHiDPIModeInThisProcess(
+      var engaged = fitsCeiling && Self.engageHiDPIModeInThisProcess(
         displayID: displayID,
         logicalWidth: normalized.logicalWidth, logicalHeight: normalized.logicalHeight
       )
-      if !engaged {
+      if fitsCeiling, !engaged {
         engaged = spawnEngageHelper(
           displayID: displayID,
           logicalWidth: normalized.logicalWidth, logicalHeight: normalized.logicalHeight
         )
       }
       if !engaged {
-        log.error("vd.create slot=\(slot) id=\(displayID): 2x mode did not engage; display stays 1x")
+        log.error("vd.create slot=\(slot) id=\(displayID): 2x mode \(fitsCeiling ? "did not engage" : "cannot exist under the pixel ceiling"); display stays 1x")
       }
     }
 
-    let handle = VirtualDisplayHandle(
-      uuid: uuid, slot: slot, displayID: displayID,
-      identity: VirtualDisplayIdentity.configIdentity(slot: slot), spec: normalized
-    )
-    lock.lock()
-    slots[slot] = (token, handle)
-    lock.unlock()
     log.info("vd.create slot=\(slot) id=\(displayID) \(normalized.logicalWidth)x\(normalized.logicalHeight) hiDPI=\(normalized.hiDPI ? 1 : 0)")
     return .success(handle)
+  }
+
+  private func release(reservation slot: Int) {
+    lock.lock()
+    reserved.remove(slot)
+    lock.unlock()
   }
 
   @discardableResult
@@ -137,6 +184,19 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
     lock.unlock()
     breakMasteredMirrors(of: entry.handle.displayID)
     let departed = CandelaVDDestroy(entry.token, entry.handle.displayID, departureTimeout)
+    if !departed {
+      // The token is released, so the display can never be destroyed again
+      // from this process; record the slot so create refuses it honestly
+      // instead of timing out into the duplicate-identity refusal.
+      lock.lock()
+      stranded.insert(slot)
+      lock.unlock()
+      log.error("vd.destroy slot=\(slot) id=\(entry.handle.displayID) did NOT depart; slot is stranded for this session")
+    } else {
+      lock.lock()
+      stranded.remove(slot)
+      lock.unlock()
+    }
     log.info("vd.destroy slot=\(slot) id=\(entry.handle.displayID) departed=\(departed ? 1 : 0)")
     return departed
   }
@@ -163,10 +223,13 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
   /// nothing; re-executing our own binary is the smallest such process.
   public static func handleEngageHelperInvocation() {
     let arguments = ProcessInfo.processInfo.arguments
-    guard arguments.count == 5, arguments[1] == "--vd-engage",
+    guard arguments.count >= 2, arguments[1] == "--vd-engage" else { return }
+    // Anything carrying the flag TERMINATES here: falling through would boot
+    // a second full app instance, i.e. a second DDC writer.
+    guard arguments.count == 5,
           let displayID = UInt32(arguments[2]),
           let width = Int(arguments[3]), let height = Int(arguments[4])
-    else { return }
+    else { exit(2) }
     let achieved = engageHiDPIModeInThisProcess(
       displayID: displayID, logicalWidth: width, logicalHeight: height
     )
@@ -179,17 +242,18 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
     let process = Process()
     process.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.arguments[0])
     process.arguments = ["--vd-engage", String(displayID), String(logicalWidth), String(logicalHeight)]
+    // A semaphore, not a run-loop poll: on a background dispatch queue the
+    // default mode is source-less and CFRunLoopRunInMode returns immediately,
+    // which turned the old loop into an 8-second 100% CPU spin (measured).
+    let finished = DispatchSemaphore(value: 0)
+    process.terminationHandler = { _ in finished.signal() }
     do {
       try process.run()
     } catch {
       log.error("vd.engage helper failed to spawn: \(error.localizedDescription, privacy: .public)")
       return false
     }
-    let deadline = Date(timeIntervalSinceNow: 8)
-    while process.isRunning, Date() < deadline {
-      CFRunLoopRunInMode(CFRunLoopMode.defaultMode, 0.1, false)
-    }
-    if process.isRunning {
+    guard finished.wait(timeout: .now() + 8) == .success else {
       process.terminate()
       return false
     }
@@ -210,12 +274,16 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
   ) -> Bool {
     let options = [kCGDisplayShowDuplicateLowResolutionModes: kCFBooleanTrue] as CFDictionary
     var modes: [CGDisplayMode] = []
-    var waited = 0.0
-    while waited < 3.0 {
+    // Wall-clock retry: on a source-less background thread the run-loop call
+    // returns immediately (measured), so the remainder is slept out or the
+    // "3 s of retries" is really one try.
+    let deadline = Date(timeIntervalSinceNow: 3)
+    while Date() < deadline {
       modes = (CGDisplayCopyAllDisplayModes(displayID, options) as? [CGDisplayMode]) ?? []
       if !modes.isEmpty { break }
-      CFRunLoopRunInMode(CFRunLoopMode.defaultMode, 0.25, false)
-      waited += 0.25
+      if CFRunLoopRunInMode(CFRunLoopMode.defaultMode, 0.25, false) == .finished {
+        Thread.sleep(forTimeInterval: 0.25)
+      }
     }
     guard let target = modes.first(where: {
       $0.width == logicalWidth && $0.height == logicalHeight && $0.pixelWidth >= logicalWidth * 2

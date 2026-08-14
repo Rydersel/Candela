@@ -6,6 +6,12 @@ import Foundation
 /// unconfigured after `launchNormalized` runs, so the stored fields survive
 /// as the slot's remembered setup without implying a display exists.
 public struct VirtualSlotDefinition: Sendable, Equatable {
+  /// The slot EXISTS as far as the user is concerned: it has a tile in the
+  /// pane whether or not a display is currently running. Added and removed
+  /// by the pane's Add/Remove; distinct from `configured` because a slot
+  /// whose create failed keeps its tile (to say why) while `configured`
+  /// flips off (so nothing silently retries a doomed create).
+  public var defined: Bool
   public var configured: Bool
   public var name: String
   public var width: Int
@@ -19,9 +25,10 @@ public struct VirtualSlotDefinition: Sendable, Equatable {
   public var uuid: UUID?
 
   public init(
-    configured: Bool, name: String, width: Int, height: Int,
+    defined: Bool = true, configured: Bool, name: String, width: Int, height: Int,
     hiDPI: Bool, refreshHz: Double, recreateAtLaunch: Bool, uuid: UUID?
   ) {
+    self.defined = defined
     self.configured = configured
     self.name = name
     self.width = width
@@ -50,17 +57,33 @@ public enum VirtualDisplayReconciler {
     /// stored spec drifted from the live one, which is the pane's
     /// explicit-apply path (VD17).
     case recreate(slot: Int)
+
+    public var slot: Int {
+      switch self {
+      case let .create(slot), let .destroy(slot), let .recreate(slot): slot
+      }
+    }
   }
 
+  /// - Parameter limitedTo: when set, only this slot's convergence is
+  ///   considered. This is the pane's per-slot Create/Apply/Remove semantics
+  ///   made structural (VD17): a Create on slot 3 must never recreate a
+  ///   drifted-but-not-applied slot 1, and in a Safe Mode session an explicit
+  ///   Create must bring up exactly the clicked slot. nil is the launch
+  ///   sweep, where nothing is live yet so only creates can fire.
   public static func actions(
     definitions: [Int: VirtualSlotDefinition],
     live: [VirtualDisplayHandle],
-    isAvailable: Bool
+    isAvailable: Bool,
+    limitedTo: Int? = nil
   ) -> [Action] {
     guard isAvailable else { return [] }
-    let liveBySlot = Dictionary(uniqueKeysWithValues: live.map { ($0.slot, $0) })
+    // Duplicate slots cannot come from the host (it keys by slot), but this
+    // is a public function: keep the first rather than trapping.
+    let liveBySlot = Dictionary(live.map { ($0.slot, $0) }, uniquingKeysWith: { first, _ in first })
     var actions: [Action] = []
     for slot in VirtualDisplayIdentity.slotRange {
+      if let limitedTo, slot != limitedTo { continue }
       let configured = definitions[slot]?.configured == true
       switch (configured, liveBySlot[slot]) {
       case (true, nil):

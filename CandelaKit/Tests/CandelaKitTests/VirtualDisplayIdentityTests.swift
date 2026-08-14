@@ -62,6 +62,17 @@ struct VirtualDisplayIdentityTests {
     #expect(once.normalized == once)
   }
 
+  /// The ceiling clamp is what stands between an escape-hatch pref and a
+  /// UInt32 trap in the host on every launch.
+  @Test func normalizingClampsBothAxesToThePixelCeiling() {
+    let huge = VirtualDisplaySpec(
+      name: "Huge", logicalWidth: 1_000_000, logicalHeight: 1_000_000, hiDPI: true, refreshHz: 60
+    ).normalized
+    #expect(huge.logicalWidth == VirtualDisplayIdentity.maxPixels.wide)
+    #expect(huge.logicalHeight == VirtualDisplayIdentity.maxPixels.high)
+    #expect(huge.normalized == huge)
+  }
+
   /// The handle carries the SPEC, because nothing is ever read back from a
   /// live virtual display (VD5): `hiDPI` read back 2 after being set to 1,
   /// and `CGDisplayScreenSize` read 0.0 x 0.0 mm.

@@ -11,7 +11,11 @@ import Testing
 /// One display only: a process can enumerate modes for only the first
 /// virtual display it creates, and multi-display scenarios belong to the
 /// two-process rig (tools/vdrig).
-@Suite("Virtual display host (live, gated)")
+/// `.serialized`: with the default parallel runner, the live create was
+/// observed to collect a spurious `initWithDescriptor:` refusal while the
+/// suite's other tests ran concurrently; alone it passes every time. Real
+/// topology is shared state, so the suite opts out of parallelism.
+@Suite("Virtual display host (live, gated)", .serialized)
 struct VirtualDisplayHostTests {
   static var isLive: Bool { ProcessInfo.processInfo.environment["CANDELA_VD_LIVE"] == "1" }
 
