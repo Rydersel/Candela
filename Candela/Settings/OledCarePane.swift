@@ -735,9 +735,12 @@ private struct OledCareDisplaySection: View {
   }
 
   private func pairedReadingsLine(_ comparison: ModelComparison) -> String {
-    guard comparison.pairCount > 0, let first = comparison.firstPair,
+    guard comparison.pairCount > 0 else { return "None yet" }
+    // A single pair has no span worth naming; "spanning 0 minutes" reads as a
+    // broken counter.
+    guard comparison.pairCount > 1, let first = comparison.firstPair,
       let last = comparison.lastPair
-    else { return "None yet" }
+    else { return "\(comparison.pairCount)" }
     return "\(comparison.pairCount), spanning \(Self.spanPhrase(last.timeIntervalSince(first)))"
   }
 
@@ -753,12 +756,22 @@ private struct OledCareDisplaySection: View {
   }
 
   private static func spanPhrase(_ interval: TimeInterval) -> String {
+    let minutes = Int((interval / 60).rounded())
+    if minutes < 120 { return minutes == 1 ? "1 minute" : "\(minutes) minutes" }
     let hours = interval / 3600
-    guard hours >= 48 else { return String(format: "%.0f hours", max(1, hours.rounded())) }
+    if hours < 48 {
+      let whole = Int(hours.rounded())
+      return whole == 1 ? "1 hour" : "\(whole) hours"
+    }
     return String(format: "%.1f days", hours / 24)
   }
 
   private static func relativePhrase(_ date: Date) -> String {
+    // A pair booked this minute rounds to "in 0 seconds" through the relative
+    // formatter (the timestamps straddle the render by microseconds); the
+    // honest phrase for anything inside one sampling interval is this one.
+    let interval = Date().timeIntervalSince(date)
+    guard interval >= 60 else { return "just now" }
     let formatter = RelativeDateTimeFormatter()
     formatter.unitsStyle = .full
     return formatter.localizedString(for: date, relativeTo: Date())
