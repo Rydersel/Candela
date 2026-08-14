@@ -1333,6 +1333,15 @@ final class OledCareCoordinator {
     let before = owners.hours.totalSeconds
     owners.accumulate(observation, elapsed: Self.seconds(Self.samplingInterval))
     ownerHours[key] = owners
+
+    // The model's other inputs are exercised on this permission-free clock
+    // too, not only beside a measured sample: the wallpaper source logs each
+    // recompute with the Screen Recording preflight inline, which is the
+    // standing evidence that the estimate's inputs stay readable while the
+    // grant is absent. The cache makes a stable wallpaper free.
+    let appearanceIsDark =
+      NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    _ = wallpaper.panelGrid(for: id, appearanceIsDark: appearanceIsDark, through: transform)
     // Only a booked observation dirties the store: an all-uncovered panel adds
     // nothing, and marking it dirty would re-encode an unchanged value.
     if owners.hours.totalSeconds > before { unsavedExposureKeys.insert(key) }
