@@ -196,6 +196,16 @@ final class OledCareCoordinator {
   private var comparisons: [String: ModelComparison] = [:]
   /// The exposure model's wallpaper backdrop; its cache lives inside it.
   @ObservationIgnored private let wallpaper = WallpaperLuminanceSource()
+  /// The most recent accepted reading, panel-native, for the hero's live
+  /// thermal view. Not history: it is the frame the accumulator just folded
+  /// in, kept so a surface can show what the display looked like at the last
+  /// reading, dated so the view can say how stale it is. Tracked; a SwiftUI
+  /// surface renders it.
+  private var latestSamples: [String: (cells: [Double], at: Date)] = [:]
+  /// The most recent window-list snapshot, display-local, for the ghost
+  /// overlay. Same standing as `latestObservations`: a live reading, not a
+  /// store. Tracked; the hero renders it.
+  private var latestWindows: [String: [WindowSnapshot]] = [:]
   /// The ageing half of window observation. `WindowObserver.observe` is
   /// MUTATING on a value type, so this must be mutated in place — a `let` copy
   /// discards every window's age on return and the stationary threshold could
@@ -426,6 +436,19 @@ final class OledCareCoordinator {
     comparisons[persistenceKey] ?? loadModelComparison(for: persistenceKey)
   }
 
+  /// The hero's live thermal view: the last accepted reading and when it
+  /// landed. Nil until one lands this session; the caller must show its age,
+  /// never present it as now.
+  func latestSample(for persistenceKey: String) -> (cells: [Double], at: Date)? {
+    latestSamples[persistenceKey]
+  }
+
+  /// The ghost overlay's window rectangles, display-local, from the same
+  /// permission-free snapshot attribution uses. Empty until observation runs.
+  func latestWindowSnapshots(for persistenceKey: String) -> [WindowSnapshot] {
+    latestWindows[persistenceKey] ?? []
+  }
+
   /// The health view's delete action: the accumulated exposure map, the
   /// per-app panel-seconds, and the window attribution derived from them,
   /// cleared in one step, in memory and on disk.
@@ -521,6 +544,8 @@ final class OledCareCoordinator {
     comparisons.removeAll()
     observers.removeAll()
     latestObservations.removeAll()
+    latestSamples.removeAll()
+    latestWindows.removeAll()
     // These removals delete the per-display state that would carry their OC12
     // marker, so verification rides the pending list instead: a blackout
     // window whose close the server ignores must not become unwatched at the
@@ -1298,7 +1323,10 @@ final class OledCareCoordinator {
   /// angle: the first is a mid-reconfiguration reading and the second is one
   /// this feature declines to describe (RT7) rather than round into a
   /// scrambled wear history.
-  private static func transform(for id: CGDirectDisplayID) -> PanelSpaceTransform? {
+  // Internal, not private: the hero's ghost overlay maps window corners
+  // through the same transform the accumulation paths use, one construction
+  // for one convention.
+  static func transform(for id: CGDirectDisplayID) -> PanelSpaceTransform? {
     let size = CGDisplayBounds(id).size
     guard size.width > 0, size.height > 0 else { return nil }
     guard let rotation = DisplayRotation(degrees: CGDisplayRotation(id)) else { return nil }
@@ -1321,6 +1349,7 @@ final class OledCareCoordinator {
     let observation = observer.observe(windows, through: transform, at: Date())
     observers[key] = observer
     latestObservations[key] = observation
+    latestWindows[key] = windows
 
     // OC18's attribution over time. Booked at the NOMINAL interval for the
     // exposure path's reason: an observation stands for one sampling slot, and
@@ -1350,6 +1379,7 @@ final class OledCareCoordinator {
   private func forgetWindowObservation(for key: String) {
     observers.removeValue(forKey: key)
     latestObservations.removeValue(forKey: key)
+    latestWindows.removeValue(forKey: key)
   }
 
   private func captureExposure(
@@ -1404,7 +1434,12 @@ final class OledCareCoordinator {
     }
     accumulators[key] = accumulator
     unsavedExposureKeys.insert(key)
-    bookComparisonPair(for: key, on: id, sample: sample, through: transform)
+    // Re-binned once here for the live view and the pair; `accumulate` does
+    // the same internally and does not expose its result.
+    let panelGrid = transform.panelNativeGrid(
+      fromDisplayGrid: sample.grid, cols: sample.cols, rows: sample.rows)
+    latestSamples[key] = (panelGrid, Date())
+    bookComparisonPair(for: key, on: id, measured: panelGrid, through: transform)
     // #20 nominates off the sampling clock, not the 10 Hz tick: the grid it
     // reads changes once a minute, so re-nominating per tick would burn CPU to
     // reach the same answer 600 times.
@@ -1422,10 +1457,8 @@ final class OledCareCoordinator {
   /// epoch, pref, ID, transform and qualification re-checks have all passed.
   private func bookComparisonPair(
     for key: String, on id: CGDirectDisplayID,
-    sample: LuminanceSampler.Sample, through transform: PanelSpaceTransform
+    measured: [Double], through transform: PanelSpaceTransform
   ) {
-    let measured = transform.panelNativeGrid(
-      fromDisplayGrid: sample.grid, cols: sample.cols, rows: sample.rows)
     // A fresh list, not `latestObservations`: observation is a separate pref
     // and its last snapshot can be minutes old, while the model's claim is
     // about this instant. The call is the same sub-millisecond one the

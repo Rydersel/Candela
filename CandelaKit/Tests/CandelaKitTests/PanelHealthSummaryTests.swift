@@ -41,6 +41,45 @@ struct PanelHealthSummaryTests {
       fullScreenOwner: nil)
   }
 
+  // MARK: - Telemetry fields
+
+  /// The ticker and the progress line read these straight off the map; two
+  /// sources of truth for one count is the defect `make`'s doc already bans.
+  @Test func sampleCountAndLastSampleComeFromTheMap() {
+    let grid = [Double](repeating: 0.5, count: PanelGrid.cellCount)
+    let map = measuredMap(grid, samples: 7)
+    let summary = PanelHealthSummary.make(
+      map: map, observation: nil, ownerHours: .empty,
+      telemetryEnabled: true, observationEnabled: true)
+    #expect(summary.sampleCount == 7)
+    #expect(summary.lastSample == map.lastSample)
+    #expect(summary.lastSample != nil)
+  }
+
+  @Test func anEmptyMapHasNoLastSample() {
+    let summary = PanelHealthSummary.make(
+      map: .empty, observation: nil, ownerHours: .empty,
+      telemetryEnabled: true, observationEnabled: true)
+    #expect(summary.sampleCount == 0)
+    #expect(summary.lastSample == nil)
+  }
+
+  /// The hover readout's gate, `hottestOwner`'s reason exactly: the last
+  /// observation outlives the pref, and naming an app the user stopped us
+  /// watching is a claim without a producer.
+  @Test func perCellOwnersAreWithheldWhenObservationIsOff() {
+    var owners = [String?](repeating: nil, count: PanelGrid.cellCount)
+    owners[0] = "Ghostty"
+    let on = PanelHealthSummary.make(
+      map: .empty, observation: observation(owners), ownerHours: .empty,
+      telemetryEnabled: true, observationEnabled: true)
+    #expect(on.dominantOwnerByCell?[0] == "Ghostty")
+    let off = PanelHealthSummary.make(
+      map: .empty, observation: observation(owners), ownerHours: .empty,
+      telemetryEnabled: true, observationEnabled: false)
+    #expect(off.dominantOwnerByCell == nil)
+  }
+
   // MARK: - Confidence
 
   @Test func insufficientDataIsReportedAsSuch() {
