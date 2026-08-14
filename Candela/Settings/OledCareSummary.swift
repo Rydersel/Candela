@@ -401,20 +401,17 @@ struct OledTelemetryTicker: View {
 struct OledMeasuringDot: View {
   let live: Bool
 
-  @State private var breathing = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
-    Circle()
-      .fill(live ? Color.green : Color.secondary.opacity(0.5))
-      .frame(width: 7, height: 7)
-      .opacity(breathing ? 1 : 0.35)
-      .animation(
-        live && !reduceMotion
-          ? .easeInOut(duration: 1.2).repeatForever(autoreverses: true) : nil,
-        value: breathing)
-      .onAppear { breathing = live }
-      .onChange(of: live) { _, isLive in breathing = isLive }
+    // A symbol effect, not a custom repeatForever animation: a repeating
+    // animation attached to a view inside a scrolling Form also animates the
+    // view's POSITION, so the dot rode every layout change across the whole
+    // window. Symbol effects are contained to the glyph by construction.
+    Image(systemName: "circle.fill")
+      .font(.system(size: 7))
+      .foregroundStyle(live ? Color.green : Color.secondary.opacity(0.5))
+      .symbolEffect(.pulse, options: .repeating, isActive: live && !reduceMotion)
       .accessibilityHidden(true)
   }
 }
