@@ -445,8 +445,10 @@ private struct OledCareDisplaySection: View {
     let tracker = model.oledCare.hoursTracker(for: persistenceKey)
     let live = model.oledCare.latestSample(for: persistenceKey)
     let historyBlank = summary.confidence != .measured
+    // Display aspect and rotation: the hero shows the monitor as it hangs,
+    // portrait mounts included. Storage stays panel-native underneath.
     let aspect =
-      OledPanelGeometry.panelNativeAspect(for: state.display.id)
+      OledPanelGeometry.displayAspect(for: state.display.id)
       ?? CGFloat(PanelGrid.cols) / CGFloat(PanelGrid.rows)
     // The displayed cells are the one truth every sub-layer (surface, ghosts,
     // crosshair readout) shares, so the inspection can never describe a frame
@@ -473,7 +475,9 @@ private struct OledCareDisplaySection: View {
         }
         heroControls(hasHistory: !historyBlank, hasLive: live != nil)
       }
-      .frame(maxWidth: 300)
+      // A portrait display at the landscape width would tower over the stat
+      // column; capping the width keeps both orientations at a similar height.
+      .frame(maxWidth: aspect < 1 ? 200 : 300)
 
       VStack(alignment: .leading, spacing: 10) {
         heroStat("Status") { Text(statusText) }
@@ -533,6 +537,7 @@ private struct OledCareDisplaySection: View {
         highlighted: heroMode == .history
           ? OledPanelGeometry.hottestIndex(summary.cells) : nil,
         aspect: aspect,
+        rotation: OledPanelGeometry.rotation(for: state.display.id),
         glowStrength: 0.6,
         reticle: true)
       .overlay {
@@ -586,11 +591,12 @@ private struct OledCareDisplaySection: View {
   /// what the estimate counts; below-zero backdrop layers stay out.
   private var ghostCanvas: some View {
     let windows = model.oledCare.latestWindowSnapshots(for: persistenceKey)
-    let transform = OledCareCoordinator.transform(for: state.display.id)
+    let display = OledCareCoordinator.transform(for: state.display.id)?.displaySize
+    // Direct display-local mapping: the surface is drawn in display
+    // orientation now, so a window rect lands exactly where the eye expects,
+    // with no panel transform in between.
     return Canvas { context, size in
-      guard let transform else { return }
-      let display = transform.displaySize
-      guard display.width > 0, display.height > 0 else { return }
+      guard let display, display.width > 0, display.height > 0 else { return }
       for window in windows where ExposureModel.includedLayers.contains(window.layer) {
         let bounds = window.bounds
         guard bounds.origin.x.isFinite, bounds.origin.y.isFinite,
@@ -598,13 +604,11 @@ private struct OledCareDisplaySection: View {
         else { continue }
         let clamped = bounds.intersection(CGRect(origin: .zero, size: display))
         guard !clamped.isNull, clamped.width > 0, clamped.height > 0 else { continue }
-        let a = transform.panelPointForDisplay(
-          u: clamped.minX / display.width, v: clamped.minY / display.height)
-        let b = transform.panelPointForDisplay(
-          u: clamped.maxX / display.width, v: clamped.maxY / display.height)
         let rect = CGRect(
-          x: min(a.p, b.p) * size.width, y: min(a.q, b.q) * size.height,
-          width: abs(b.p - a.p) * size.width, height: abs(b.q - a.q) * size.height
+          x: clamped.minX / display.width * size.width,
+          y: clamped.minY / display.height * size.height,
+          width: clamped.width / display.width * size.width,
+          height: clamped.height / display.height * size.height
         ).insetBy(dx: 0.5, dy: 0.5)
         context.stroke(
           Path(roundedRect: rect, cornerRadius: 2),
@@ -631,8 +635,16 @@ private struct OledCareDisplaySection: View {
       }
       .overlay {
         if let point = hoverPoint, size.width > 0, size.height > 0 {
-          let col = min(PanelGrid.cols - 1, max(0, Int(point.x / size.width * CGFloat(PanelGrid.cols))))
-          let row = min(PanelGrid.rows - 1, max(0, Int(point.y / size.height * CGFloat(PanelGrid.rows))))
+          // Pointer to PANEL cell through the shared transform, so a rotated
+          // display's readout describes the cell under the pointer, not the
+          // cell at those coordinates in the manufactured frame.
+          let rotation = OledPanelGeometry.rotation(for: state.display.id)
+          let mapper = PanelSpaceTransform(
+            displaySize: CGSize(width: 1, height: 1), rotation: rotation)
+          let panelPoint = mapper.panelPointForDisplay(
+            u: point.x / size.width, v: point.y / size.height)
+          let col = min(PanelGrid.cols - 1, max(0, Int(panelPoint.p * Double(PanelGrid.cols))))
+          let row = min(PanelGrid.rows - 1, max(0, Int(panelPoint.q * Double(PanelGrid.rows))))
           let cell = row * PanelGrid.cols + col
           Canvas { context, canvasSize in
             var lines = Path()

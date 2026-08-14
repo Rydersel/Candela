@@ -26,6 +26,52 @@ enum OledPanelGeometry {
     guard let peak = cells.max(), peak > 0 else { return nil }
     return cells.firstIndex(of: peak)
   }
+
+  /// The display's CURRENT logical aspect, rotation included, for surfaces
+  /// that draw the map the way the glass hangs on the desk. Storage stays
+  /// panel-native; this is presentation only.
+  static func displayAspect(for displayID: CGDirectDisplayID?) -> CGFloat? {
+    guard let displayID else { return nil }
+    let width = CGFloat(CGDisplayPixelsWide(displayID))
+    let height = CGFloat(CGDisplayPixelsHigh(displayID))
+    guard width > 0, height > 0 else { return nil }
+    return width / height
+  }
+
+  static func rotation(for displayID: CGDirectDisplayID?) -> DisplayRotation {
+    guard let displayID else { return .standard }
+    return DisplayRotation(degrees: CGDisplayRotation(displayID)) ?? .standard
+  }
+
+  /// The stored panel-native grid re-ordered into DISPLAY orientation, with
+  /// both index maps, so a rotated monitor's surface shows what the desk
+  /// shows while every data lookup stays in the panel-native store. The
+  /// mapping goes through `PanelSpaceTransform`'s own point function; a
+  /// right-angle rotation maps cell centers to cell centers exactly, so this
+  /// is a re-ordering, never a resample.
+  static func displayOriented(
+    _ cells: [Double], rotation: DisplayRotation
+  ) -> (cells: [Double], cols: Int, rows: Int, panelFromDisplay: [Int]) {
+    let cols = rotation.swapsAxes ? PanelGrid.rows : PanelGrid.cols
+    let rows = rotation.swapsAxes ? PanelGrid.cols : PanelGrid.rows
+    let transform = PanelSpaceTransform(
+      displaySize: CGSize(width: 1, height: 1), rotation: rotation)
+    var oriented = [Double](repeating: 0, count: cells.count)
+    var panelFromDisplay = [Int](repeating: 0, count: cells.count)
+    for row in 0..<rows {
+      for col in 0..<cols {
+        let point = transform.panelPointForDisplay(
+          u: (Double(col) + 0.5) / Double(cols), v: (Double(row) + 0.5) / Double(rows))
+        let panelCol = min(PanelGrid.cols - 1, max(0, Int(point.p * Double(PanelGrid.cols))))
+        let panelRow = min(PanelGrid.rows - 1, max(0, Int(point.q * Double(PanelGrid.rows))))
+        let panelIndex = panelRow * PanelGrid.cols + panelCol
+        let displayIndex = row * cols + col
+        panelFromDisplay[displayIndex] = panelIndex
+        if cells.indices.contains(panelIndex) { oriented[displayIndex] = cells[panelIndex] }
+      }
+    }
+    return (oriented, cols, rows, panelFromDisplay)
+  }
 }
 
 /// The glance rendering of an exposure map: the stored 24 by 10 grid as a
@@ -38,9 +84,14 @@ enum OledPanelGeometry {
 /// taller cells read as stretched. The hottest cell keeps its outline here so
 /// the words beside the hero still point at something.
 struct PanelExposureSurface: View {
+  /// Panel-native, always; the surface re-orders for presentation itself.
   let cells: [Double]
+  /// Panel-native index; remapped internally.
   let highlighted: Int?
+  /// The DISPLAY's current aspect, so a portrait-mounted monitor draws tall.
   let aspect: CGFloat
+  /// How the glass hangs. Presentation only: storage never rotates.
+  var rotation: DisplayRotation = .standard
   /// 0 disables the emission glow; the strip runs it low, the hero higher.
   /// The glow is the same rasterized data blurred, so it can only bloom where
   /// the panel has actually been lit.
@@ -51,7 +102,11 @@ struct PanelExposureSurface: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
-    let image = Self.rasterize(cells)
+    let oriented = OledPanelGeometry.displayOriented(cells, rotation: rotation)
+    let image = Self.rasterize(oriented.cells, cols: oriented.cols, rows: oriented.rows)
+    let highlightedDisplayIndex = highlighted.flatMap { panelIndex in
+      oriented.panelFromDisplay.firstIndex(of: panelIndex)
+    }
     ZStack {
       if glowStrength > 0, let image {
         Image(decorative: image, scale: 1)
@@ -73,13 +128,13 @@ struct PanelExposureSurface: View {
       }
       .aspectRatio(aspect, contentMode: .fit)
       .overlay {
-        if let highlighted, cells.indices.contains(highlighted) {
+        if let index = highlightedDisplayIndex {
           Canvas { context, size in
-            let width = size.width / CGFloat(PanelGrid.cols)
-            let height = size.height / CGFloat(PanelGrid.rows)
+            let width = size.width / CGFloat(oriented.cols)
+            let height = size.height / CGFloat(oriented.rows)
             let rect = CGRect(
-              x: CGFloat(highlighted % PanelGrid.cols) * width,
-              y: CGFloat(highlighted / PanelGrid.cols) * height,
+              x: CGFloat(index % oriented.cols) * width,
+              y: CGFloat(index / oriented.cols) * height,
               width: width, height: height
             ).insetBy(dx: 0.75, dy: 0.75)
             context.stroke(
@@ -107,10 +162,8 @@ struct PanelExposureSurface: View {
   /// One pixel per stored cell, colored through the shared ramp. Row 0 of a
   /// `CGImage` is the top row, the same top-left convention the cells are
   /// stored in, so no flip.
-  private static func rasterize(_ cells: [Double]) -> CGImage? {
-    guard cells.count == PanelGrid.cellCount else { return nil }
-    let cols = PanelGrid.cols
-    let rows = PanelGrid.rows
+  private static func rasterize(_ cells: [Double], cols: Int, rows: Int) -> CGImage? {
+    guard cells.count == cols * rows else { return nil }
     var pixels = [UInt8](repeating: 255, count: cols * rows * 4)
     for index in cells.indices {
       let (r, g, b) = PanelExposureScale.components(cells[index])
@@ -222,8 +275,11 @@ struct OledCareGlanceTile: View {
   }
 
   private func tile(summary: PanelHealthSummary, showsMap: Bool) -> some View {
+    // Display aspect, not panel-native: the tile stands for the monitor on
+    // the desk, so a portrait mount draws tall. Storage stays panel-native;
+    // the surface re-orders for presentation.
     let aspect =
-      OledPanelGeometry.panelNativeAspect(for: state.display.id)
+      OledPanelGeometry.displayAspect(for: state.display.id)
       ?? CGFloat(PanelGrid.cols) / CGFloat(PanelGrid.rows)
     let width = min(boxWidth, boxHeight * aspect)
     let size = CGSize(width: width, height: width / aspect)
@@ -233,6 +289,7 @@ struct OledCareGlanceTile: View {
           cells: summary.cells,
           highlighted: OledPanelGeometry.hottestIndex(summary.cells),
           aspect: aspect,
+          rotation: OledPanelGeometry.rotation(for: state.display.id),
           glowStrength: 0.35)
       } else {
         // No dotted placeholder: a blank surface with the state line under it
