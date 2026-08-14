@@ -72,6 +72,22 @@ struct OledCarePane: View {
     // per-display sections below, which write through `DisplayPrefWriter`.
     let _ = model.prefsRevision
     return Form {
+      // The pane's opening image, the display hero's precedent at pane scale:
+      // each ENROLLED display's shape and history before any control. Clicking
+      // a tile jumps to that display's section through the same anchor the hub
+      // link uses. Enrolled only, so the strip is what this pane manages
+      // rather than a row of placeholders.
+      let enrolledDisplays = model.displays.filter {
+        DisplayPrefs(persistenceKey: $0.display.persistenceKey).oledCareEnrolled
+      }
+      if !enrolledDisplays.isEmpty {
+        Section {
+          OledCareGlanceStrip(displays: enrolledDisplays) { key in
+            withAnimation { proxy.scrollTo(key, anchor: .top) }
+          }
+        }
+      }
+
       Section {
         // One row, not two: a `SettingsCaption` placed as its own `Form` row
         // gets a divider above it, so two paragraphs of the same introduction
@@ -363,7 +379,7 @@ private struct OledCareDisplaySection: View {
       }
 
       if prefs.oledCareEnrolled {
-        statusRow
+        hero
         idleControls
         lockControls
         blackoutControls
@@ -406,19 +422,132 @@ private struct OledCareDisplaySection: View {
     #endif
   }
 
-  // MARK: - Status
+  // MARK: - Hero
 
-  /// What the engine is doing right now. `dimStates` is the coordinator's own
-  /// published state, never a second opinion computed here — and a mirrored
-  /// display's "paused" reading is the one spec §5 requires to be visible
-  /// (OC13).
-  private var statusRow: some View {
-    LabeledContent("Status") {
-      Text(statusText)
+  /// The section's opening image: the display's accumulated history as a
+  /// picture, beside the facts the section used to open with as plain rows
+  /// (status, hours) and the health view's headline finding. Every fact the
+  /// map draws is stated in words in the stat column, the display hero's rule,
+  /// so the map stays decorative to VoiceOver and the honesty precedence is
+  /// the health view's exactly: Safe Mode, then the grant, then confidence.
+  @ViewBuilder private var hero: some View {
+    let summary = model.oledCare.healthSummary(for: persistenceKey)
+    let tracker = model.oledCare.hoursTracker(for: persistenceKey)
+    let blank = summary.confidence != .measured
+    let aspect =
+      OledPanelGeometry.panelNativeAspect(for: state.display.id)
+      ?? CGFloat(PanelGrid.cols) / CGFloat(PanelGrid.rows)
+    HStack(alignment: .top, spacing: 20) {
+      VStack(alignment: .leading, spacing: 8) {
+        // The smooth glance surface, not the health sheet's discrete grid:
+        // at this size inset cells read as floating squares. Blank state is a
+        // plain shape, not a faint pattern that reads as data.
+        if blank {
+          RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(.quaternary)
+            .overlay {
+              RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .strokeBorder(.separator, lineWidth: 1)
+            }
+            .aspectRatio(aspect, contentMode: .fit)
+            .accessibilityHidden(true)
+        } else {
+          PanelExposureSurface(
+            cells: summary.cells,
+            highlighted: OledPanelGeometry.hottestIndex(summary.cells),
+            aspect: aspect)
+        }
+        if blank {
+          Text(verbatim: mapPlaceholder(summary))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        } else {
+          PanelExposureLegend()
+        }
+      }
+      .frame(maxWidth: 300)
+
+      VStack(alignment: .leading, spacing: 10) {
+        heroStat("Status") { Text(statusText) }
+        heroStat("Hours of use") { Text(verbatim: hoursLine(tracker)) }
+        if !blank, let relative = summary.hottestRelative,
+          let multiple = PanelHealthCopy.multiple(relative)
+        {
+          heroStat("Hottest area") {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(verbatim: "\(multiple) this display's average")
+              if let sentence = hottestSentence(summary) {
+                Text(verbatim: sentence)
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .fixedSize(horizontal: false, vertical: true)
+              }
+            }
+          }
+        }
+        heroStat("Measurement") { Text(verbatim: measurementStateLine(summary)) }
+        if let stats = model.oledCare.modelComparison(for: persistenceKey).statistics() {
+          heroStat("Estimate agreement") {
+            Text(verbatim: String(format: "%.2f", stats.pearson))
+          }
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .padding(.vertical, 4)
+  }
+
+  private func heroStat(_ label: String, @ViewBuilder value: () -> some View) -> some View {
+    VStack(alignment: .leading, spacing: 1) {
+      Text(verbatim: label)
+        .font(.caption)
         .foregroundStyle(.secondary)
+      value()
     }
   }
 
+  /// Caption under a blank hero map. `summary.cells` stays populated whatever
+  /// the confidence, so blanking the drawing must not also claim there is no
+  /// history behind it (the health view's own rule).
+  private func mapPlaceholder(_ summary: PanelHealthSummary) -> String {
+    if model.isSafeMode {
+      return "Paused for this session (Safe Mode). History recorded before it is kept."
+    }
+    if summary.confidence != .estimated, !CGPreflightScreenCaptureAccess() {
+      return "Waiting on Screen Recording; no readings are being taken."
+    }
+    return summary.confidence == .estimated
+      ? "Not shown while measuring is off. The history recorded so far is kept."
+      : "Nothing measured to draw yet. Readings are taken once a minute while this display is awake and in use."
+  }
+
+  private func measurementStateLine(_ summary: PanelHealthSummary) -> String {
+    if model.isSafeMode { return "Paused for this session (Safe Mode)" }
+    if summary.confidence != .estimated, !CGPreflightScreenCaptureAccess() {
+      return "Waiting on Screen Recording"
+    }
+    switch summary.confidence {
+    case .measured: return "Measuring, one reading a minute"
+    case .insufficient: return "Measuring, not enough readings yet"
+    case .estimated: return "Off"
+    }
+  }
+
+  /// Words for what the outline draws. Past tense for the owner, the health
+  /// view's reason: the snapshot behind it is up to a minute old.
+  private func hottestSentence(_ summary: PanelHealthSummary) -> String? {
+    guard let index = OledPanelGeometry.hottestIndex(summary.cells),
+      let region = PanelHealthCopy.region(cell: index)
+    else { return nil }
+    guard let owner = summary.hottestOwner else { return "Outlined on the map, \(region)." }
+    return "Outlined on the map, \(region). \(owner) was there at the last reading."
+  }
+
+  /// What the engine is doing right now. `dimStates` is the coordinator's own
+  /// published state, never a second opinion computed here; a mirrored
+  /// display's "paused" reading is the one spec §5 requires to be visible
+  /// (OC13).
   private var statusText: LocalizedStringKey {
     if model.isSafeMode { return "Paused for this session (Safe Mode)" }
     // Exhaustive, so a new engine state is a compile error here rather than a
@@ -558,16 +687,9 @@ private struct OledCareDisplaySection: View {
       ))
     }
 
-    // Both numbers live here, always — the since-standby figure is the one the
-    // note below is about, and a dismissed note must not be the only place it
-    // can be read. With counting off the numbers stay on screen (they are the
-    // accumulated total, not a live reading) but they stop moving, and two
-    // frozen figures with nothing saying so read as a broken counter.
-    LabeledContent("Hours of use") {
-      Text(verbatim: hoursLine(tracker))
-        .foregroundStyle(.secondary)
-    }
-
+    // The figures themselves live in the hero above, always on screen, so a
+    // dismissed standby note is never the only place the since-standby number
+    // can be read.
     if tracker.shouldShowStandbyNote {
       SettingRow(caption: SettingsCaption("Most OLED displays run their own compensation cycle when they go into standby, and skip it while they are in use. Anything that puts the display to sleep counts: the monitor's own power button, or leaving the Mac idle.")) {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
