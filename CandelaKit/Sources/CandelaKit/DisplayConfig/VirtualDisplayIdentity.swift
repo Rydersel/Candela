@@ -10,12 +10,15 @@ import Foundation
 /// A previous rig that varied identity per run left 143 orphaned profiles and
 /// drove the ColorSync daemons to 59% CPU.
 ///
-/// The PRODUCT varies per slot, never the serial: macOS refuses a second
-/// virtual display advertising the same vendor+product as a standing one,
-/// regardless of serial, name or physical size (the twins measurement,
-/// tools/vdrig/README.md). The product range 0x2001+ is disjoint from
-/// vdrig's 0x1001..0x1003 so rig displays and app displays read apart in any
-/// topology dump.
+/// The PRODUCT varies per slot, never the serial: macOS keys its
+/// duplicate-display refusal on vendor+product+physical size, ignoring serial
+/// and name entirely (the twins measurement, tools/vdrig/src/vdrig.h: twins
+/// sharing the whole triple coexist only because their sizeInMillimeters
+/// differ). All three slots share one physical size, so the product is the
+/// field doing the separating; two slots standing at once is measured
+/// (VERIFICATION-STATUS 2026-08-13). The product range 0x2001+ is disjoint
+/// from vdrig's 0x1001..0x1003 so rig displays and app displays read apart
+/// in any topology dump.
 ///
 /// `DisplayConfigIdentity` is NOT extended and gains no virtual case: its key
 /// format is frozen on-disk schema. The extension is entirely on the INPUTS,

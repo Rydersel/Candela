@@ -27,19 +27,28 @@ final class SettingsActions {
 
   /// Call after EVERY pref write. `persistenceKey` scopes the dimming
   /// re-apply to one display; nil (app-level prefs) re-applies every external.
-  func prefDidChange(_ name: PrefName, persistenceKey: String? = nil) {
-    apply(PrefPropagation.effects(forChange: name), persistenceKey: persistenceKey)
+  /// `virtualSlot` scopes the virtual-display convergence the same way: the
+  /// pane passes the slot whose `configured` it wrote, so one slot's Create
+  /// can never recreate another slot's drifted-but-unapplied edits (VD17).
+  func prefDidChange(_ name: PrefName, persistenceKey: String? = nil, virtualSlot: Int? = nil) {
+    apply(
+      PrefPropagation.effects(forChange: name),
+      persistenceKey: persistenceKey, virtualSlot: virtualSlot
+    )
   }
 
   /// One fan-out for a batch write (the per-display reset). The union is NOT
   /// any single member's row — resetting a display writes `hideDisplay`, which
   /// carries `.updateStatusItem` that `forceSw` does not — so a batch must
   /// never be collapsed onto one representative name.
-  func prefsDidChange(_ names: [PrefName], persistenceKey: String? = nil) {
-    apply(PrefPropagation.effects(forChanges: names), persistenceKey: persistenceKey)
+  func prefsDidChange(_ names: [PrefName], persistenceKey: String? = nil, virtualSlot: Int? = nil) {
+    apply(
+      PrefPropagation.effects(forChanges: names),
+      persistenceKey: persistenceKey, virtualSlot: virtualSlot
+    )
   }
 
-  private func apply(_ effects: Set<PrefEffect>, persistenceKey: String?) {
+  private func apply(_ effects: Set<PrefEffect>, persistenceKey: String?, virtualSlot: Int? = nil) {
     if effects.contains(.rearmTap) { rearmTap() }
     if effects.contains(.updateStatusItem) { updateStatusItem() }
     if effects.contains(.recheckPermissions) { recheckPermissions() }
@@ -69,9 +78,10 @@ final class SettingsActions {
       model.oledCare.reapplyAfterPrefChange(persistenceKey: persistenceKey)
     }
     if effects.contains(.syncVirtualDisplays) {
-      // VD14: converge live virtual displays to the slot prefs. The model
-      // hops off the main actor itself; nothing here blocks.
-      model?.syncVirtualDisplays()
+      // VD14: converge live virtual displays to the slot prefs, scoped to
+      // the written slot when the caller named one. The model hops off the
+      // main actor itself; nothing here blocks.
+      model?.syncVirtualDisplays(slot: virtualSlot)
     }
   }
 }

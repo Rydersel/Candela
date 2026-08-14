@@ -77,6 +77,9 @@ public enum PrefName: String, Sendable, CaseIterable {
   // the user (VD17).
   case virtualSlotConfigured, virtualSlotName, virtualSlotWidth, virtualSlotHeight
   case virtualSlotHiDPI, virtualSlotRefreshHz, virtualSlotRecreateAtLaunch, virtualSlotUUID
+  // Whether the slot has a tile at all; Add/Remove write it alongside
+  // `configured`, which carries the convergence.
+  case virtualSlotDefined
 }
 
 /// Engine work a pref edit fans out to (D20). The settings UI writes a pref,
@@ -155,7 +158,8 @@ public enum PrefPropagation {
       [.syncVirtualDisplays]
 
     case .virtualSlotName, .virtualSlotWidth, .virtualSlotHeight, .virtualSlotHiDPI,
-         .virtualSlotRefreshHz, .virtualSlotRecreateAtLaunch, .virtualSlotUUID:
+         .virtualSlotRefreshHz, .virtualSlotRecreateAtLaunch, .virtualSlotUUID,
+         .virtualSlotDefined:
       // Field edits apply on the next Create/Apply (VD17): `.refreshUI` is
       // unioned in below and is the whole row, a deliberate answer.
       []

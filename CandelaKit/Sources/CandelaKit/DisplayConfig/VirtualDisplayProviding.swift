@@ -19,18 +19,27 @@ public struct VirtualDisplaySpec: Sendable, Equatable {
     self.refreshHz = refreshHz
   }
 
-  /// Both axes rounded DOWN to even, refresh quantized through the shared
-  /// `DisplayMode.quantizedRefresh`. Pure, and the only place either rule
-  /// lives.
+  /// Both axes rounded DOWN to even, clamped to the advertised pixel ceiling,
+  /// refresh quantized through the shared `DisplayMode.quantizedRefresh`.
+  /// Pure, and the only place any of these rules lives.
   ///
-  /// The rounding is DEFENSIVE, and that is the honest reason: S2 recorded
-  /// that odd dimensions silently yielded non-HiDPI once, and the follow-up
-  /// research pass could not reproduce parity as the cause. Kept because it
-  /// costs nothing and the original failure is still unexplained.
+  /// The even rounding is DEFENSIVE, and that is the honest reason: S2
+  /// recorded that odd dimensions silently yielded non-HiDPI once, and the
+  /// follow-up research pass could not reproduce parity as the cause. Kept
+  /// because it costs nothing and the original failure is still unexplained.
+  ///
+  /// The ceiling clamp is not defensive: prefs are an escape-hatch surface
+  /// (defaults write), and an unclamped width would trap the UInt32
+  /// conversion in the host on every launch with no way back from inside the
+  /// app.
   public var normalized: VirtualDisplaySpec {
     var copy = self
-    copy.logicalWidth = max(2, logicalWidth - logicalWidth % 2)
-    copy.logicalHeight = max(2, logicalHeight - logicalHeight % 2)
+    copy.logicalWidth = min(
+      VirtualDisplayIdentity.maxPixels.wide, max(2, logicalWidth - logicalWidth % 2)
+    )
+    copy.logicalHeight = min(
+      VirtualDisplayIdentity.maxPixels.high, max(2, logicalHeight - logicalHeight % 2)
+    )
     copy.refreshHz = DisplayMode.quantizedRefresh(refreshHz)
     return copy
   }
@@ -91,6 +100,10 @@ public enum VirtualDisplayFailure: Error, Sendable, Equatable {
   /// move-it-back: main-display transaction semantics are unverified, and
   /// nothing may risk state that outlives the process.
   case wouldBecomeMainDisplay
+  /// A destroy released the display but it stayed in the online list past
+  /// the deadline. The slot is stranded for the session: the token is gone,
+  /// so nothing can destroy it again, and its identity is still advertised.
+  case didNotDepart
 }
 
 /// The lifetime seam for displays Candela creates.

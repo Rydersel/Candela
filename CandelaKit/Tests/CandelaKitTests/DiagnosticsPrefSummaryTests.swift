@@ -130,6 +130,7 @@ struct DiagnosticsPrefSummaryTests {
     // per-display summary never reports them.
     .virtualSlotConfigured, .virtualSlotName, .virtualSlotWidth, .virtualSlotHeight,
     .virtualSlotHiDPI, .virtualSlotRefreshHz, .virtualSlotRecreateAtLaunch, .virtualSlotUUID,
+    .virtualSlotDefined,
     // Per-display, deliberately not summarised: it is the pinned mode
     // descriptor, and `rememberDisplayMode = true` already reports that a pin
     // is in force. The descriptor belongs in the report's `current mode` line,

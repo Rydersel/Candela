@@ -20,13 +20,16 @@ public enum DisplayDiscovery {
   ///   sees it, alongside foreign virtual displays; see `DDCCandidatePolicy`
   ///   for what happens if they are not. Empty by default so a caller that
   ///   owns no virtual displays reads naturally; the app passes
-  ///   `AppModel.ownedVirtualDisplayIDs`.
+  ///   `AppModel.virtualDisplays.ownedDisplayIDs`.
   public static func discover(excluding ownedVirtualIDs: Set<CGDirectDisplayID> = [])
     -> [(display: ExternalDisplay, writer: any DDCWriting, facts: DisplayHardwareFacts)] {
     #if arch(arm64)
-      var displayIDs = [CGDirectDisplayID](repeating: 0, count: 16)
+      // 32, not the historical 16: virtual displays consume this buffer
+      // BEFORE the candidate policy filters them, so three slots up would
+      // otherwise lower the real-display ceiling to 13.
+      var displayIDs = [CGDirectDisplayID](repeating: 0, count: 32)
       var count: UInt32 = 0
-      guard CGGetOnlineDisplayList(16, &displayIDs, &count) == .success else {
+      guard CGGetOnlineDisplayList(32, &displayIDs, &count) == .success else {
         return []
       }
       let externalIDs = DDCCandidatePolicy.candidates(

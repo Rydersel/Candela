@@ -127,35 +127,101 @@ final class AppModel {
     label: "com.rydersel.Candela.vdsync", qos: .userInitiated
   )
 
+  /// Slots with a create/destroy in flight on the vd queue. Observable so
+  /// the pane can disable a slot's buttons and say it is working; a create
+  /// can legitimately take ~10 s.
+  private(set) var virtualSlotBusy: Set<Int> = []
+
+  /// The last failure per slot, cleared by the next success. Observable so
+  /// the pane can say WHY a slot is not running instead of silently reverting
+  /// to a Create button.
+  private(set) var virtualSlotIssues: [Int: VirtualDisplayFailure] = [:]
+
   /// The `.syncVirtualDisplays` effect (VD14): converge live virtual displays
   /// to the slot prefs. Reconciliation is pure (`VirtualDisplayReconciler`);
   /// this only executes what it returns, one action set at a time.
-  func syncVirtualDisplays() {
+  ///
+  /// - Parameter slot: scope of the convergence. The pane passes the slot
+  ///   whose `configured` was written, so one slot's Create can never
+  ///   recreate another slot that has drifted-but-unapplied edits (VD17),
+  ///   and a Safe Mode Create brings up exactly the clicked slot. nil is
+  ///   the launch sweep.
+  func syncVirtualDisplays(slot: Int? = nil) {
+    // A create landing between the reset's destroy step and the domain wipe
+    // would stand a display no pref explains (VD15).
+    guard !isResetting else { return }
+    // VD9: every configured slot has a persisted uuid BEFORE any create, so
+    // "the same display across recreations" holds on every configure path,
+    // not only the pane's.
+    for n in VirtualDisplayIdentity.slotRange where slot == nil || slot == n {
+      var definition = appPrefs.virtualSlot(n)
+      if definition.configured, definition.uuid == nil {
+        definition.uuid = UUID()
+        appPrefs.setVirtualSlot(definition, slot: n)
+      }
+    }
     let definitions = appPrefs.virtualSlotDefinitions()
     let host = virtualDisplays
+    let actions = VirtualDisplayReconciler.actions(
+      definitions: definitions, live: host.live(), isAvailable: host.isAvailable, limitedTo: slot
+    )
+    guard !actions.isEmpty else { return }
+    virtualSlotBusy.formUnion(actions.map(\.slot))
     virtualDisplayQueue.async { [weak self] in
-      let actions = VirtualDisplayReconciler.actions(
-        definitions: definitions, live: host.live(), isAvailable: host.isAvailable
-      )
+      var failures: [Int: VirtualDisplayFailure] = [:]
+      var succeeded: [Int] = []
+      func runCreate(_ slot: Int) {
+        guard let definition = definitions[slot] else { return }
+        switch host.create(
+          definition.spec, slot: slot, uuid: definition.uuid ?? UUID(), appearanceTimeout: 10
+        ) {
+        case .success: succeeded.append(slot)
+        case let .failure(failure): failures[slot] = failure
+        }
+      }
       for action in actions {
         switch action {
         case let .create(slot):
-          guard let definition = definitions[slot] else { break }
-          _ = host.create(
-            definition.spec, slot: slot, uuid: definition.uuid ?? UUID(), appearanceTimeout: 10
-          )
+          runCreate(slot)
         case let .destroy(slot):
-          host.destroy(slot: slot, departureTimeout: 5)
+          if host.destroy(slot: slot, departureTimeout: 5) {
+            succeeded.append(slot)
+          } else {
+            failures[slot] = .didNotDepart
+          }
         case let .recreate(slot):
-          guard let definition = definitions[slot] else { break }
-          host.destroy(slot: slot, departureTimeout: 5)
-          _ = host.create(
-            definition.spec, slot: slot, uuid: definition.uuid ?? UUID(), appearanceTimeout: 10
-          )
+          // The old display must be GONE before the same identity is
+          // re-advertised, or the create only collects the duplicate
+          // refusal after a full timeout.
+          if host.destroy(slot: slot, departureTimeout: 5) {
+            runCreate(slot)
+          } else {
+            failures[slot] = .didNotDepart
+          }
         }
       }
-      guard !actions.isEmpty else { return }
-      Task { @MainActor [weak self] in self?.notePrefsChanged() }
+      // Immutable copies: the vars above are confined to the queue closure,
+      // and sending them into the MainActor task as constants is what strict
+      // concurrency can prove race-free.
+      let finishedSlots = succeeded
+      let failedSlots = failures
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        for slot in finishedSlots { virtualSlotIssues[slot] = nil }
+        for (slot, failure) in failedSlots {
+          virtualSlotIssues[slot] = failure
+          // A slot that could not be created must not stay `configured`:
+          // every later sync and every launch would silently retry a doomed
+          // 10-second create. The retry becomes the user's decision.
+          var definition = appPrefs.virtualSlot(slot)
+          if definition.configured, failure != .didNotDepart {
+            definition.configured = false
+            appPrefs.setVirtualSlot(definition, slot: slot)
+          }
+        }
+        virtualSlotBusy.subtract(actions.map(\.slot))
+        notePrefsChanged()
+      }
     }
   }
 
