@@ -189,6 +189,13 @@ final class OledCareCoordinator {
   /// double-book every observation, and this is persisted, so the bias never
   /// washes out.
   private var ownerHours: [String: OwnerHoursAccumulator] = [:]
+  /// EM2's paired modelled-vs-measured store, one per panel, restored on first
+  /// touch and kept for the app's lifetime like `accumulators`, and
+  /// observation-tracked for the same reason: the OLED Care pane's comparison
+  /// section reads it.
+  private var comparisons: [String: ModelComparison] = [:]
+  /// The exposure model's wallpaper backdrop; its cache lives inside it.
+  @ObservationIgnored private let wallpaper = WallpaperLuminanceSource()
   /// The ageing half of window observation. `WindowObserver.observe` is
   /// MUTATING on a value type, so this must be mutated in place — a `let` copy
   /// discards every window's age on return and the stationary threshold could
@@ -412,6 +419,13 @@ final class OledCareCoordinator {
       observationEnabled: observing)
   }
 
+  /// The OLED Care pane's comparison section. Non-memoising, `healthSummary`'s
+  /// rule and reason: called from a SwiftUI body, where populating an
+  /// observation-tracked dictionary is a state mutation during view update.
+  func modelComparison(for persistenceKey: String) -> ModelComparison {
+    comparisons[persistenceKey] ?? loadModelComparison(for: persistenceKey)
+  }
+
   /// The health view's delete action: the accumulated exposure map, the
   /// per-app panel-seconds, and the window attribution derived from them,
   /// cleared in one step, in memory and on disk.
@@ -431,8 +445,13 @@ final class OledCareCoordinator {
     // The bytes were held back precisely because destroying them was not the
     // user's call. It is now.
     unwritableExposureKeys.remove(persistenceKey)
+    // The comparison is derived from the same samples the map is, so the
+    // delete that empties one must empty the other or the section keeps
+    // scoring a history the user just removed.
+    comparisons[persistenceKey] = .empty
     UserDefaults.standard.removeObject(forKey: Self.exposureKeyName(persistenceKey))
     UserDefaults.standard.removeObject(forKey: Self.ownerHoursKeyName(persistenceKey))
+    UserDefaults.standard.removeObject(forKey: Self.modelComparisonKeyName(persistenceKey))
   }
 
   // MARK: - Entry points
@@ -499,6 +518,7 @@ final class OledCareCoordinator {
     unwritableExposureKeys.removeAll()
     accumulators.removeAll()
     ownerHours.removeAll()
+    comparisons.removeAll()
     observers.removeAll()
     latestObservations.removeAll()
     // These removals delete the per-display state that would carry their OC12
@@ -1375,6 +1395,7 @@ final class OledCareCoordinator {
     }
     accumulators[key] = accumulator
     unsavedExposureKeys.insert(key)
+    bookComparisonPair(for: key, on: id, sample: sample, through: transform)
     // #20 nominates off the sampling clock, not the 10 Hz tick: the grid it
     // reads changes once a minute, so re-nominating per tick would burn CPU to
     // reach the same answer 600 times.
@@ -1384,6 +1405,45 @@ final class OledCareCoordinator {
     OLED care: exposure sample accepted for display \(id, privacy: .public) \
     (\(accumulator.map.sampleCount, privacy: .public) total)
     """)
+  }
+
+  /// EM2: the modelled grid is booked only beside an accepted measured sample,
+  /// so both sides of the comparison cover identical instants and a grant
+  /// outage stops them together. Runs inside the accepted branch, so the
+  /// epoch, pref, ID, transform and qualification re-checks have all passed.
+  private func bookComparisonPair(
+    for key: String, on id: CGDirectDisplayID,
+    sample: LuminanceSampler.Sample, through transform: PanelSpaceTransform
+  ) {
+    let measured = transform.panelNativeGrid(
+      fromDisplayGrid: sample.grid, cols: sample.cols, rows: sample.rows)
+    // A fresh list, not `latestObservations`: observation is a separate pref
+    // and its last snapshot can be minutes old, while the model's claim is
+    // about this instant. The call is the same sub-millisecond one the
+    // observation path makes.
+    let windows = CGWindowListSource(displayID: id).onScreenWindows()
+    let appearanceIsDark =
+      NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    let wallpaperCells = wallpaper.panelGrid(
+      for: id, appearanceIsDark: appearanceIsDark, through: transform)
+    let modelled = ExposureModel.modelledGrid(
+      inputs: ExposureModelInputs(
+        windows: windows, wallpaperCells: wallpaperCells, appearanceIsDark: appearanceIsDark),
+      through: transform)
+
+    var comparison = comparisonStore(for: key)
+    let before = comparison.pairCount
+    // The NOMINAL interval, `finishExposureCapture`'s reason: a pair stands
+    // for one sampling slot.
+    comparison.addPair(
+      measured: measured, modelled: modelled,
+      elapsed: Self.seconds(Self.samplingInterval), at: Date())
+    guard comparison.pairCount > before else {
+      log.debug("OLED care: comparison pair refused for display \(id, privacy: .public)")
+      return
+    }
+    comparisons[key] = comparison
+    unsavedExposureKeys.insert(key)
   }
 
   // MARK: - Exposure persistence
@@ -1414,6 +1474,38 @@ final class OledCareCoordinator {
 
   private static func ownerHoursKeyName(_ persistenceKey: String) -> String {
     "oledOwnerHours.\(persistenceKey)"
+  }
+
+  private static func modelComparisonKeyName(_ persistenceKey: String) -> String {
+    "oledModelComparison.\(persistenceKey)"
+  }
+
+  /// One live store per key, `hoursTracker(for:)`'s rule and reason.
+  private func comparisonStore(for key: String) -> ModelComparison {
+    if let existing = comparisons[key] { return existing }
+    let comparison = loadModelComparison(for: key)
+    comparisons[key] = comparison
+    return comparison
+  }
+
+  /// `loadExposureMap`'s taxonomy, unchanged: quarantine what a later build
+  /// could migrate, start over on junk.
+  private func loadModelComparison(for key: String) -> ModelComparison {
+    guard let data = UserDefaults.standard.data(forKey: Self.modelComparisonKeyName(key)) else {
+      return .empty
+    }
+    do {
+      return try JSONDecoder().decode(ModelComparison.self, from: data)
+    } catch let failure as OledStoreDecodeFailure {
+      quarantine(key, reason: "model comparison", failure: failure)
+      return .empty
+    } catch {
+      log.error("""
+      OLED care: stored model comparison for \(key, privacy: .public) is unreadable \
+      (\(error.localizedDescription, privacy: .public)); starting over
+      """)
+      return .empty
+    }
   }
 
   /// A `cells` array of the wrong length throws out of `ExposureMap.init(from:)`
@@ -1526,6 +1618,13 @@ final class OledCareCoordinator {
         UserDefaults.standard.set(data, forKey: Self.ownerHoursKeyName(key))
       } else {
         log.error("OLED care: could not encode the per-app hours for \(key, privacy: .public)")
+      }
+    }
+    if let comparison = comparisons[key] {
+      if let data = try? JSONEncoder().encode(comparison) {
+        UserDefaults.standard.set(data, forKey: Self.modelComparisonKeyName(key))
+      } else {
+        log.error("OLED care: could not encode the model comparison for \(key, privacy: .public)")
       }
     }
   }

@@ -134,7 +134,9 @@ final class LuminanceSampler {
   ///
   /// Neither measurement is a contract, which is why the delivered size is
   /// read back in `sample(displayID:)` rather than assumed here.
-  private static func requestedSize(displayWidth: Int, displayHeight: Int) -> (Int, Int) {
+  // Internal, not private: the wallpaper source renders through the same
+  // orientation rule and EOTF math, so both stay one implementation.
+  static func requestedSize(displayWidth: Int, displayHeight: Int) -> (Int, Int) {
     let long = max(PanelGrid.cols, PanelGrid.rows)
     let short = min(PanelGrid.cols, PanelGrid.rows)
     // A zero-sized display reading only happens mid-reconfiguration; the square
@@ -170,7 +172,7 @@ final class LuminanceSampler {
   /// A bitmap context's first memory row is the image's TOP row even though its
   /// user space has a bottom-left origin, so no flip is needed to land in the
   /// top-left-origin convention `PanelSpaceTransform` expects.
-  private static func meanLuminance(of image: CGImage, cols: Int, rows: Int) -> [Double]? {
+  static func meanLuminance(of image: CGImage, cols: Int, rows: Int) -> [Double]? {
     let bytesPerRow = cols * 4
     var pixels = [UInt8](repeating: 0, count: bytesPerRow * rows)
     // sRGB, not DeviceRGB: the destination encoding has to be the one the
