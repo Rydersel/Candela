@@ -3,16 +3,31 @@ import Foundation
 import Observation
 import ServiceManagement
 
+/// The three SMAppService touchpoints behind one injectable value (the D21
+/// follow-up, built once its test-target precondition existed). The closures
+/// are the seam, not a cache: `status` executes on every read, so D10's
+/// live-read invariant survives injection by construction. Production is
+/// `.live`; tests substitute a fake whose backing they mutate to prove the
+/// answer tracks the system, never a mirror.
+@MainActor
+struct LoginItemService {
+  var status: () -> SMAppService.Status
+  var register: () throws -> Void
+  var unregister: () throws -> Void
+
+  static let live = LoginItemService(
+    status: { SMAppService.mainApp.status },
+    register: { try SMAppService.mainApp.register() },
+    unregister: { try SMAppService.mainApp.unregister() })
+}
+
 /// Launch-at-login via SMAppService (D10). ONE source of truth: `isEnabled` is
-/// a LIVE read of `SMAppService.mainApp.status` — never a mirrored bool — so a
+/// a LIVE read of the service status — never a mirrored bool — so a
 /// failed register() shows OFF plus an error instead of the fork's lying
 /// checkbox.
-///
-/// Follow-up: a one-line `status: @escaping () -> SMAppService.Status`
-/// injection seam would make that invariant testable. Left out here because M5
-/// adds no app test target and an untested seam buys nothing.
 @MainActor @Observable
 final class LoginItem {
+  @ObservationIgnored private let service: LoginItemService
   /// D10: ONE source of truth. Never a mirrored bool — the settings reset
   /// unregisters the main app directly (`SMAppService.mainApp.unregister()`),
   /// and System Settings → General → Login Items can disable it at any moment
@@ -27,7 +42,7 @@ final class LoginItem {
 
   var isEnabled: Bool {
     _ = refreshToken // observation dependency; the value below is always live
-    return SMAppService.mainApp.status == .enabled
+    return service.status() == .enabled
   }
 
   private(set) var lastError: String?
@@ -37,7 +52,10 @@ final class LoginItem {
   /// written exactly once, from `init`, on the main actor.
   @ObservationIgnored nonisolated(unsafe) private var activationObserver: (any NSObjectProtocol)?
 
-  init() {
+  // Optional-with-nil rather than a `.live` default argument: a default is
+  // evaluated in a nonisolated context, and `.live` is main-actor state.
+  init(service: LoginItemService? = nil) {
+    self.service = service ?? .live
     // Closes the last hole in D10: a live *read* is not a
     // live *render*, and `.onAppear` only fires when a pane appears. Becoming
     // active is the moment any already-open window showing this toggle is
@@ -67,9 +85,9 @@ final class LoginItem {
   func setEnabled(_ enabled: Bool) {
     do {
       if enabled {
-        try SMAppService.mainApp.register()
+        try service.register()
       } else {
-        try SMAppService.mainApp.unregister()
+        try service.unregister()
       }
       lastError = nil
     } catch {
