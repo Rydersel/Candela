@@ -51,20 +51,12 @@ struct OledCarePane: View {
     // pushed pages, which write through `DisplayPrefWriter`.
     let _ = model.prefsRevision
     Form {
-      Section {
-        // One row, not two: a `SettingsCaption` placed as its own `Form` row
-        // gets a divider above it, so two paragraphs of the same introduction
-        // read as two settings.
-        VStack(alignment: .leading, spacing: 6) {
-          // Two sentences, not three (SO15/SO16): "enrolling applies the
-          // recommended settings" already lives on every enrollment toggle's
-          // own caption, where the control is.
-          SettingsCaption("Software can do two things about OLED wear: show fewer bright pixels, and show them for less time. \(AppInfo.productName) dims an enrolled display that has been idle, and can turn on macOS's own auto-hiding for the menu bar and the Dock.")
-          SettingsCaption("OLED care applies to external displays.")
-        }
-        if model.isSafeMode {
-          safeModeNote
-        }
+      // The exceptional state leads when it exists; prose never does. The
+      // page opens on the cards, which are its actual content: an
+      // introduction card ABOVE them read as the page's headline and made
+      // the overview open with a paragraph (Ryder, 2026-08-17).
+      if model.isSafeMode {
+        Section { safeModeNote }
       }
 
       // Identified by `persistenceKey`, NOT by `DisplayState.id` (which is
@@ -77,10 +69,19 @@ struct OledCarePane: View {
           OledCareDisplayCard(state: state)
         }
         if model.displays.isEmpty {
-          SettingsCaption("Connect an external display to enroll it in OLED care.")
+          // The one place "external displays" must be said outright: with no
+          // cards on screen, nothing else on the page implies the scope.
+          SettingsCaption("Connect an external display to enroll it in OLED care. OLED care applies to external displays only.")
         }
       } header: {
         Text("Displays").settingsHeading()
+      } footer: {
+        // The two-levers line (OC11), demoted from a leading card to the
+        // cards' own footer: it explains what the cards do, so it reads
+        // below them at caption weight. The auto-hide half of the old intro
+        // is gone from here because Screen Chrome's captions already carry
+        // it, where the controls are.
+        SettingsCaption("Software can do two things about OLED wear: show fewer bright pixels, and show them for less time. \(AppInfo.productName) dims an enrolled external display that has been idle.")
       }
 
       chromeSection
