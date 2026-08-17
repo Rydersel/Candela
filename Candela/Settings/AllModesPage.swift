@@ -224,6 +224,14 @@ struct AllModesPage: View {
   /// established. Filtering also cuts most groups to one or two rows, so the
   /// expanded list stays about as long as the collapsed one.
   private func isExpanded(_ group: DisplayModeCatalog.SizeGroup) -> Bool {
+    Self.isExpanded(group, rateFilter: rateFilter, expandedSizes: expandedSizes)
+  }
+
+  /// The same rule over plain values, so the row derivation below can answer it
+  /// without a live view's state.
+  static func isExpanded(
+    _ group: DisplayModeCatalog.SizeGroup, rateFilter: Double?, expandedSizes: Set<String>
+  ) -> Bool {
     rateFilter != nil || expandedSizes.contains(group.header)
   }
 
@@ -254,7 +262,7 @@ struct AllModesPage: View {
       case .recommended:
         Section {
           ForEach(catalog.rows) { row in
-            recommendedRow(row, in: catalog)
+            choice(Self.recommendedRowModel(row, in: catalog), in: catalog)
           }
         } header: {
           Text("Recommended Sizes").settingsHeading()
@@ -268,7 +276,9 @@ struct AllModesPage: View {
         // same words twice.
         Section {
           ForEach(filteredGroups(catalog), id: \.header) { group in
-            sizeRow(group, in: catalog)
+            choice(
+              Self.sizeRowModel(group, in: catalog, expanded: isExpanded(group)), in: catalog
+            )
             if isExpanded(group) {
               // One transition site for the opened block, and a `Group` rather
               // than a real container: a `Group`'s modifier reaches each child,
@@ -280,8 +290,11 @@ struct AllModesPage: View {
               // the toggle site opens.
               Group {
                 ForEach(group.modes) { mode in
-                  fullRow(mode, in: catalog, lowResolution: lowResolution)
-                    .padding(.leading, 18)
+                  choice(
+                    Self.fullRowModel(mode, in: catalog, lowResolution: lowResolution),
+                    in: catalog
+                  )
+                  .padding(.leading, 18)
                 }
               }
               .transition(.opacity)
@@ -320,9 +333,9 @@ struct AllModesPage: View {
   /// sight, which is a complaint about a choice the user cannot act on from
   /// this list. In All, where the twin is one row away, the tag is a
   /// distinction; here it would only be an insult.
-  private func recommendedRow(
+  static func recommendedRowModel(
     _ row: DisplayModeRow, in catalog: DisplayModeCoordinator.Catalog
-  ) -> some View {
+  ) -> AllModesRow {
     let outcome = DisplayModeCatalog.outcome(
       selectingWidth: row.mode.logicalWidth,
       selectingHeight: row.mode.logicalHeight,
@@ -345,14 +358,19 @@ struct AllModesPage: View {
     // 1920×804 was engaged, CoreGraphics began publishing that rate while the
     // other rates at the same framebuffer stayed ours, which is a published
     // representative in front of an applied mode we added.
+    let applied = catalog.modeKeepingCurrentRefreshRate(for: row)
     let badge = rowBadge(
       // By SIZE, like the checkmark below and like the hub's pop-up.
       isRecommendedSize: catalog.isRecommendedSize(row.mode),
-      isRevealed: catalog.modeKeepingCurrentRefreshRate(for: row).isRevealed
+      isRevealed: applied.isRevealed
     )
 
-    return modeRow(
+    return AllModesRow(
       id: RowID.mode(row.id),
+      // The mode a press APPLIES, which is why the row carries it rather than
+      // its representative: the same answer the source mark above is taken
+      // from, so a row cannot wear one mode's mark and apply another's.
+      kind: .mode(applied),
       title: DisplayModeCopy.size(row.mode),
       detail: ([rate].compactMap { $0 } + tags).joined(separator: " · "),
       badge: badge,
@@ -368,15 +386,13 @@ struct AllModesPage: View {
       // its size's fastest, so an ID comparison would drop the checkmark
       // whenever the user is at that size's slower rate.
       isCurrent: catalog.isCurrentSize(row.mode)
-    ) {
-      apply(catalog.modeKeepingCurrentRefreshRate(for: row), in: catalog)
-    }
+    )
   }
 
-  private func fullRow(
+  static func fullRowModel(
     _ mode: DisplayMode, in catalog: DisplayModeCoordinator.Catalog,
     lowResolution: Set<Int32>
-  ) -> some View {
+  ) -> AllModesRow {
     let tags = catalog.tags(
       for: mode, isLowResolutionDuplicate: lowResolution.contains(mode.ioModeID)
     )
@@ -402,8 +418,9 @@ struct AllModesPage: View {
       isRevealed: mode.isRevealed
     )
 
-    return modeRow(
+    return AllModesRow(
       id: RowID.mode(mode.ioModeID),
+      kind: .mode(mode),
       title: DisplayModeCopy.size(mode),
       detail: ([hz.map(DisplayModeCopy.refresh)].compactMap { $0 } + tags)
         .joined(separator: " · "),
@@ -416,25 +433,24 @@ struct AllModesPage: View {
       // Exact here, unlike the curated rows: this list holds every rate of
       // every size, so the row the display is running is one specific mode.
       isCurrent: mode.ioModeID == catalog.current?.ioModeID
-    ) {
-      apply(mode, in: catalog)
-    }
+    )
   }
 
   /// One size, closed. Says how fast the size goes rather than how many entries
   /// it holds: the rate is what the next click is about, and a count of modes
   /// counts duplicates the platform publishes.
-  private func sizeRow(
-    _ group: DisplayModeCatalog.SizeGroup, in catalog: DisplayModeCoordinator.Catalog
-  ) -> some View {
-    let expanded = isExpanded(group)
+  static func sizeRowModel(
+    _ group: DisplayModeCatalog.SizeGroup, in catalog: DisplayModeCoordinator.Catalog,
+    expanded: Bool
+  ) -> AllModesRow {
     let holdsCurrent = catalog.current.map {
       $0.logicalWidth == group.logicalWidth && $0.logicalHeight == group.logicalHeight
     } ?? false
     let top = group.modes.map(\.refreshHz).max().map(DisplayMode.quantizedRefresh)
-    let id = RowID.size(width: group.logicalWidth, height: group.logicalHeight)
 
-    return ModeChoice(
+    return AllModesRow(
+      id: RowID.size(width: group.logicalWidth, height: group.logicalHeight),
+      kind: .size(header: group.header),
       title: group.header,
       detail: top.map { $0 > 0 ? "up to \(DisplayModeCopy.refresh($0))" : "" } ?? "",
       // Size and state, both spoken: a closed row that does not say it is
@@ -445,32 +461,40 @@ struct AllModesPage: View {
       spokenValue: expanded ? "Expanded" : "Collapsed",
       isCurrent: holdsCurrent,
       chevronExpanded: expanded
+    )
+  }
+
+  /// Draws one derived row. The two lists differ in what they derive, never in
+  /// how a row is drawn, so a row model is all this needs.
+  private func choice(_ row: AllModesRow, in catalog: DisplayModeCoordinator.Catalog) -> some View {
+    ModeChoice(
+      title: row.title, detail: row.detail, badge: row.badge, spoken: row.spoken,
+      spokenValue: row.spokenValue, isCurrent: row.isCurrent,
+      chevronExpanded: row.chevronExpanded
     ) {
-      // Animated HERE, not by an `.animation` on the list: only the click
-      // should move. The seed in `seedListMode` opens the size in use before
-      // the page is on screen, and a re-enumeration must not replay it.
-      withAnimation(Motion.disclosure(reduceMotion: reduceMotion)) {
-        if expanded {
-          expandedSizes.remove(group.header)
-        } else {
-          expandedSizes.insert(group.header)
+      switch row.kind {
+      case let .mode(mode):
+        apply(mode, in: catalog)
+      case let .size(header):
+        // Animated HERE, not by an `.animation` on the list: only the click
+        // should move. The seed in `seedListMode` opens the size in use before
+        // the page is on screen, and a re-enumeration must not replay it.
+        //
+        // Keyed on the row's own chevron rather than on set membership, which
+        // are not the same question: a rate filter shows every matching size
+        // open while its header is absent from the set, and pressing there must
+        // stay the no-op it has always been.
+        withAnimation(Motion.disclosure(reduceMotion: reduceMotion)) {
+          if row.chevronExpanded == true {
+            expandedSizes.remove(header)
+          } else {
+            expandedSizes.insert(header)
+          }
         }
       }
     }
-    .id(id)
-    .focused($focusedRow, equals: id)
-  }
-
-  private func modeRow(
-    id: String, title: String, detail: String, badge: String? = nil, spoken: String,
-    isCurrent: Bool, action: @escaping () -> Void
-  ) -> some View {
-    ModeChoice(
-      title: title, detail: detail, badge: badge, spoken: spoken, isCurrent: isCurrent,
-      action: action
-    )
-    .id(id)
-    .focused($focusedRow, equals: id)
+    .id(row.id)
+    .focused($focusedRow, equals: row.id)
   }
 
   /// A row's marks as the ONE string `ModeChoice` draws: the density model's
@@ -502,12 +526,42 @@ struct AllModesPage: View {
   /// The recommendation IS about the size, so a mark there would be honest,
   /// and it is still absent: the curated list is where a suggestion is meant to
   /// be read, and this page's own `Recommended` list is one segment away.
-  private func rowBadge(isRecommendedSize: Bool, isRevealed: Bool) -> String? {
+  static func rowBadge(isRecommendedSize: Bool, isRevealed: Bool) -> String? {
     let marks = [
       isRecommendedSize ? DisplayModeCopy.recommended : nil,
       isRevealed ? DisplayModeCopy.addedByApp : nil,
     ].compactMap { $0 }
     return marks.isEmpty ? nil : marks.joined(separator: ", ")
+  }
+
+  /// Everything either list puts on screen, in render order, derived from the
+  /// catalog and the two pieces of list state alone.
+  ///
+  /// The page's own rows ARE these models: `modeList` walks the same groups and
+  /// hands each one straight to `choice`, so a row that is missing here is a row
+  /// nobody can see. That is the point of it being callable without a window,
+  /// because a curated list can be structurally correct and still show none of
+  /// the modes our own enumeration added.
+  static func rows(
+    in catalog: DisplayModeCoordinator.Catalog, listMode: ListMode,
+    rateFilter: Double?, expandedSizes: Set<String>
+  ) -> [AllModesRow] {
+    switch listMode {
+    case .recommended:
+      return catalog.rows.map { recommendedRowModel($0, in: catalog) }
+    case .all:
+      // Computed once per list, not per row: the answer depends on a mode's
+      // siblings at the same logical size.
+      let lowResolution = DisplayModeCatalog.lowResolutionDuplicates(catalog.all)
+      return filteredGroups(catalog.all, rateFilter: rateFilter).flatMap { group in
+        let expanded = isExpanded(group, rateFilter: rateFilter, expandedSizes: expandedSizes)
+        let size = sizeRowModel(group, in: catalog, expanded: expanded)
+        guard expanded else { return [size] }
+        return [size] + group.modes.map {
+          fullRowModel($0, in: catalog, lowResolution: lowResolution)
+        }
+      }
+    }
   }
 
   /// The one id space the list, its focus and `scrollTo` all speak.
@@ -521,7 +575,13 @@ struct AllModesPage: View {
   private func filteredGroups(
     _ catalog: DisplayModeCoordinator.Catalog
   ) -> [DisplayModeCatalog.SizeGroup] {
-    let groups = DisplayModeCatalog.groupedBySize(catalog.all)
+    Self.filteredGroups(catalog.all, rateFilter: rateFilter)
+  }
+
+  static func filteredGroups(
+    _ modes: [DisplayMode], rateFilter: Double?
+  ) -> [DisplayModeCatalog.SizeGroup] {
+    let groups = DisplayModeCatalog.groupedBySize(modes)
     guard let rateFilter else { return groups }
     return groups.compactMap { group in
       let modes = group.modes.filter { DisplayMode.quantizedRefresh($0.refreshHz) == rateFilter }
@@ -637,18 +697,29 @@ struct AllModesPage: View {
   /// of a shut size excluded. The arrow keys walk this, the rotor checks
   /// membership against it, and `scrollToCurrent` measures the fold against it,
   /// so all three follow the collapse for free.
-  private var visibleRowIDs: [String] { rowIDs(for: listMode, in: catalog) }
+  private var visibleRowIDs: [String] {
+    Self.rowIDs(
+      for: listMode, in: catalog, rateFilter: rateFilter, expandedSizes: expandedSizes
+    )
+  }
 
-  private func rowIDs(
-    for mode: ListMode, in catalog: DisplayModeCoordinator.Catalog?
+  /// Ids only, and deliberately not `rows(...).map(\.id)`: this runs on every
+  /// body evaluation, and building the words for 332 rows to throw all but the
+  /// identifiers away is work the arrow keys do not need. The two orders agree,
+  /// and a test pins that they do.
+  static func rowIDs(
+    for mode: ListMode, in catalog: DisplayModeCoordinator.Catalog?,
+    rateFilter: Double?, expandedSizes: Set<String>
   ) -> [String] {
     guard let catalog else { return [] }
     switch mode {
     case .recommended:
       return catalog.rows.map { RowID.mode($0.id) }
     case .all:
-      return filteredGroups(catalog).flatMap { group in
-        [group.header] + (isExpanded(group) ? group.modes.map { RowID.mode($0.ioModeID) } : [])
+      return filteredGroups(catalog.all, rateFilter: rateFilter).flatMap { group in
+        [group.header]
+          + (isExpanded(group, rateFilter: rateFilter, expandedSizes: expandedSizes)
+            ? group.modes.map { RowID.mode($0.ioModeID) } : [])
       }
     }
   }
@@ -711,6 +782,31 @@ struct AllModesPage: View {
       ]
     )
   }
+}
+
+/// One row of either list: the words it shows, the marks it wears, and what
+/// pressing it does. A value, so the whole list is derivable and assertable
+/// without laying out a view.
+struct AllModesRow: Identifiable, Equatable {
+  /// What a press does, which is also what kind of row this is.
+  enum Kind: Equatable {
+    /// Applies this mode. On a curated row it is the mode the press would
+    /// APPLY, not the row's representative (SO18), so the two lists can carry
+    /// different provenance for the same size.
+    case mode(DisplayMode)
+    /// Opens or shuts the size group filed under this header.
+    case size(header: String)
+  }
+
+  let id: String
+  let kind: Kind
+  let title: String
+  let detail: String
+  var badge: String?
+  let spoken: String
+  var spokenValue: String?
+  let isCurrent: Bool
+  var chevronExpanded: Bool?
 }
 
 private extension DisplayModeCatalog.SizeGroup {

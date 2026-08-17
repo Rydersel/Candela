@@ -35,6 +35,27 @@ private struct DisplayRow: Identifiable {
   var id: CGDirectDisplayID { state.id }
 }
 
+/// The SO21 ordinal every sidebar row draws, one entry per key, derived from
+/// ONE snapshot of the display list. Plain keys in, plain answers out: nothing
+/// here reads the model, so the answer cannot be built against a list other
+/// than the one it was handed.
+func sidebarDisplayOrdinals(keys: [String]) -> [Int?] {
+  DisplayOrdering.sharedIdentityOrdinals(keys: keys)
+}
+
+/// The ordinal the row at `index` draws.
+///
+/// Total on purpose. A position is a description of a list that outlives the
+/// list: the sidebar crashed subscripting a display list a settings reset had
+/// already emptied, with a position captured against the longer list it was
+/// built from. An index that no longer describes the snapshot means the row it
+/// pointed at is gone, and a gone row has no number, so the honest answer is
+/// nil rather than a trap.
+func sidebarOrdinal(at index: Int, in ordinals: [Int?]) -> Int? {
+  guard ordinals.indices.contains(index) else { return nil }
+  return ordinals[index]
+}
+
 @MainActor
 struct SettingsSidebar: View {
   @Binding var selection: SettingsDestination?
@@ -184,10 +205,10 @@ struct SettingsSidebar: View {
   /// captured against one list does not survive the list, and a value does.
   private var displayRows: [DisplayRow] {
     let states = model.displays
-    let ordinals = DisplayOrdering.sharedIdentityOrdinals(
-      keys: states.map(\.display.persistenceKey)
-    )
-    return zip(states, ordinals).map(DisplayRow.init)
+    let ordinals = sidebarDisplayOrdinals(keys: states.map(\.display.persistenceKey))
+    return states.indices.map { index in
+      DisplayRow(state: states[index], ordinal: sidebarOrdinal(at: index, in: ordinals))
+    }
   }
 
   /// A display's row: name, and a bar showing where its brightness currently

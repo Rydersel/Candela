@@ -76,13 +76,16 @@ struct PanelView: View {
         }
         ForEach(externals) { state in
           let name = Self.title(for: state.display)
+          // One prefs read per row, handed to both slider predicates: they each
+          // built their own before the derivations moved to plain inputs.
+          let rowPrefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
           VStack(alignment: .leading, spacing: 8) {
             DisplayHeaderRow(controller: state.controller, displayName: name)
             DisplaySliderRow(
               controller: state.controller, displayName: name,
               snapsToStops: snapsToStops, showsPercent: showsPercent
             )
-            if showsVolumeSlider(for: state) {
+            if Self.showsVolumeSlider(for: state, prefs: rowPrefs) {
               let volumeEnabled = model.volumeSliderEnabled(state)
               ValueSliderRow(
                 controller: state.volume,
@@ -115,7 +118,7 @@ struct PanelView: View {
               // this renders under the display's own header.
               .panelHoverReason(model.volumeSliderCompactReason(state))
             }
-            if showsContrastSlider(for: state) {
+            if Self.showsContrastSlider(for: state, prefs: rowPrefs) {
               ValueSliderRow(
                 controller: state.contrast,
                 systemImage: "circle.lefthalf.filled",
@@ -187,10 +190,22 @@ struct PanelView: View {
   /// `SWIFT_STRICT_CONCURRENCY: complete`.
   @MainActor
   static func visibleDisplays(_ model: AppModel) -> [AppModel.DisplayState] {
+    visibleDisplays(model.displays, prefs: standardPrefs)
+  }
+
+  /// The same derivation over plain inputs, so it can be asked what it renders
+  /// without an `AppModel` and without the app's own prefs domain. The
+  /// `AppModel` form above is the only production caller and passes exactly
+  /// what it used to read inline.
+  @MainActor
+  static func visibleDisplays(
+    _ states: [AppModel.DisplayState],
+    prefs: (String) -> DisplayPrefs
+  ) -> [AppModel.DisplayState] {
     DisplayOrdering.panelOrder(
-      model.displays,
-      isHidden: { DisplayPrefs(persistenceKey: $0.display.persistenceKey).hideDisplay },
-      title: { title(for: $0.display) }
+      states,
+      isHidden: { prefs($0.display.persistenceKey).hideDisplay },
+      title: { title(for: $0.display, prefs: prefs) }
     )
   }
 
@@ -200,17 +215,31 @@ struct PanelView: View {
   /// `visibleDisplays` — it reads `AppModel`.
   @MainActor
   static func showsBuiltIn(_ model: AppModel) -> Bool {
-    model.builtIn != nil && !DisplayPrefs(persistenceKey: "app").hideBuiltInDisplay
+    showsBuiltIn(hasBuiltIn: model.builtIn != nil, appPrefs: standardPrefs("app"))
+  }
+
+  static func showsBuiltIn(hasBuiltIn: Bool, appPrefs: DisplayPrefs) -> Bool {
+    hasBuiltIn && !appPrefs.hideBuiltInDisplay
   }
 
   /// The name every part of the panel shows for a display — header, slider
   /// accessibility label, and tooltips all go through this one call, so a
   /// rename in the Displays pane (T13) moves all of them together.
   static func title(for display: ExternalDisplay) -> String {
+    title(for: display, prefs: standardPrefs)
+  }
+
+  static func title(for display: ExternalDisplay, prefs: (String) -> DisplayPrefs) -> String {
     DisplayOrdering.title(
-      friendlyName: DisplayPrefs(persistenceKey: display.persistenceKey).friendlyName,
+      friendlyName: prefs(display.persistenceKey).friendlyName,
       hardwareName: display.name
     )
+  }
+
+  /// The prefs the app itself runs on. Named so the seams above take a factory
+  /// rather than reaching for `UserDefaults.standard` from inside a derivation.
+  static func standardPrefs(_ persistenceKey: String) -> DisplayPrefs {
+    DisplayPrefs(persistenceKey: persistenceKey)
   }
 
   /// Two different empties, said differently: "nothing is attached" is a fact
@@ -258,18 +287,31 @@ struct PanelView: View {
   /// register the app is willing to write, and greying says "this monitor says
   /// it does not implement volume", while these conjuncts mean the control does
   /// not apply here at all.
-  private func showsVolumeSlider(for state: AppModel.DisplayState) -> Bool {
-    let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
-    return state.volume.isAvailable && !prefs.hideVolumeSlider
+  @MainActor
+  static func showsVolumeSlider(for state: AppModel.DisplayState, prefs: DisplayPrefs) -> Bool {
+    showsVolumeSlider(
+      commandIsAvailable: state.volume.isAvailable, hideVolumeSlider: prefs.hideVolumeSlider)
+  }
+
+  static func showsVolumeSlider(commandIsAvailable: Bool, hideVolumeSlider: Bool) -> Bool {
+    commandIsAvailable && !hideVolumeSlider
   }
 
   /// D2: contrast slider behind the app-level `showContrast` pref (default
   /// false, fork parity), never for a disabled command, never for a
   /// `forceSoftware` display (fork stepContrast/menu: `!isSw()`, R5 — the
   /// latter two again via `isAvailable`).
-  private func showsContrastSlider(for state: AppModel.DisplayState) -> Bool {
-    let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
-    return prefs.showContrast && state.contrast.isAvailable
+  ///
+  /// `showContrast` is app-level and unkeyed, so the display's own prefs object
+  /// answers for it: one read per row instead of a second object.
+  @MainActor
+  static func showsContrastSlider(for state: AppModel.DisplayState, prefs: DisplayPrefs) -> Bool {
+    showsContrastSlider(
+      commandIsAvailable: state.contrast.isAvailable, showContrast: prefs.showContrast)
+  }
+
+  static func showsContrastSlider(commandIsAvailable: Bool, showContrast: Bool) -> Bool {
+    showContrast && commandIsAvailable
   }
 
   /// Visually quiet Accessibility banner (spec §6: banner, not alert):
