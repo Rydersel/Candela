@@ -293,7 +293,12 @@ private final class ConfirmationHostingView<Content: View>: NSHostingView<Conten
     resizeWindowToFittingSize()
   }
 
-  private func resizeWindowToFittingSize() {
+  /// `isSettleRetry` is the depth bound on the completion handler's recall below:
+  /// one settle pass, then stop. Convergence normally holds, since each pass ends
+  /// on the fitting size it measured; the bound means a content size that
+  /// oscillates costs one wrong frame instead of a pulse loop nobody can close
+  /// the window out of.
+  private func resizeWindowToFittingSize(isSettleRetry: Bool = false) {
     guard let window else { return }
     let target = fittingSize
     guard frame.size != target else { return }
@@ -311,7 +316,7 @@ private final class ConfirmationHostingView<Content: View>: NSHostingView<Conten
     // window the user has dragged stays where they put it.
     let centre = NSPoint(x: window.frame.midX, y: window.frame.midY)
     let before = window.frame
-    let duration = Motion.windowFadeIn(reduceMotion: Motion.systemReduceMotion)
+    let duration = Motion.windowResize(reduceMotion: Motion.systemReduceMotion)
     // Set before the geometry changes below, which re-lay-out the content and so
     // can re-enter through `invalidateIntrinsicContentSize`.
     isResizingWindow = duration > 0
@@ -348,9 +353,9 @@ private final class ConfirmationHostingView<Content: View>: NSHostingView<Conten
         // unanimated one to the point, wherever the animator stopped.
         window.setFrame(destination, display: false)
         self.isResizingWindow = false
-        // A content change ignored while the animation ran settles now.
-        if self.frame.size != self.fittingSize {
-          self.resizeWindowToFittingSize()
+        // A content change ignored while the animation ran settles now, once.
+        if !isSettleRetry, self.frame.size != self.fittingSize {
+          self.resizeWindowToFittingSize(isSettleRetry: true)
         }
       }
     }

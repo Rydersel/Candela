@@ -25,9 +25,13 @@ struct VirtualDisplaysPane: View {
 
   /// The selected slot's create failure as RENDERED, mirroring
   /// `AppModel.virtualSlotIssues` one update behind. The model writes that map
-  /// from the convergence pass, and a keyed `.animation` on a `Form` row animates
-  /// nothing in either direction (measured 2026-08-17), so this is what puts the
-  /// sentence's arrival and departure inside a transaction.
+  /// from the convergence pass, and neither placement of a keyed `.animation`
+  /// fades a `Form` row symmetrically (measured 2026-08-17): on a `Group`
+  /// wrapping the conditional row it animates nothing in either direction, and on
+  /// an always-present container inside the row the child fades IN and then SNAPS
+  /// out. That snap-out asymmetry is why hanging the animation on the container
+  /// is not enough; the mirror puts the sentence's arrival AND departure inside
+  /// one transaction.
   ///
   /// It carries the SLOT it is about, and the row renders nothing unless the two
   /// agree: one value serves whichever slot is selected, and without the slot a

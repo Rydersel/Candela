@@ -28,12 +28,15 @@ struct AdvancedPage: View {
 
   /// The traffic block as the CAPTION renders it, mirroring `trafficBlock` one
   /// update behind. The block is derived from the engine's brightness path, which
-  /// changes without this view writing anything, and a keyed `.animation` on a
-  /// `Form` row animates nothing in either direction (measured 2026-08-17), so
-  /// this is what puts the explanation's arrival and departure inside a
-  /// transaction. Only the caption reads it: SO12's greying stays instant, and
-  /// the safety sentence spoken on the hardware-control toggle keeps reading the
-  /// live value.
+  /// changes without this view writing anything, and neither placement of a keyed
+  /// `.animation` fades a `Form` row symmetrically (measured 2026-08-17): on a
+  /// `Group` wrapping the conditional row it animates nothing in either
+  /// direction, and on an always-present container inside the row the child fades
+  /// IN and then SNAPS out. That snap-out asymmetry is why a container-hung
+  /// `.animation` is not enough here; the mirror is what puts the explanation's
+  /// arrival AND departure inside one transaction. Only the caption reads it:
+  /// SO12's greying stays instant, and the safety sentence spoken on the
+  /// hardware-control toggle keeps reading the live value.
   @State private var shownTrafficBlock: DDCTrafficBlock?
 
   private var persistenceKey: String { state.display.persistenceKey }

@@ -49,10 +49,13 @@ struct MirroringSection: View {
   @State private var chosenMaster: CGDirectDisplayID?
 
   /// The reason lines as RENDERED, mirroring the coordinator's three signals one
-  /// update behind. A keyed `.animation` on a `Form` row animates nothing in
-  /// either direction (measured 2026-08-17), so the only way these fade is for
-  /// the write to happen inside a `withAnimation` in this view. Kept in agreement
-  /// by the two hooks on the status row and by nothing else.
+  /// update behind. Neither placement of a keyed `.animation` fades a `Form` row
+  /// symmetrically (measured 2026-08-17): on a `Group` wrapping the conditional
+  /// row it animates nothing in either direction, and on an always-present
+  /// container inside the row the child fades IN and then SNAPS out. A line that
+  /// snaps away is the half that matters here, so the only way these fade both
+  /// ways is for the write to happen inside a `withAnimation` in this view. Kept
+  /// in agreement by the two hooks on the status row and by nothing else.
   @State private var shownReasons = ReasonLines.none
 
   private var displayID: CGDirectDisplayID { state.display.id }
@@ -143,8 +146,12 @@ struct MirroringSection: View {
       // The three reason lines are the only rows here that arrive and leave on
       // their own, so they are the only ones that animate, and they render from
       // the mirror rather than from the coordinator. The control block above
-      // swaps `_ConditionalContent` branches and rebuilds its control; it reads
-      // the coordinator directly and stays instant.
+      // swaps `_ConditionalContent` branches and rebuilds its control, reading
+      // the coordinator directly. It is observed to stay instant, and the reason
+      // is timing rather than a guarantee: today the topology change lands in the
+      // commit before the mirror write, so the branch swap is already outside the
+      // animated transaction. Reorder those two and the control could pick the
+      // fade up.
       // Every refusal states a reason and there are EIGHT of them, each with its
       // own sentence; three of the eight are the only ones this pane can say
       // without asserting something it does not know. See `refusalCaption`,

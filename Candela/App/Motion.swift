@@ -7,6 +7,15 @@ import SwiftUI
 ///
 /// Grown out of the panel's motion helper when the settings-wide pass adopted
 /// the same vocabulary.
+///
+/// Three kinds of animation are deliberately OUTSIDE this vocabulary: hover
+/// reveals, press feedback, and crossfades between two renderings of the same
+/// data. Those are per-surface feel rather than a state change a person made, so
+/// each one carries its own curve and its own Reduce Motion guard at its site
+/// (`panelHoverReason` in `SliderRows.swift`, and the hover, press and
+/// exposure-surface data crossfades in `OledCareSummary.swift`). A mixed idiom
+/// in one of those views is intent, not an oversight; anything a user's action
+/// moves belongs to a role below.
 enum Motion {
   /// A disclosure or inline list opening and closing, and a control giving
   /// way to a sibling arriving beside it.
@@ -52,6 +61,17 @@ enum Motion {
 
   static func windowFadeOut(reduceMotion: Bool) -> TimeInterval {
     reduceMotion ? 0 : 0.3
+  }
+
+  /// An AppKit window's own frame changing under it, animated with
+  /// `NSAnimationContext`: the confirmation window growing around its centre as a
+  /// caption arrives. Same values as `windowFadeIn` because it is the same
+  /// register (a window arriving, and a window changing shape, are both something
+  /// the user is waiting on), and zero under Reduce Motion so the frame change
+  /// lands in one step. Named separately so a fade duration can move without
+  /// silently retiming every resize.
+  static func windowResize(reduceMotion: Bool) -> TimeInterval {
+    reduceMotion ? 0 : 0.15
   }
 
   /// Reduce Motion for AppKit call sites, which have no SwiftUI environment

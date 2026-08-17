@@ -33,10 +33,14 @@ struct GeneralPane: View {
 
   /// The login-item failure as RENDERED, mirroring `loginItem.lastError` one
   /// update behind. `LoginItem` writes it only from `setEnabled` (a refresh
-  /// does not clear it), and a keyed `.animation` on a `Form` row animates nothing in
-  /// either direction (measured 2026-08-17), so this is what puts the arrival and
-  /// the departure inside a transaction. Kept in agreement by the two hooks on
-  /// the toggle below and by nothing else.
+  /// does not clear it), and neither placement of a keyed `.animation` fades a
+  /// `Form` row symmetrically (measured 2026-08-17): on a `Group` wrapping the
+  /// conditional row it animates nothing in either direction, and on an
+  /// always-present container inside the row the child fades IN and then SNAPS
+  /// out. The snap-out asymmetry is why the container-hung `.animation` is not
+  /// enough; the mirror is what puts the arrival AND the departure inside one
+  /// transaction. Kept in agreement by the two hooks on the toggle below and by
+  /// nothing else.
   @State private var shownLoginError: String?
 
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }

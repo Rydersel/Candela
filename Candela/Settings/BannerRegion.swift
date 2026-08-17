@@ -323,6 +323,13 @@ struct BannerRegion: View {
       prefs.setTuning(tuning, for: .volume)
       prefs.audioSinkOverride = .auto
     }
+    // The card fades out over 0.2 s and stays hit-testable while it does, so a
+    // second click mid-fade must not toggle back: `toggleMute` is a real toggle
+    // and would re-mute the display over DDC. `DDCValueController` exposes no
+    // one-way unmute (`setMuted` is private), so the guard is the state this
+    // recovery exists to undo, read after the prefs are cleared so D29 rule 2's
+    // ordering is untouched.
+    guard state.volume.isMuted else { return }
     _ = state.volume.toggleMute()
   }
 

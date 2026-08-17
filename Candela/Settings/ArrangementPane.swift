@@ -39,10 +39,14 @@ struct ArrangementPane: View {
 
   /// The restore notice as RENDERED, mirroring `coordinator.restoreNotice` one
   /// update behind. The coordinator writes that property from an unattended
-  /// restore pass, and a keyed `.animation` on a `Form` row animates nothing
-  /// either way (measured 2026-08-17), so this is what puts the arrival and the
-  /// dismissal inside a transaction. Kept in agreement by the two hooks in
-  /// `savedLayoutSection` and by nothing else.
+  /// restore pass, and neither placement of a keyed `.animation` fades a `Form`
+  /// row symmetrically (measured 2026-08-17): on a `Group` wrapping the
+  /// conditional row it animates nothing either way, and on an always-present
+  /// container inside the row the child fades IN and then SNAPS out. That
+  /// snap-out asymmetry is why a container-hung `.animation` is not enough; the
+  /// mirror is what puts the arrival AND the dismissal inside one transaction.
+  /// Kept in agreement by the two hooks in `savedLayoutSection` and by nothing
+  /// else.
   @State private var shownRestoreNotice: ArrangementReapplyNotice?
 
   private var coordinator: ArrangementCoordinator { model.arrangement }
@@ -67,8 +71,10 @@ struct ArrangementPane: View {
       try? await Task.sleep(for: .seconds(4))
       guard !Task.isCancelled else { return }
       // Inside a transaction, like the write in `onRefuse`: a keyed `.animation`
-      // on a `Form` row animates nothing in either direction (measured
-      // 2026-08-17), so the animation has to travel with the write.
+      // on a `Group` wrapping a conditional `Form` row animates nothing in either
+      // direction, and hung on the always-present container inside the row it
+      // fades the child in but snaps it out (measured 2026-08-17), so the
+      // animation has to travel with the write.
       withAnimation(Motion.notice(reduceMotion: reduceMotion)) { refusal = [] }
     }
   }
@@ -99,8 +105,10 @@ struct ArrangementPane: View {
           selection: reconciledSelection,
           onPropose: { coordinator.apply($0) },
           onRefuse: { problems in
-            // The sentence below is a `Form` row, where a keyed `.animation`
-            // animates nothing (measured 2026-08-17), so the write carries the
+            // The sentence below is a conditional child of a `Form` row: a keyed
+            // `.animation` on a `Group` around it animates nothing, and on the
+            // always-present `VStack` inside the row it fades the sentence in but
+            // snaps it out (measured 2026-08-17), so the write carries the
             // transaction instead. `refusal` is this view's own state and needs no
             // mirror: the mirror shape exists to get a coordinator's write inside
             // a `withAnimation`, and this write is already inside the view. The
@@ -131,7 +139,14 @@ struct ArrangementPane: View {
         // The fade comes from the transaction the two writers of `refusal`
         // carry. The refused-drop write also springs the tile home on the same
         // values, so sentence and spring read as one gesture; the 4 s
-        // auto-clear has no drag left to spring and just fades.
+        // auto-clear has no drag left to spring.
+        //
+        // Expect the two directions to differ. This is a conditional child of an
+        // always-present `VStack` that is itself a `Form` row, the geometry
+        // measured on 2026-08-17 as fading IN and snapping OUT, so the insert
+        // reads as a fade and the 4 s removal most likely snaps even though the
+        // transaction is present. Confirm by looking before claiming a symmetric
+        // fade; the mirror shape is the fix if the snap is unacceptable.
         if !refusal.isEmpty {
           ArrangementCopy.invalidLayout(refusal, name: coordinator.displayName)
             .font(.callout)
