@@ -11,12 +11,12 @@ import CandelaKit
 /// knowing anything about windows.
 protocol BrightnessHUDPresenting: AnyObject {
   @MainActor func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double,
-                                 nameSuffix: String?, position: HUDPosition)
+                                 nameSuffix: String?, position: HUDPosition, style: HUDStyle)
   /// Generic pill (M4): volume/contrast/mute. Exposed through the protocol so
   /// the executor talks to a presenter, not the concrete panel.
   @MainActor func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String,
                           value: Float, maxValue: Float, nameSuffix: String?,
-                          position: HUDPosition)
+                          position: HUDPosition, style: HUDStyle)
 }
 
 enum HUDType {
@@ -50,26 +50,96 @@ enum HUDType {
 /// *system* brightness state, which never changes for a DDC-controlled display: on macOS 26 the
 /// ControlCenter-based OSD ignores the value of repeat showImage calls while its HUD is visible,
 /// so the pill would freeze mid-interaction.
+///
+/// Three looks (KMR-A3), chosen by the caller like the position: `.system` is
+/// the native-matching default (KMR-A4), `.segments` swaps the bar for the
+/// classic 16-chiclet strip, `.compact` is a smaller name-less pill. The
+/// island keeps holding no judgement: style and position both arrive from the
+/// caller, which reads them from prefs at announce time.
 @MainActor
 final class BrightnessHUD: BrightnessHUDPresenting {
   private struct HUD {
     let panel: NSPanel
     let effectView: NSVisualEffectView
-    let nameLabel: NSTextField
+    /// nil where the style draws no name (`.compact`).
+    let nameLabel: NSTextField?
     let leftIcon: NSImageView
     let rightIcon: NSImageView
-    let fillBox: NSBox
+    /// The continuous bar's fill; nil for `.segments`.
+    let fillBox: NSBox?
+    /// The 16 chiclets; empty for the continuous-bar styles.
+    let segmentBoxes: [NSBox]
+    let style: HUDStyle
   }
 
-  private static let hudSize = NSSize(width: 314, height: 62)
-  private static let cornerRadius: CGFloat = 22
-  private static let margin: CGFloat = 18
-  private static let leftIconSize: CGFloat = 14
-  private static let rightIconSize: CGFloat = 17
-  private static let barHeight: CGFloat = 4
-  private static let barY: CGFloat = 19
-  private static let barX: CGFloat = BrightnessHUD.margin + BrightnessHUD.leftIconSize + 9
-  private static let barWidth: CGFloat = BrightnessHUD.hudSize.width - BrightnessHUD.barX - BrightnessHUD.rightIconSize - BrightnessHUD.margin - 9
+  /// Per-style geometry (KMR-A3). The Menu Bar preview's miniature implements
+  /// the same numbers from the spec, so a change here must travel there.
+  private struct Metrics {
+    let size: NSSize
+    let cornerRadius: CGFloat
+    let margin: CGFloat
+    let barY: CGFloat
+    let hasName: Bool
+
+    static let leftIconSize: CGFloat = 14
+    static let rightIconSize: CGFloat = 17
+    static let barHeight: CGFloat = 4
+
+    var barX: CGFloat { self.margin + Self.leftIconSize + 9 }
+    var barWidth: CGFloat {
+      self.size.width - self.barX - Self.rightIconSize - self.margin - 9
+    }
+
+    init(style: HUDStyle) {
+      switch style {
+      case .system, .segments:
+        self.size = NSSize(width: 314, height: 62)
+        self.cornerRadius = 22
+        self.margin = 18
+        self.barY = 19
+        self.hasName = true
+      case .compact:
+        self.size = NSSize(width: 220, height: 36)
+        self.cornerRadius = 18
+        self.margin = 14
+        self.barY = 16
+        self.hasName = false
+      }
+    }
+  }
+
+  // KMR-A4 fidelity knobs, one line each so the side-by-side pass can tune
+  // them without archaeology. The deltas they close, from Ryder's reference
+  // screenshots against the native pill: ours read darker (material), wore a
+  // near-black outline (separatorColor resolved over dark content), and
+  // missed the track's interval dots and the larger name.
+  /// `.popover` blends lighter and brighter than `.hudWindow` in both
+  /// appearances; the sheen below pushes it the rest of the way.
+  private static let material: NSVisualEffectView.Material = .popover
+  /// White wash over the material, the "bright glass" half of the fix.
+  private static let sheenAlpha: CGFloat = 0.07
+  /// The native edge reads as a LIGHT inner hairline in both appearances (a
+  /// glass highlight), so this is constant white, not a semantic color: the
+  /// old `separatorColor` CGColor resolved near-black and drew the outline
+  /// Ryder flagged. Static, so the per-show appearance refresh went with it.
+  private static let hairlineColor = NSColor.white.withAlphaComponent(0.25)
+  private static let hairlineWidth: CGFloat = 0.75
+  /// The native pill keeps a soft shadow; the heaviness Ryder saw was the
+  /// dark border plus the dark material. Flip this if the pass still reads
+  /// heavy after those two.
+  private static let panelHasShadow = true
+  /// Native name label: one point larger than ours was.
+  private static let nameFontSize: CGFloat = 13
+  /// Interval dots on the track at the sixteenths, covered by the fill on the
+  /// filled side exactly as the native track shows them.
+  private static let tickCount = 15
+  private static let tickDiameter: CGFloat = 2
+
+  private static let segmentCount = 16
+  private static let segmentGap: CGFloat = 2
+  private static let segmentHeight: CGFloat = 8
+  private static let segmentCornerRadius: CGFloat = 2
+
   private static let screenMargin: CGFloat = 20
   /// Extra clearance added on top of the menu-bar allowance so the pill sits
   /// clearly below the bar rather than hugging it. Ryder eyeballed this against
@@ -94,6 +164,10 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   /// fade takes the same window from one anchor to the other. Keying by kind as
   /// well as by display would make simultaneous pills possible, which is a
   /// product change nobody has ruled on, not a bug fix.
+  ///
+  /// A window built for one STYLE is torn down and rebuilt when a show arrives
+  /// with another (KMR-A3): the anatomies differ structurally, so
+  /// reconfiguring in place would leave orphaned subviews.
   private var huds: [CGDirectDisplayID: HUD] = [:]
   private var fadeTimers: [CGDirectDisplayID: Timer] = [:]
   /// Monotonic per display, bumped by every `showHUD` and by `cleanupDisplay`.
@@ -104,9 +178,9 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   // MARK: - BrightnessHUDPresenting
 
   func showBrightness(displayID: CGDirectDisplayID, name: String, value: Double,
-                      nameSuffix: String?, position: HUDPosition) {
+                      nameSuffix: String?, position: HUDPosition, style: HUDStyle) {
     self.showHUD(displayID: displayID, type: .brightness, name: name, value: Float(value),
-                 nameSuffix: nameSuffix, position: position)
+                 nameSuffix: nameSuffix, position: position, style: style)
   }
 
   // MARK: - Presentation
@@ -129,29 +203,37 @@ final class BrightnessHUD: BrightnessHUDPresenting {
   /// purpose rather than by iteration order (#123).
   func showHUD(displayID: CGDirectDisplayID, type: HUDType, name: String, value: Float,
                maxValue: Float = 1, nameSuffix: String? = nil,
-               position: HUDPosition) {
+               position: HUDPosition, style: HUDStyle) {
     guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
       return
     }
     let hud: HUD
-    if let existing = self.huds[displayID] {
+    if let existing = self.huds[displayID], existing.style == style {
       hud = existing
     } else {
-      hud = self.createHUD()
+      // Style changed (or first show): the old window's subview tree belongs
+      // to the old anatomy, so it closes rather than reconfigures.
+      self.huds[displayID]?.panel.close()
+      hud = self.createHUD(style: style)
       self.huds[displayID] = hud
     }
+    let metrics = Metrics(style: style)
     let title = name.isEmpty ? screen.localizedName : name
-    hud.nameLabel.stringValue = title + (nameSuffix ?? "")
-    hud.leftIcon.image = Self.symbolImage(type.leftSymbolName, pointSize: Self.leftIconSize - 3)
-    hud.rightIcon.image = Self.symbolImage(type.rightSymbolName, pointSize: Self.rightIconSize - 3)
+    hud.nameLabel?.stringValue = title + (nameSuffix ?? "")
+    hud.leftIcon.image = Self.symbolImage(type.leftSymbolName, pointSize: Metrics.leftIconSize - 3)
+    hud.rightIcon.image = Self.symbolImage(type.rightSymbolName, pointSize: Metrics.rightIconSize - 3)
     let normalized = CGFloat(min(max(maxValue > 0 ? value / maxValue : 0, 0), 1))
-    var fillFrame = hud.fillBox.frame
-    fillFrame.size.width = max(Self.barHeight, Self.barWidth * normalized)
-    hud.fillBox.frame = fillFrame
-    // Layer colors don't track appearance changes; refresh the hairline border
-    // against whatever the system looks like right now.
-    hud.effectView.effectiveAppearance.performAsCurrentDrawingAppearance {
-      hud.effectView.layer?.borderColor = NSColor.separatorColor.cgColor
+    if let fillBox = hud.fillBox {
+      var fillFrame = fillBox.frame
+      fillFrame.size.width = max(Metrics.barHeight, metrics.barWidth * normalized)
+      fillBox.frame = fillFrame
+    }
+    if !hud.segmentBoxes.isEmpty {
+      // KMR-A3: filled count rounds, so a half step lights the nearer chiclet.
+      let filled = Int((normalized * CGFloat(Self.segmentCount)).rounded())
+      for (index, box) in hud.segmentBoxes.enumerated() {
+        box.fillColor = index < filled ? .labelColor : .quaternaryLabelColor
+      }
     }
     // The anchor arrives from the caller and the arithmetic lives in the Kit,
     // where a rotated display's bounds can be tested (DT16: the island holds no
@@ -159,7 +241,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     // display mounted at 270° needs nothing special here.
     hud.panel.setFrameOrigin(HUDPlacement.origin(
       position,
-      size: Self.hudSize,
+      size: metrics.size,
       frame: screen.frame,
       visibleFrame: screen.visibleFrame,
       topInset: Self.menuBarAllowance(for: screen),
@@ -193,77 +275,134 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     return NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config)
   }
 
-  private func createHUD() -> HUD {
-    let panel = NSPanel(contentRect: NSRect(origin: .zero, size: Self.hudSize), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+  private func createHUD(style: HUDStyle) -> HUD {
+    let metrics = Metrics(style: style)
+    let size = metrics.size
+    let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     panel.level = .screenSaver
     panel.isFloatingPanel = true
     panel.hidesOnDeactivate = false
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
     panel.isOpaque = false
     panel.backgroundColor = .clear
-    panel.hasShadow = true
+    panel.hasShadow = Self.panelHasShadow
     panel.isMovable = false
     panel.ignoresMouseEvents = true
 
-    let size = Self.hudSize
     let rootView = NSView(frame: NSRect(origin: .zero, size: size))
     rootView.wantsLayer = true
     rootView.layer?.backgroundColor = NSColor.clear.cgColor
 
     let effectView = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
-    effectView.material = .hudWindow
+    effectView.material = Self.material
     effectView.blendingMode = .behindWindow
     effectView.state = .active
     // The fork forces `.vibrantDark`; the native pill adapts to the system
     // appearance, and so do we (Ryder, 2026-07-30): dynamic semantic colors
-    // everywhere, and `.hudWindow` supplies the light/dark material itself.
-    // The one non-dynamic spot is the layer border — CGColor resolves at set
-    // time, so `showHUD` refreshes it against the current appearance.
+    // everywhere. KMR-A4 moved the material off `.hudWindow` (too dark next to
+    // the native pill) and the border off `separatorColor` (resolved
+    // near-black, the "outline" in Ryder's screenshot); the hairline is now a
+    // constant white glass highlight, so nothing here needs an appearance
+    // refresh at show time any more.
     effectView.wantsLayer = true
-    effectView.layer?.cornerRadius = Self.cornerRadius
+    effectView.layer?.cornerRadius = metrics.cornerRadius
     effectView.layer?.masksToBounds = true
-    effectView.layer?.borderWidth = 0.5
+    effectView.layer?.borderWidth = Self.hairlineWidth
+    effectView.layer?.borderColor = Self.hairlineColor.cgColor
     rootView.addSubview(effectView)
 
-    let nameLabel = NSTextField(labelWithString: "")
-    nameLabel.frame = NSRect(x: Self.margin, y: size.height - 26, width: size.width - Self.margin * 2, height: 16)
-    nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-    nameLabel.textColor = .labelColor
-    nameLabel.lineBreakMode = .byTruncatingTail
-    effectView.addSubview(nameLabel)
+    // The bright-glass sheen (KMR-A4): first subview, so every control draws
+    // above it. Constant white; the alpha is the whole design.
+    let sheen = NSView(frame: NSRect(origin: .zero, size: size))
+    sheen.wantsLayer = true
+    sheen.layer?.backgroundColor = NSColor.white.withAlphaComponent(Self.sheenAlpha).cgColor
+    effectView.addSubview(sheen)
 
-    let leftIcon = NSImageView(frame: NSRect(x: Self.margin, y: Self.barY - (Self.leftIconSize - Self.barHeight) / 2, width: Self.leftIconSize, height: Self.leftIconSize))
+    var nameLabel: NSTextField?
+    if metrics.hasName {
+      let label = NSTextField(labelWithString: "")
+      label.frame = NSRect(x: metrics.margin, y: size.height - 28, width: size.width - metrics.margin * 2, height: 18)
+      label.font = NSFont.systemFont(ofSize: Self.nameFontSize, weight: .semibold)
+      label.textColor = .labelColor
+      label.lineBreakMode = .byTruncatingTail
+      effectView.addSubview(label)
+      nameLabel = label
+    }
+
+    let leftIcon = NSImageView(frame: NSRect(x: metrics.margin, y: metrics.barY - (Metrics.leftIconSize - Metrics.barHeight) / 2, width: Metrics.leftIconSize, height: Metrics.leftIconSize))
     leftIcon.imageScaling = .scaleProportionallyDown
     leftIcon.contentTintColor = .secondaryLabelColor
     effectView.addSubview(leftIcon)
 
-    let rightIcon = NSImageView(frame: NSRect(x: size.width - Self.margin - Self.rightIconSize, y: Self.barY - (Self.rightIconSize - Self.barHeight) / 2, width: Self.rightIconSize, height: Self.rightIconSize))
+    let rightIcon = NSImageView(frame: NSRect(x: size.width - metrics.margin - Metrics.rightIconSize, y: metrics.barY - (Metrics.rightIconSize - Metrics.barHeight) / 2, width: Metrics.rightIconSize, height: Metrics.rightIconSize))
     rightIcon.imageScaling = .scaleProportionallyDown
     rightIcon.contentTintColor = .secondaryLabelColor
     effectView.addSubview(rightIcon)
 
-    let barBackground = NSBox(frame: NSRect(x: Self.barX, y: Self.barY, width: Self.barWidth, height: Self.barHeight))
-    barBackground.boxType = .custom
-    // The fork says `borderType = .noBorder`; that is deprecated and applies only to the old-style
-    // box. `borderWidth = 0` is the custom-box equivalent (Apple's suggested `transparent` would
-    // also suppress the fill, which is the only thing we draw here).
-    barBackground.borderWidth = 0
-    barBackground.fillColor = .quaternaryLabelColor
-    barBackground.cornerRadius = Self.barHeight / 2
-    effectView.addSubview(barBackground)
+    var fillBox: NSBox?
+    var segmentBoxes: [NSBox] = []
+    switch style {
+    case .system, .compact:
+      let barBackground = NSBox(frame: NSRect(x: metrics.barX, y: metrics.barY, width: metrics.barWidth, height: Metrics.barHeight))
+      barBackground.boxType = .custom
+      // The fork says `borderType = .noBorder`; that is deprecated and applies only to the old-style
+      // box. `borderWidth = 0` is the custom-box equivalent (Apple's suggested `transparent` would
+      // also suppress the fill, which is the only thing we draw here).
+      barBackground.borderWidth = 0
+      barBackground.fillColor = .quaternaryLabelColor
+      barBackground.cornerRadius = Metrics.barHeight / 2
+      effectView.addSubview(barBackground)
 
-    let fillBox = NSBox(frame: NSRect(x: Self.barX, y: Self.barY, width: Self.barHeight, height: Self.barHeight))
-    fillBox.boxType = .custom
-    fillBox.borderWidth = 0
-    fillBox.fillColor = .labelColor
-    fillBox.cornerRadius = Self.barHeight / 2
-    effectView.addSubview(fillBox)
+      // Interval dots at the sixteenths (KMR-A4). Added BEFORE the fill so the
+      // filled side covers its dots, which is exactly how the native track
+      // reads: dots visible on the unfilled remainder only.
+      for index in 1 ... Self.tickCount {
+        let centerX = metrics.barX + metrics.barWidth * CGFloat(index) / CGFloat(Self.tickCount + 1)
+        let tick = NSBox(frame: NSRect(
+          x: centerX - Self.tickDiameter / 2,
+          y: metrics.barY + Metrics.barHeight / 2 - Self.tickDiameter / 2,
+          width: Self.tickDiameter, height: Self.tickDiameter
+        ))
+        tick.boxType = .custom
+        tick.borderWidth = 0
+        tick.fillColor = .tertiaryLabelColor
+        tick.cornerRadius = Self.tickDiameter / 2
+        effectView.addSubview(tick)
+      }
+
+      let fill = NSBox(frame: NSRect(x: metrics.barX, y: metrics.barY, width: Metrics.barHeight, height: Metrics.barHeight))
+      fill.boxType = .custom
+      fill.borderWidth = 0
+      fill.fillColor = .labelColor
+      fill.cornerRadius = Metrics.barHeight / 2
+      effectView.addSubview(fill)
+      fillBox = fill
+
+    case .segments:
+      // KMR-A3 pinned geometry: 16 chiclets across the system bar rect,
+      // 8 pt tall, radius 2, 2 pt gaps, centered on the bar's line.
+      let segmentWidth = (metrics.barWidth - CGFloat(Self.segmentCount - 1) * Self.segmentGap) / CGFloat(Self.segmentCount)
+      let segmentY = metrics.barY + Metrics.barHeight / 2 - Self.segmentHeight / 2
+      for index in 0 ..< Self.segmentCount {
+        let segment = NSBox(frame: NSRect(
+          x: metrics.barX + CGFloat(index) * (segmentWidth + Self.segmentGap),
+          y: segmentY, width: segmentWidth, height: Self.segmentHeight
+        ))
+        segment.boxType = .custom
+        segment.borderWidth = 0
+        segment.fillColor = .quaternaryLabelColor
+        segment.cornerRadius = Self.segmentCornerRadius
+        effectView.addSubview(segment)
+        segmentBoxes.append(segment)
+      }
+    }
 
     // Do not drop this line: without it the panel has no content view and the HUD is invisible
     // (see docs/ENGINEERING-NOTES.md, "OSD / HUD").
     panel.contentView = rootView
 
-    return HUD(panel: panel, effectView: effectView, nameLabel: nameLabel, leftIcon: leftIcon, rightIcon: rightIcon, fillBox: fillBox)
+    return HUD(panel: panel, effectView: effectView, nameLabel: nameLabel, leftIcon: leftIcon,
+               rightIcon: rightIcon, fillBox: fillBox, segmentBoxes: segmentBoxes, style: style)
   }
 
   private func fadeOut(displayID: CGDirectDisplayID) {

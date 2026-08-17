@@ -295,7 +295,8 @@ final class KeyActionExecutor {
         nameSuffix: HUDGrouping.nameSuffix(
           isHDREngaged: isHDREngaged(named.id), othersInSet: pill.othersInSet
         ),
-        position: appPrefs.hudPositionBrightness
+        position: appPrefs.hudPositionBrightness,
+        style: appPrefs.hudStyle
       )
     }
   }
@@ -318,14 +319,16 @@ final class KeyActionExecutor {
         value: Float(named.value),
         maxValue: 1,
         nameSuffix: HUDGrouping.nameSuffix(isHDREngaged: false, othersInSet: pill.othersInSet),
-        position: position
+        position: position,
+        style: appPrefs.hudStyle
       )
     }
   }
 
   /// The app-level defaults, re-read at every announcement rather than cached:
-  /// the indicator positions fan out to `.refreshUI` alone, so a pill drawn
-  /// after the picker moves has to pick the new value up here.
+  /// the indicator positions and style (KMR-A3) fan out to `.refreshUI` alone,
+  /// so a pill drawn after either picker moves has to pick the new value up
+  /// here; the island rebuilds its cached window on a style mismatch.
   private var appPrefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
   /// What the HUD calls a display. The model hands every step path the RAW
