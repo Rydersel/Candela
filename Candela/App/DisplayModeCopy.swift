@@ -87,25 +87,37 @@ enum DisplayModeCopy {
 
   /// The hub's one-line suggestion: the size and the reason in one sentence.
   ///
-  /// "Renders larger and scales the result" is the RM11 half. Every size this
-  /// model can name is a scaled mode, so the sentence has to say so; what it
-  /// must never do is imply the panel is natively that size. It states the
-  /// mechanism plainly instead, which is also the honest answer to "why is this
-  /// better than what I have".
+  /// Two second sentences, picked by the caller from the curated row this
+  /// applies, because the recommended size is NOT always a scaled mode: on the
+  /// MAG running 1920 × 1080 the model names 3440 × 1440, whose representative
+  /// is the panel's own native mode. "It renders larger and scales the result"
+  /// scales nothing there, and the picker row beside it says Native at the same
+  /// moment.
+  ///
+  /// The scaled sentence is the RM11 half: it states the mechanism plainly and
+  /// never implies the panel is natively that size. The other states provenance
+  /// in the word the row tags already use (`Catalog.tags(for:)`), and neither
+  /// makes a quality claim.
   ///
   /// The claim is about THIS panel's physical size and nothing else. No
   /// measurement, no PPI, no band: those are the model's workings, and a
   /// suggestion someone has to do arithmetic to evaluate is not a suggestion.
-  static func recommendationCallout(width: Int, height: Int) -> String {
-    "For this display's size, \(size(width: width, height: height)) is the comfortable fit. It renders larger and scales the result."
+  static func recommendationCallout(width: Int, height: Int, isScaled: Bool) -> String {
+    let fit = "For this display's size, \(size(width: width, height: height)) is the comfortable fit."
+    return isScaled
+      ? "\(fit) It renders larger and scales the result."
+      : "\(fit) It is this display's native resolution."
   }
 
   /// Names the ACT, not the size: the sentence above already named the size,
   /// and a button repeating it would be read as a second, different size.
   static var recommendationApply: String { "Use This Size" }
 
-  /// Closes the row for this display and nothing more. The Recommended mark
-  /// survives it, so this is "not now", never "never tell me again".
+  /// Closes the row for this display for good: the dismissal pref is not in the
+  /// per-display reset's enumerated batch, so only Reset All Settings clears it.
+  /// What keeps the suggestion reachable afterwards is the Recommended mark on
+  /// the size picker, which this does not touch: the passive signal outlives the
+  /// row that argues for it.
   static var recommendationDismiss: String { "Dismiss" }
 
   /// Rates are quantized to one decimal at the CoreGraphics boundary, so 59.9

@@ -262,25 +262,35 @@ struct DisplayHubView: View {
   /// The density model's suggestion as an ACTION, where the badge on the size
   /// picker is only a mark (PD8).
   ///
-  /// Four conditions, and each removes the row for a different reason: no
+  /// Five conditions, and each removes the row for a different reason: no
   /// recommendation (the model abstained, or no geometry ever reached it), the
-  /// user closed it, the named size has no curated row to apply (the wire-timing
+  /// user closed it, the user has already applied a size on this display this
+  /// session, the named size has no curated row to apply (the wire-timing
   /// guard can withhold one), or the display is already running that size. The
   /// last is why applying writes no dismissal: the size becomes current, so the
   /// row goes on its own, and a dismissal written here would also hide the row
   /// for a LATER recommendation on this display.
   ///
+  /// A person who just chose a size has answered the question for this session;
+  /// the durable opt-out is the dismissal.
+  ///
   /// Matched through `isRecommendedSize`, the same predicate the picker's mark
   /// uses, so the row this applies and the row that wears the mark cannot drift.
+  /// `isScaled` comes off that same curated row, because a recommended size can
+  /// be the panel's own native one (the MAG running 1920 × 1080 is offered
+  /// 3440 × 1440), and the callout must not claim a scaling that is not
+  /// happening while the row beside it says Native.
   @ViewBuilder private func recommendationCallout(
     _ catalog: DisplayModeCoordinator.Catalog
   ) -> some View {
     if let recommendation = catalog.density?.recommendation,
        !prefs.sizeRecommendationDismissed,
+       !coordinator.sizeAppliedByUser.contains(displayID),
        let row = catalog.rows.first(where: { catalog.isRecommendedSize($0.mode) }),
        !catalog.isCurrentSize(row.mode) {
       SettingRow(caption: SettingsCaption(verbatim: DisplayModeCopy.recommendationCallout(
-        width: recommendation.logicalWidth, height: recommendation.logicalHeight
+        width: recommendation.logicalWidth, height: recommendation.logicalHeight,
+        isScaled: row.isScaled
       ))) {
         HStack {
           // The SAME apply the picker uses, countdown and all (PD9): a
@@ -909,7 +919,9 @@ struct DisplayHubView: View {
       //    NOT everything keyed to this display: the mute strategy is step 4
       //    (ordering), and the remembered display mode is deliberately outside
       //    — a resolution the user is currently looking at is not a setting
-      //    this button promises to change.
+      //    this button promises to change. The size-recommendation dismissal is
+      //    deliberately outside too: only Reset All Settings brings that
+      //    suggestion back, and this alert never promises to.
       writer.writeAll([
         .friendlyName, .hideDisplay, .isDisabled, .hideOsd, .forceSw, .avoidGamma,
         .audioDeviceNameOverride, .audioSinkOverride, .hideVolumeSlider,

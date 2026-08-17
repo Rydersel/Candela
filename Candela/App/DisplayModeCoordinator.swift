@@ -199,6 +199,21 @@ final class DisplayModeCoordinator {
   /// synchronously so the disable lands in the same body evaluation as the
   /// click that caused it.
   private(set) var isApplying = false
+  /// Displays whose user has applied a size in THIS session (PD8): a person who
+  /// just chose a size has answered the recommendation for now, and the durable
+  /// opt-out is the dismissal pref.
+  ///
+  /// In memory and never persisted, deliberately, for that same split: the
+  /// dismissal is the answer that outlives a launch, and a second stored
+  /// hide-forever key would be a second way to lose the suggestion for good.
+  /// Written only by a KEPT preview, so a reverted or expired try leaves the
+  /// suggestion standing.
+  private(set) var sizeAppliedByUser: Set<CGDirectDisplayID> = []
+  /// Whether the select now in flight changes the display's logical SIZE,
+  /// sampled before `begin()` moves it. PD8 is about applying a size: a refresh
+  /// rate picked at the size already on screen answers nothing about how big
+  /// things look, so it must not hide the callout.
+  @ObservationIgnored private var selectChangesSize: [CGDirectDisplayID: Bool] = [:]
 
   let configurator: any DisplayConfiguring
   let persistence: ModePersistence
@@ -417,6 +432,12 @@ final class DisplayModeCoordinator {
         refreshCatalog(for: displayID)
       } else {
         catalogs[displayID] = nil
+        // Both are keyed by display ID, which the next display to arrive can
+        // inherit, so a departure has to take them: a suggestion silently
+        // suppressed on a panel nobody has chosen a size for is the failure
+        // this feature has no visible symptom for.
+        sizeAppliedByUser.remove(displayID)
+        selectChangesSize[displayID] = nil
       }
     }
     // A departure is what makes the next arrival an arrival, so it is recorded
@@ -865,6 +886,15 @@ final class DisplayModeCoordinator {
     // where the decision is filed.)
     origins[displayID] = origin
     surfaces[displayID] = surface
+    // Sampled here, before `begin()` moves the display, and promoted to
+    // `sizeAppliedByUser` only if this preview is KEPT. Every path that reaches
+    // here is an explicit choice from an offering surface (the hub's pickers,
+    // the full list, the menu bar's list); reapply and restore never preview.
+    // An unreadable current mode counts as a size change: this is a user's
+    // choice either way, and the recommendation is the thing being answered.
+    selectChangesSize[displayID] = configurator.currentMode(for: displayID).map {
+      $0.logicalWidth != mode.logicalWidth || $0.logicalHeight != mode.logicalHeight
+    } ?? true
     // Through `dismissStartFailure`, never a bare `startFailure = nil`: the
     // standalone window renders the failure, so clearing it without syncing
     // leaves an EMPTY floating panel on the display for the whole duration of
@@ -919,6 +949,13 @@ final class DisplayModeCoordinator {
       // trying sizes out would otherwise rewrite it from whichever one was
       // kept last — a change nobody asked for and nothing showed. The only
       // route to a stored mode is `pinCurrentMode`.
+      //
+      // The size recommendation IS answered here (PD8): a kept size is the
+      // user's answer for this session, and only a kept one, since a revert or
+      // an expiry leaves them on the size they were already being asked about.
+      if selectChangesSize[answered.displayID] == true {
+        sizeAppliedByUser.insert(answered.displayID)
+      }
       await adopt(.clear)
     case .reverted:
       await adopt(.clear)
