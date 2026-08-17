@@ -32,6 +32,21 @@ struct DisplayModeProvenanceTests {
       mode(provenance: .coreGraphics).descriptor
         == mode(provenance: .coreGraphicsServices).descriptor)
   }
+
+  /// SS5. A synthesized row comes from neither enumeration: it is a size we
+  /// render through a virtual display, so it is not "revealed" and its
+  /// `ioModeID` is a sentinel that must never reach CoreGraphics.
+  @Test func synthesizedIsNeitherRevealedNorCoreGraphics() {
+    let m = DisplayMode(
+      ioModeID: DisplayMode.syntheticIoModeID(stopIndex: 2),
+      logicalWidth: 2580, logicalHeight: 1080,
+      pixelWidth: 5160, pixelHeight: 2160,
+      refreshHz: 0, isNative: false, provenance: .synthesized)
+    #expect(m.isSynthesized)
+    #expect(!m.isRevealed)
+    #expect(m.ioModeID == -1002)
+    #expect(m.isHiDPI)
+  }
 }
 
 /// The one question the pickers ask about provenance: is this an option our own

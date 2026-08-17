@@ -161,6 +161,13 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       try applyPublishedMode(mode, to: displayID, scope: scope)
     case .coreGraphicsServices:
       try applyRevealedMode(mode, to: displayID, scope: scope)
+    case .synthesized:
+      // Refused, not routed. A synthesized size is engaged by
+      // `ModeSynthesisEngine` (a virtual display plus a mirror), and its
+      // sentinel `ioModeID` denotes nothing in either mode-ID space, so there
+      // is no configuration transaction this could stage. Reaching here means a
+      // caller bypassed the engine.
+      throw DisplayConfigError(cgErrorCode: CGError.illegalArgument.rawValue)
     }
   }
 
