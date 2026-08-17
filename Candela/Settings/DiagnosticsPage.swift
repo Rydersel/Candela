@@ -700,6 +700,7 @@ private struct KeyRequirementRow: View {
 @MainActor
 struct DiagnosticsReportActions: View {
   @Environment(AppModel.self) private var model
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   @State private var justCopied = false
   /// Cancelled and replaced on every copy, so a second click restarts the two
@@ -733,12 +734,12 @@ struct DiagnosticsReportActions: View {
   private func copyReport() {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(DiagnosticsReport.render(model.diagnosticsSnapshot()), forType: .string)
-    withAnimation { justCopied = true }
+    withAnimation(Motion.notice(reduceMotion: reduceMotion)) { justCopied = true }
     confirmationTask?.cancel()
     confirmationTask = Task {
       try? await Task.sleep(for: .seconds(2))
       guard !Task.isCancelled else { return }
-      withAnimation { justCopied = false }
+      withAnimation(Motion.notice(reduceMotion: reduceMotion)) { justCopied = false }
     }
   }
 

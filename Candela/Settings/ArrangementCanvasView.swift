@@ -227,7 +227,7 @@ struct ArrangementCanvasView: View {
 
   /// Reduce Motion turns the spring-back and the settle off **entirely** — a
   /// `nil` animation, not a faster one.
-  private var motion: Animation? { reduceMotion ? nil : .snappy(duration: 0.2) }
+  private var motion: Animation? { Motion.settle(reduceMotion: reduceMotion) }
 
   /// The user's name for a display, falling back to the name the topology
   /// carries. The fallback is load-bearing rather than defensive:

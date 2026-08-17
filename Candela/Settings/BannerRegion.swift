@@ -33,6 +33,7 @@ struct BannerRegion: View {
 
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private var persistenceKey: String { state.display.persistenceKey }
   private var displayID: CGDirectDisplayID { state.display.id }
@@ -46,6 +47,10 @@ struct BannerRegion: View {
     // `DisplayPrefs` is plain UserDefaults and not observable; this is what
     // re-runs the strand and first-sight checks after a write anywhere.
     let _ = model.prefsRevision
+    // Read ONCE per body and handed down. `hasAnyStoredValue` behind
+    // `firstSight` materialises the whole UserDefaults dictionary, and this
+    // region re-renders every second of a countdown, in two placements.
+    let cards = visibleCards
     // Spacing lives on each card, not on this stack: a padded container would
     // keep its padding as dead space when every banner is absent, which is the
     // usual state of this region.
@@ -54,8 +59,14 @@ struct BannerRegion: View {
       startFailureBanner
       reapplyBanner
       strandedMuteBanner
-      firstSightBanner
+      firstSightBanner(cards.firstSight)
     }
+    // Keyed to WHICH cards are present and to nothing else. The countdown's
+    // per-second tick, a report's sentence and the strand's cause all change
+    // inside a card that is already on screen, and a card already on screen is
+    // not an arrival; a page-wide or unkeyed animation here would put every one
+    // of them on a curve.
+    .animation(Motion.notice(reduceMotion: reduceMotion), value: cards)
   }
 
   /// One banner's chrome. Applied per banner so an empty region is exactly
@@ -70,6 +81,48 @@ struct BannerRegion: View {
       )
       .padding(.horizontal, 20)
       .padding(.top, 10)
+      // Opacity only, per card: the stack's animated layout supplies the
+      // collapse and the growth, so nothing slides sideways and the cards below
+      // a departing one keep their order.
+      .transition(.opacity)
+  }
+
+  // MARK: - What is on screen
+
+  /// Which cards the region is showing, and the only animation key it has.
+  ///
+  /// Each field is read from the same property the matching `@ViewBuilder`
+  /// branches on, so the key cannot come to disagree with what is rendered: a
+  /// second, drifting copy of these tests would animate cards that are not
+  /// there and leave arriving ones to jump.
+  ///
+  /// No defaults: a field left out of the key below is a compile error rather
+  /// than a card that silently never animates.
+  private struct VisibleCards: Equatable {
+    var countdown: Bool
+    var startFailure: Bool
+    var reapply: Bool
+    var strandedMute: Bool
+    var firstSight: Bool
+  }
+
+  private var visibleCards: VisibleCards {
+    VisibleCards(
+      // Presence only. The countdown's two FORMS are a branch swap that rebuilds
+      // the answerable banner's controls, so a surface change lands instantly
+      // rather than cross-fading two different cards.
+      //
+      // Latent, and worth knowing if the preview model changes: `surface` is
+      // fixed at preview start and `ownsAnswerableCountdown` follows the
+      // navigation stack, so today neither can flip in the same update as
+      // another card's presence. If one ever could, that update would carry an
+      // animation and the form swap would cross-fade a live control.
+      countdown: countdownForm != nil,
+      startFailure: startFailure != nil,
+      reapply: reapplyReport != nil,
+      strandedMute: isStrandedMuted,
+      firstSight: showsFirstSight
+    )
   }
 
   // MARK: - Countdown (SO6)
@@ -79,24 +132,34 @@ struct BannerRegion: View {
   /// when this window owns the answer, passive text when the floating window
   /// does — never both (SO6).
   @ViewBuilder private var countdownBanner: some View {
-    if let preview = coordinator.preview, preview.displayID == displayID {
-      switch preview.surface {
-      case .settingsBanner:
-        if ownsAnswerableCountdown {
-          card { AnswerableModeBanner(coordinator: coordinator, preview: preview) }
-        }
-      case .floatingPanel:
-        // Status only while the countdown is armed. Once it is spent (a failed
-        // expiry) the floating window is the whole story, and a passive line
-        // saying "reverting in 0 seconds" would be false.
-        if preview.isCountingDown {
-          card {
-            Text(verbatim: DisplayModeCopy.passiveCountdown(preview.secondsRemaining))
-              .foregroundStyle(.secondary)
-              .monospacedDigit()
-          }
+    if let preview = coordinator.preview, let form = countdownForm {
+      switch form {
+      case .answerable:
+        card { AnswerableModeBanner(coordinator: coordinator, preview: preview) }
+      case .passive:
+        card {
+          Text(verbatim: DisplayModeCopy.passiveCountdown(preview.secondsRemaining))
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
         }
       }
+    }
+  }
+
+  /// Which form the countdown card takes, or nil when there is no card. Read by
+  /// the builder above and by the animation key, so presence has one definition.
+  private enum CountdownForm { case answerable, passive }
+
+  private var countdownForm: CountdownForm? {
+    guard let preview = coordinator.preview, preview.displayID == displayID else { return nil }
+    switch preview.surface {
+    case .settingsBanner:
+      return ownsAnswerableCountdown ? .answerable : nil
+    case .floatingPanel:
+      // Status only while the countdown is armed. Once it is spent (a failed
+      // expiry) the floating window is the whole story, and a passive line
+      // saying "reverting in 0 seconds" would be false.
+      return preview.isCountingDown ? .passive : nil
     }
   }
 
@@ -106,7 +169,7 @@ struct BannerRegion: View {
   /// panel-origin ones — the settings window stays on screen, so this region
   /// can report its own.
   @ViewBuilder private var startFailureBanner: some View {
-    if let failure = coordinator.startFailure, failure.displayID == displayID {
+    if let failure = startFailure {
       card {
         VStack(alignment: .leading, spacing: 6) {
           SettingsCaption(DisplayModeCopy.startFailure(failure.reason))
@@ -118,13 +181,20 @@ struct BannerRegion: View {
     }
   }
 
+  /// This display's start failure, or nil. One reading for the builder and the
+  /// animation key.
+  private var startFailure: DisplayModeCoordinator.StartFailure? {
+    guard let failure = coordinator.startFailure, failure.displayID == displayID else { return nil }
+    return failure
+  }
+
   // MARK: - Reapply notices (SO8)
 
   /// What reapply could not do, said on the display it could not do it to.
   /// An unplug does not take it away; only OK does, through the one dismissal
   /// path every surface shares.
   @ViewBuilder private var reapplyBanner: some View {
-    if let report = coordinator.report(for: displayID) {
+    if let report = reapplyReport {
       card {
         VStack(alignment: .leading, spacing: 6) {
           SettingsCaption(DisplayModeCopy.reapply(
@@ -138,6 +208,10 @@ struct BannerRegion: View {
         }
       }
     }
+  }
+
+  private var reapplyReport: DisplayModeCoordinator.ReapplyReport? {
+    coordinator.report(for: displayID)
   }
 
   // MARK: - Stranded mute recovery (SO4)
@@ -249,6 +323,13 @@ struct BannerRegion: View {
       prefs.setTuning(tuning, for: .volume)
       prefs.audioSinkOverride = .auto
     }
+    // The card fades out over 0.2 s and stays hit-testable while it does, so a
+    // second click mid-fade must not toggle back: `toggleMute` is a real toggle
+    // and would re-mute the display over DDC. `DDCValueController` exposes no
+    // one-way unmute (`setMuted` is private), so the guard is the state this
+    // recovery exists to undo, read after the prefs are cleared so D29 rule 2's
+    // ordering is untouched.
+    guard state.volume.isMuted else { return }
     _ = state.volume.toggleMute()
   }
 
@@ -259,9 +340,11 @@ struct BannerRegion: View {
   /// key, so a display that has ANY history fails it. Dismissal is
   /// session-scoped and in-memory on purpose; a marker pref would defeat the
   /// very emptiness this line is gated on.
-  @ViewBuilder private var firstSightBanner: some View {
-    if !model.dismissedFirstSightKeys.contains(persistenceKey),
-       !DisplayPrefs.hasAnyStoredValue(forKey: persistenceKey) {
+  ///
+  /// Takes the answer rather than re-deriving it: `hasAnyStoredValue` reads the
+  /// whole domain, and `body` has already asked once for the animation key.
+  @ViewBuilder private func firstSightBanner(_ shows: Bool) -> some View {
+    if shows {
       card {
         HStack(alignment: .firstTextBaseline) {
           Text("First time seeing this display. Its settings start fresh.")
@@ -272,6 +355,11 @@ struct BannerRegion: View {
         }
       }
     }
+  }
+
+  private var showsFirstSight: Bool {
+    !model.dismissedFirstSightKeys.contains(persistenceKey)
+      && !DisplayPrefs.hasAnyStoredValue(forKey: persistenceKey)
   }
 }
 
@@ -288,6 +376,7 @@ private struct AnswerableModeBanner: View {
   let preview: DisplayModeCoordinator.Preview
 
   @AccessibilityFocusState private var keepFocused: Bool
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -302,6 +391,7 @@ private struct AnswerableModeBanner: View {
         // until the app exits.
         SettingsCaption(DisplayModeCopy.resolveFailure)
           .help("CoreGraphics error \(failure.cgErrorCode)")
+          .transition(.opacity)
       }
       if preview.isCountingDown {
         Text(verbatim: DisplayModeCopy.countdown(preview.secondsRemaining))
@@ -330,6 +420,17 @@ private struct AnswerableModeBanner: View {
       // is pointless even though it is now harmless.
       .disabled(coordinator.isApplying)
     }
+    // The failure caption is a pure insert under the buttons, so it fades in and
+    // the buttons give way to it. Keyed to that one fact, so the seconds ticking
+    // inside this same stack animate nothing.
+    //
+    // The countdown/expiry pair below the caption DOES animate with it, and that
+    // is accepted rather than avoided: `adopt` assigns the whole `Preview` at
+    // once, so a failed expiry flips `failure` and `isCountingDown` in one
+    // observation and the swap lands inside this transaction. Both branches are
+    // plain text with no control and no focus in them, so the cross-fade costs
+    // nothing.
+    .animation(Motion.notice(reduceMotion: reduceMotion), value: preview.failure != nil)
     .accessibilityElement(children: .contain)
     .onAppear {
       keepFocused = true

@@ -107,6 +107,7 @@ extension View {
 private struct PanelHoverReason: ViewModifier {
   let reason: String?
   @State private var hovering = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   func body(content: Content) -> some View {
     VStack(alignment: .leading, spacing: 3) {
@@ -125,7 +126,13 @@ private struct PanelHoverReason: ViewModifier {
           .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
           .opacity(hovering ? 1 : 0)
-          .animation(.easeInOut(duration: 0.12), value: hovering)
+          // A hover fade, deliberately outside the `Motion` vocabulary: that set
+          // covers state a person changed, and this is per-surface feel on a
+          // pointer affordance, guarded here on its own. 0.12 s is kept because
+          // the pointer can cross several controls in a second and anything
+          // slower trails behind it. nil under Reduce Motion, so the reason
+          // appears at once instead of fading.
+          .animation(reduceMotion ? nil : .easeInOut(duration: 0.12), value: hovering)
       }
     }
   }

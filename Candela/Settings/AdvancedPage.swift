@@ -22,8 +22,22 @@ struct AdvancedPage: View {
 
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   @State private var confirmingRestore = false
+
+  /// The traffic block as the CAPTION renders it, mirroring `trafficBlock` one
+  /// update behind. The block is derived from the engine's brightness path, which
+  /// changes without this view writing anything, and neither placement of a keyed
+  /// `.animation` fades a `Form` row symmetrically (measured 2026-08-17): on a
+  /// `Group` wrapping the conditional row it animates nothing in either
+  /// direction, and on an always-present container inside the row the child fades
+  /// IN and then SNAPS out. That snap-out asymmetry is why a container-hung
+  /// `.animation` is not enough here; the mirror is what puts the explanation's
+  /// arrival AND departure inside one transaction. Only the caption reads it:
+  /// SO12's greying stays instant, and the safety sentence spoken on the
+  /// hardware-control toggle keeps reading the live value.
+  @State private var shownTrafficBlock: DDCTrafficBlock?
 
   private var persistenceKey: String { state.display.persistenceKey }
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: persistenceKey) }
@@ -175,9 +189,19 @@ struct AdvancedPage: View {
           set: { shown in writer.write(.hideOsd) { $0.hideOsd = !shown } }
         ))
       }
+      // The caption's mirror hooks hang on the row above, the last row of this
+      // section that is always present: hooks on the caption itself would only
+      // exist while the caption does, so nothing would be watching for it to
+      // arrive. Un-animated on appear, or opening the page under live HDR would
+      // fade the explanation in as though HDR had just engaged.
+      .onAppear { shownTrafficBlock = trafficBlock }
+      .onChange(of: trafficBlock) { _, block in
+        withAnimation(Motion.notice(reduceMotion: reduceMotion)) { shownTrafficBlock = block }
+      }
 
-      if let trafficBlock {
-        blockExplanation(trafficBlock)
+      if let shownTrafficBlock {
+        blockExplanation(shownTrafficBlock)
+          .transition(.opacity)
       }
     } header: {
       Text("Control Method").settingsHeading()
