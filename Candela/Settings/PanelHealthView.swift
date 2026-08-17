@@ -59,8 +59,10 @@ struct PanelHealthView: View {
 
   private var persistenceKey: String { state.display.persistenceKey }
   /// Live handle, used only to ask macOS about the panel's current geometry.
-  /// Never persisted and never a key: IDs reassign across a replug. A pushed
-  /// page only exists for a connected display, so it is never stale here.
+  /// Never persisted and never a key: IDs reassign across a replug. Staleness
+  /// is kept out by `DisplayHealthWindowRoot`, which resolves the key against
+  /// the connected set each render and closes the window on departure
+  /// (OCR-A1), so this view only ever renders for a connected display.
   private var displayID: CGDirectDisplayID? { state.display.id }
 
   private var displayName: String {
@@ -245,6 +247,7 @@ struct PanelHealthView: View {
     let aspect =
       OledPanelGeometry.displayAspect(for: displayID)
       ?? CGFloat(PanelGrid.cols) / CGFloat(PanelGrid.rows)
+    let mapSize = Self.mapSize(aspect: aspect)
     let rotation = OledPanelGeometry.rotation(for: displayID)
     // The displayed cells are the one truth every sub-layer (surface, ghosts,
     // crosshair readout) shares, so the inspection can never describe a frame
@@ -316,8 +319,7 @@ struct PanelHealthView: View {
         // 520 x 218), and it sits OUTSIDE the overlays so the crosshair's
         // GeometryReader and the hotspot tag keep describing exactly the
         // drawn map.
-        .frame(width: Self.mapSize(aspect: aspect).width,
-               height: Self.mapSize(aspect: aspect).height)
+        .frame(width: mapSize.width, height: mapSize.height)
         .frame(maxWidth: .infinity)
         PanelExposureLegend()
         if surfaceMode == .now, let live {
@@ -335,8 +337,7 @@ struct PanelHealthView: View {
           }
           // Same explicit frame as the drawn map: the blank state collapses
           // under `preferredContentSize` hosting exactly the same way.
-          .frame(width: Self.mapSize(aspect: aspect).width,
-                 height: Self.mapSize(aspect: aspect).height)
+          .frame(width: mapSize.width, height: mapSize.height)
           .frame(maxWidth: .infinity)
           .accessibilityHidden(true)
         // `summary.cells` is the accumulated history and is populated whatever

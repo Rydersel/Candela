@@ -347,11 +347,13 @@ struct MenuBarPreviewView: View {
     colorScheme == .dark ? .white.opacity(0.22) : .black.opacity(0.08)
   }
 
-  /// The display a pill names, its live value, and whether it is muted: the
-  /// first row the panel would render for that kind, which is the same
-  /// "first visible" ordering the real HUD grouping resolves to on this rig.
-  /// The value is the controllers' live one (KMR-A5), the exact reads the
-  /// panel miniature's bars use, so the two move together.
+  /// The display a pill names, its live value, and whether it is muted:
+  /// mirrors the panel miniature's row ordering (the first display with a row
+  /// of that kind), which keeps the two surfaces naming the same subject. The
+  /// REAL pill's subject depends on the key target mode, so this is a preview
+  /// convention, not a claim about which display a press would name. The
+  /// value is the controllers' live one (KMR-A5), the exact reads the panel
+  /// miniature's bars use, so the two move together.
   private func pillSubject(kind: HUDType, externals: [AppModel.DisplayState])
     -> (name: String, value: Double, muted: Bool) {
     if kind == .volume || kind == .volumeMuted,

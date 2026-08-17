@@ -702,7 +702,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     /// and the pill has no other route to a screenshot. Style and position are
     /// re-read from prefs on every tick, so a style change in the settings
     /// window is visible on the live pill within a second, which is also the
-    /// interactive demo of the style picker. Compiled out of Release by
+    /// interactive demo of the style picker. While the demo runs it wins over
+    /// real key presses on its display: the next tick overwrites their pill
+    /// within a second. Compiled out of Release by
     /// construction; the name's 21 bytes clear the 16-byte floor the deploy
     /// grep can see.
     private func startHUDDemoIfRequested() {
