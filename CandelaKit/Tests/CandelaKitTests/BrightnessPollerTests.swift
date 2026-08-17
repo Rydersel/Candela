@@ -198,20 +198,19 @@ private func makePoller(
 
 @Test func divergenceSwitchesToFastCadence() async {
   let probe = Probe(expected: 0.5, generation: 1, hardware: 0.9)
-  let poller = makePoller(probe, fast: .milliseconds(10), idle: .milliseconds(500))
+  // The idle interval dwarfs waitUntil's whole window on purpose: run() ticks
+  // BEFORE it sleeps, so a poller that switches to fast produces five reads in
+  // ~40 ms, while one stuck on idle cannot produce read two inside 3 s. The
+  // gate below is therefore the cadence assertion. Its predecessor asserted
+  // elapsed time between reads with a 1 s bound, which starvation on a hosted
+  // runner crossed at 1.198 s while still on the fast cadence; no bound under
+  // the idle math survives that, so the elapsed check is gone rather than
+  // loosened again (it had already moved once, off spans of 387 and 512 ms).
+  let poller = makePoller(probe, fast: .milliseconds(10), idle: .seconds(30))
   let task = Task { await poller.run() }
   let got = await waitUntil { probe.reads.count >= 5 }
   task.cancel()
   #expect(got)
-  let reads = probe.reads
-  guard reads.count >= 5 else { return }
-  // Four idle intervals would be 2 s; four fast ones ~40 ms. The bound sits an
-  // order of magnitude above the fast cadence and a factor of two below the
-  // idle one, because the quantity here is ELAPSED TIME and no amount of
-  // awaiting shortens it: a starved scheduler stretches the real loop, and at
-  // 300 ms this failed on spans of 387 ms and 512 ms that were still nowhere
-  // near the idle cadence (#115). Under 1 s means fast; idle cannot get there.
-  #expect(reads[4].at - reads[0].at < .seconds(1))
 }
 
 @Test func echoStaysOnIdleCadence() async {
