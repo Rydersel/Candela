@@ -74,6 +74,7 @@ struct AllModesPage: View {
   /// SO6's "key settings window" test, read at the click that starts a
   /// preview: `.key` exactly when this view's window is the key window.
   @Environment(\.controlActiveState) private var controlActiveState
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private var displayID: CGDirectDisplayID { state.display.id }
   private var coordinator: DisplayModeCoordinator { model.displayModes }
@@ -148,7 +149,13 @@ struct AllModesPage: View {
           // keeps a picker's own initial-selection write from being recorded as
           // the user having answered.
           guard mode != listMode else { return }
-          chosenListMode = mode
+          // Animated at the SETTER, not by an `.animation` on the list: only a
+          // real choice should move. The seed in `seedListMode` decides the
+          // opening list before anything is on screen, and a catalog arriving
+          // mid-page must land instantly.
+          withAnimation(Motion.disclosure(reduceMotion: reduceMotion)) {
+            chosenListMode = mode
+          }
           announce(mode, in: catalog)
         }
       )) {
@@ -161,12 +168,25 @@ struct AllModesPage: View {
       // Only the full list is long enough to want filtering, and a filter with
       // one rate in it is a control that cannot do anything.
       if listMode == .all, rateChoices.count > 1 {
-        Picker("Refresh rate", selection: $rateFilter) {
+        Picker("Refresh rate", selection: Binding<Double?>(
+          get: { rateFilter },
+          set: { rate in
+            // A rate bulk-expands every size that offers it (see `isExpanded`),
+            // so this is the size rows' own disclosure made thirty times at
+            // once, and it unfurls as one movement. Animating the SETTER leaves
+            // the correction in `onChange(of: rateChoices)` instant, which is
+            // right: nobody asked for that one.
+            withAnimation(Motion.disclosure(reduceMotion: reduceMotion)) { rateFilter = rate }
+          }
+        )) {
           Text("Any").tag(Double?.none)
           ForEach(rateChoices, id: \.self) { hz in
             Text(verbatim: DisplayModeCopy.refresh(hz)).tag(Double?.some(hz))
           }
         }
+        // Arrives and leaves with the switch to All, under that switch's own
+        // animation.
+        .transition(.opacity)
       }
     }
   }
@@ -250,10 +270,21 @@ struct AllModesPage: View {
           ForEach(filteredGroups(catalog), id: \.header) { group in
             sizeRow(group, in: catalog)
             if isExpanded(group) {
-              ForEach(group.modes) { mode in
-                fullRow(mode, in: catalog, lowResolution: lowResolution)
-                  .padding(.leading, 18)
+              // One transition site for the opened block, and a `Group` rather
+              // than a real container: a `Group`'s modifier reaches each child,
+              // so every rate stays its OWN form row. A `VStack` would fade as
+              // one block and collapse the whole size into a single row, taking
+              // the separators and the row insets with it, which is the
+              // grouped-`Form` trap `.focusSection()` fell into below. The fade
+              // is the transition; the vertical unfurl is the animated layout
+              // the toggle site opens.
+              Group {
+                ForEach(group.modes) { mode in
+                  fullRow(mode, in: catalog, lowResolution: lowResolution)
+                    .padding(.leading, 18)
+                }
               }
+              .transition(.opacity)
             }
           }
         } header: {
@@ -392,12 +423,17 @@ struct AllModesPage: View {
       ),
       spokenValue: expanded ? "Expanded" : "Collapsed",
       isCurrent: holdsCurrent,
-      chevron: expanded ? "chevron.up" : "chevron.down"
+      chevronExpanded: expanded
     ) {
-      if expanded {
-        expandedSizes.remove(group.header)
-      } else {
-        expandedSizes.insert(group.header)
+      // Animated HERE, not by an `.animation` on the list: only the click
+      // should move. The seed in `seedListMode` opens the size in use before
+      // the page is on screen, and a re-enumeration must not replay it.
+      withAnimation(Motion.disclosure(reduceMotion: reduceMotion)) {
+        if expanded {
+          expandedSizes.remove(group.header)
+        } else {
+          expandedSizes.insert(group.header)
+        }
       }
     }
     .id(id)
@@ -670,10 +706,11 @@ private struct ModeChoice: View {
   /// dead end.
   var spokenValue: String?
   let isCurrent: Bool
-  /// An SF Symbol drawn at the trailing edge, or nothing. Hidden from
-  /// accessibility: `spokenValue` already says what it means, and a glyph name
-  /// read aloud says nothing.
-  var chevron: String?
+  /// Whether the disclosure chevron at the trailing edge is pointing at an open
+  /// size, or nil on a row that discloses nothing. Hidden from accessibility:
+  /// `spokenValue` already says what it means, and a glyph read aloud says
+  /// nothing.
+  var chevronExpanded: Bool?
   let action: () -> Void
 
   @State private var isHovering = false
@@ -703,10 +740,15 @@ private struct ModeChoice: View {
             .background(RoundedRectangle(cornerRadius: 3, style: .continuous).fill(.quaternary))
             .accessibilityHidden(true)
         }
-        if let chevron {
-          Image(systemName: chevron)
+        if let chevronExpanded {
+          // One glyph rotated, not an up/down symbol swap: the rotation rides
+          // the same animation as the expansion it describes, and a swap cannot.
+          // Same as the menu bar's `PanelDisclosureRow`, so the two resolution
+          // surfaces move alike.
+          Image(systemName: "chevron.down")
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(.secondary)
+            .rotationEffect(.degrees(chevronExpanded ? 180 : 0))
             .accessibilityHidden(true)
         }
       }
