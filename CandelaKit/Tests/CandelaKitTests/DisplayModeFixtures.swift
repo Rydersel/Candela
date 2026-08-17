@@ -46,6 +46,18 @@ enum DisplayModeFixtures {
     m(1720, 720, 3440, 1440, native: true),
   ]
 
+  /// The three MAG ladder rungs the flat 720 minor-axis floor hid: measured in
+  /// the CGS revelation pass, aspect-correct at 2x and at the panel's own
+  /// 175 Hz, yet every one has a minor axis under 720 because the panel is
+  /// 21:9. They are the acceptance case for the density floor, so they live
+  /// apart from `mag` rather than inside it: `mag` is the published ladder, and
+  /// these arrive only with revelation on.
+  static let magRevealedMidLadder: [DisplayMode] = [
+    m(1280, 536, 2560, 1072, hz: 175, provenance: .coreGraphicsServices),
+    m(1344, 562, 2688, 1124, hz: 175, provenance: .coreGraphicsServices),
+    m(1600, 670, 3200, 1340, hz: 175, provenance: .coreGraphicsServices),
+  ]
+
   /// The MAG's 1x ladder, where the rates it really offers survive. `mag`
   /// above is the HiDPI ladder and carries one rate per size, because curation
   /// collapses the rest — so nothing there can exercise a question about
@@ -109,15 +121,20 @@ enum DisplayModeFixtures {
   /// it leaves every fixture's `ioModeID` unchanged — which matters, because
   /// `DisplayModeCatalog` tie-breaks on `ioModeID` and the ordered assertions
   /// in `DisplayModeCatalogTests` would shift if these moved.
+  /// `provenance` is deliberately outside the ID derivation, for the same
+  /// reason the removed `surfaced:` parameter was: adding it leaves every
+  /// existing fixture's `ioModeID` untouched, and the ordered assertions in
+  /// `DisplayModeCatalogTests` tie-break on that value.
   private static func m(
     _ lw: Int, _ lh: Int, _ pw: Int, _ ph: Int,
-    hz: Double = 60, native: Bool = false
+    hz: Double = 60, native: Bool = false,
+    provenance: ModeProvenance = .coreGraphics
   ) -> DisplayMode {
     DisplayMode(
       ioModeID: Int32(truncatingIfNeeded: lw &* 100_003 &+ lh &* 397 &+ Int(hz)),
       logicalWidth: lw, logicalHeight: lh,
       pixelWidth: pw, pixelHeight: ph, refreshHz: hz,
-      isNative: native
+      isNative: native, provenance: provenance
     )
   }
 }

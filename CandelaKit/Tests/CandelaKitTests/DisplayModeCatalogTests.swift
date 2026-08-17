@@ -13,15 +13,111 @@ struct DisplayModeCatalogTests {
                               nativePixelHeight: DisplayModeFixtures.dellNativePixels.1)
   }
 
-  @Test func curationDropsModesBelowTheUsabilityFloor() {
+  /// With no declared physical size the floor is a fraction of the native
+  /// minor axis, so this states the fraction rule rather than the flat 720 it
+  /// replaced. The Dell is where the fraction was calibrated: 0.33 of 2160 is
+  /// 713, which admits exactly what the old constant did on this panel.
+  @Test func curationDropsModesBelowTheFractionOfNativeFloor() {
+    let floor = Int(
+      (Double(min(DisplayModeFixtures.dellNativePixels.0,
+                  DisplayModeFixtures.dellNativePixels.1))
+        * PanelDensityModel.fallbackFloorMinorAxisFraction).rounded())
     let rows = curatedDell()
+    #expect(rows.allSatisfy { min($0.mode.logicalWidth, $0.mode.logicalHeight) >= floor })
+    // The raw fixture definitely contains sub-floor junk.
+    #expect(dell.contains { min($0.logicalWidth, $0.logicalHeight) < floor })
+  }
+
+  /// The acceptance case for the density floor. All three rungs are real,
+  /// aspect-correct and at the panel's own 175 Hz, and every one has a minor
+  /// axis under 720 purely because the panel is 21:9 - so the flat floor cut
+  /// them and the density floor keeps them.
+  @Test func densityFloorReturnsTheMAGMidLadderRungs() {
+    let modes = mag + DisplayModeFixtures.magRevealedMidLadder
+    let rows = DisplayModeCatalog.curated(
+      modes, nativePixelWidth: 3440, nativePixelHeight: 1440,
+      geometry: PanelDensityModelTests.mag)
+    let sizes = Set(rows.map { "\($0.mode.logicalWidth)x\($0.mode.logicalHeight)" })
+    #expect(sizes.contains("1600x670"))
+    #expect(sizes.contains("1344x562"))
+    #expect(sizes.contains("1280x536"))
+  }
+
+  /// The other half of the same claim: a floor that admits 1280x536 must still
+  /// refuse the sizes the floor exists for. 1024x429 is the near miss, one rung
+  /// below the smallest kept rung on this panel.
+  @Test func densityFloorStillDropsJunk() {
+    let rows = DisplayModeCatalog.curated(
+      mag, nativePixelWidth: 3440, nativePixelHeight: 1440,
+      geometry: PanelDensityModelTests.mag)
+    let sizes = Set(rows.map { "\($0.mode.logicalWidth)x\($0.mode.logicalHeight)" })
+    #expect(!sizes.contains("400x300"))
+    #expect(!sizes.contains("800x600"))
+    #expect(!sizes.contains("1024x429"))
+  }
+
+  /// The safety property for the whole change: a person who has been choosing
+  /// a size from this list must still find it there. Both new floors are
+  /// measured against the SHIPPED one, the flat 720 minor axis, because that
+  /// is what "currently curated" means.
+  ///
+  /// Not against the nil-geometry call: that path is itself new here, and it
+  /// is the LOOSEST of the three (0.33 of 1440 is 475 on the MAG, where the
+  /// shipped floor was 720). Treating it as the baseline would demand the
+  /// density floor keep six sizes nothing ever showed - 640x480 among them -
+  /// and would fail for the right reason on the wrong claim.
+  @Test func noCurrentlyCuratedRowDisappearsOnAnyPanel() {
+    for (modes, native, geometry) in [
+      (DisplayModeFixtures.mag, DisplayModeFixtures.magNativePixels,
+       PanelDensityModelTests.mag),
+      (DisplayModeFixtures.dell, DisplayModeFixtures.dellNativePixels,
+       PanelDensityModelTests.dellRotated),
+    ] {
+      // Zero native pixels reaches the flat floor, so the baseline runs
+      // through the SAME grouping and representative ranking as the two rows
+      // being compared against it. A hand-filtered list would not: curation
+      // returns one row per size, so its ids are representatives, not members.
+      let before = Set(DisplayModeCatalog.curated(
+        modes, nativePixelWidth: 0, nativePixelHeight: 0
+      ).map(\.mode.ioModeID))
+      #expect(!before.isEmpty)
+
+      // Passing geometry may ADD rows; it must never remove one.
+      let withDensity = Set(DisplayModeCatalog.curated(
+        modes, nativePixelWidth: native.0, nativePixelHeight: native.1,
+        geometry: geometry
+      ).map(\.mode.ioModeID))
+      #expect(before.subtracting(withDensity).isEmpty)
+
+      // And the fraction fallback, the floor that runs when it does not.
+      let withFraction = Set(DisplayModeCatalog.curated(
+        modes, nativePixelWidth: native.0, nativePixelHeight: native.1
+      ).map(\.mode.ioModeID))
+      #expect(before.subtracting(withFraction).isEmpty)
+    }
+  }
+
+  @Test func fractionFallbackGovernsWithoutPhysicalSize() {
+    // nil geometry: floor is a fraction of the native pixel minor axis.
+    let rows = DisplayModeCatalog.curated(
+      dell, nativePixelWidth: 2160, nativePixelHeight: 3840)
+    let sizes = Set(rows.map { "\($0.mode.logicalWidth)x\($0.mode.logicalHeight)" })
+    #expect(sizes.contains("720x1280"))   // 720 >= 0.33 x 2160
+    #expect(!sizes.contains("300x400"))
+  }
+
+  /// The state the flat constant still serves, and it is not hypothetical:
+  /// `DisplayModeCoordinator` passes `native?.width ?? 0` when the native flag
+  /// could not be read, so with no physical size either there is nothing left
+  /// to take a fraction of.
+  @Test func theFlatFloorIsTheLastResortWhenNothingAboutThePanelIsKnown() {
+    let rows = DisplayModeCatalog.curated(dell, nativePixelWidth: 0, nativePixelHeight: 0)
     #expect(rows.allSatisfy {
       min($0.mode.logicalWidth, $0.mode.logicalHeight) >= DisplayModeCatalog.usabilityFloorMinorAxis
     })
-    // The raw fixture definitely contains sub-floor junk.
-    #expect(dell.contains {
-      min($0.logicalWidth, $0.logicalHeight) < DisplayModeCatalog.usabilityFloorMinorAxis
-    })
+    let sizes = Set(rows.map { "\($0.mode.logicalWidth)x\($0.mode.logicalHeight)" })
+    #expect(sizes.contains("720x1280"))
+    #expect(!sizes.contains("648x1152"))
   }
 
   /// Regression for the rotated-display bug. The development Dell runs rotated
@@ -33,14 +129,22 @@ struct DisplayModeCatalogTests {
     #expect(sizes.contains("900x1600"))
   }
 
-  /// The ultrawide's exact-2x native mode is 1720x720. Its minor axis is 720,
-  /// so any floor above that removes the single most important mode on that
-  /// panel — which is why the floor is 720 and not 768.
-  @Test func theUltrawidesNativeHiDPIModeSurvivesTheFloor() {
-    let rows = DisplayModeCatalog.curated(mag,
-                                          nativePixelWidth: DisplayModeFixtures.magNativePixels.0,
-                                          nativePixelHeight: DisplayModeFixtures.magNativePixels.1)
-    #expect(rows.contains { $0.mode.logicalWidth == 1720 && $0.mode.logicalHeight == 720 })
+  /// The ultrawide's exact-2x native mode is 1720x720, the single most
+  /// important mode on that panel. It has to survive every one of the three
+  /// floors, since which one applies depends on what could be read about the
+  /// panel and the mode is the same either way.
+  @Test func theUltrawidesNativeHiDPIModeSurvivesEveryFloor() {
+    func keepsNative(_ rows: [DisplayModeRow]) -> Bool {
+      rows.contains { $0.mode.logicalWidth == 1720 && $0.mode.logicalHeight == 720 }
+    }
+    let native = DisplayModeFixtures.magNativePixels
+    #expect(keepsNative(DisplayModeCatalog.curated(
+      mag, nativePixelWidth: native.0, nativePixelHeight: native.1,
+      geometry: PanelDensityModelTests.mag)))
+    #expect(keepsNative(DisplayModeCatalog.curated(
+      mag, nativePixelWidth: native.0, nativePixelHeight: native.1)))
+    #expect(keepsNative(DisplayModeCatalog.curated(
+      mag, nativePixelWidth: 0, nativePixelHeight: 0)))
   }
 
   @Test func curatedRowsAreSortedByDescendingLogicalArea() {
@@ -67,14 +171,35 @@ struct DisplayModeCatalogTests {
   /// The MAG's ladder tops out at its native mode — nothing above the native
   /// framebuffer exists. Curation must not invent anything.
   @Test func theStandardPPIPanelHasNoModeAboveItsNativeFramebuffer() {
-    let rows = DisplayModeCatalog.curated(mag,
-                                          nativePixelWidth: DisplayModeFixtures.magNativePixels.0,
-                                          nativePixelHeight: DisplayModeFixtures.magNativePixels.1)
+    let native = DisplayModeFixtures.magNativePixels
     // The exact curated result, in order — a tautology like "nothing exceeds
     // the native framebuffer" cannot fail for any input, since curation never
     // synthesizes modes. This pins the floor AND the grouping by name.
+    let rows = DisplayModeCatalog.curated(mag,
+                                          nativePixelWidth: native.0,
+                                          nativePixelHeight: native.1,
+                                          geometry: PanelDensityModelTests.mag)
     #expect(rows.map { "\($0.mode.logicalWidth)x\($0.mode.logicalHeight)" } == ["1720x720", "1280x720"])
     #expect(rows.first?.mode.logicalWidth == 1720)
+  }
+
+  /// The fraction fallback's cost, pinned rather than left to be discovered.
+  ///
+  /// 0.33 was calibrated on the Dell, where it lands at 713 and reproduces the
+  /// old flat 720 exactly. On a 21:9 panel the same fraction of 1440 is only
+  /// 475, so six sizes the flat floor hid come back, 640x480 among them. That
+  /// is the price of a floor that must not drop a row it cannot measure, and
+  /// it is paid ONLY when the panel declares no physical size: the MAG really
+  /// declares 80x34 cm, so production takes the density path above and gets
+  /// two rows.
+  @Test func theFractionFallbackIsLooserOnAnUltrawideThanTheFlatFloorWas() {
+    let native = DisplayModeFixtures.magNativePixels
+    let rows = DisplayModeCatalog.curated(mag,
+                                          nativePixelWidth: native.0,
+                                          nativePixelHeight: native.1)
+    #expect(rows.map { "\($0.mode.logicalWidth)x\($0.mode.logicalHeight)" }
+            == ["1720x720", "1280x720", "960x540", "800x600", "840x525",
+                "672x504", "640x512", "640x480"])
   }
 
   @Test func theFullListIsNeverFiltered() {
