@@ -621,53 +621,55 @@ struct PanelHealthView: View {
 
 // MARK: - Window root
 
-/// The Display Health window's root (OCR-A1, #185): resolves the scene value
-/// (a persistence key) against the connected externals, keeps the switcher's
-/// list fresh, and closes the window when its display departs, the same rule
-/// that pops a pushed path on departure. Switching displays repoints THIS
-/// window's value rather than opening another, so the comparison workflow
-/// (SO23) stays one window deep; opening health for a second display from the
-/// settings window creates that display's own window (WindowGroup-for-value
-/// semantics).
+/// The Display Health window's root (OCR-A1, #185): resolves its persistence
+/// key against the connected externals, keeps the switcher's list fresh, and
+/// closes the window when its display departs, the same rule that pops a
+/// pushed path on departure. Hosted by `DisplayHealthWindowPresenter` (an
+/// AppKit island; a `WindowGroup` measurably changed plain-launch behavior),
+/// which supplies the two closures: `close` closes THIS window, and `rekey`
+/// tells the presenter the switcher repointed it, so the comparison workflow
+/// (SO23) stays one window deep and a later open finds the truth.
 @MainActor
 struct DisplayHealthWindowRoot: View {
-  @Binding var persistenceKey: String?
+  let initialKey: String
+  let close: () -> Void
+  let rekey: (_ from: String, _ to: String) -> Void
+
+  /// The display THIS window shows; the switcher moves it (through `rekey`,
+  /// so the presenter's bookkeeping follows).
+  @State private var currentKey: String?
 
   @Environment(AppModel.self) private var model
-  @Environment(\.dismiss) private var dismiss
 
   var body: some View {
     // Rename dependency, the switcher's rule: names come from `friendlyName`
     // and `DisplayPrefs` has no observation of its own.
     let _ = model.prefsRevision
+    let key = currentKey ?? initialKey
     Group {
-      if let key = persistenceKey,
-        let state = model.displays.first(where: { $0.display.persistenceKey == key })
-      {
+      if let state = model.displays.first(where: { $0.display.persistenceKey == key }) {
         PanelHealthView(
           state: state,
           displays: switcherDisplays,
-          onSwitch: { persistenceKey = $0 }
+          onSwitch: { newKey in
+            rekey(key, newKey)
+            currentKey = newKey
+          }
         )
         // A display switch resets page state (SO10's lesson: the lens and
         // ghost toggles describe one display's map, not a session).
         .id(key)
       } else {
-        // One frame of a departed (or restored-without-value) window before
-        // `dismiss` lands; never a blank white sheet.
+        // One frame of a departed display's window before `close` lands;
+        // never a blank white sheet.
         Text("This display is not connected.")
           .foregroundStyle(.secondary)
           .padding(40)
       }
     }
     .onChange(of: model.displays.map(\.display.persistenceKey), initial: true) { _, connected in
-      if let key = persistenceKey, !connected.contains(key) {
-        dismiss()
-      }
-      if persistenceKey == nil {
-        // A window restored by the system without its value has nothing to
-        // show and no way to be given one; close rather than sit blank.
-        dismiss()
+      if !connected.contains(key) {
+        close()
       }
     }
   }

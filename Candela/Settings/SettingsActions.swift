@@ -19,6 +19,11 @@ final class SettingsActions {
   @ObservationIgnored var performReset: () -> Void = {}
   @ObservationIgnored var postReset: () -> Void = {}
   @ObservationIgnored var showOnboarding: () -> Void = {}
+  /// Opens (or re-focuses) a display's Display Health window (OCR-A1, #185).
+  /// A closure for the same reason as `showOnboarding`: the windows are an
+  /// AppKit island the views cannot see, wired by `StatusItemController` at
+  /// launch. The argument is the display's persistence key.
+  @ObservationIgnored var openDisplayHealth: (String) -> Void = { _ in }
   @ObservationIgnored private weak var model: AppModel?
 
   init(model: AppModel) {

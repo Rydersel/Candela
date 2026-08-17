@@ -105,6 +105,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// above: the coordinator references it weakly and the countdown outlives
   /// whatever started the change.
   private var arrangementConfirmation: ArrangementConfirmationWindow?
+  /// Display Health windows (OCR-A1, #185): held like the confirmation
+  /// windows above, app-lifetime, one window per display key inside.
+  private lazy var displayHealthPresenter = DisplayHealthWindowPresenter(model: model)
   /// Stored (review M23) so the topology loop can `cleanupDisplay` departed
   /// displays' HUD panels; the executor shares this same instance.
   private let hud = BrightnessHUD()
@@ -670,6 +673,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     PrefsSchema.migrateIfNeeded(in: .standard)
 
     settingsActions.showOnboarding = { [weak self] in self?.presentOnboarding() }
+    // Display Health windows (OCR-A1): an AppKit island, reached through the
+    // same closure precedent as onboarding because the views cannot see it.
+    settingsActions.openDisplayHealth = { [weak self] key in
+      self?.displayHealthPresenter.open(key: key)
+    }
     // D12: a full-domain wipe removes prefsSchemaVersion, so the post-reset
     // state IS a first-run state and gets the same window.
     settingsActions.postReset = { [weak self] in self?.presentOnboarding() }
