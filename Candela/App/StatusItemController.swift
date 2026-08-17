@@ -269,7 +269,16 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // the display's own verdict for the volume and mute registers, and that
     // verdict arrives asynchronously after the display does, so the first arm
     // after a plug is always made from the pre-probe answer.
-    model.onVolumeKeyRoutingChanged = { [weak self] in self?.refreshTapConfig() }
+    model.onVolumeKeyRoutingChanged = { [weak self] in
+      self?.refreshTapConfig()
+      #if DEBUG
+        // Third dump trigger, beside launch and reconfigure: the capability
+        // verdict resolves after the launch dump, so without this the greyed
+        // slider (the dump's flagship assertion) is invisible until a
+        // reconfigure happens to come along.
+        if let self { DebugPanelDump.dumpIfRequested(self.model) }
+      #endif
+    }
 
     settingsActions.rearmTap = { [weak self] in
       self?.refreshTapConfig()
@@ -490,6 +499,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
           await state.controller.noteHDRStateMayHaveChanged()
           await state.controller.handleReconfigure()
         }
+        #if DEBUG
+          // Panel row model (AT7), last in the pass: the HDR state above and
+          // the re-applied dimming are what a dump taken here can report.
+          DebugPanelDump.dumpIfRequested(self.model)
+        #endif
       }
     }
 
@@ -605,6 +619,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // creation itself runs on the model's serial vd queue.
       model.syncVirtualDisplaysAtLaunch()
       #if DEBUG
+        // Panel row model (AT7): the first dump, after the warm refresh, so it
+        // describes a discovered display list. Before the settings hook, so a
+        // capture run's window cannot land between the refresh and the dump.
+        DebugPanelDump.dumpIfRequested(model)
         // Screenshot hook (DT6). After `model.refresh()`, so `display:first`
         // has a display list to resolve against.
         DebugSettingsHook.openIfRequested(
