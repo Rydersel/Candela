@@ -20,7 +20,31 @@ settings:
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: ""
+schemes:
+  # Headless entry for the app suite: xcodebuild test -scheme CandelaAppTests.
+  CandelaAppTests:
+    build:
+      targets:
+        CandelaAppTests: [test]
+    test:
+      targets: [CandelaAppTests]
 targets:
+  # Host-free unit-test bundle over the app sources (AT1). No TEST_HOST, so
+  # CandelaMain.main() never runs: no status item, no pollers, no DDC writer
+  # exists in the test process, and the suite is safe to run with panels
+  # attached. App sources compile INTO the bundle, so tests reach internal
+  # types directly with no @testable and no framework extraction (AT2).
+  CandelaAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Candela
+        excludes:
+          - "Info.plist"
+      - CandelaAppTests
+    dependencies:
+      - package: CandelaKit
+      - package: KeyboardShortcuts
   Candela:
     type: application
     platform: macOS
