@@ -504,18 +504,38 @@ final class AppModel {
   /// when the grant appears while the panel is open).
   let accessibility = AccessibilityPermission()
 
+  /// What a discovery pass returns, named so the seam below can be spelled
+  /// without repeating the tuple.
+  typealias DiscoveredDisplays = [(
+    display: ExternalDisplay, writer: any DDCWriting, facts: DisplayHardwareFacts
+  )]
+
+  /// How this model finds displays.
+  ///
+  /// Injected for ONE case that cannot be produced by hand (#51): a different
+  /// panel arriving on a display ID we already hold, inside a SINGLE refresh
+  /// pass. Every physical unplug fires its own reconfiguration, so a same-port
+  /// swap always splits into a departure pass and an arrival pass, and the
+  /// reconciliation branch that matters is never entered. Verified on the rig
+  /// 2026-08-17 by the event ring's ordering, which distinguishes the two.
+  @ObservationIgnored private let discoverDisplays: (Set<CGDirectDisplayID>) -> DiscoveredDisplays
+
   init(
     shade: (any ShadeRendering)? = nil,
     gamma: (any GammaApplying)? = nil,
     hdrToggling: (any HDRToggling)? = nil,
     audioDevices: (any AudioDeviceProviding)? = nil,
-    safeMode: Bool = false
+    safeMode: Bool = false,
+    discoverDisplays: @escaping (Set<CGDirectDisplayID>) -> DiscoveredDisplays = {
+      DisplayDiscovery.discover(excluding: $0)
+    }
   ) {
     self.shade = shade
     self.gamma = gamma
     self.hdrToggling = hdrToggling ?? MonitorPanelService()
     self.audioDevices = audioDevices ?? CoreAudioDeviceProvider()
     self.safeMode = safeMode
+    self.discoverDisplays = discoverDisplays
     appPrefs = DisplayPrefs(persistenceKey: "app", safeMode: safeMode)
   }
 
@@ -1152,7 +1172,7 @@ final class AppModel {
     let existing = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
     var appeared: [DisplayState] = []
     var kept: [DisplayState] = []
-    let entries = DisplayDiscovery.discover(excluding: virtualDisplays.ownedDisplayIDs)
+    let entries = discoverDisplays(virtualDisplays.ownedDisplayIDs)
     // Reconciled on PANEL identity, not on the display ID (#51). A display ID is
     // a slot: macOS reassigns them across a replug, so an ID that is still
     // present can be a different monitor, and reusing its controllers would
