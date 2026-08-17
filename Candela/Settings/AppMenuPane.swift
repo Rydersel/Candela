@@ -27,12 +27,12 @@ struct AppMenuPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
 
-  /// Which indicator the preview's pill depicts (KMR9): brightness until the
-  /// volume position picker is the one changed, then volume, and back. View
-  /// state only; nothing persists it.
-  @State private var previewPill: HUDType = .brightness
-
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
+
+  /// Scroll anchors for the preview's click-to-jump (KMR-A5). On the Section,
+  /// not a row: the jump should land the section heading at the top.
+  private static let slidersSectionID = "menuBar.sliders"
+  private static let indicatorsSectionID = "menuBar.indicators"
 
   var body: some View {
     // `menuIcon` is written from OUTSIDE this pane: ⌘-dragging the status item
@@ -40,13 +40,30 @@ struct AppMenuPane: View {
     // are plain UserDefaults and not observable, so the revision bump is the
     // only thing that re-reads them and flips the popup.
     let _ = model.prefsRevision
+    // A grouped `Form` is a ScrollView underneath, so the reader's proxy can
+    // drive it; the OLED pane's old glance strip used the same shape.
+    ScrollViewReader { proxy in
+      form(proxy: proxy)
+    }
+  }
+
+  private func form(proxy: ScrollViewProxy) -> some View {
     Form {
       // The pane's subject, drawn (KMR7): everything below decides what
       // Candela puts on screen, and the preview shows the current answer.
+      // Its widgets are doorways (KMR-A5): clicking one scrolls to the
+      // section that configures it.
       Section {
         VStack(alignment: .leading, spacing: 6) {
-          MenuBarPreviewView(pillKind: previewPill)
-          SettingsCaption("A preview of the current settings; the controls below change it live.")
+          MenuBarPreviewView { target in
+            withAnimation {
+              switch target {
+              case .sliders: proxy.scrollTo(Self.slidersSectionID, anchor: .top)
+              case .indicators: proxy.scrollTo(Self.indicatorsSectionID, anchor: .top)
+              }
+            }
+          }
+          SettingsCaption("A preview of the current settings; the controls below change it live. Click a widget to jump to its settings.")
         }
       }
 
@@ -108,6 +125,7 @@ struct AppMenuPane: View {
           ))
         }
       }
+      .id(Self.slidersSectionID)
 
       Section("Slider Appearance") {
         Toggle("Snap to 25% steps", isOn: Binding(
@@ -153,14 +171,12 @@ struct AppMenuPane: View {
   /// display's Advanced page both use it); "OSD" and "HUD" are internal words
   /// and never appear here.
   @ViewBuilder private var indicatorSection: some View {
-    Section("On-Screen Indicators") {
+    Section {
       SettingRow("One style for every indicator, on every display.") {
         Picker("Indicator style:", selection: Binding(
           get: { prefs.hudStyle },
           set: { style in
             prefs.hudStyle = style
-            // The preview keeps depicting whichever kind was last positioned;
-            // a style change restyles that pill rather than resetting it.
             actions.prefDidChange(.hudStyle)
           }
         )) {
@@ -178,9 +194,6 @@ struct AppMenuPane: View {
           get: { prefs.hudPositionBrightness },
           set: { position in
             prefs.hudPositionBrightness = position
-            // Preview follows the picker last touched (KMR9); the write above
-            // is unchanged and stays first.
-            previewPill = .brightness
             actions.prefDidChange(.hudPositionBrightness)
           }
         )) {
@@ -198,7 +211,6 @@ struct AppMenuPane: View {
           get: { prefs.hudPositionVolume },
           set: { position in
             prefs.hudPositionVolume = position
-            previewPill = .volume
             actions.prefDidChange(.hudPositionVolume)
           }
         )) {
@@ -207,7 +219,15 @@ struct AppMenuPane: View {
           }
         }
       }
+    } header: {
+      Text("On-Screen Indicators")
+    } footer: {
+      // The preview depicts both kinds at once so both position choices stay
+      // visible (KMR-A5); this line keeps what the screen actually does from
+      // being misread off that picture.
+      SettingsCaption("On screen, the two kinds of indicator take turns in one window per display; the preview shows both so each position stays visible.")
     }
+    .id(Self.indicatorsSectionID)
   }
 
   /// Reads as one sentence with the row label: "Indicator style: Match macOS"
