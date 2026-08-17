@@ -8,7 +8,7 @@ import Testing
 @Suite("Scaffold")
 struct ScaffoldTests {
   @Test func anAppModuleSymbolIsCallable() {
-    #expect(RotationCopy.countdown(5).contains("6"))  // POSITIVE CONTROL: wrong on purpose, reverted next commit
+    #expect(RotationCopy.countdown(5).contains("5"))
   }
 
   @Test @MainActor func imageRendererProducesPixelsWithoutAWindow() {
