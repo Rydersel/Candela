@@ -2,8 +2,12 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// One panel's accumulated exposure, opened FROM the OLED Care pane rather than
-/// embedded in one of its sections (OC19).
+/// One panel's accumulated exposure, a page pushed from the display's OLED
+/// Care page rather than embedded in one of its sections (OC19, placement
+/// amended by OCR5: a pushed page, no longer a sheet). It owns the map
+/// instruments now: the History / Right now lens, the window outlines, and
+/// the crosshair readout, all moved here from the old hero so the app has ONE
+/// surface for interrogating the map.
 ///
 /// Copy rule, and it is the reason half this file is text (OC11): software has
 /// two levers against OLED wear, namely reduce luminance and reduce time at
@@ -33,18 +37,31 @@ import SwiftUI
 /// claim the data cannot answer.
 @MainActor
 struct PanelHealthView: View {
-  let displayName: String
-  let persistenceKey: String
-  /// Live handle, used only to ask macOS about the panel's current geometry:
-  /// how it is turned, so the map can say when what it draws is not what is on
-  /// the glass, and how big it is, so the map is drawn at this display's shape
-  /// rather than the stored grid's. Never persisted and never a key: IDs
-  /// reassign across a replug.
-  let displayID: CGDirectDisplayID?
+  let state: AppModel.DisplayState
+  let displays: [(key: String, name: String)]
+  let onSwitch: (String) -> Void
 
   @Environment(AppModel.self) private var model
-  @Environment(\.dismiss) private var dismiss
   @State private var confirmingDelete = false
+  /// Which lens the surface shows. Session state, not a pref.
+  @State private var surfaceMode: SurfaceMode = .history
+  @State private var showsWindowGhosts = false
+  /// Pointer location over the surface, for the crosshair inspection.
+  @State private var hoverPoint: CGPoint?
+
+  private enum SurfaceMode { case history, now }
+
+  private var persistenceKey: String { state.display.persistenceKey }
+  /// Live handle, used only to ask macOS about the panel's current geometry.
+  /// Never persisted and never a key: IDs reassign across a replug. A pushed
+  /// page only exists for a connected display, so it is never stale here.
+  private var displayID: CGDirectDisplayID? { state.display.id }
+
+  private var displayName: String {
+    DisplayOrdering.title(
+      friendlyName: DisplayPrefs(persistenceKey: persistenceKey).friendlyName,
+      hardwareName: state.display.name)
+  }
 
   /// The coordinator's single door. Non-mutating by contract: it is called
   /// from a `body`, and it deliberately does not memoize the map it may have to
@@ -63,28 +80,27 @@ struct PanelHealthView: View {
   /// come and go under a running app: each ad-hoc re-sign of a deployed build
   /// can drop it (CLAUDE.md §3), and so can a revocation in System Settings.
   private var screenRecordingMissing: Bool {
-    displayID != nil && !CGPreflightScreenCaptureAccess()
+    !CGPreflightScreenCaptureAccess()
   }
 
   var body: some View {
     let summary = self.summary
-    VStack(spacing: 0) {
-      header
-      Divider()
-      ScrollView {
-        VStack(alignment: .leading, spacing: 20) {
-          confidenceNote(summary)
-          mapCard(summary)
-          findings(summary)
-          ownersCard(summary)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
+    ScrollView {
+      VStack(alignment: .leading, spacing: 20) {
+        SubPageHeader(
+          title: "Display Health",
+          currentKey: persistenceKey,
+          displays: displays,
+          onSwitch: onSwitch)
+        confidenceNote(summary)
+        mapCard(summary)
+        findings(summary)
+        ownersCard(summary)
+        deleteRow
       }
-      Divider()
-      footer
+      .padding(20)
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .frame(width: 560, height: 620)
     .confirmationDialog(
       "Delete this display's measurement history?",
       isPresented: $confirmingDelete,
@@ -108,30 +124,9 @@ struct PanelHealthView: View {
 
   // MARK: - Chrome
 
-  private var header: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text("Display health")
-        .font(.headline)
-      Text(verbatim: displayName)
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.horizontal, 20)
-    .padding(.vertical, 14)
-  }
-
-  private var footer: some View {
-    HStack {
-      Button("Delete History…", role: .destructive) { confirmingDelete = true }
-        .accessibilityLabel("Delete History…")
-      Spacer(minLength: 12)
-      Button("Done") { dismiss() }
-        .keyboardShortcut(.defaultAction)
-        .accessibilityLabel("Done")
-    }
-    .padding(.horizontal, 20)
-    .padding(.vertical, 14)
+  private var deleteRow: some View {
+    Button("Delete History…", role: .destructive) { confirmingDelete = true }
+      .accessibilityLabel("Delete History…")
   }
 
   // MARK: - Confidence
@@ -210,21 +205,95 @@ struct PanelHealthView: View {
 
   // MARK: - Map
 
+  /// The map as an instrument (OCR5): the heat surface drawn the way the
+  /// monitor hangs on the desk (`PanelExposureSurface` re-orders a rotated
+  /// display's history for presentation; storage stays panel-native), with
+  /// the lens picker, the window outlines and the crosshair readout, all
+  /// moved here from the old pane hero.
   @ViewBuilder private func mapCard(_ summary: PanelHealthSummary) -> some View {
-    let blank = summary.confidence != .measured
+    let live = model.oledCare.latestSample(for: persistenceKey)
+    let historyBlank = summary.confidence != .measured
+    let aspect =
+      OledPanelGeometry.displayAspect(for: displayID)
+      ?? CGFloat(PanelGrid.cols) / CGFloat(PanelGrid.rows)
+    let rotation = OledPanelGeometry.rotation(for: displayID)
+    // The displayed cells are the one truth every sub-layer (surface, ghosts,
+    // crosshair readout) shares, so the inspection can never describe a frame
+    // the surface is not drawing.
+    let displayed: [Double]? =
+      surfaceMode == .history ? (historyBlank ? nil : summary.cells) : live?.cells
 
     VStack(alignment: .leading, spacing: 10) {
       Text("Where this display has been lit")
         .font(.subheadline.weight(.semibold))
 
-      PanelExposureMap(
-        cells: summary.cells,
-        highlighted: blank ? nil : Self.hottestIndex(summary.cells),
-        blank: blank,
-        aspect: panelNativeAspect
-      )
+      HStack(spacing: 10) {
+        Picker("Map", selection: $surfaceMode) {
+          Text("History").tag(SurfaceMode.history)
+          Text("Right now").tag(SurfaceMode.now)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 170)
+        .accessibilityLabel("Map shows")
+        Toggle("Windows", isOn: $showsWindowGhosts)
+          .toggleStyle(.button)
+          .controlSize(.small)
+          .help("Outline the windows on this display, from the same permission-free snapshot app attribution uses.")
+        Spacer(minLength: 0)
+      }
 
-      if blank {
+      if let displayed {
+        PanelExposureSurface(
+          cells: displayed,
+          highlighted: surfaceMode == .history
+            ? OledPanelGeometry.hottestIndex(summary.cells) : nil,
+          aspect: aspect,
+          rotation: rotation,
+          glowStrength: 0.6,
+          reticle: true)
+        .overlay {
+          if showsWindowGhosts {
+            ghostCanvas
+              .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+          }
+        }
+        .overlay {
+          // The marked cell explains itself on the map (OCR8): here the tag
+          // carries the whole finding, because this page IS the reading
+          // instrument. History lens only; the live lens marks nothing.
+          if surfaceMode == .history, let relative = summary.hottestRelative,
+            let multiple = PanelHealthCopy.multiple(relative)
+          {
+            OledHotspotTag(
+              cells: summary.cells,
+              rotation: rotation,
+              text: "Hottest area · \(multiple) average")
+          }
+        }
+        .overlay {
+          GeometryReader { geometry in
+            inspection(
+              displayed: displayed, summary: summary, size: geometry.size,
+              rotation: rotation)
+          }
+        }
+        PanelExposureLegend()
+        if surfaceMode == .now, let live {
+          Text(verbatim: "Reading from \(live.at.formatted(date: .omitted, time: .standard)); brightness of what the display was showing.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      } else {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+          .fill(.quaternary)
+          .overlay {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+              .strokeBorder(.separator, lineWidth: 1)
+          }
+          .aspectRatio(aspect, contentMode: .fit)
+          .accessibilityHidden(true)
         // `summary.cells` is the accumulated history and is populated whatever
         // the confidence, so blanking the drawing must not also claim there is
         // nothing behind it: a display measured for a month and then switched
@@ -232,43 +301,148 @@ struct PanelHealthView: View {
         // "Delete History…". Only `.insufficient` may say nothing was measured,
         // because that state IS a map with fewer than
         // `minimumSamplesForAnalysis` samples in it.
-        Text(
-          summary.confidence == .estimated
-            ? "Not shown while measuring is off. The history recorded so far is kept."
-            : "Nothing measured to draw yet."
-        )
-        .font(.callout)
-        .foregroundStyle(.secondary)
-      } else {
-        PanelExposureLegend()
+        Text(verbatim: mapPlaceholder(summary, mode: surfaceMode))
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
       }
-
-      SettingsCaption(verbatim: orientationNote)
     }
   }
 
-  /// The shared computation (`OledPanelGeometry`), so the glance strip, the
-  /// hero and this page cannot drift on what shape a display's history draws
-  /// at. The rationale lives on the helper.
-  private var panelNativeAspect: CGFloat? {
-    OledPanelGeometry.panelNativeAspect(for: displayID)
+  /// Caption under a blank surface, per lens.
+  private func mapPlaceholder(_ summary: PanelHealthSummary, mode: SurfaceMode) -> String {
+    if mode == .now {
+      return "No reading this session yet. One lands within a minute while this display is awake, in use, and Screen Recording is granted."
+    }
+    if model.isSafeMode {
+      return "Paused for this session (Safe Mode). History recorded before it is kept."
+    }
+    if summary.confidence != .estimated, screenRecordingMissing {
+      return "Waiting on Screen Recording; no readings are being taken."
+    }
+    return summary.confidence == .estimated
+      ? "Not shown while measuring is off. The history recorded so far is kept."
+      : "Nothing measured to draw yet. Readings are taken once a minute while this display is awake and in use."
   }
 
-  /// Panel-native means the geometry the glass was manufactured with, the
-  /// landscape rectangle, which is NOT the display's current orientation once
-  /// a monitor is mounted rotated. Wear history is accumulated that way on
-  /// purpose, so that turning a monitor cannot scramble it, and the map has to
-  /// say so or a rotated panel's owner reads it as simply wrong.
-  private var orientationNote: String {
-    let base =
-      "Drawn the way the display itself is built, with the long edge across, so the history survives a monitor being turned."
-    guard let displayID, CGDisplayRotation(displayID) != 0 else { return base }
-    return base
-      + " This display is currently rotated, so the map will not line up with what you see on screen."
+  /// Current window rectangles over the surface, the geometry model made
+  /// visible. Same layer policy as the exposure model, so what is outlined is
+  /// what the estimate counts; below-zero backdrop layers stay out.
+  private var ghostCanvas: some View {
+    let windows = model.oledCare.latestWindowSnapshots(for: persistenceKey)
+    let display = OledCareCoordinator.transform(for: state.display.id)?.displaySize
+    // Direct display-local mapping: the surface is drawn in display
+    // orientation, so a window rect lands exactly where the eye expects,
+    // with no panel transform in between.
+    return Canvas { context, size in
+      guard let display, display.width > 0, display.height > 0 else { return }
+      for window in windows where ExposureModel.includedLayers.contains(window.layer) {
+        let bounds = window.bounds
+        guard bounds.origin.x.isFinite, bounds.origin.y.isFinite,
+          bounds.width.isFinite, bounds.height.isFinite
+        else { continue }
+        let clamped = bounds.intersection(CGRect(origin: .zero, size: display))
+        guard !clamped.isNull, clamped.width > 0, clamped.height > 0 else { continue }
+        let rect = CGRect(
+          x: clamped.minX / display.width * size.width,
+          y: clamped.minY / display.height * size.height,
+          width: clamped.width / display.width * size.width,
+          height: clamped.height / display.height * size.height
+        ).insetBy(dx: 0.5, dy: 0.5)
+        context.stroke(
+          Path(roundedRect: rect, cornerRadius: 2),
+          with: .color(.white.opacity(0.55)), lineWidth: 1)
+      }
+    }
+    .allowsHitTesting(false)
+  }
+
+  /// Crosshair and readout under the pointer: the map as an instrument you
+  /// can interrogate. History mode reads the accumulated cell against the
+  /// map's own mean; Right now reads the live luminance. Both say only what
+  /// the displayed array holds.
+  @ViewBuilder private func inspection(
+    displayed: [Double], summary: PanelHealthSummary, size: CGSize,
+    rotation: DisplayRotation
+  ) -> some View {
+    Color.clear
+      .contentShape(Rectangle())
+      .onContinuousHover { phase in
+        switch phase {
+        case .active(let location): hoverPoint = location
+        case .ended: hoverPoint = nil
+        }
+      }
+      .overlay {
+        if let point = hoverPoint, size.width > 0, size.height > 0 {
+          // Pointer to PANEL cell through the shared transform, so a rotated
+          // display's readout describes the cell under the pointer, not the
+          // cell at those coordinates in the manufactured frame.
+          let mapper = PanelSpaceTransform(
+            displaySize: CGSize(width: 1, height: 1), rotation: rotation)
+          let panelPoint = mapper.panelPointForDisplay(
+            u: point.x / size.width, v: point.y / size.height)
+          let col = min(PanelGrid.cols - 1, max(0, Int(panelPoint.p * Double(PanelGrid.cols))))
+          let row = min(PanelGrid.rows - 1, max(0, Int(panelPoint.q * Double(PanelGrid.rows))))
+          let cell = row * PanelGrid.cols + col
+          Canvas { context, canvasSize in
+            var lines = Path()
+            lines.move(to: CGPoint(x: point.x, y: 0))
+            lines.addLine(to: CGPoint(x: point.x, y: canvasSize.height))
+            lines.move(to: CGPoint(x: 0, y: point.y))
+            lines.addLine(to: CGPoint(x: canvasSize.width, y: point.y))
+            context.stroke(lines, with: .color(.white.opacity(0.3)), lineWidth: 0.5)
+          }
+          .allowsHitTesting(false)
+          inspectionReadout(cell: cell, displayed: displayed, summary: summary)
+            .position(
+              x: min(max(point.x + 70, 70), size.width - 70),
+              y: max(point.y - 26, 18))
+            .allowsHitTesting(false)
+        }
+      }
+  }
+
+  @ViewBuilder private func inspectionReadout(
+    cell: Int, displayed: [Double], summary: PanelHealthSummary
+  ) -> some View {
+    let lines = inspectionLines(cell: cell, displayed: displayed, summary: summary)
+    if !lines.isEmpty {
+      VStack(alignment: .leading, spacing: 1) {
+        ForEach(lines, id: \.self) { line in
+          Text(verbatim: line)
+        }
+      }
+      .font(.caption2.monospaced())
+      .foregroundStyle(.white)
+      .padding(.horizontal, 7)
+      .padding(.vertical, 4)
+      .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 4))
+    }
+  }
+
+  private func inspectionLines(
+    cell: Int, displayed: [Double], summary: PanelHealthSummary
+  ) -> [String] {
+    guard displayed.indices.contains(cell) else { return [] }
+    var lines: [String] = []
+    switch surfaceMode {
+    case .history:
+      let mean = displayed.reduce(0, +) / Double(displayed.count)
+      if mean > 0, let multiple = PanelHealthCopy.multiple(displayed[cell] / mean) {
+        lines.append("\(multiple) average")
+      }
+    case .now:
+      lines.append("\(Int((displayed[cell] * 100).rounded()))% luminance")
+    }
+    if let owner = summary.dominantOwnerByCell?[cell] {
+      lines.append(owner)
+    }
+    return lines
   }
 
   /// The shared tie-break (`OledPanelGeometry.hottestIndex`), one answer for
-  /// this page, the hero and the glance strip.
+  /// this page and the display page's hero.
   private static func hottestIndex(_ cells: [Double]) -> Int? {
     OledPanelGeometry.hottestIndex(cells)
   }
@@ -295,7 +469,7 @@ struct PanelHealthView: View {
         }
 
         if let region = Self.hottestIndex(summary.cells).map(Self.regionPhrase) {
-          SettingsCaption(verbatim: "Outlined on the map, \(region).")
+          SettingsCaption(verbatim: "Marked on the map, \(region).")
         }
 
         // Past tense, deliberately. The snapshot behind this is up to a minute
