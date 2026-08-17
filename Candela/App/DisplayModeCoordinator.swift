@@ -953,6 +953,14 @@ final class DisplayModeCoordinator {
       // how they left it. Only this branch writes: a reverted or expired
       // preview is a mode nobody accepted and must never become the pin.
       //
+      // The guarantee is the FLOW, not the type. This arm keys on the outcome,
+      // and `confirm` can return a committed outcome without applying anything
+      // when it replays `lastOutcome` for an answer it has already given. That
+      // replay re-enters here and rewrites the SAME descriptor, which is what
+      // makes keying on the outcome safe rather than merely convenient. Any
+      // future path that can reach `.committed` carrying a mode the user did
+      // not accept breaks this, so it has to be checked here and not assumed.
+      //
       // Deliberately NOT narrowed to size changes the way the recommendation
       // below is. A kept rate-only change is still a kept resolution, and the
       // stored descriptor carries the refresh rate.
