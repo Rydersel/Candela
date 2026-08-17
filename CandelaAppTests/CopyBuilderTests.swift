@@ -170,7 +170,22 @@ struct CopyBuilderTests {
         .layoutNoLongerFits([.overlap(Self.mag, Self.dell)]), name: Self.bothNamed))
     #expect(refit == render(ArrangementCopy.invalidLayout([.overlap(Self.mag, Self.dell)], name: Self.bothNamed)))
 
-    #expect(Set(Self.allReapplyNotices.map { render(ArrangementCopy.restoreNotice($0, name: Self.bothNamed)) }).count == 4)
+    // #180. A layout declined because a display resized must NOT borrow the
+    // overlap sentence: nothing on the machine overlaps, and that sentence was
+    // written for someone who had just dragged one display onto another.
+    let resized = render(
+      ArrangementCopy.restoreNotice(.savedForDifferentGeometry(["a"]), name: Self.bothNamed))
+    #expect(resized.contains("not the size they were"))
+    #expect(!resized.contains("overlap"))
+    #expect(!resized.contains("cover each other"))
+    // It names the way out, because nothing else ends this state: the saved
+    // layout is deliberately never rewritten.
+    #expect(resized.contains("Arrange them again"))
+    // Says nothing about a particular screen; the fact is about the layout.
+    #expect(!resized.contains("MAG 341C"))
+    #expect(!resized.contains("DELL"))
+
+    #expect(Set(Self.allReapplyNotices.map { render(ArrangementCopy.restoreNotice($0, name: Self.bothNamed)) }).count == 5)
   }
 
   @Test func arrangementApplyNoticeNamesTheDisplayWhenItCan() {
@@ -895,6 +910,7 @@ struct CopyBuilderTests {
     .ambiguousIdentity(["MAG-0", "MAG-0"]),
     .setDiffers(missing: ["DELL-1"], extra: ["MAG-0"]),
     .layoutNoLongerFits([.overlap(mag, dell)]),
+    .savedForDifferentGeometry(["DELL-1"]),
     .failed(DisplayConfigError(cgErrorCode: 1001)),
   ]
 
@@ -903,7 +919,8 @@ struct CopyBuilderTests {
     case .ambiguousIdentity: 0
     case .setDiffers: 1
     case .layoutNoLongerFits: 2
-    case .failed: 3
+    case .savedForDifferentGeometry: 3
+    case .failed: 4
     }
   }
 
@@ -1056,7 +1073,7 @@ struct CopyBuilderTests {
   /// Touches every guard so none is dead code the compiler stops checking.
   @Test func everyGuardedEnumIsStillTheShapeTheSamplesAssume() {
     #expect(Set(Self.allReportSubjects.map(Self.guardReportSubject)).count == 3)
-    #expect(Set(Self.allReapplyNotices.map(Self.guardReapplyNotice)).count == 4)
+    #expect(Set(Self.allReapplyNotices.map(Self.guardReapplyNotice)).count == 5)
     #expect(Set(Self.allApplyNotices.map(Self.guardApplyNotice)).count == 2)
     #expect(Set(Self.allProblemShapes.flatMap { $0 }.map(Self.guardProblem)).count == 2)
     #expect(Set(Self.allBrightnessPaths.map(Self.guardBrightnessPath)).count == 6)

@@ -26,6 +26,7 @@ struct ArrangementReportSubjectTests {
     ArrangementReapplyNotice.ambiguousIdentity(["a"]),
     .setDiffers(missing: ["a"], extra: ["b"]),
     .layoutNoLongerFits([.overlap(1, 2)]),
+    .savedForDifferentGeometry(["a"]),
   ])
   func aDeclinedRestoreReportsNothingChanged(notice: ArrangementReapplyNotice) {
     #expect(ArrangementReportSubject.of(

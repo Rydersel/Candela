@@ -56,10 +56,11 @@ public struct TopologySignature: Sendable, Hashable {
 
 /// One display's place in a saved layout.
 ///
-/// The size is persisted for future validation and diagnostics — nothing reads
-/// it back yet — and never as authority (§7.4): a layout's geometry is only
-/// valid for the modes the displays were in when it was captured, and the
-/// display's current footprint is what a restore has to tile.
+/// The size is the geometry the origins were MEASURED against, and it is read
+/// back for exactly that (`ArrangementPersistence.resolve`). Never as authority
+/// (§7.4): a layout's geometry is only valid for the modes the displays were in
+/// when it was captured, so a restore never re-imposes a recorded footprint on
+/// a display that has since changed size. It declines instead.
 public struct SavedArrangementEntry: Sendable, Equatable, Codable {
   /// `DisplayConfigIdentity.key`. A String rather than the struct because this
   /// is an on-disk format and the identity's key format is frozen; storing the
@@ -144,6 +145,15 @@ public enum ArrangementMatch: Sendable, Equatable {
   /// The stored set is not the attached set. `missing` is stored and not
   /// attached, `extra` is attached and not stored.
   case setDiffers(missing: [String], extra: [String])
+  /// The right displays are attached, and at least one of them is not the SIZE
+  /// the layout was measured against. The named identity keys are the ones that
+  /// moved, sorted.
+  ///
+  /// Its own outcome rather than a flavour of `.exact`, because the origins are
+  /// not restorable and are not an overlap either: they tiled the footprints
+  /// they were recorded on, and they say nothing whatever about the footprints
+  /// attached now.
+  case geometryDiffers([String])
   /// Nothing to restore.
   case none
 }
@@ -234,6 +244,12 @@ public final class ArrangementPersistence: @unchecked Sendable {
   /// Compared as MULTISETS, not as sets: a layout naming one `a` cannot be
   /// restored onto two, and — the case a set comparison would silently accept —
   /// a layout naming two `a`s cannot be restored onto one.
+  ///
+  /// Then the SIZES, which is the check #180 was filed for: the right displays
+  /// being attached is not enough, they also have to be the shape the origins
+  /// were measured on. The three refusals are ordered by how far each gets
+  /// before it stops, so the sentence the user reads names the first thing that
+  /// is actually wrong.
   public static func resolve(
     _ saved: SavedArrangement, against current: DisplayArrangement
   ) -> ArrangementMatch {
@@ -257,17 +273,36 @@ public final class ArrangementPersistence: @unchecked Sendable {
       return .setDiffers(missing: missing, extra: extra)
     }
 
+    // **The origins are only meaningful on the footprints they were measured
+    // against (#180).** Combining them with different ones describes a machine
+    // that has never existed, and the app then read that reconstruction back as
+    // an overlap and reported it: at every launch, about displays sitting
+    // peacefully side by side, in the sentence written for a user who had just
+    // dragged one onto another.
+    //
+    // Checked here rather than at the apply, and as a whole rather than per
+    // display: a layout is a statement about how displays sit RELATIVE to each
+    // other, so one display changing size invalidates every origin in it,
+    // including the ones whose own display never moved.
+    let moved = saved.entries
+      .filter { entry in
+        guard let tile = tilesByIdentity[entry.identity]?.first else { return false }
+        return tile.rect.width != entry.width || tile.rect.height != entry.height
+      }
+      .map(\.identity).sorted()
+    guard moved.isEmpty else { return .geometryDiffers(moved) }
+
     let tiles = saved.entries.compactMap { entry in
       tilesByIdentity[entry.identity]?.first.map { tile in
         ArrangementTile(
           id: tile.id,
           identity: tile.identity,
           name: tile.name,
-          // The stored origin on the CURRENT footprint (§7.4): a display that
-          // has changed resolution since the layout was captured is a different
-          // size now, and re-imposing the recorded size would describe a screen
-          // that does not exist. What that costs is that the recorded origins
-          // may no longer tile, which the apply path reads back and reports.
+          // The stored origin on the CURRENT footprint (§7.4). The two are the
+          // same shape by the time this runs (the guard above is what makes that
+          // true), so this is the size never being authority rather than a
+          // reconstruction: nothing here can put a display at a size the screen
+          // does not have.
           rect: DisplayRect(x: entry.x, y: entry.y, width: tile.rect.width, height: tile.rect.height),
           mirroredIDs: tile.mirroredIDs
         )
