@@ -41,6 +41,7 @@ struct DisplayHubView: View {
   /// SO6's "key settings window" test, read at the click that starts a
   /// preview: `.key` exactly when this view's window is the key window.
   @Environment(\.controlActiveState) private var controlActiveState
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   /// Written by the OLED Care link so the pane opens on THIS display's section.
   @Environment(\.oledCareScrollTarget) private var oledCareScrollTarget
 
@@ -174,7 +175,7 @@ struct DisplayHubView: View {
         // focus loss, this button, the per-display reset) plus any external
         // write, and only a predicate on the value itself covers them all.
         // Keyed to `hasCustomName`, so typing animates nothing.
-        .animation(.easeInOut(duration: 0.15), value: hasCustomName)
+        .animation(Motion.disclosure(reduceMotion: reduceMotion), value: hasCustomName)
       }
       if model.isSharedIdentity(persistenceKey) {
         // SO21: same persistence key, same prefs — every control on this page

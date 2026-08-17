@@ -27,8 +27,21 @@ import SwiftUI
 struct GeneralPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @State private var loginItem = LoginItem()
   @State private var confirmingReset = false
+
+  /// The login-item failure as RENDERED, mirroring `loginItem.lastError` one
+  /// update behind. `LoginItem` writes it only from `setEnabled` (a refresh
+  /// does not clear it), and neither placement of a keyed `.animation` fades a
+  /// `Form` row symmetrically (measured 2026-08-17): on a `Group` wrapping the
+  /// conditional row it animates nothing in either direction, and on an
+  /// always-present container inside the row the child fades IN and then SNAPS
+  /// out. The snap-out asymmetry is why the container-hung `.animation` is not
+  /// enough; the mirror is what puts the arrival AND the departure inside one
+  /// transaction. Kept in agreement by the two hooks on the toggle below and by
+  /// nothing else.
+  @State private var shownLoginError: String?
 
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
@@ -90,18 +103,28 @@ struct GeneralPane: View {
         get: { loginItem.isEnabled },
         set: { loginItem.setEnabled($0) } // D10: the readback happens inside
       ))
-      if let error = loginItem.lastError {
-        // A failed register() leaves the toggle reading OFF — the fork's lying
-        // checkbox is exactly what D10 exists to fix — so the reason has to be
+      // The failure row's mirror hooks hang on the toggle, the row that caused
+      // the failure and the one row here that is always present: hooks on the
+      // failure row itself would only exist while the failure does, so nothing
+      // would be watching for it to arrive. Un-animated on appear, or an error
+      // still standing when the pane opens would fade in as though it were new.
+      .onAppear { shownLoginError = loginItem.lastError }
+      .onChange(of: loginItem.lastError) { _, error in
+        withAnimation(Motion.notice(reduceMotion: reduceMotion)) { shownLoginError = error }
+      }
+      if let error = shownLoginError {
+        // A failed register() leaves the toggle reading OFF (the fork's lying
+        // checkbox is exactly what D10 exists to fix), so the reason has to be
         // visible or the control looks broken. The symbol is not decoration:
         // color.md forbids communicating essential information by color alone.
         HStack(alignment: .firstTextBaseline, spacing: 4) {
           Image(systemName: "exclamationmark.triangle.fill")
-          Text(verbatim: error) // system error text — never a lookup key
+          Text(verbatim: error) // system error text, never a lookup key
         }
         .font(.callout)
         .foregroundStyle(.red)
         .fixedSize(horizontal: false, vertical: true)
+        .transition(.opacity)
       }
       HStack(spacing: 8) {
         // Both titles are stated twice on purpose. SwiftUI does not publish a

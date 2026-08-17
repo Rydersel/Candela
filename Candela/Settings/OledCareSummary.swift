@@ -375,12 +375,14 @@ struct OledTelemetryTicker: View {
   let lastSample: Date?
   let grantPresent: Bool
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   var body: some View {
     Text(verbatim: line)
       .font(.caption2.monospaced())
       .foregroundStyle(.tertiary)
       .contentTransition(.numericText())
-      .animation(.default, value: sampleCount)
+      .animation(Motion.value(reduceMotion: reduceMotion), value: sampleCount)
   }
 
   private var line: String {

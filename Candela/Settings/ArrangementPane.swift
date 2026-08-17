@@ -21,6 +21,7 @@ import SwiftUI
 struct ArrangementPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   /// Reconciled against the live layout on every read rather than seeded once —
   /// displays come and go while this pane is open, and a selection naming a
@@ -35,6 +36,18 @@ struct ArrangementPane: View {
   /// Bumped on every refusal so an identical second refusal restarts the timer
   /// rather than inheriting the tail of the first one's.
   @State private var refusalToken = 0
+
+  /// The restore notice as RENDERED, mirroring `coordinator.restoreNotice` one
+  /// update behind. The coordinator writes that property from an unattended
+  /// restore pass, and neither placement of a keyed `.animation` fades a `Form`
+  /// row symmetrically (measured 2026-08-17): on a `Group` wrapping the
+  /// conditional row it animates nothing either way, and on an always-present
+  /// container inside the row the child fades IN and then SNAPS out. That
+  /// snap-out asymmetry is why a container-hung `.animation` is not enough; the
+  /// mirror is what puts the arrival AND the dismissal inside one transaction.
+  /// Kept in agreement by the two hooks in `savedLayoutSection` and by nothing
+  /// else.
+  @State private var shownRestoreNotice: ArrangementReapplyNotice?
 
   private var coordinator: ArrangementCoordinator { model.arrangement }
 
@@ -57,7 +70,12 @@ struct ArrangementPane: View {
       // refusal, and cancelled outright when the pane goes away.
       try? await Task.sleep(for: .seconds(4))
       guard !Task.isCancelled else { return }
-      refusal = []
+      // Inside a transaction, like the write in `onRefuse`: a keyed `.animation`
+      // on a `Group` wrapping a conditional `Form` row animates nothing in either
+      // direction, and hung on the always-present container inside the row it
+      // fades the child in but snaps it out (measured 2026-08-17), so the
+      // animation has to travel with the write.
+      withAnimation(Motion.notice(reduceMotion: reduceMotion)) { refusal = [] }
     }
   }
 
@@ -87,7 +105,18 @@ struct ArrangementPane: View {
           selection: reconciledSelection,
           onPropose: { coordinator.apply($0) },
           onRefuse: { problems in
-            refusal = problems
+            // The sentence below is a conditional child of a `Form` row: a keyed
+            // `.animation` on a `Group` around it animates nothing, and on the
+            // always-present `VStack` inside the row it fades the sentence in but
+            // snaps it out (measured 2026-08-17), so the write carries the
+            // transaction instead. `refusal` is this view's own state and needs no
+            // mirror: the mirror shape exists to get a coordinator's write inside
+            // a `withAnimation`, and this write is already inside the view. The
+            // whole value moves, so a second refusal with a longer sentence
+            // animates its height rather than snapping to it.
+            withAnimation(Motion.notice(reduceMotion: reduceMotion)) {
+              refusal = problems
+            }
             refusalToken &+= 1
           }
         )
@@ -106,11 +135,24 @@ struct ArrangementPane: View {
         // displays — and it is the SAME sentence the confirmation window uses
         // for the same fact, because two spellings of one statement are two
         // things to keep true.
+        //
+        // The fade comes from the transaction the two writers of `refusal`
+        // carry. The refused-drop write also springs the tile home on the same
+        // values, so sentence and spring read as one gesture; the 4 s
+        // auto-clear has no drag left to spring.
+        //
+        // Expect the two directions to differ. This is a conditional child of an
+        // always-present `VStack` that is itself a `Form` row, the geometry
+        // measured on 2026-08-17 as fading IN and snapping OUT, so the insert
+        // reads as a fade and the 4 s removal most likely snaps even though the
+        // transaction is present. Confirm by looking before claiming a symmetric
+        // fade; the mirror shape is the fix if the snap is unacceptable.
         if !refusal.isEmpty {
           ArrangementCopy.invalidLayout(refusal, name: coordinator.displayName)
             .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+            .transition(.opacity)
         }
       }
     }
@@ -199,6 +241,17 @@ struct ArrangementPane: View {
           }
         ))
       }
+      // The restore notice's mirror hooks hang HERE, on the one row of this
+      // section that is always present: hooks on the notice's own container would
+      // only exist while the notice does, so nothing would be watching for it to
+      // arrive. The appear sync is un-animated on purpose, or a notice left over
+      // from an unattended restore would fade in as though it had just happened.
+      .onAppear { shownRestoreNotice = coordinator.restoreNotice }
+      .onChange(of: coordinator.restoreNotice) { _, notice in
+        withAnimation(Motion.notice(reduceMotion: reduceMotion)) {
+          shownRestoreNotice = notice
+        }
+      }
 
       // The restore pass is one of the things Safe Mode suppresses, so in a
       // safe-mode session this control describes behavior that is not happening.
@@ -219,7 +272,12 @@ struct ArrangementPane: View {
       // never taken away by a departure alone (SO8) — rendered in the
       // section whose control made the promise, exactly as the stored-mode
       // reapply banner sits under "Remember this resolution".
-      if let notice = coordinator.restoreNotice {
+      //
+      // Rendered from the mirror, so arrival and dismissal fade the same way.
+      // `dismissReport()` clears five coordinator properties and the OK click
+      // is not the only thing that ends this notice, so the transaction belongs
+      // to the mirror write and not to the button.
+      if let notice = shownRestoreNotice {
         VStack(alignment: .leading, spacing: 6) {
           ArrangementCopy.restoreNotice(notice, name: coordinator.displayName)
             .font(.callout)
@@ -228,6 +286,7 @@ struct ArrangementPane: View {
           Button("OK") { coordinator.dismissReport() }
             .accessibilityLabel("OK")
         }
+        .transition(.opacity)
       }
     }
   }

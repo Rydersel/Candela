@@ -82,6 +82,9 @@ import Testing
     #expect(verdict.recommendation?.logicalWidth == 1440)
     #expect(verdict.recommendation?.logicalHeight == 2560)
     #expect(verdict.ideal?.servedToday == true)
+    // A recommendation is the best in-band candidate, so the mark and the
+    // callout name the same size whenever both are showing.
+    #expect(verdict.bestInBand == verdict.recommendation)
   }
 
   @Test func dellAlreadyOnTheRungAbstainsAsCurrentIsBest() {
@@ -92,6 +95,27 @@ import Testing
       geometry: Self.dellRotated)
     #expect(verdict.recommendation == nil)
     #expect(verdict.abstention == .currentIsBest)
+    // The endorsement outlives the abstention: the size in use is still the
+    // one the model would pick, so the mark stays on it.
+    #expect(verdict.bestInBand?.logicalWidth == 1440)
+    #expect(verdict.bestInBand?.logicalHeight == 2560)
+  }
+
+  /// The other in-band abstention, where the mark lands on a size the display
+  /// is NOT running: three of the Dell's rungs are in band, so a person sitting
+  /// on the coarsest of them needs no correction while the best one is still
+  /// worth pointing at.
+  @Test func dellInBandButNotOnTheBestRungStillNamesIt() {
+    let rows = DisplayModeCatalog.curated(
+      DisplayModeFixtures.dell, nativePixelWidth: 2160, nativePixelHeight: 3840)
+    let verdict = PanelDensityModel.evaluate(
+      rows: rows, currentLogicalWidth: 1296, currentLogicalHeight: 2304,
+      geometry: Self.dellRotated)
+    #expect(verdict.currentPlacement == .inBand)
+    #expect(verdict.recommendation == nil)
+    #expect(verdict.abstention == .currentInBand)
+    #expect(verdict.bestInBand?.logicalWidth == 1440)
+    #expect(verdict.bestInBand?.logicalHeight == 2560)
   }
 
   @Test func magAtNativeAbstainsInBand() {
@@ -102,6 +126,25 @@ import Testing
       geometry: Self.mag)
     #expect(verdict.recommendation == nil)
     #expect(verdict.abstention == .currentInBand)
+    // The published HiDPI ladder tops out at 1720x720, roughly 55 PPI, so
+    // nothing here is in band and there is no size to endorse.
+    #expect(verdict.bestInBand == nil)
+  }
+
+  /// The MAG as macOS really presents it, 1x rungs included: its native size is
+  /// then a candidate, it wins, and the display is already running it. The mark
+  /// belongs on that row even though the model has nothing to say.
+  @Test func magAtNativeWearsTheMarkOnItsOwnNativeSize() {
+    let rows = DisplayModeCatalog.curated(
+      DisplayModeFixtures.mag + DisplayModeFixtures.magRateLadder,
+      nativePixelWidth: 3440, nativePixelHeight: 1440)
+    let verdict = PanelDensityModel.evaluate(
+      rows: rows, currentLogicalWidth: 3440, currentLogicalHeight: 1440,
+      geometry: Self.mag)
+    #expect(verdict.recommendation == nil)
+    #expect(verdict.abstention == .currentIsBest)
+    #expect(verdict.bestInBand?.logicalWidth == 3440)
+    #expect(verdict.bestInBand?.logicalHeight == 1440)
   }
 
   @Test func virtualDisplayAbstainsBeforeAnythingElse() {
@@ -112,6 +155,8 @@ import Testing
       rows: [], currentLogicalWidth: nil, currentLogicalHeight: nil, geometry: g)
     #expect(verdict.abstention == .virtualDisplay)
     #expect(verdict.ideal == nil)
+    // No ranking happened, so there is nothing to mark either.
+    #expect(verdict.bestInBand == nil)
   }
 
   @Test func noPhysicalSizeAbstainsWithNoIdeal() {
@@ -122,6 +167,7 @@ import Testing
       rows: [], currentLogicalWidth: 3440, currentLogicalHeight: 1440, geometry: g)
     #expect(verdict.abstention == .noPhysicalSize)
     #expect(verdict.ideal == nil)
+    #expect(verdict.bestInBand == nil)
   }
 
   @Test func idealIsAspectExactAndEven() throws {
@@ -202,6 +248,7 @@ import Testing
       geometry: Self.mag)
     #expect(verdict.abstention == .noCandidateInBand)
     #expect(verdict.recommendation == nil)
+    #expect(verdict.bestInBand == nil)
     #expect(verdict.currentPlacement == .below)
     let ideal = try #require(verdict.ideal)
     #expect(ideal.servedToday == false)
