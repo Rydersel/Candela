@@ -214,12 +214,23 @@ jobs:
       # one in the deploy loop: it puts the product somewhere known, so the check
       # below is looking at THIS build's output and not at whatever a shared
       # location happened to hold.
+      # The signing override is deliberate and spelled out rather than defaulted.
+      # project.yml signs the app target with the Developer ID identity in both
+      # configurations, which a GitHub runner cannot do: it has no keychain and
+      # no certificate, and shipping the private key to CI to give it one would
+      # be a far worse trade than building unsigned here. Overriding on the
+      # command line keeps the failure honest in the other direction too, since
+      # a developer whose certificate is missing gets a codesign error instead
+      # of a silent ad-hoc fallback that looks like a successful signed build.
+      # The entitlements are NOT overridden, so this job still proves the file
+      # parses and applies.
       - name: Build the app
         shell: bash
         run: |
           set -euo pipefail
           xcodebuild -project Candela.xcodeproj -scheme Candela \
-            -configuration Debug -derivedDataPath "$RUNNER_TEMP/dd" build
+            -configuration Debug -derivedDataPath "$RUNNER_TEMP/dd" build \
+            CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM=""
 
       # `** BUILD SUCCEEDED **` is a claim about the build, not about a product.
       # Treating it as proof that an app exists is the same mistake as treating a

@@ -17,6 +17,10 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
+    # Ad-hoc is the PROJECT-wide default, which now means the test bundle only:
+    # the app target overrides it below. CandelaAppTests is never deployed and
+    # holds no TCC grant, so a real identity would buy it nothing and would make
+    # the suite unrunnable anywhere the certificate is absent.
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: ""
@@ -57,11 +61,53 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.rydersel.Candela
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
+        # Developer ID in BOTH configurations, not Release alone. TCC keys a
+        # grant to the code identity, so an ad-hoc Debug build is a different
+        # app to the system than the Release one and re-earns the Accessibility
+        # and Screen Recording prompts every rebuild. One reset cleared 21 stale
+        # Accessibility rows, one per ad-hoc identity this project has had.
+        # Signing both configurations is what ends that.
+        #
+        # The identity is named generically so it resolves against whichever
+        # Developer ID Application certificate is in the keychain; the team is
+        # what actually pins it. Neither is a secret: both are readable out of
+        # any binary we ship with `codesign -dvvv`.
+        CODE_SIGN_IDENTITY: "Developer ID Application"
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: WGFW4X4695
+        CODE_SIGN_ENTITLEMENTS: Candela.entitlements
         # The icon ships as an asset catalog rather than a bare CFBundleIconFile.
         # An LSUIElement app has no Dock tile, so the places the icon actually
         # shows — About, notifications, System Settings > Login Items — are the
         # ones that read the catalog. Masters and the .icns live in `icons/`.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        # Hardened runtime on Release only. It is a notarization prerequisite,
+        # so it has to be on for anything shipped; keeping it off in Debug
+        # leaves the debugger unencumbered and means a Debug build never
+        # depends on the get-task-allow entitlement Xcode injects for it.
+        #
+        # The consequence to remember: Release is the FIRST place the hardened
+        # runtime is exercised, and the deploy loop builds Release, so a private
+        # framework it refused to load would surface at deploy time rather than
+        # during day-to-day Debug work. That is why the acceptance pass drives
+        # every dlopen path off a Release build specifically.
+        Release:
+          ENABLE_HARDENED_RUNTIME: YES
+          # Without this, Release carries get-task-allow and notarization
+          # rejects it outright. Xcode injects that entitlement on a plain
+          # `build` action and suppresses it only under `archive`, and the
+          # deploy loop builds rather than archives, so the default would have
+          # shipped a permanently un-notarizable binary. Measured 2026-08-17:
+          # the first signed Release build had it, and scripts/verify-signing.sh
+          # is the only thing that noticed. Nothing else fails: the app runs,
+          # codesign --verify passes, and the flaw surfaces only at submission.
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+          # A secure timestamp is required for notarization and cannot be added
+          # after the fact: an untimestamped signature is rejected. Release only,
+          # since it needs Apple's timestamp server on every signing and would
+          # otherwise put the network in the path of every Debug build.
+          OTHER_CODE_SIGN_FLAGS: "--timestamp"
     info:
       path: Candela/Info.plist
       properties:

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Deliberately near-empty. The hardened runtime is a deny-list: every exception
+  added here is attack surface and a notarization question, so each one has to
+  earn its place by a measured failure, not by anticipation.
+
+  Audited 2026-08-17 against what the app actually does:
+
+  - App sandbox is OFF and must stay off. DDC/CI over IOKit, CGDisplay
+    reconfiguration and the CGEvent tap are all unavailable inside a sandbox.
+  - No `cs.disable-library-validation`. The three private frameworks we dlopen
+    (DisplayServices, MonitorPanel, SkyLight) are Apple-signed, and library
+    validation only rejects code signed by neither Apple nor this team.
+    KeyboardShortcuts is an SPM source dependency signed with the app.
+  - No `automation.apple-events`. The app drives no other process over Apple
+    Events; the source has no NSAppleScript and no AEDeterminePermission call.
+  - No entitlement for Screen Recording or Accessibility: those are TCC grants
+    a user gives at runtime, and a non-sandboxed app declares nothing for them.
+  - No `get-task-allow` here. Xcode injects it into Debug builds on its own
+    (CODE_SIGN_INJECT_BASE_ENTITLEMENTS), and its presence in a Release build
+    is a hard notarization rejection, so it must never be written down.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+</dict>
+</plist>
