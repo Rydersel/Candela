@@ -204,8 +204,11 @@ struct OledCareDisplayCard: View {
   /// The display hero's fit rule at card scale: the box the mini map fits
   /// inside, preserving aspect, so an ultrawide and a portrait-mounted panel
   /// take the same vertical room.
-  @ScaledMetric(relativeTo: .body) private var boxWidth: CGFloat = 112
-  @ScaledMetric(relativeTo: .body) private var boxHeight: CGFloat = 50
+  // Sized so the overview's whole default page fits the window without a
+  // scroll bar; measured against the 900 by 520 saved frame with two
+  // externals connected.
+  @ScaledMetric(relativeTo: .body) private var boxWidth: CGFloat = 104
+  @ScaledMetric(relativeTo: .body) private var boxHeight: CGFloat = 44
 
   private var persistenceKey: String { state.display.persistenceKey }
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: persistenceKey) }
@@ -241,7 +244,7 @@ struct OledCareDisplayCard: View {
           .accessibilityHidden(true)
       }
       .contentShape(Rectangle())
-      .padding(.vertical, 4)
+      .padding(.vertical, 2)
     }
     .buttonStyle(OledTileButtonStyle())
     .accessibilityLabel(Text(verbatim: name))

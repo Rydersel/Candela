@@ -71,7 +71,13 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// derives. Neither list corresponds to what Displays settings shows.
   public func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] {
     let (published, revealed) = enumerate(displayID)
-    return published + (revealed?.modes ?? [])
+    // Collapse AFTER the merge, not inside `copyModes` (#95). Revelation dedupes
+    // against the published IDs, so a twin removed before it ran would free its
+    // ID and come back wearing the revealed badge. Today its own gates would
+    // reject it anyway (every measured duplicate is 1x, and gate 4 admits HiDPI
+    // only), but that is a fact about this hardware, not a property of the
+    // ordering, and the ordering is free.
+    return DisplayModeList.deduplicated(published + (revealed?.modes ?? []))
   }
 
   public func modesWithheldByWireTimingGuard(for displayID: CGDirectDisplayID) -> Int {
@@ -134,8 +140,12 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// 132/132, 332/332 and 120/120 unique across three panels.
   public func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
     guard let mode = CGDisplayCopyDisplayMode(displayID) else { return nil }
-    let ioModeID = mode.ioDisplayModeID
-    return modes(for: displayID).first { $0.ioModeID == ioModeID }
+    // Resolved rather than looked up: the display can be running a duplicate the
+    // enumeration collapsed (#95), and this call answers with the live id either
+    // way. See `DisplayModeList.resolve`.
+    return DisplayModeList.resolve(
+      Self.displayMode(ioModeID: mode.ioDisplayModeID, mode: mode),
+      in: modes(for: displayID))
   }
 
   public func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
@@ -324,7 +334,19 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
     guard let raw = CGDisplayCopyAllDisplayModes(displayID, options) as? [CGDisplayMode] else {
       return []
     }
-    return raw.map { ($0.ioDisplayModeID, $0) }
+    // macOS itself says these cannot drive the desktop GUI, and this list is
+    // only ever used to offer a person something to switch to (#95). Measured
+    // 2026-08-17: 95 such modes on the Dell, 47 on the MAG, 0 on the built-in,
+    // and they were the WHOLE of the MAG's duplicate rows, each an unusable twin
+    // of a usable one.
+    //
+    // Safe ahead of the native lookup below, which would strand the revelation
+    // pass if it removed the panel's own timing: no mode carrying
+    // `kDisplayModeNativeFlag` is unusable on any of the three panels, and the
+    // CGS side rejects the same modes independently (its gate 2 reads the
+    // descriptor's own unusable flag), so nothing here can be re-admitted as a
+    // revealed row.
+    return raw.filter { $0.isUsableForDesktopGUI() }.map { ($0.ioDisplayModeID, $0) }
   }
 
   private static func displayMode(ioModeID: Int32, mode: CGDisplayMode) -> DisplayMode {

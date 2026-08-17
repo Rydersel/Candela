@@ -78,10 +78,12 @@ struct OledCarePane: View {
       } footer: {
         // The two-levers line (OC11), demoted from a leading card to the
         // cards' own footer: it explains what the cards do, so it reads
-        // below them at caption weight. The auto-hide half of the old intro
-        // is gone from here because Screen Chrome's captions already carry
-        // it, where the controls are.
-        SettingsCaption("Software can do two things about OLED wear: show fewer bright pixels, and show them for less time. \(AppInfo.productName) dims an enrolled external display that has been idle.")
+        // below them at caption weight. One sentence, one line: the cards'
+        // own status lines show what dimming does, the display pages explain
+        // it, and Screen Chrome's captions carry the auto-hide half. The
+        // page fits the default window without a scroll bar on this budget
+        // (Ryder, 2026-08-17); grow it back only with the height in hand.
+        SettingsCaption("Software can do two things about OLED wear: show fewer bright pixels, and show them for less time.")
       }
 
       chromeSection
@@ -192,8 +194,10 @@ struct OledCarePane: View {
       // Suppressed while the controls are missing: a note about what "both
       // settings" are is noise under a section that is currently showing
       // neither.
+      // One line on the same height budget as the Displays footer; the
+      // trimmed words changed no claim (OC10's guarantee survives whole).
       if model.oledCare.chrome != nil {
-        SettingsCaption("Both settings belong to macOS rather than to \(AppInfo.productName): they apply to every display, and enrolling a display never changes them on its own.")
+        SettingsCaption("Both settings belong to macOS: they apply to every display, and enrolling a display never changes them.")
       }
     }
   }
