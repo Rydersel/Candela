@@ -30,6 +30,10 @@ public enum PrefName: String, Sendable, CaseIterable {
   // brightness in another. Not a way to see both at once, which the island's
   // one-window-per-display keying rules out either way.
   case hudPositionBrightness, hudPositionVolume
+  // App-level: how every pill draws (KMR-A3). One key for all kinds: the
+  // styles differ in anatomy, not per-kind meaning, so splitting would
+  // multiply taste decisions without adding one a person needs to make.
+  case hudStyle
   // App-level — dimming
   case disableCombinedBrightness, allowZeroSwBrightness, enableBrightnessSync, startupAction
   case separateCombinedScale
@@ -177,7 +181,7 @@ public enum PrefPropagation {
     case .startupAction, .multiKeyboardBrightness,
          .useFineScaleBrightness, .useFineScaleVolume,
          .pollingMode, .pollingCount, .separateCombinedScale,
-         .hudPositionBrightness, .hudPositionVolume:
+         .hudPositionBrightness, .hudPositionVolume, .hudStyle:
       // Read at key time / launch time / DDC-read time. `.refreshUI` alone is
       // the whole row, which is a deliberate answer and not a missing one. The two
       // indicator positions are read by `KeyActionExecutor` as it announces a

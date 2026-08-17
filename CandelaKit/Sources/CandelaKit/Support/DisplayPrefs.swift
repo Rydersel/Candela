@@ -628,6 +628,14 @@ public final class DisplayPrefs: @unchecked Sendable {
     return HUDPosition(rawValue: stored) ?? .topCenter
   }
 
+  /// How every indicator pill draws (KMR-A3), app-level like the two position
+  /// keys. Plain `integer(forKey:)` is correct here, unlike the positions:
+  /// raw 0 IS the shipped default, so absent and default agree.
+  public var hudStyle: HUDStyle {
+    get { HUDStyle(rawValue: defaults.integer(forKey: "hudStyle")) ?? .system }
+    set { defaults.set(newValue.rawValue, forKey: "hudStyle") }
+  }
+
   /// Hide the built-in display's panel section (Candela's positive-default
   /// equivalent of the fork's dead hideAppleFromMenu — the filter WORKS here, D2).
   public var hideBuiltInDisplay: Bool {

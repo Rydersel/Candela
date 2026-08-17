@@ -480,6 +480,24 @@ struct DisplayPrefsTests {
     #expect(prefs.hudPositionVolume == .topCenter)
   }
 
+  @Test func hudStyleIsAppLevelDefaultsToSystemAndFallsBackOnUnknownRaw() {
+    let d = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: d, persistenceKey: "irrelevant")
+    // Raw 0 IS the shipped default, so absent and default agree and the plain
+    // integer read is correct here, unlike the position keys.
+    #expect(prefs.hudStyle == .system)
+
+    prefs.hudStyle = .segments
+    #expect(d.integer(forKey: "hudStyle") == 1)
+    // App-level: no per-display suffix.
+    #expect(d.object(forKey: "hudStyle.irrelevant") == nil)
+    let reread = DisplayPrefs(defaults: d, persistenceKey: "another-display")
+    #expect(reread.hudStyle == .segments)
+
+    d.set(99, forKey: "hudStyle")
+    #expect(prefs.hudStyle == .system)
+  }
+
   @Test func foldedRawKeysKeepTheirExactKeyStrings() {
     let d = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: d, persistenceKey: "PK")

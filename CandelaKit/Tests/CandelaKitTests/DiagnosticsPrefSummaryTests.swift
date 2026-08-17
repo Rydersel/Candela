@@ -116,9 +116,9 @@ struct DiagnosticsPrefSummaryTests {
     // App-level: one value for the whole app, not a fact about a display.
     .menuIcon, .hideBuiltInDisplay, .showContrast,
     .enableSliderSnap, .enableSliderPercent,
-    // One position for every display's pills, so it says nothing about a
-    // particular display.
-    .hudPositionBrightness, .hudPositionVolume,
+    // One position (and one style) for every display's pills, so they say
+    // nothing about a particular display.
+    .hudPositionBrightness, .hudPositionVolume, .hudStyle,
     .disableCombinedBrightness, .allowZeroSwBrightness, .enableBrightnessSync, .startupAction,
     .separateCombinedScale,
     .keyboardBrightness, .keyboardVolume, .disableAltBrightnessKeys,

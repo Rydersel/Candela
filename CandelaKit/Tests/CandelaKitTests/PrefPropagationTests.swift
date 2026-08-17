@@ -89,6 +89,8 @@ struct PrefPropagationTests {
     // one pill and strand the position the user chose for the other.
     #expect(PrefName.hudPositionBrightness.rawValue == "hudPositionBrightness")
     #expect(PrefName.hudPositionVolume.rawValue == "hudPositionVolume")
+    // KMR-A3 added the pill style beside them.
+    #expect(PrefName.hudStyle.rawValue == "hudStyle")
     // #14 added the eight virtual-display slot keys: 55 -> 63; the Add/Remove
     // rework added `virtualSlotDefined`: 63 -> 64. The raw values are the
     // base names `DisplayPrefs` composes with `.<slot>`, the per-command
@@ -98,7 +100,8 @@ struct PrefPropagationTests {
     #expect(PrefName.virtualSlotDefined.rawValue == "virtualSlotDefined")
     // The density model's hub callout added its per-display dismissal: 64 -> 65.
     #expect(PrefName.sizeRecommendationDismissed.rawValue == "sizeRecommendationDismissed")
-    #expect(PrefName.allCases.count == 65)
+    // KMR-A3's indicator style: 65 -> 66.
+    #expect(PrefName.allCases.count == 66)
   }
 
   // MARK: - Rows
@@ -288,7 +291,7 @@ struct PrefPropagationTests {
     // already uses the new position: no re-arm, no rebuild, and above all no
     // `.reapplyDimming`, which would put a DDC write on the bus every time
     // someone tried a position out.
-    for name in [PrefName.hudPositionBrightness, .hudPositionVolume] {
+    for name in [PrefName.hudPositionBrightness, .hudPositionVolume, .hudStyle] {
       #expect(PrefPropagation.effects(forChange: name) == [.refreshUI])
     }
   }
