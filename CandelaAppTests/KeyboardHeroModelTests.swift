@@ -28,33 +28,43 @@ struct KeyboardHeroModelTests {
 
   // MARK: - Annotations say what the lighting shows (colour is never alone)
 
+  // Sentences with a verb (Ryder, 2026-08-17): the line states what the keys
+  // are doing right now, so a noun-phrase reading like a feature caption is
+  // the defect these strings replaced.
   @Test func brightnessLineNamesModeAndTarget() {
     #expect(
       KeyboardHeroModel.brightnessLine(mode: .media, target: .mouse)
-        == "The brightness keys · the display under the pointer")
+        == "Media keys act on the display under the pointer")
     #expect(
       KeyboardHeroModel.brightnessLine(mode: .both, target: .allScreens)
-        == "Media keys and shortcuts · every display")
+        == "Media keys and shortcuts act on every display")
     #expect(
       KeyboardHeroModel.brightnessLine(mode: .media, target: .focusInsteadOfMouse)
-        == "The brightness keys · the display with the active window")
+        == "Media keys act on the display with the active window")
     #expect(
       KeyboardHeroModel.brightnessLine(mode: .custom, target: .mouse)
-        == "Custom shortcuts only · keys left to macOS")
-    #expect(KeyboardHeroModel.brightnessLine(mode: .disabled, target: .mouse) == "Left to macOS")
+        == "Custom shortcuts only; the keys go to macOS")
+    #expect(
+      KeyboardHeroModel.brightnessLine(mode: .disabled, target: .mouse)
+        == "Off; the keys go to macOS")
   }
 
   @Test func volumeLineNamesModeAndTarget() {
+    // The audio-matching target carries its own verb: keys FOLLOW the output
+    // device rather than acting on it, which the old dot template got wrong
+    // ("keys · follows").
     #expect(
       KeyboardHeroModel.volumeLine(mode: .media, target: .audioDeviceNameMatching)
-        == "The volume and mute keys · follows the audio output device")
+        == "Media keys follow the audio output device")
     #expect(
       KeyboardHeroModel.volumeLine(mode: .both, target: .mouse)
-        == "Media keys and shortcuts · the display under the pointer")
+        == "Media keys and shortcuts act on the display under the pointer")
     #expect(
       KeyboardHeroModel.volumeLine(mode: .media, target: .allScreens)
-        == "The volume and mute keys · every display")
-    #expect(KeyboardHeroModel.volumeLine(mode: .disabled, target: .mouse) == "Left to macOS")
+        == "Media keys act on every display")
+    #expect(
+      KeyboardHeroModel.volumeLine(mode: .disabled, target: .mouse)
+        == "Off; the keys go to macOS")
   }
 
   @Test func alternateLineMatchesItsLighting() {
