@@ -421,7 +421,14 @@ struct BannerRegion: View {
   }
 
   private var showsFirstSight: Bool {
-    !model.dismissedFirstSightKeys.contains(persistenceKey)
+    // Never for the built-in. This banner narrates the replug identity story:
+    // a monitor seen for the first time starts fresh, and its settings will
+    // survive an unplug. The built-in display is present from the app's very
+    // first launch, so "first time seeing this display" is false there, and
+    // because dismissal is session-scoped while the gate is an EMPTY pref
+    // domain, an untouched built-in showed the note again on every launch.
+    persistenceKey != "builtIn"
+      && !model.dismissedFirstSightKeys.contains(persistenceKey)
       && !DisplayPrefs.hasAnyStoredValue(forKey: persistenceKey)
   }
 }
