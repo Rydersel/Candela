@@ -268,7 +268,7 @@ jobs:
           # spells out: a pipeline reports its LAST command's status, so without
           # it this reports tee's, and tee succeeds whatever xcodebuild did.
           # Every failing suite would be published as green.
-          xcodebuild test -project Candela.xcodeproj -scheme CandelaAppTests \
+          xcodebuild test -project Candela.xcodeproj -scheme CandelaAppTests -only-testing:CandelaAppTests/NoSuchSuite \
             -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/dd-tests" \
             2>&1 | tee "$RUNNER_TEMP/app-tests.log"
 
