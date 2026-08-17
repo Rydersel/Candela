@@ -27,6 +27,11 @@ struct AppMenuPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
 
+  /// Which indicator the preview's pill depicts (KMR9): brightness until the
+  /// volume position picker is the one changed, then volume, and back. View
+  /// state only; nothing persists it.
+  @State private var previewPill: HUDType = .brightness
+
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
   var body: some View {
@@ -36,6 +41,15 @@ struct AppMenuPane: View {
     // only thing that re-reads them and flips the popup.
     let _ = model.prefsRevision
     Form {
+      // The pane's subject, drawn (KMR7): everything below decides what
+      // Candela puts on screen, and the preview shows the current answer.
+      Section {
+        VStack(alignment: .leading, spacing: 6) {
+          MenuBarPreviewView(pillKind: previewPill)
+          SettingsCaption("A preview of the current settings; the controls below change it live.")
+        }
+      }
+
       Section("Menu Bar") {
         SettingRow {
           Picker("Show the menu bar icon:", selection: Binding(
@@ -145,6 +159,9 @@ struct AppMenuPane: View {
           get: { prefs.hudPositionBrightness },
           set: { position in
             prefs.hudPositionBrightness = position
+            // Preview follows the picker last touched (KMR9); the write above
+            // is unchanged and stays first.
+            previewPill = .brightness
             actions.prefDidChange(.hudPositionBrightness)
           }
         )) {
@@ -162,6 +179,7 @@ struct AppMenuPane: View {
           get: { prefs.hudPositionVolume },
           set: { position in
             prefs.hudPositionVolume = position
+            previewPill = .volume
             actions.prefDidChange(.hudPositionVolume)
           }
         )) {
