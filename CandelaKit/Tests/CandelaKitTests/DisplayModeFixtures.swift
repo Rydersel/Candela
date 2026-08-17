@@ -63,30 +63,33 @@ enum DisplayModeFixtures {
   /// dump: `docs/spikes/s2-resolutions/fixtures/builtin-modes-2026-08-17.txt`.
   static let builtInNativePixels = (3024, 1964)
 
-  /// One representative entry per distinct logical size: the 132 published
+  /// One representative entry per distinct pixel footprint: the 132 published
   /// modes collapse to 12 once refresh rates are dropped. Prefers the HiDPI
-  /// (scaled) logical variant of a given pixel footprint, except the native
-  /// 3024x1964 footprint, where the dump's native flag sits on the 1x entry
-  /// rather than its 1512x982 HiDPI sibling, so that is the fixture's native
-  /// entry.
+  /// (scaled) logical variant, matching the dell and mag arrays' convention:
+  /// the dump marks native=true on both rows of the 3024×1964 framebuffer
+  /// (the 1x 3024×1964 row and its 1512×982 HiDPI sibling), so the fixture's
+  /// native entry is the HiDPI row, same as dell's 1080×1920 and mag's
+  /// 1720×720.
   static let builtIn: [DisplayMode] = [
     m(960, 600, 1920, 1200), m(1024, 640, 2048, 1280),
     m(1024, 665, 2048, 1330), m(1147, 716, 2294, 1432),
     m(1147, 745, 2294, 1490), m(1280, 800, 2560, 1600),
     m(1352, 845, 2704, 1690), m(1352, 878, 2704, 1756),
     m(1512, 945, 3024, 1890),
-    m(3024, 1964, 3024, 1964, native: true),
+    m(1512, 982, 3024, 1964, native: true),
     m(1800, 1125, 3600, 2250), m(1800, 1169, 3600, 2338),
   ]
 
-  /// Physical panel size in integer centimetres, truncated from the panel's
-  /// declared millimetres (`CGDisplayScreenSize`, same truncation the shipped
-  /// physical-size read applies). Captured 2026-08-17. Raw dump:
-  /// `docs/spikes/s2-resolutions/fixtures/builtin-modes-2026-08-17.txt`. The
-  /// Dell is measured mounted rotated 270°, so it reports portrait (33, 60)
-  /// rather than its landscape manufactured size.
-  static let magPhysicalCm = (80, 33)
-  static let dellPhysicalCm = (33, 60)
+  /// Physical panel size in integer centimetres, from the shipped
+  /// `Arm64DDC.physicalSizeCm` read (CoreDisplay EDID image-size keys,
+  /// integer mm/10). Measured 2026-08-17 through a temporary patch, since
+  /// reverted. The Dell reports its panel-native landscape size here even
+  /// though it is mounted rotated 270°: the raw dump's `CGDisplayScreenSize`
+  /// figures differ from these by up to 1cm, and by orientation on the Dell,
+  /// because that read answers in the rotated frame instead. These Arm64DDC
+  /// values are the ones production feeds into the density model.
+  static let magPhysicalCm = (80, 34)
+  static let dellPhysicalCm = (60, 34)
   static let builtInPhysicalCm = (30, 19)
 
   static func mode(
