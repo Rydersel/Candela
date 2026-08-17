@@ -285,6 +285,17 @@ jobs:
           set -euo pipefail
           log="$RUNNER_TEMP/app-tests.log"
 
+          # Both halves were demonstrated failing on this runner before this
+          # step merged, the same discipline the Kit job applied to itself
+          # [MEASURED 2026-08-17]:
+          #   run 32065655446  one expectation flipped to a wrong value; the
+          #                    job went red at "Run the app suite" itself.
+          #   run 32065124183  the suite filtered to a name matching nothing.
+          #                    xcodebuild printed a summary of 0 tests and
+          #                    exited 0, so "Run the app suite" stayed GREEN;
+          #                    this step is what failed the job. That is the
+          #                    exact vacuous pass the floor exists for.
+          #
           # A collapse detector, not a ratchet, exactly as the Kit job's floor
           # is. It sits far below the count this suite had when the step was
           # written, so ordinary churn (folding two suites together, moving
