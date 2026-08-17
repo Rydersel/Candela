@@ -67,6 +67,11 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     let rightIcon: NSImageView
     /// The continuous bar's fill; nil for `.segments`.
     let fillBox: NSBox?
+    /// The track's interval dots (continuous-bar styles only). Held so a show
+    /// can hide the ones the fill has passed: `labelColor` is translucent in
+    /// dark appearance, so a covered dot would ghost through the fill, and the
+    /// native track shows dots on the unfilled remainder only (KMR-A4).
+    let tickBoxes: [NSBox]
     /// The 16 chiclets; empty for the continuous-bar styles.
     let segmentBoxes: [NSBox]
     let style: HUDStyle
@@ -227,6 +232,12 @@ final class BrightnessHUD: BrightnessHUDPresenting {
       var fillFrame = fillBox.frame
       fillFrame.size.width = max(Metrics.barHeight, metrics.barWidth * normalized)
       fillBox.frame = fillFrame
+      // Being UNDER the fill is not enough: `labelColor` is translucent in
+      // dark appearance, so a covered dot ghosts through. Hide what the fill
+      // has passed; the native track shows dots on the remainder only.
+      for tick in hud.tickBoxes {
+        tick.isHidden = tick.frame.midX <= fillFrame.maxX
+      }
     }
     if !hud.segmentBoxes.isEmpty {
       // KMR-A3: filled count rounds, so a half step lights the nearer chiclet.
@@ -340,6 +351,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     effectView.addSubview(rightIcon)
 
     var fillBox: NSBox?
+    var tickBoxes: [NSBox] = []
     var segmentBoxes: [NSBox] = []
     switch style {
     case .system, .compact:
@@ -368,6 +380,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
         tick.fillColor = .tertiaryLabelColor
         tick.cornerRadius = Self.tickDiameter / 2
         effectView.addSubview(tick)
+        tickBoxes.append(tick)
       }
 
       let fill = NSBox(frame: NSRect(x: metrics.barX, y: metrics.barY, width: Metrics.barHeight, height: Metrics.barHeight))
@@ -402,7 +415,8 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     panel.contentView = rootView
 
     return HUD(panel: panel, effectView: effectView, nameLabel: nameLabel, leftIcon: leftIcon,
-               rightIcon: rightIcon, fillBox: fillBox, segmentBoxes: segmentBoxes, style: style)
+               rightIcon: rightIcon, fillBox: fillBox, tickBoxes: tickBoxes,
+               segmentBoxes: segmentBoxes, style: style)
   }
 
   private func fadeOut(displayID: CGDirectDisplayID) {
