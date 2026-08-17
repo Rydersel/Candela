@@ -272,7 +272,7 @@ final class BrightnessHUD: BrightnessHUDPresenting {
     }
     let generation = self.fadeGenerations[displayID] ?? 0
     NSAnimationContext.runAnimationGroup { context in
-      context.duration = 0.3
+      context.duration = Motion.windowFadeOut(reduceMotion: Motion.systemReduceMotion)
       panel.animator().alphaValue = 0
     } completionHandler: { [weak self] in
       // The completion handler is `@Sendable`-typed but fires on the main thread, where the panel
