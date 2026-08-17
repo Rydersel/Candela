@@ -58,24 +58,42 @@ struct MenuBarPreviewView: View {
       hasExternalDisplay: !model.displays.isEmpty,
       hasVisibleSlider: !externals.isEmpty || showsBuiltIn
     )
+    // The panel hangs from the icon; without the icon there is nothing to
+    // open it from, so it goes too. The real pill DOES outrank the panel in z
+    // (a screen-saver-level window draws over everything), but at miniature
+    // scale that overlap destroys both widgets' legibility, so when the pill's
+    // chosen corner is the panel's corner the two stack instead, still in the
+    // chosen corner (Ryder, 2026-08-17).
+    let pillSharesPanelCorner = iconVisible && pillPosition == .topRight
     ZStack(alignment: .top) {
       wallpaper
       menuBar(iconVisible: iconVisible)
-      // The panel hangs from the icon; without the icon there is nothing to
-      // open it from, so it goes too. The pill outranks the panel in z, as the
-      // real one does (a screen-saver-level window draws over everything).
-      if iconVisible {
-        panelMiniature(externals: externals, showsBuiltIn: showsBuiltIn)
-          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-          .padding(.top, Self.menuBarHeight + 3)
-          .padding(.trailing, 22)
+      VStack(alignment: .trailing, spacing: 9) {
+        // Pill first: it sits at the top of the real screen, so the stacked
+        // corner keeps it nearest the menu bar with the panel beneath it
+        // (Ryder, 2026-08-17).
+        if pillSharesPanelCorner {
+          pillMiniature(externals: externals)
+        }
+        if iconVisible {
+          panelMiniature(externals: externals, showsBuiltIn: showsBuiltIn)
+        }
       }
-      pillMiniature(externals: externals)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: pillAlignment)
-        .padding(.top, Self.menuBarHeight + 6)
-        .padding(.horizontal, 10)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+      .padding(.top, Self.menuBarHeight + 5)
+      .padding(.bottom, 8)
+      .padding(.trailing, 16)
+      if !pillSharesPanelCorner {
+        pillMiniature(externals: externals)
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: pillAlignment)
+          .padding(.top, Self.menuBarHeight + 8)
+          .padding(.horizontal, 14)
+      }
     }
-    .frame(height: 212)
+    // Sized for the tallest realistic panel on this rig (a built-in row plus
+    // two externals with volume and contrast shown) stacked with the pill;
+    // the column top-aligns, so smaller panels just leave ground.
+    .frame(height: 284)
     .frame(maxWidth: .infinity)
     .clipShape(RoundedRectangle(cornerRadius: 9))
     .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.separator, lineWidth: 1))
@@ -104,7 +122,7 @@ struct MenuBarPreviewView: View {
   private static let menuBarHeight: CGFloat = 13
 
   private func menuBar(iconVisible: Bool) -> some View {
-    HStack(spacing: 7) {
+    HStack(spacing: 9) {
       Image(systemName: "apple.logo").font(.system(size: 6.5))
       Text("Finder").font(.system(size: 6.5, weight: .bold))
       Text("File").font(.system(size: 6.5))
@@ -116,10 +134,13 @@ struct MenuBarPreviewView: View {
       }
       Image(systemName: "wifi").font(.system(size: 6))
       Image(systemName: "battery.75percent").font(.system(size: 7))
-      Text("Wed 14:12").font(.system(size: 6.5))
+      // Fixed-size: the clock is the trailing element, and letting it
+      // compress put its last digits under the rounded corner's clip.
+      Text("Wed 14:12").font(.system(size: 6.5)).fixedSize()
     }
     .foregroundStyle(.white.opacity(0.85))
-    .padding(.horizontal, 8)
+    .padding(.leading, 10)
+    .padding(.trailing, 13)
     .frame(height: Self.menuBarHeight)
     .frame(maxWidth: .infinity)
     .background(.black.opacity(0.28))
@@ -238,7 +259,9 @@ struct MenuBarPreviewView: View {
         Text(SliderSnap.percentText(row.value))
           .font(.system(size: 6).monospacedDigit())
           .foregroundStyle(.secondary)
-          .frame(width: 15, alignment: .trailing)
+          // Fixed-size: "100%" wrapped to two lines in a compressible frame.
+          .fixedSize()
+          .frame(width: 18, alignment: .trailing)
       }
     }
   }

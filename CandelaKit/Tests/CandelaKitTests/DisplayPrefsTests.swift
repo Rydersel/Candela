@@ -430,13 +430,19 @@ struct DisplayPrefsTests {
     }
   }
 
-  @Test func hudPositionsAreAppLevelAndDefaultToTheShippedTopRight() {
+  @Test func hudPositionsAreAppLevelAndDefaultToTheShippedTopCenter() {
     let d = InMemoryDefaults()
     let prefs = DisplayPrefs(defaults: d, persistenceKey: "irrelevant")
-    // An install that has never touched these keeps the only position the app
-    // ever had.
+    // An untouched install gets the shipped default, top center (Ryder,
+    // 2026-08-17, KMR spec amendment).
+    #expect(prefs.hudPositionBrightness == .topCenter)
+    #expect(prefs.hudPositionVolume == .topCenter)
+
+    // Top right stores raw 0, indistinguishable from absent through
+    // `integer(forKey:)`: the accessor reads key PRESENCE, so an explicit
+    // top-right choice survives the default moving away from it.
+    prefs.hudPositionBrightness = .topRight
     #expect(prefs.hudPositionBrightness == .topRight)
-    #expect(prefs.hudPositionVolume == .topRight)
 
     prefs.hudPositionBrightness = .topLeft
     prefs.hudPositionVolume = .topCenter
@@ -469,10 +475,9 @@ struct DisplayPrefsTests {
     #expect(prefs.keyboardVolume == .media)
     #expect(prefs.multiKeyboardBrightness == .mouse)
     // Raw 0 is a valid case for these two as well, so only an out-of-range
-    // value reaches their fallback. It is the position every build before the
-    // preference existed drew the pill at.
-    #expect(prefs.hudPositionBrightness == .topRight)
-    #expect(prefs.hudPositionVolume == .topRight)
+    // value reaches their fallback: the shipped default, top center.
+    #expect(prefs.hudPositionBrightness == .topCenter)
+    #expect(prefs.hudPositionVolume == .topCenter)
   }
 
   @Test func foldedRawKeysKeepTheirExactKeyStrings() {
