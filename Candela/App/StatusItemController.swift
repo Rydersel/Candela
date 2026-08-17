@@ -108,6 +108,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// Stored (review M23) so the topology loop can `cleanupDisplay` departed
   /// displays' HUD panels; the executor shares this same instance.
   private let hud = BrightnessHUD()
+  #if DEBUG
+    /// Keeps the `CANDELA_DEBUG_HUD_DEMO` re-show loop alive; see
+    /// `startHUDDemoIfRequested()`.
+    private var hudDemoTimer: Timer?
+  #endif
   /// Sleep/wake observation tokens (block-based observers stay registered
   /// only while retained). Never removed — fork parity, app-lifetime.
   private var sleepWakeObservers: [any NSObjectProtocol] = []
@@ -675,7 +680,52 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     if isFirstRun {
       presentOnboarding()
     }
+
+    #if DEBUG
+      startHUDDemoIfRequested()
+    #endif
   }
+
+  #if DEBUG
+    /// `CANDELA_DEBUG_HUD_DEMO=<brightness|volume|muted|contrast>`: keeps one
+    /// indicator pill on screen for capture runs. Permanent, like
+    /// `DebugSettingsHook` and for the same reason: a worktree debug build
+    /// never holds the Accessibility grant, so no media key reaches the tap
+    /// and the pill has no other route to a screenshot. Style and position are
+    /// re-read from prefs on every tick, so a style change in the settings
+    /// window is visible on the live pill within a second, which is also the
+    /// interactive demo of the style picker. Compiled out of Release by
+    /// construction; the name's 21 bytes clear the 16-byte floor the deploy
+    /// grep can see.
+    private func startHUDDemoIfRequested() {
+      guard let raw = ProcessInfo.processInfo.environment["CANDELA_DEBUG_HUD_DEMO"] else { return }
+      let type: HUDType = switch raw {
+      case "volume": .volume
+      case "muted": .volumeMuted
+      case "contrast": .contrast
+      default: .brightness
+      }
+      let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          let displayID = CGMainDisplayID()
+          let prefs = DisplayPrefs(persistenceKey: "app")
+          let position: HUDPosition = switch type {
+          case .volume, .volumeMuted: prefs.hudPositionVolume
+          case .brightness, .contrast: prefs.hudPositionBrightness
+          }
+          let name = self.model.displays.first { $0.id == displayID }
+            .map { PanelView.title(for: $0.display) } ?? "Display"
+          self.hud.showHUD(
+            displayID: displayID, type: type, name: name,
+            value: type == .volumeMuted ? 0 : 0.62, maxValue: 1,
+            nameSuffix: nil, position: position, style: prefs.hudStyle)
+        }
+      }
+      RunLoop.main.add(timer, forMode: .common)
+      hudDemoTimer = timer
+    }
+  #endif
 
   /// The Setup window (user-facing name; "onboarding" is internal only).
   private func presentOnboarding() {

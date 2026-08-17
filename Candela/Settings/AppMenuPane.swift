@@ -154,6 +154,25 @@ struct AppMenuPane: View {
   /// and never appear here.
   @ViewBuilder private var indicatorSection: some View {
     Section("On-Screen Indicators") {
+      SettingRow("One style for every indicator, on every display.") {
+        Picker("Indicator style:", selection: Binding(
+          get: { prefs.hudStyle },
+          set: { style in
+            prefs.hudStyle = style
+            // The preview keeps depicting whichever kind was last positioned;
+            // a style change restyles that pill rather than resetting it.
+            actions.prefDidChange(.hudStyle)
+          }
+        )) {
+          // `HUDStyle.pickerOrder`, consumed like every enum picker here even
+          // though it matches raw order today, so a future case slots into
+          // reading order without renumbering raws.
+          ForEach(HUDStyle.pickerOrder, id: \.self) { style in
+            Text(label(for: style)).tag(style)
+          }
+        }
+      }
+
       SettingRow("Contrast uses this position too.") {
         Picker("Brightness indicator position:", selection: Binding(
           get: { prefs.hudPositionBrightness },
@@ -188,6 +207,17 @@ struct AppMenuPane: View {
           }
         }
       }
+    }
+  }
+
+  /// Reads as one sentence with the row label: "Indicator style: Match macOS"
+  /// (KMR-A3). Exhaustive, so a future `HUDStyle` case is a compile error
+  /// rather than a blank row.
+  private func label(for style: HUDStyle) -> LocalizedStringKey {
+    switch style {
+    case .system: "Match macOS"
+    case .segments: "Segmented"
+    case .compact: "Compact"
     }
   }
 
