@@ -426,6 +426,14 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: key("longerDelay")) }
   }
 
+  /// The user closed this display's size suggestion. The Recommended mark stays
+  /// on the size itself; only the hub's callout row honors this, so the
+  /// suggestion is still legible where a size is chosen after it is waved off.
+  public var sizeRecommendationDismissed: Bool {
+    get { defaults.bool(forKey: key("sizeRecommendationDismissed")) }
+    set { defaults.set(newValue, forKey: key("sizeRecommendationDismissed")) }
+  }
+
   /// Manual override for the panel's volume-slider verdict, in both directions
   /// (see `AudioSinkOverride` — the automatic signal is the display's own
   /// capabilities string, not CoreAudio). Unknown raw values fall back to

@@ -249,14 +249,33 @@ case "modes":
   }
 case "curated":
   // What the DEFAULT picker actually shows, after DisplayModeCatalog curation.
+  //
+  // Geometry is built and passed, so this mirrors the app's DENSITY floor
+  // rather than the fraction-of-native fallback. The two disagree on real
+  // panels (that is what the density floor is for), and without this the app
+  // and the probe would print different curated lists for the same display,
+  // which a hardware pass has no way to read as anything but a bug.
+  //
+  // The physical size comes off the discovery pass already made at startup, so
+  // nothing extra is read and nothing new goes on the DDC wire.
   let cur = CoreGraphicsDisplayConfigurator()
   for display in online where displayFilter == nil || display.id == displayFilter {
     let all = cur.modes(for: display.id)
     guard let native = all.first(where: { $0.isNative }) else { continue }
+    let facts = found.first { $0.display.id == display.id }?.facts
+    let geometry = PanelGeometry(
+      nativePixelWidth: native.pixelWidth, nativePixelHeight: native.pixelHeight,
+      physicalWidthCm: facts?.physicalWidthCm,
+      physicalHeightCm: facts?.physicalHeightCm,
+      isVirtual: VirtualDisplayDetection.isVirtual(display.id) == true)
     let rows = DisplayModeCatalog.curated(
-      all, nativePixelWidth: native.pixelWidth, nativePixelHeight: native.pixelHeight)
+      all, nativePixelWidth: native.pixelWidth, nativePixelHeight: native.pixelHeight,
+      geometry: geometry)
     let revealedRows = rows.filter { $0.mode.provenance == .coreGraphicsServices }
     print("\n\(display.name): \(all.count) modes -> \(rows.count) rows, \(revealedRows.count) of them revealed")
+    if geometry.physicalWidthCm == nil || geometry.physicalHeightCm == nil {
+      print("  no declared physical size (\(geometry.isVirtual ? "virtual display" : "not reported")): fraction-of-native floor in effect, not the density floor")
+    }
     for row in rows {
       let m = row.mode
       print("  \(m.logicalWidth)x\(m.logicalHeight) fb \(m.pixelWidth)x\(m.pixelHeight) @\(Int(m.refreshHz))Hz id \(m.ioModeID) \(m.provenance) hidpi=\(m.isHiDPI)")

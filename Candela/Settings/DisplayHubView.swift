@@ -237,6 +237,8 @@ struct DisplayHubView: View {
           SettingsCaption("\(AppInfo.productName) found no resolutions it can switch between on this display.")
         }
 
+        recommendationCallout(catalog)
+
         if !catalog.all.isEmpty {
           rememberRow
         }
@@ -255,6 +257,60 @@ struct DisplayHubView: View {
       }
     } header: {
       Text("Display").settingsHeading()
+    }
+  }
+
+  /// The density model's suggestion as an ACTION, where the badge on the size
+  /// picker is only a mark (PD8).
+  ///
+  /// Five conditions, and each removes the row for a different reason: no
+  /// recommendation (the model abstained, or no geometry ever reached it), the
+  /// user closed it, the user has already applied a size on this display this
+  /// session, the named size has no curated row to apply (the wire-timing
+  /// guard can withhold one), or the display is already running that size. The
+  /// last is why applying writes no dismissal: the size becomes current, so the
+  /// row goes on its own, and a dismissal written here would also hide the row
+  /// for a LATER recommendation on this display.
+  ///
+  /// A person who just chose a size has answered the question for this session;
+  /// the durable opt-out is the dismissal.
+  ///
+  /// Matched through `isRecommendedSize`, the same predicate the picker's mark
+  /// uses, so the row this applies and the row that wears the mark cannot drift.
+  /// The copy variant comes off that same curated row, because a recommended
+  /// size can be the panel's own native one (the MAG running 1920 × 1080 is
+  /// offered 3440 × 1440), and the callout must not claim a scaling that is not
+  /// happening. It asks the mode's NATIVE flag rather than the row's
+  /// `isScaled`, which is framebuffer equality: an exact-2x HiDPI mode on a 5K
+  /// or 6K panel renders into the native framebuffer at half the logical size,
+  /// so `isScaled` calls it unscaled and the native sentence would be false
+  /// there. Anything the flag leaves out gets the scaled sentence, the milder
+  /// claim.
+  @ViewBuilder private func recommendationCallout(
+    _ catalog: DisplayModeCoordinator.Catalog
+  ) -> some View {
+    if let recommendation = catalog.density?.recommendation,
+       !prefs.sizeRecommendationDismissed,
+       !coordinator.sizeAppliedByUser.contains(displayID),
+       let row = catalog.rows.first(where: { catalog.isRecommendedSize($0.mode) }),
+       !catalog.isCurrentSize(row.mode) {
+      SettingRow(caption: SettingsCaption(verbatim: DisplayModeCopy.recommendationCallout(
+        width: recommendation.logicalWidth, height: recommendation.logicalHeight,
+        isNative: row.mode.isNative
+      ))) {
+        HStack {
+          // The SAME apply the picker uses, countdown and all (PD9): a
+          // recommended mode is no safer than any other, and the keep/revert
+          // window is the only wire-timing detector that exists.
+          Button(DisplayModeCopy.recommendationApply) { select(size: row, in: catalog) }
+            .accessibilityLabel(DisplayModeCopy.recommendationApply)
+          Button(DisplayModeCopy.recommendationDismiss) {
+            writer.write(.sizeRecommendationDismissed) { $0.sizeRecommendationDismissed = true }
+          }
+          .accessibilityLabel(DisplayModeCopy.recommendationDismiss)
+          Spacer()
+        }
+      }
     }
   }
 
@@ -300,13 +356,19 @@ struct DisplayHubView: View {
   /// deduplicated by logical size, so the distinction words belong to the
   /// surfaces that show the duplicates (SO14/SO18, Task 14).
   ///
-  /// **The source mark DOES ride along, and the difference is the point.**
-  /// Native and Scaled tell two entries of one size apart, which this picker
-  /// has none of. "Added by Candela" says why the entry is on the list at all,
-  /// and this pop-up is the offering surface of record (the menu bar's list is
-  /// a five-row shortcut; see `PanelResolutionSection`): a differentiator
-  /// nobody can see at the moment of choosing is one the app does not appear to
-  /// have.
+  /// **The source mark does not ride along either.** Three marks on one
+  /// dropdown item read as a badge queue, so this pop-up states only the cost
+  /// of the choice (the caps warning) and the recommendation. "Added by
+  /// Candela" belongs to the All Sizes page, where a row has the width for it
+  /// and where a mode we found sits beside its published neighbour at the same
+  /// size; see `AllModesPage.rowBadge`.
+  ///
+  /// **The density model's mark rides along too**, for the same reason: this
+  /// pop-up is where a size is chosen, and a suggestion nobody sees while
+  /// choosing is a suggestion the app did not make. One word is all of it: a
+  /// mark states the suggestion, and anything that has to be argued (the panel
+  /// measurement behind it, an apply button) belongs to a dismissible row that
+  /// this mark deliberately outlives.
   ///
   /// `currentHz` is `outcome`'s contract, not a hint: when the display has no
   /// current mode the caps warning is SUPPRESSED entirely — a placeholder 0
@@ -321,18 +383,13 @@ struct DisplayHubView: View {
          in: catalog.all
        ),
        outcome.lowersCurrentRate {
-      // First: it is a warning about what this choice costs, and the source
-      // mark is a note about where the choice came from.
+      // First: what this choice costs outranks a note about the display.
       marks.append("caps at \(DisplayModeCopy.refresh(outcome.appliedHz))")
     }
-    // The mode this item would APPLY, not the row's representative, which is
-    // the same rule the caps warning above follows (SO18). They disagree
-    // whenever a size holds both kinds: measured on the MAG after 1920×804 was
-    // engaged, CoreGraphics began publishing that one rate while the rest of
-    // that framebuffer's rates stayed ours, so the representative can be
-    // published while the mode this item applies is one we added.
-    if catalog.modeKeepingCurrentRefreshRate(for: row).isRevealed {
-      marks.append(DisplayModeCopy.addedByApp)
+    // Second: a note about this PANEL rather than a cost of the choice. By
+    // SIZE, like `curatedSelection` above.
+    if catalog.isRecommendedSize(row.mode) {
+      marks.append(DisplayModeCopy.recommended)
     }
 
     let base = DisplayModeCopy.size(row.mode)
@@ -856,7 +913,9 @@ struct DisplayHubView: View {
       //    NOT everything keyed to this display: the mute strategy is step 4
       //    (ordering), and the remembered display mode is deliberately outside
       //    — a resolution the user is currently looking at is not a setting
-      //    this button promises to change.
+      //    this button promises to change. The size-recommendation dismissal is
+      //    deliberately outside too: only Reset All Settings brings that
+      //    suggestion back, and this alert never promises to.
       writer.writeAll([
         .friendlyName, .hideDisplay, .isDisabled, .hideOsd, .forceSw, .avoidGamma,
         .audioDeviceNameOverride, .audioSinkOverride, .hideVolumeSlider,

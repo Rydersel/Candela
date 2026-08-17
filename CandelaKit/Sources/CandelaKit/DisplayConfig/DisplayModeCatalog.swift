@@ -34,22 +34,50 @@ public struct DisplayModeRow: Sendable, Equatable, Identifiable {
 /// Foundation only — no CoreGraphics — so the judgement is testable against
 /// captured fixtures rather than against attached hardware.
 public enum DisplayModeCatalog {
-  /// Below this on its SHORTER axis, a mode is not a usable desktop. The real
-  /// Dell list contains 300×400; nobody is choosing that.
+  /// LAST-RESORT floor, on the SHORTER axis, for the one state where nothing
+  /// about the panel is known: no declared physical size to take a density
+  /// from, and no native pixel count to take a fraction of. Every other case
+  /// goes through `passesUsabilityFloor`, which prefers density and then the
+  /// fraction. Not dead code: `DisplayModeCoordinator` really does pass 0 for
+  /// the native pixels when the native-flagged mode could not be read.
+  ///
+  /// It was the ONLY floor until the density model landed, and a flat pixel
+  /// count is the wrong shape for the job: it asks how many pixels tall a mode
+  /// is, when the question is how big things look. On a 21:9 panel that cut
+  /// three legitimate ladder rungs (1600×670, 1344×562, 1280×536) for being
+  /// short rather than for being unusable.
   ///
   /// Deliberately the minor axis rather than width: the development Dell runs
   /// rotated 270°, where usable desktops are tall and narrow, and a width-only
   /// floor cut 945×1680 and 900×1600. Deliberately 720 rather than 768: the
-  /// MAG ultrawide's exact-2x native mode is 1720×720, so a higher floor would
+  /// MAG ultrawide's exact-2x native mode is 1720×720, so a higher value would
   /// remove the most important mode on that panel.
   public static let usabilityFloorMinorAxis = 720
 
   /// Default presentation: one row per logical size, fastest refresh rate
   /// representing it, junk dropped, largest first.
+  ///
+  /// - Parameter geometry: the panel's physical facts, when they are known.
+  ///   Supplying them upgrades the usability floor from a pixel count to a
+  ///   density, which is the only form of the question that transfers between
+  ///   a 21:9 ultrawide and a rotated 4K panel. On the calibrated panel set it
+  ///   only ADDS rows: nothing the shipped pixel floor kept disappears, which
+  ///   `noCurrentlyCuratedRowDisappearsOnAnyPanel` pins on all three fixtures.
+  ///   That is a fixture result, not a structural one. A panel coarse enough
+  ///   (a 55-inch 4K TV reads about 81 PPI) has sizes a pixel floor keeps and
+  ///   a density floor drops, which is the density floor doing its job.
+  ///
+  ///   A VIRTUAL display's geometry may be passed like any other: the floor
+  ///   itself treats `isVirtual` as no geometry at all, so no caller can
+  ///   density-floor an invented physical size by forgetting to strip it.
   public static func curated(
-    _ modes: [DisplayMode], nativePixelWidth: Int, nativePixelHeight: Int
+    _ modes: [DisplayMode], nativePixelWidth: Int, nativePixelHeight: Int,
+    geometry: PanelGeometry? = nil
   ) -> [DisplayModeRow] {
-    let usable = modes.filter { min($0.logicalWidth, $0.logicalHeight) >= usabilityFloorMinorAxis }
+    let usable = modes.filter {
+      passesUsabilityFloor($0, nativePixelWidth: nativePixelWidth,
+                           nativePixelHeight: nativePixelHeight, geometry: geometry)
+    }
     let groups = Dictionary(grouping: usable) { SizeKey(width: $0.logicalWidth, height: $0.logicalHeight) }
 
     return groups.compactMap { _, group -> DisplayModeRow? in
@@ -65,6 +93,45 @@ public enum DisplayModeCatalog {
         ? $0.mode.logicalArea > $1.mode.logicalArea
         : $0.mode.ioModeID < $1.mode.ioModeID
     }
+  }
+
+  /// Is this size a usable desktop on THIS panel? Three floors, most informed
+  /// first, each falling through to the next when its input is missing.
+  ///
+  /// 1. Density, when the panel declares a physical size AND is not virtual.
+  ///    "Too big to work in" is a physical claim, so this is the only floor
+  ///    that means the same thing on two panels of different sizes. A virtual
+  ///    display's declared size is invented, so its density is fiction and the
+  ///    fraction of its native pixels is the honest answer: the exclusion lives
+  ///    here rather than in every caller, since a caller that forgets to strip
+  ///    the geometry gets a floor derived from a made-up 600x340 mm panel.
+  /// 2. A fraction of the native minor axis, when only the pixel count is
+  ///    known. Calibrated so nothing currently curated disappears, which makes
+  ///    it deliberately permissive: on the MAG it lands at 475 where the flat
+  ///    floor was 720.
+  /// 3. The flat constant, when neither is known.
+  ///
+  /// Runs BEFORE grouping, so the representative-picking never sees a mode the
+  /// floor rejected. `PanelDensityModel.evaluate` then trusts that its rows are
+  /// post-floor, which is what this ordering guarantees.
+  private static func passesUsabilityFloor(
+    _ mode: DisplayMode, nativePixelWidth: Int, nativePixelHeight: Int,
+    geometry: PanelGeometry?
+  ) -> Bool {
+    if let geometry, !geometry.isVirtual,
+       let density = PanelDensityModel.looksLikePPI(
+         logicalWidth: mode.logicalWidth, logicalHeight: mode.logicalHeight,
+         in: geometry) {
+      return density >= PanelDensityModel.floorLooksLikePPI
+    }
+    let nativeMinor = min(nativePixelWidth, nativePixelHeight)
+    guard nativeMinor > 0 else {
+      return min(mode.logicalWidth, mode.logicalHeight) >= usabilityFloorMinorAxis
+    }
+    let fractionFloor = Int(
+      (Double(nativeMinor) * PanelDensityModel.fallbackFloorMinorAxisFraction)
+        .rounded())
+    return min(mode.logicalWidth, mode.logicalHeight) >= fractionFloor
   }
 
   /// Everything, ungrouped. The escape hatch that stops us being a nicer
