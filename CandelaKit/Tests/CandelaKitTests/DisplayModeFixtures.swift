@@ -59,6 +59,36 @@ enum DisplayModeFixtures {
     m(1920, 1080, 1920, 1080, hz: 60),
   ]
 
+  /// Built-in MacBook Pro panel, native 3024×1964. Captured 2026-08-17. Raw
+  /// dump: `docs/spikes/s2-resolutions/fixtures/builtin-modes-2026-08-17.txt`.
+  static let builtInNativePixels = (3024, 1964)
+
+  /// One representative entry per distinct logical size: the 132 published
+  /// modes collapse to 12 once refresh rates are dropped. Prefers the HiDPI
+  /// (scaled) logical variant of a given pixel footprint, except the native
+  /// 3024x1964 footprint, where the dump's native flag sits on the 1x entry
+  /// rather than its 1512x982 HiDPI sibling, so that is the fixture's native
+  /// entry.
+  static let builtIn: [DisplayMode] = [
+    m(960, 600, 1920, 1200), m(1024, 640, 2048, 1280),
+    m(1024, 665, 2048, 1330), m(1147, 716, 2294, 1432),
+    m(1147, 745, 2294, 1490), m(1280, 800, 2560, 1600),
+    m(1352, 845, 2704, 1690), m(1352, 878, 2704, 1756),
+    m(1512, 945, 3024, 1890),
+    m(3024, 1964, 3024, 1964, native: true),
+    m(1800, 1125, 3600, 2250), m(1800, 1169, 3600, 2338),
+  ]
+
+  /// Physical panel size in integer centimetres, truncated from the panel's
+  /// declared millimetres (`CGDisplayScreenSize`, same truncation the shipped
+  /// physical-size read applies). Captured 2026-08-17. Raw dump:
+  /// `docs/spikes/s2-resolutions/fixtures/builtin-modes-2026-08-17.txt`. The
+  /// Dell is measured mounted rotated 270°, so it reports portrait (33, 60)
+  /// rather than its landscape manufactured size.
+  static let magPhysicalCm = (80, 33)
+  static let dellPhysicalCm = (33, 60)
+  static let builtInPhysicalCm = (30, 19)
+
   static func mode(
     _ id: Int32, logical: (Int, Int), pixels: (Int, Int), hz: Double = 60
   ) -> DisplayMode {
