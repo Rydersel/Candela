@@ -17,10 +17,27 @@ import SwiftUI
 struct VirtualDisplaysPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   /// Which slot the controls below describe, chosen on the tile row the way
   /// the arrangement map chooses a display. nil until something is added or
   /// clicked; the effective selection falls back to the first added slot.
   @State private var selectedSlot: Int?
+
+  /// The selected slot's create failure as RENDERED, mirroring
+  /// `AppModel.virtualSlotIssues` one update behind. The model writes that map
+  /// from the convergence pass, and a keyed `.animation` on a `Form` row animates
+  /// nothing in either direction (measured 2026-08-17), so this is what puts the
+  /// sentence's arrival and departure inside a transaction.
+  ///
+  /// It carries the SLOT it is about, and the row renders nothing unless the two
+  /// agree: one value serves whichever slot is selected, and without the slot a
+  /// switch would show the previous slot's failure until the sync landed.
+  @State private var shownIssue: ShownIssue?
+
+  private struct ShownIssue: Equatable {
+    var slot: Int
+    var failure: VirtualDisplayFailure?
+  }
 
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
@@ -210,6 +227,9 @@ struct VirtualDisplaysPane: View {
   @ViewBuilder
   private func statusRow(slot: Int, live: VirtualDisplayHandle?) -> some View {
     let busy = model.virtualSlotBusy.contains(slot)
+    // The four states below are a branch swap around a `ProgressView`, not an
+    // insert, so this row is left instant: fading a spinner into a sentence and
+    // back is the one shape the house voice has no use for.
     HStack {
       Text("Status")
       Spacer()
@@ -229,7 +249,18 @@ struct VirtualDisplaysPane: View {
         Text("Not created").foregroundStyle(.secondary)
       }
     }
-    if !busy, let issue = model.virtualSlotIssues[slot] {
+    // The failure row's mirror hooks hang on the status row, which is always
+    // present and sits directly above it: hooks on the failure row itself would
+    // only exist while the failure does, so nothing would be watching for it to
+    // arrive. The appear sync is un-animated, and it re-runs on a slot change
+    // because `slotSection` carries the slot as its identity.
+    .onAppear { shownIssue = ShownIssue(slot: slot, failure: visibleIssue(slot: slot)) }
+    .onChange(of: visibleIssue(slot: slot)) { _, issue in
+      withAnimation(Motion.notice(reduceMotion: reduceMotion)) {
+        shownIssue = ShownIssue(slot: slot, failure: issue)
+      }
+    }
+    if let shown = shownIssue, shown.slot == slot, let issue = shown.failure {
       // The last attempt's failure, in words: a create that fails must not
       // be indistinguishable from a click that was ignored.
       HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -239,7 +270,17 @@ struct VirtualDisplaysPane: View {
       .font(.callout)
       .foregroundStyle(.orange)
       .fixedSize(horizontal: false, vertical: true)
+      .transition(.opacity)
     }
+  }
+
+  /// The failure this slot's status row should be showing, or nil: what the
+  /// mirror follows. While the slot is busy there is no sentence, so a failure
+  /// that arrives mid-work fades in when the work ends rather than under the
+  /// spinner.
+  private func visibleIssue(slot: Int) -> VirtualDisplayFailure? {
+    guard !model.virtualSlotBusy.contains(slot) else { return nil }
+    return model.virtualSlotIssues[slot]
   }
 
   private static func sentence(for failure: VirtualDisplayFailure) -> String {

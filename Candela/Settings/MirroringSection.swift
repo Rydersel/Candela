@@ -40,12 +40,20 @@ struct MirroringSection: View {
   /// old name standing in the status line and in the picker. The coordinator
   /// itself is `@Observable` and needs no help.
   @Environment(AppModel.self) private var model
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   /// The master the user has picked, or nil while they have picked nothing.
   /// Never read directly — `selectedMaster` reconciles it against the live
   /// topology first, because a display can depart between the pick and the
   /// click.
   @State private var chosenMaster: CGDirectDisplayID?
+
+  /// The reason lines as RENDERED, mirroring the coordinator's three signals one
+  /// update behind. A keyed `.animation` on a `Form` row animates nothing in
+  /// either direction (measured 2026-08-17), so the only way these fade is for
+  /// the write to happen inside a `withAnimation` in this view. Kept in agreement
+  /// by the two hooks on the status row and by nothing else.
+  @State private var shownReasons = ReasonLines.none
 
   private var displayID: CGDirectDisplayID { state.display.id }
   private var topology: MirrorTopology { coordinator.topology }
@@ -106,6 +114,15 @@ struct MirroringSection: View {
         ))
         .foregroundStyle(.secondary)
       }
+      // The mirror's two hooks hang HERE, on the one row of this section that is
+      // always present: a hook on the reason lines' own container would only
+      // exist while a reason does, so nothing would be watching for the arrival.
+      // The appear sync is deliberately un-animated, or a reason still standing
+      // when the pane opens would fade in as though it had just happened.
+      .onAppear { shownReasons = reasonLines }
+      .onChange(of: reasonLines) { _, lines in
+        withAnimation(Motion.notice(reduceMotion: reduceMotion)) { shownReasons = lines }
+      }
 
       if isLocked {
         // Named and DISABLED, never hidden, and the words travel in the SAME
@@ -123,23 +140,30 @@ struct MirroringSection: View {
         startControls
       }
 
+      // The three reason lines are the only rows here that arrive and leave on
+      // their own, so they are the only ones that animate, and they render from
+      // the mirror rather than from the coordinator. The control block above
+      // swaps `_ConditionalContent` branches and rebuilds its control; it reads
+      // the coordinator directly and stays instant.
       // Every refusal states a reason and there are EIGHT of them, each with its
-      // own sentence — and three of the eight are the only ones this pane can
-      // say without asserting something it does not know. See `refusalCaption`,
+      // own sentence; three of the eight are the only ones this pane can say
+      // without asserting something it does not know. See `refusalCaption`,
       // which switches over all eight with no `default:` arm.
-      if let refusal = coordinator.lastRefusal {
+      if let refusal = shownReasons.refusal {
         refusalCaption(refusal)
+          .transition(.opacity)
       }
-      if let failure = coordinator.lastFailure {
+      if let failure = shownReasons.failure {
         // The CoreGraphics code is diagnostic and stays out of the sentence.
         SettingsCaption(MirroringCopy.applyFailure)
           .help("CoreGraphics error \(failure.cgErrorCode)")
+          .transition(.opacity)
       }
       // A break that committed exactly what it staged and STILL left a set
       // standing. `MirrorToggleDecision.disengage` carries `residualMembers` for
       // this sentence alone: a locked slave keeps mirroring, which keeps its
       // master a master. Binding that residue and not rendering it would report
-      // "mirroring off" over a set the user is still looking at — the
+      // "mirroring off" over a set the user is still looking at: the
       // silent-success defect this whole feature exists to close, re-created one
       // layer out.
       //
@@ -147,12 +171,33 @@ struct MirroringSection: View {
       // above, and that is deliberate rather than an oversight: this sentence
       // NAMES the displays it is about (or falls back to a count), so it makes
       // no claim about the pane it lands in and cannot be false there.
-      if !coordinator.lastPartialBreak.isEmpty {
+      if !shownReasons.partialBreak.isEmpty {
         SettingsCaption(verbatim: MirroringCopy.partialBreak(
-          residual: coordinator.lastPartialBreak, name: name
+          residual: shownReasons.partialBreak, name: name
         ))
+        .transition(.opacity)
       }
     }
+  }
+
+  /// The three reason signals, carried WHOLE rather than as three bools: one
+  /// refusal replacing another is a different sentence, five of the eight
+  /// refusals render nothing at all, and the sentences differ in height, so the
+  /// mirror has to move for a change that leaves the row count alone.
+  private struct ReasonLines: Equatable {
+    var refusal: MirrorRefusal?
+    var failure: DisplayConfigError?
+    var partialBreak: [CGDirectDisplayID]
+
+    static let none = ReasonLines(refusal: nil, failure: nil, partialBreak: [])
+  }
+
+  private var reasonLines: ReasonLines {
+    ReasonLines(
+      refusal: coordinator.lastRefusal,
+      failure: coordinator.lastFailure,
+      partialBreak: coordinator.lastPartialBreak
+    )
   }
 
   /// The refusals this pane can state TRUTHFULLY, and no others.
