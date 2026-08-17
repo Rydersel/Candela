@@ -40,7 +40,14 @@ enum DisplayModeCopy {
   /// live mode. Routed through one implementation so a remembered resolution is
   /// named the same way as the row the user picked it from.
   static func size(_ descriptor: DisplayModeDescriptor) -> String {
-    "\(descriptor.logicalWidth) × \(descriptor.logicalHeight)"
+    size(width: descriptor.logicalWidth, height: descriptor.logicalHeight)
+  }
+
+  /// The same label from bare numbers, for the density model's recommendation:
+  /// it names a logical SIZE with no mode behind it (`SizeRecommendation` holds
+  /// no `ioModeID` on purpose). Routed here so the times sign has one spelling.
+  static func size(width: Int, height: Int) -> String {
+    "\(width) × \(height)"
   }
 
   /// The mark on an option that is in the list because this app's own
@@ -58,6 +65,66 @@ enum DisplayModeCopy {
   /// Spoken and seen are the same words, deliberately: there is no symbol or
   /// abbreviation here for a screen reader to mispronounce.
   static var addedByApp: String { "Added by \(AppInfo.productName)" }
+
+  /// The mark on the size the density model names for this panel. Stated here
+  /// with the other marks because a row can carry both, and two literals in two
+  /// views is how one word becomes two.
+  ///
+  /// One word, and it is the whole claim (RM11): a suggestion about THIS
+  /// display's physical size, never a claim about the mode's quality and never
+  /// a HiDPI implication. Everything that would earn a longer sentence, the
+  /// physical measurement behind it included, belongs to a surface with room
+  /// for a sentence, never to this word.
+  ///
+  /// Spoken and seen are the same word, like `addedByApp`: nothing here for a
+  /// screen reader to mispronounce.
+  ///
+  /// It shares a word with `AllModesPage.ListMode.recommended`, whose segmented
+  /// control names the CURATED LIST. The overlap is deliberate rather than
+  /// missed: both mean "this is what we suggest", at list scale and at row
+  /// scale, and RM11 fixes this word.
+  static var recommended: String { "Recommended" }
+
+  /// The hub's one-line suggestion: the size and the reason in one sentence.
+  ///
+  /// Two second sentences, picked by the caller from the curated row this
+  /// applies, because the recommended size is NOT always a scaled mode: on the
+  /// MAG running 1920 × 1080 the model names 3440 × 1440, whose representative
+  /// is the panel's own native mode. "It renders larger and scales the result"
+  /// scales nothing there.
+  ///
+  /// Keyed off the mode's NATIVE flag, never off framebuffer equality with the
+  /// panel's native pixel count: the exact-2x HiDPI mode of a 5K or 6K panel
+  /// renders into the native framebuffer while presenting half the logical
+  /// size, so a pixel-equality test calls it unscaled and this would tell a 5K
+  /// owner that looks-like-2560 × 1440 is their native resolution. The flag
+  /// answers the question actually being asked, and everything it leaves out
+  /// falls to the scaled sentence, which is the milder of the two claims.
+  ///
+  /// The scaled sentence is the RM11 half: it states the mechanism plainly and
+  /// never implies the panel is natively that size. The other states provenance,
+  /// and neither makes a quality claim.
+  ///
+  /// The claim is about THIS panel's physical size and nothing else. No
+  /// measurement, no PPI, no band: those are the model's workings, and a
+  /// suggestion someone has to do arithmetic to evaluate is not a suggestion.
+  static func recommendationCallout(width: Int, height: Int, isNative: Bool) -> String {
+    let fit = "For this display's size, \(size(width: width, height: height)) is the comfortable fit."
+    return isNative
+      ? "\(fit) It is this display's native resolution."
+      : "\(fit) It renders larger and scales the result."
+  }
+
+  /// Names the ACT, not the size: the sentence above already named the size,
+  /// and a button repeating it would be read as a second, different size.
+  static var recommendationApply: String { "Use This Size" }
+
+  /// Closes the row for this display for good: the dismissal pref is not in the
+  /// per-display reset's enumerated batch, so only Reset All Settings clears it.
+  /// What keeps the suggestion reachable afterwards is the Recommended mark on
+  /// the size picker, which this does not touch: the passive signal outlives the
+  /// row that argues for it.
+  static var recommendationDismiss: String { "Dismiss" }
 
   /// Rates are quantized to one decimal at the CoreGraphics boundary, so 59.9
   /// is a real value and truncating it to "59 Hz" would both misreport it and

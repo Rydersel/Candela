@@ -63,9 +63,48 @@ final class AppModel {
   /// stored property declared above it, and the Observation macro cannot wrap a
   /// `lazy var`. Views observe the coordinator's own properties, not this
   /// reference.
-  @ObservationIgnored private(set) lazy var displayModes = DisplayModeCoordinator(
-    gate: reconfigurationGate
-  )
+  ///
+  /// The physical-facts provider is wired here rather than at a surface for
+  /// `didStoreMode`'s reason: the catalog is rebuilt at reconnect with nothing
+  /// on screen, so a view-installed provider would be absent exactly when the
+  /// panel's own size is being judged.
+  @ObservationIgnored private(set) lazy var displayModes: DisplayModeCoordinator = {
+    let coordinator = DisplayModeCoordinator(gate: reconfigurationGate)
+    coordinator.physicalFacts = { [weak self] display in
+      self?.physicalPanelFacts(for: display)
+    }
+    return coordinator
+  }()
+
+  /// PD7: the app-side half of the density join. The Kit is handed a value and
+  /// performs no lookup of its own.
+  ///
+  /// Both halves are resolved from the LIVE display list on every call, never
+  /// remembered: `hardwareFacts` is keyed by persistence key because display IDs
+  /// reassign across a replug, so the ID this is asked about only means anything
+  /// against the list as it stands right now.
+  ///
+  /// A display with no entry yields nil sizes rather than no facts, so a virtual
+  /// display still reports itself as virtual. It has to: discovery drops virtual
+  /// displays from the DDC pool, so they never have facts, and their declared
+  /// physical size is a fiction no plausibility range can catch.
+  private func physicalPanelFacts(
+    for display: ConfiguredDisplay
+  ) -> DisplayModeCoordinator.PhysicalPanelFacts {
+    // Ours by ownership, everyone else's by the optional-returning predicate
+    // (nil reads as an ordinary panel), the same pair the arrangement canvas
+    // asks. Two answers to "is this virtual" is one too many.
+    let isVirtual = virtualDisplays.ownedDisplayIDs.contains(display.id)
+      || VirtualDisplayDetection.isVirtual(display.id) == true
+    let facts = allControlledStates
+      .first { $0.id == display.id }
+      .flatMap { hardwareFacts[$0.display.persistenceKey] }
+    return DisplayModeCoordinator.PhysicalPanelFacts(
+      physicalWidthCm: facts?.physicalWidthCm,
+      physicalHeightCm: facts?.physicalHeightCm,
+      isVirtual: isVirtual
+    )
+  }
 
   /// THE topology sample every part of the app resolves through (DT15). Handed
   /// to every `BrightnessController` so the shade and the gamma activity

@@ -876,11 +876,14 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// after the menu closed and the section would be missing on the open that
   /// asked for it, appearing only on the next one.
   ///
-  /// Enumeration is on demand and cached (DM7, never on a timer): this skips
-  /// displays that already have a catalog, and the coordinator keeps the rest
-  /// fresh from screen-parameters notifications.
+  /// Enumeration is on demand and cached (DM7, never on a timer), and this pass
+  /// re-enumerates every listed display rather than only the ones with no
+  /// catalog: the contract is that a catalog describes the panel now behind that
+  /// ID, and a replug can reassign IDs between two panels while both stay
+  /// present. All three call sites run it AFTER `model.refresh()`, so it is the
+  /// pass that joins a catalog to freshly discovered hardware facts.
   private func warmModeCatalogs() {
-    for state in model.displays where model.displayModes.catalogs[state.id] == nil {
+    for state in model.displays {
       model.displayModes.refreshCatalog(for: state.id)
     }
   }

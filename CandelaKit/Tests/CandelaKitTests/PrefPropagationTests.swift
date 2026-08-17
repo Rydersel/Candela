@@ -96,7 +96,9 @@ struct PrefPropagationTests {
     #expect(PrefName.virtualSlotConfigured.rawValue == "virtualSlotConfigured")
     #expect(PrefName.virtualSlotUUID.rawValue == "virtualSlotUUID")
     #expect(PrefName.virtualSlotDefined.rawValue == "virtualSlotDefined")
-    #expect(PrefName.allCases.count == 64)
+    // The density model's hub callout added its per-display dismissal: 64 -> 65.
+    #expect(PrefName.sizeRecommendationDismissed.rawValue == "sizeRecommendationDismissed")
+    #expect(PrefName.allCases.count == 65)
   }
 
   // MARK: - Rows
@@ -266,6 +268,19 @@ struct PrefPropagationTests {
                  .virtualSlotUUID, .virtualSlotDefined] {
       #expect(PrefPropagation.effects(forChange: name) == [.refreshUI], "\(name.rawValue)")
     }
+  }
+
+  @Test func theSizeSuggestionDismissalRefreshesTheUIAndNothingElse() {
+    // The hub's suggestion row is closed by the person reading it, so the write
+    // is a pane write and D27 makes it a case. Nothing else may ride on it: the
+    // suggestion names a resolution but changes none, so a `.rebuildPanel` row
+    // would redraw the menu bar over a row someone dismissed, and anything
+    // touching the display would turn a "not now" into a mode change.
+    //
+    // The contrast with `oledStandbyNoteDismissed` above is the whole rule: that
+    // one is written by the hours tracker and so is engine state, this one has a
+    // button.
+    #expect(PrefPropagation.effects(forChange: .sizeRecommendationDismissed) == [.refreshUI])
   }
 
   @Test func indicatorPositionsRefreshTheUIAndNothingElse() {

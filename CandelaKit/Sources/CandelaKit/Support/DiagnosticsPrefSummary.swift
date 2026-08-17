@@ -59,6 +59,10 @@ public enum DiagnosticsPrefSummary {
     if prefs.pollingMode != .normal { note(.pollingMode, "\(prefs.pollingMode)") }
     if prefs.pollingCount != 0 { note(.pollingCount, "\(prefs.pollingCount)") }
     if remembersMode { note(.rememberDisplayMode, "true") }
+    // Reported because it is the answer to "the app never suggested a size for
+    // this display": a closed suggestion is invisible everywhere else in a
+    // report, and the alternative reading is that the density model abstained.
+    if prefs.sizeRecommendationDismissed { note(.sizeRecommendationDismissed, "true") }
 
     // OLED care (W3a). The comparison values ARE the accessor defaults — the
     // Recommended preset, pinned by `oledDefaultsAreTheRecommendedPreset` — so

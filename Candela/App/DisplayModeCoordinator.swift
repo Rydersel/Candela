@@ -86,8 +86,31 @@ final class DisplayModeCoordinator {
     /// silence we refuse elsewhere (CR11), and on the hardware pass this count
     /// is what distinguishes "the guard fired" from "revelation found nothing".
     let withheldForWireTiming: Int
+    /// What the density model made of this panel, judged over the SAME curated
+    /// rows this catalog publishes (PD1): a size the wire-timing guard withheld
+    /// has no apply path, so it must never become a recommendation.
+    ///
+    /// nil when the panel's native pixels are unknown, or when no facts
+    /// provider is installed (the default closure, i.e. every test that does not
+    /// wire one). A display with no entry in the app's hardware facts is NOT
+    /// this case: the provider still answers, with nil sizes, and the model
+    /// abstains with a `.noPhysicalSize` verdict. Both cases here are "no
+    /// geometry", and no geometry means no judgement rather than one from zeros.
+    let density: DensityVerdict?
 
     var nativeKnown: Bool { nativePixels != nil }
+  }
+
+  /// What the app layer knows about a panel that CoreGraphics mode enumeration
+  /// does not. Two joins meet here and neither belongs in the Kit (PD7): the
+  /// declared physical size, filed per `persistenceKey` because display IDs
+  /// reassign across a replug, and the is-virtual predicate, which no
+  /// plausibility range could ever stand in for (a virtual display declares a
+  /// perfectly ordinary fake size).
+  struct PhysicalPanelFacts: Equatable {
+    let physicalWidthCm: Int?
+    let physicalHeightCm: Int?
+    let isVirtual: Bool
   }
 
   struct PixelSize: Equatable {
@@ -176,6 +199,21 @@ final class DisplayModeCoordinator {
   /// synchronously so the disable lands in the same body evaluation as the
   /// click that caused it.
   private(set) var isApplying = false
+  /// Displays whose user has applied a size in THIS session (PD8): a person who
+  /// just chose a size has answered the recommendation for now, and the durable
+  /// opt-out is the dismissal pref.
+  ///
+  /// In memory and never persisted, deliberately, for that same split: the
+  /// dismissal is the answer that outlives a launch, and a second stored
+  /// hide-forever key would be a second way to lose the suggestion for good.
+  /// Written only by a KEPT preview, so a reverted or expired try leaves the
+  /// suggestion standing.
+  private(set) var sizeAppliedByUser: Set<CGDirectDisplayID> = []
+  /// Whether the select now in flight changes the display's logical SIZE,
+  /// sampled before `begin()` moves it. PD8 is about applying a size: a refresh
+  /// rate picked at the size already on screen answers nothing about how big
+  /// things look, so it must not hide the callout.
+  @ObservationIgnored private var selectChangesSize: [CGDirectDisplayID: Bool] = [:]
 
   let configurator: any DisplayConfiguring
   let persistence: ModePersistence
@@ -216,6 +254,15 @@ final class DisplayModeCoordinator {
   /// the notice a surface can still render is `report(for:)`, which holds only
   /// the LATEST one per display and is cleared when the user dismisses it.
   @ObservationIgnored var didReportReapply: (CGDirectDisplayID, ModeReapplyNotice) -> Void = { _, _ in }
+
+  /// The app's answer to "what is this panel physically". Injected because the
+  /// lookup it performs (`AppModel.hardwareFacts`, the owned/foreign virtual
+  /// check) lives one layer up; the coordinator only enumerates modes.
+  ///
+  /// The default returns nil, which is the pre-density behaviour exactly: no
+  /// geometry reaches the Kit, the usability floor falls back to its
+  /// fraction-of-native rule, and no catalog carries a verdict.
+  @ObservationIgnored var physicalFacts: (ConfiguredDisplay) -> PhysicalPanelFacts? = { _ in nil }
 
   @ObservationIgnored private let session: ModePreviewSession
   /// Per display, not one value for the coordinator. A settings-select on B
@@ -321,18 +368,46 @@ final class DisplayModeCoordinator {
     }
     let all = DisplayModeCatalog.full(configurator.modes(for: displayID))
     let native = configurator.nativePixels(for: displayID)
+    // Sampled here, once, and handed to both the catalog and the verdict: the
+    // size the model calls "current" has to be the size this enumeration saw,
+    // not one re-read after the rows were built.
+    let current = configurator.currentMode(for: displayID)
+    // Density is a claim about physical pixels, so no native size means no
+    // geometry at all rather than geometry over zeros.
+    let geometry = native.flatMap { native in
+      physicalFacts(display).map { facts in
+        PanelGeometry(
+          nativePixelWidth: native.width, nativePixelHeight: native.height,
+          physicalWidthCm: facts.physicalWidthCm,
+          physicalHeightCm: facts.physicalHeightCm,
+          isVirtual: facts.isVirtual
+        )
+      }
+    }
+    // One value, two readers (PD1). Curating twice would let the rows the user
+    // can pick and the rows the model ranks drift apart.
+    let rows = DisplayModeCatalog.curated(
+      all,
+      nativePixelWidth: native?.width ?? 0,
+      nativePixelHeight: native?.height ?? 0,
+      geometry: geometry
+    )
     catalogs[displayID] = Catalog(
       display: display,
-      rows: DisplayModeCatalog.curated(
-        all,
-        nativePixelWidth: native?.width ?? 0,
-        nativePixelHeight: native?.height ?? 0
-      ),
+      rows: rows,
       all: all,
-      current: configurator.currentMode(for: displayID),
+      current: current,
       distinctLogicalSizes: Set(all.map { LogicalSize(mode: $0) }).count,
       nativePixels: native.map { PixelSize(width: $0.width, height: $0.height) },
-      withheldForWireTiming: configurator.modesWithheldByWireTimingGuard(for: displayID)
+      withheldForWireTiming: configurator.modesWithheldByWireTimingGuard(for: displayID),
+      density: geometry.map {
+        PanelDensityModel.evaluate(
+          rows: rows,
+          currentLogicalWidth: current?.logicalWidth,
+          currentLogicalHeight: current?.logicalHeight,
+          geometry: $0
+        )
+      }
     )
   }
 
@@ -357,6 +432,12 @@ final class DisplayModeCoordinator {
         refreshCatalog(for: displayID)
       } else {
         catalogs[displayID] = nil
+        // Both are keyed by display ID, which the next display to arrive can
+        // inherit, so a departure has to take them: a suggestion silently
+        // suppressed on a panel nobody has chosen a size for is the failure
+        // this feature has no visible symptom for.
+        sizeAppliedByUser.remove(displayID)
+        selectChangesSize[displayID] = nil
       }
     }
     // A departure is what makes the next arrival an arrival, so it is recorded
@@ -805,6 +886,15 @@ final class DisplayModeCoordinator {
     // where the decision is filed.)
     origins[displayID] = origin
     surfaces[displayID] = surface
+    // Sampled here, before `begin()` moves the display, and promoted to
+    // `sizeAppliedByUser` only if this preview is KEPT. Every path that reaches
+    // here is an explicit choice from an offering surface (the hub's pickers,
+    // the full list, the menu bar's list); reapply and restore never preview.
+    // An unreadable current mode counts as a size change: this is a user's
+    // choice either way, and the recommendation is the thing being answered.
+    selectChangesSize[displayID] = configurator.currentMode(for: displayID).map {
+      $0.logicalWidth != mode.logicalWidth || $0.logicalHeight != mode.logicalHeight
+    } ?? true
     // Through `dismissStartFailure`, never a bare `startFailure = nil`: the
     // standalone window renders the failure, so clearing it without syncing
     // leaves an EMPTY floating panel on the display for the whole duration of
@@ -859,6 +949,13 @@ final class DisplayModeCoordinator {
       // trying sizes out would otherwise rewrite it from whichever one was
       // kept last — a change nobody asked for and nothing showed. The only
       // route to a stored mode is `pinCurrentMode`.
+      //
+      // The size recommendation IS answered here (PD8): a kept size is the
+      // user's answer for this session, and only a kept one, since a revert or
+      // an expiry leaves them on the size they were already being asked about.
+      if selectChangesSize[answered.displayID] == true {
+        sizeAppliedByUser.insert(answered.displayID)
+      }
       await adopt(.clear)
     case .reverted:
       await adopt(.clear)
@@ -1137,10 +1234,17 @@ extension DisplayModeCoordinator.Catalog {
   /// (`representativeRanking` rule 1 outranks rule 2). Tagging a display's own
   /// native resolution "low resolution" would be an insult rather than a
   /// distinction, and the twin is not on screen here to be distinguished from.
+  ///
+  /// The density model's mark rides along, in the SAME bracket as the tags.
+  /// Its caller draws one string on one line, so a mark of its own would be a
+  /// second pair of brackets on a 280 pt row; and the marks a settings row can
+  /// afford to separate ("Added by Candela") are the ones that stayed in
+  /// Settings anyway.
   func badgedSize(_ mode: DisplayMode) -> String {
-    let tags = tags(for: mode, isLowResolutionDuplicate: false)
-    guard !tags.isEmpty else { return DisplayModeCopy.size(mode) }
-    return "\(DisplayModeCopy.size(mode)) (\(tags.joined(separator: ", ")))"
+    var marks = tags(for: mode, isLowResolutionDuplicate: false)
+    if isRecommendedSize(mode) { marks.append(DisplayModeCopy.recommended) }
+    guard !marks.isEmpty else { return DisplayModeCopy.size(mode) }
+    return "\(DisplayModeCopy.size(mode)) (\(marks.joined(separator: ", ")))"
   }
 
   /// The mode to apply for a curated row: the chosen SIZE at the refresh rate
@@ -1194,5 +1298,22 @@ extension DisplayModeCoordinator.Catalog {
   func isCurrentSize(_ mode: DisplayMode) -> Bool {
     guard let current else { return false }
     return current.logicalWidth == mode.logicalWidth && current.logicalHeight == mode.logicalHeight
+  }
+
+  /// True for the row whose LOGICAL SIZE the density model named.
+  ///
+  /// A size match, the same rule `isCurrentSize` and the hub's
+  /// `curatedSelection` follow, because a recommendation IS a logical size:
+  /// `SizeRecommendation` carries no `ioModeID` precisely so that mode-id
+  /// instability can never reach it, and a curated row's representative mode is
+  /// its size's fastest rate.
+  ///
+  /// False whenever there is no verdict or the verdict abstained. Three
+  /// offering surfaces ask this question, and one helper is the only way they
+  /// keep answering it the same way.
+  func isRecommendedSize(_ mode: DisplayMode) -> Bool {
+    guard let recommendation = density?.recommendation else { return false }
+    return recommendation.logicalWidth == mode.logicalWidth
+      && recommendation.logicalHeight == mode.logicalHeight
   }
 }
