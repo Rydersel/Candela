@@ -307,14 +307,17 @@ struct PanelHealthView: View {
               rotation: rotation)
           }
         }
-        // The cap that keeps a portrait window ON the screen (OCR-A1): a
-        // rotated display's map fits 470 pt of height and narrows to match,
-        // instead of running the column to 995 pt the way full column width
-        // did on the pushed page. The aspect box is applied OUTSIDE the
-        // overlays so the crosshair's GeometryReader and the hotspot tag keep
-        // describing exactly the drawn map, never a wider frame around it.
-        .aspectRatio(aspect, contentMode: .fit)
-        .frame(maxHeight: 470)
+        // An EXPLICIT frame, not an aspect box (OCR-A1): under the health
+        // window's `preferredContentSize` hosting, a flexible frame plus
+        // `aspectRatio` reports no ideal height and collapses to nothing
+        // [MEASURED 2026-08-17: the window rendered every section except the
+        // map]. The concrete size keeps a portrait map at 470 pt tall
+        // (Dell: 264 x 470) and a landscape one width-capped (MAG:
+        // 520 x 218), and it sits OUTSIDE the overlays so the crosshair's
+        // GeometryReader and the hotspot tag keep describing exactly the
+        // drawn map.
+        .frame(width: Self.mapSize(aspect: aspect).width,
+               height: Self.mapSize(aspect: aspect).height)
         .frame(maxWidth: .infinity)
         PanelExposureLegend()
         if surfaceMode == .now, let live {
@@ -330,10 +333,10 @@ struct PanelHealthView: View {
             RoundedRectangle(cornerRadius: 5, style: .continuous)
               .strokeBorder(.separator, lineWidth: 1)
           }
-          .aspectRatio(aspect, contentMode: .fit)
-          // Same cap as the drawn map: a blank portrait frame must not run
-          // the window off the screen either.
-          .frame(maxHeight: 470)
+          // Same explicit frame as the drawn map: the blank state collapses
+          // under `preferredContentSize` hosting exactly the same way.
+          .frame(width: Self.mapSize(aspect: aspect).width,
+                 height: Self.mapSize(aspect: aspect).height)
           .frame(maxWidth: .infinity)
           .accessibilityHidden(true)
         // `summary.cells` is the accumulated history and is populated whatever
@@ -349,6 +352,16 @@ struct PanelHealthView: View {
           .fixedSize(horizontal: false, vertical: true)
       }
     }
+  }
+
+  /// The map's concrete size (OCR-A1): a portrait display's map stands
+  /// 470 pt tall and narrows to its aspect; a landscape one is capped at
+  /// 520 pt wide. One formula, both cases: the height cap wins wherever it
+  /// produces the narrower map. Explicit on purpose, because the health
+  /// window's `preferredContentSize` hosting collapses flexible frames.
+  private static func mapSize(aspect: CGFloat) -> CGSize {
+    let width = min(520, 470 * max(aspect, 0.01))
+    return CGSize(width: width, height: width / max(aspect, 0.01))
   }
 
   /// Caption under a blank surface, per lens.
