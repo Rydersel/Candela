@@ -83,6 +83,34 @@ struct DensityCalibrationTests {
       #expect(PanelDensityModel.bandPlacement(of: density) == placement, "\(label)")
     }
   }
+
+  /// The three anchors above sit deep inside the band (108.4 and 128.0) or far
+  /// outside it (162.6), so either edge could move several points before any of
+  /// them noticed. These four straddle the edges instead: two just inside, two
+  /// just outside, close enough that a one-point retune shows up here first.
+  ///
+  /// They are edge pins, not rungs anyone chooses. 1147x745 and 1800x3200 are
+  /// real fixture sizes and the other two are invented, but all four are here
+  /// for the density they produce on a real panel's geometry, nothing else.
+  @Test func theBandEdgesRejectTheSizesJustOutsideThem() throws {
+    for (label, width, height, geometry, expected, placement) in [
+      ("just inside the low edge", 1147, 745, PanelDensityModelTests.builtIn,
+       97.1, BandPlacement.inBand),
+      ("just below the low edge", 1120, 727, PanelDensityModelTests.builtIn,
+       94.8, .below),
+      ("just inside the high edge", 1769, 3144, PanelDensityModelTests.dellRotated,
+       133.1, .inBand),
+      ("just above the high edge", 1800, 3200, PanelDensityModelTests.dellRotated,
+       135.5, .above),
+    ] {
+      let density = try #require(
+        PanelDensityModel.looksLikePPI(logicalWidth: width, logicalHeight: height,
+                                       in: geometry),
+        "\(label) yielded no density")
+      #expect((density * 10).rounded() / 10 == expected, "\(label)")
+      #expect(PanelDensityModel.bandPlacement(of: density) == placement, "\(label)")
+    }
+  }
 }
 
 // These arrays ARE the calibration ledger. They are transcribed from a run, not

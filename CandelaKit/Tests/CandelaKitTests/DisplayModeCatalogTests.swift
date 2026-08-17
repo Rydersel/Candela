@@ -30,8 +30,8 @@ struct DisplayModeCatalogTests {
 
   /// The acceptance case for the density floor. All three rungs are real,
   /// aspect-correct and at the panel's own 175 Hz, and every one has a minor
-  /// axis under 720 purely because the panel is 21:9 - so the flat floor cut
-  /// them and the density floor keeps them.
+  /// axis under 720 purely because the panel is 21:9. The flat floor cut them;
+  /// the density floor keeps them.
   @Test func densityFloorReturnsTheMAGMidLadderRungs() {
     let modes = mag + DisplayModeFixtures.magRevealedMidLadder
     let rows = DisplayModeCatalog.curated(
@@ -64,7 +64,7 @@ struct DisplayModeCatalogTests {
   /// Not against the nil-geometry call: that path is itself new here, and it
   /// is the LOOSEST of the three (0.33 of 1440 is 475 on the MAG, where the
   /// shipped floor was 720). Treating it as the baseline would demand the
-  /// density floor keep six sizes nothing ever showed - 640x480 among them -
+  /// density floor keep six sizes nothing ever showed (640x480 among them),
   /// and would fail for the right reason on the wrong claim.
   @Test func noCurrentlyCuratedRowDisappearsOnAnyPanel() {
     for (modes, native, geometry) in [
@@ -72,6 +72,8 @@ struct DisplayModeCatalogTests {
        PanelDensityModelTests.mag),
       (DisplayModeFixtures.dell, DisplayModeFixtures.dellNativePixels,
        PanelDensityModelTests.dellRotated),
+      (DisplayModeFixtures.builtIn, DisplayModeFixtures.builtInNativePixels,
+       PanelDensityModelTests.builtIn),
     ] {
       // Zero native pixels reaches the flat floor, so the baseline runs
       // through the SAME grouping and representative ranking as the two rows

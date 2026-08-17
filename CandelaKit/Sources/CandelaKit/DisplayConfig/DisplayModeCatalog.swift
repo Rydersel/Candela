@@ -60,9 +60,12 @@ public enum DisplayModeCatalog {
   /// - Parameter geometry: the panel's physical facts, when they are known.
   ///   Supplying them upgrades the usability floor from a pixel count to a
   ///   density, which is the only form of the question that transfers between
-  ///   a 21:9 ultrawide and a rotated 4K panel. It can only ADD rows: a
-  ///   density floor never removes a size the fraction floor kept, which
-  ///   `noCurrentlyCuratedRowDisappearsOnAnyPanel` pins on both panels.
+  ///   a 21:9 ultrawide and a rotated 4K panel. On the calibrated panel set it
+  ///   only ADDS rows: nothing the shipped pixel floor kept disappears, which
+  ///   `noCurrentlyCuratedRowDisappearsOnAnyPanel` pins on all three fixtures.
+  ///   That is a fixture result, not a structural one. A panel coarse enough
+  ///   (a 55-inch 4K TV reads about 81 PPI) has sizes a pixel floor keeps and
+  ///   a density floor drops, which is the density floor doing its job.
   ///
   ///   A VIRTUAL display's geometry may be passed like any other: the floor
   ///   itself treats `isVirtual` as no geometry at all, so no caller can
