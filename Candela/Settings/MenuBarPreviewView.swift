@@ -1,10 +1,18 @@
 import CandelaKit
 import SwiftUI
 
+/// Where a click on one of the preview's widgets takes the pane (KMR-A5):
+/// each widget scrolls to the section that configures it.
+enum MenuBarPreviewJump {
+  case sliders
+  case indicators
+}
+
 /// The Menu Bar pane's live preview (KMR7): a miniature desktop showing what
 /// Candela puts on screen right now: the status icon in the menu bar, the open
-/// panel with its slider rows, and one on-screen indicator pill. Every control
-/// on the pane changes something here, so the choices stop being phrases.
+/// panel with its slider rows, and both on-screen indicator pills. Every
+/// control on the pane changes something here, so the choices stop being
+/// phrases.
 ///
 /// Fidelity (KMR8): each miniature replicates the real widget's anatomy at
 /// about half scale, from the real sources rather than from imagination:
@@ -17,19 +25,24 @@ import SwiftUI
 /// effect views in the settings window), so the pill and panel grounds are
 /// opaque colors matched per appearance instead.
 ///
-/// Honesty (KMR9): everything shown is derived from the same policies the real
-/// widgets consult. Icon presence is `MenuIconPolicy.isStatusItemVisible` with
-/// the live rig's inputs; the rows are `PanelView.visibleDisplays` /
-/// `showsBuiltIn` / `showsVolumeSlider` / `showsContrastSlider`; the slider
-/// fills are the controllers' live values; the pill position is the persisted
-/// `HUDPosition`, and its anatomy the persisted `HUDStyle` (KMR-A3), from the
-/// spec's pinned geometry. Nothing is drawn that the current settings would
-/// not produce. The default style's ground, hairline and tick dots lean
-/// toward the NATIVE pill the real HUD is being corrected to (KMR-A4); the
-/// integration pass reconciles the two side by side.
+/// Honesty (KMR9, amended by KMR-A5): everything shown is derived from the
+/// same policies the real widgets consult. Icon presence is
+/// `MenuIconPolicy.isStatusItemVisible` with the live rig's inputs; the rows
+/// are `PanelView.visibleDisplays` / `showsBuiltIn` / `showsVolumeSlider` /
+/// `showsContrastSlider`; every bar (panel rows and pills alike) shows the
+/// controllers' LIVE values; each pill sits at its own persisted
+/// `HUDPosition` in the persisted `HUDStyle` (KMR-A3). Both pills are
+/// depicted so both position choices stay visible; the pane's footer keeps
+/// the truth that on screen the two kinds take turns in one window per
+/// display. Pills sharing an anchor stack brightness-above-volume, and pills
+/// at the panel's corner stack above the panel (KMR-A2).
 ///
-/// Illustration, not control (KMR10): one accessibility element, no hit
-/// targets, and the label below summarizes what is currently depicted.
+/// Doorways, not dead furniture (KMR-A5, superseding KMR10's no-hit-targets
+/// clause the way the OLED hero map superseded OC3): hovering the panel or a
+/// pill lifts it, and clicking scrolls the pane to the section that
+/// configures it. The scenery stays decorative and hidden from
+/// accessibility; the widgets are buttons whose labels name their
+/// destination.
 ///
 /// `@MainActor` for the same reason as every pane: `PanelView`'s statics and
 /// `AppModel` are main-actor, and a `View`'s non-`body` members are nonisolated
@@ -39,10 +52,9 @@ struct MenuBarPreviewView: View {
   @Environment(AppModel.self) private var model
   @Environment(\.colorScheme) private var colorScheme
 
-  /// Which indicator the pill depicts. The pane flips this to `.volume` when
-  /// the volume position picker was the last one changed (KMR9); it is view
-  /// state there, never persisted.
-  var pillKind: HUDType
+  /// Scrolls the pane; supplied by `AppMenuPane`, which owns the
+  /// `ScrollViewReader`.
+  var jump: (MenuBarPreviewJump) -> Void
 
   // Real metrics x this. Half scale keeps a 280 pt panel and a 314 pt pill
   // legible inside one form row without dwarfing the controls below.
@@ -62,47 +74,84 @@ struct MenuBarPreviewView: View {
       hasExternalDisplay: !model.displays.isEmpty,
       hasVisibleSlider: !externals.isEmpty || showsBuiltIn
     )
-    // The panel hangs from the icon; without the icon there is nothing to
-    // open it from, so it goes too. The real pill DOES outrank the panel in z
-    // (a screen-saver-level window draws over everything), but at miniature
-    // scale that overlap destroys both widgets' legibility, so when the pill's
-    // chosen corner is the panel's corner the two stack instead, still in the
-    // chosen corner (Ryder, 2026-08-17).
-    let pillSharesPanelCorner = iconVisible && pillPosition == .topRight
     ZStack(alignment: .top) {
       wallpaper
       menuBar(iconVisible: iconVisible)
-      VStack(alignment: .trailing, spacing: 9) {
-        // Pill first: it sits at the top of the real screen, so the stacked
-        // corner keeps it nearest the menu bar with the panel beneath it
-        // (Ryder, 2026-08-17).
-        if pillSharesPanelCorner {
-          pillMiniature(externals: externals)
-        }
-        if iconVisible {
-          panelMiniature(externals: externals, showsBuiltIn: showsBuiltIn)
-        }
-      }
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-      .padding(.top, Self.menuBarHeight + 5)
-      .padding(.bottom, 8)
-      .padding(.trailing, 16)
-      if !pillSharesPanelCorner {
-        pillMiniature(externals: externals)
-          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: pillAlignment)
-          .padding(.top, Self.menuBarHeight + 8)
-          .padding(.horizontal, 14)
-      }
+      anchorColumn(.topLeft, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
+      anchorColumn(.topCenter, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
+      anchorColumn(.topRight, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
     }
-    // Sized for the tallest realistic panel on this rig (a built-in row plus
-    // two externals with volume and contrast shown) stacked with the pill;
-    // the column top-aligns, so smaller panels just leave ground.
-    .frame(height: 284)
+    // Sized for the tallest realistic column: both pills at top right above a
+    // panel showing a built-in row plus two externals with volume and
+    // contrast. Columns top-align, so smaller content just leaves ground.
+    .frame(height: 300)
     .frame(maxWidth: .infinity)
     .clipShape(RoundedRectangle(cornerRadius: 9))
     .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.separator, lineWidth: 1))
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel(accessibilitySummary(iconVisible: iconVisible))
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel("Preview of the menu bar and the on-screen indicators")
+  }
+
+  // MARK: - Anchor columns
+
+  /// The pills anchored at one position, in stack order (KMR-A5: brightness
+  /// above volume when they share an anchor).
+  private func pillKinds(at position: HUDPosition) -> [HUDType] {
+    var kinds: [HUDType] = []
+    if prefs.hudPositionBrightness == position { kinds.append(.brightness) }
+    if prefs.hudPositionVolume == position { kinds.append(.volume) }
+    return kinds
+  }
+
+  /// One position's stack: its pills, and at top right the panel beneath them
+  /// (KMR-A2: the pill sits nearest the menu bar; the true z-overlap is
+  /// illegible at miniature scale, so the corner stacks instead).
+  @ViewBuilder
+  private func anchorColumn(
+    _ position: HUDPosition, externals: [AppModel.DisplayState],
+    showsBuiltIn: Bool, iconVisible: Bool
+  ) -> some View {
+    let kinds = pillKinds(at: position)
+    let holdsPanel = position == .topRight && iconVisible
+    if !kinds.isEmpty || holdsPanel {
+      VStack(alignment: columnHorizontalAlignment(position), spacing: 9) {
+        ForEach(kinds, id: \.leftSymbolName) { kind in
+          LiftButton(label: pillAccessibilityLabel(kind: kind, position: position)) {
+            jump(.indicators)
+          } content: {
+            pillMiniature(kind: kind, externals: externals)
+          }
+        }
+        if holdsPanel {
+          LiftButton(label: "Menu bar sliders preview; opens the Sliders settings below") {
+            jump(.sliders)
+          } content: {
+            panelMiniature(externals: externals, showsBuiltIn: showsBuiltIn)
+          }
+        }
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: columnAlignment(position))
+      .padding(.top, Self.menuBarHeight + (holdsPanel ? 5 : 8))
+      .padding(.bottom, 8)
+      .padding(.leading, position == .topLeft ? 14 : 0)
+      .padding(.trailing, position == .topRight ? 16 : 0)
+    }
+  }
+
+  private func columnAlignment(_ position: HUDPosition) -> Alignment {
+    switch position {
+    case .topLeft: .topLeading
+    case .topCenter: .top
+    case .topRight: .topTrailing
+    }
+  }
+
+  private func columnHorizontalAlignment(_ position: HUDPosition) -> HorizontalAlignment {
+    switch position {
+    case .topLeft: .leading
+    case .topCenter: .center
+    case .topRight: .trailing
+    }
   }
 
   // MARK: - Desktop
@@ -119,6 +168,7 @@ struct MenuBarPreviewView: View {
       ],
       startPoint: .topLeading, endPoint: .bottomTrailing
     )
+    .accessibilityHidden(true)
   }
 
   // MARK: - Menu bar
@@ -148,6 +198,7 @@ struct MenuBarPreviewView: View {
     .frame(height: Self.menuBarHeight)
     .frame(maxWidth: .infinity)
     .background(.black.opacity(0.28))
+    .accessibilityHidden(true)
   }
 
   // MARK: - Panel miniature
@@ -281,19 +332,7 @@ struct MenuBarPreviewView: View {
     .background(Capsule().fill(.quaternary.opacity(0.5)))
   }
 
-  // MARK: - Indicator pill miniature
-
-  private var pillPosition: HUDPosition {
-    pillKind == .volume ? prefs.hudPositionVolume : prefs.hudPositionBrightness
-  }
-
-  private var pillAlignment: Alignment {
-    switch pillPosition {
-    case .topLeft: .topLeading
-    case .topCenter: .top
-    case .topRight: .topTrailing
-    }
-  }
+  // MARK: - Indicator pill miniatures
 
   /// Lightened from the first pass (KMR-A4): the native pill's material reads
   /// brighter than `.hudWindow` did, and the real HUD is being corrected the
@@ -308,23 +347,30 @@ struct MenuBarPreviewView: View {
     colorScheme == .dark ? .white.opacity(0.22) : .black.opacity(0.08)
   }
 
-  /// The display the pill names, and the value its bar shows: the first row
-  /// the panel would render, which is the same "first visible" ordering the
-  /// real HUD grouping resolves to on this rig.
-  private func pillSubject(externals: [AppModel.DisplayState]) -> (name: String, value: Double) {
-    if pillKind == .volume,
+  /// The display a pill names, its live value, and whether it is muted: the
+  /// first row the panel would render for that kind, which is the same
+  /// "first visible" ordering the real HUD grouping resolves to on this rig.
+  /// The value is the controllers' live one (KMR-A5), the exact reads the
+  /// panel miniature's bars use, so the two move together.
+  private func pillSubject(kind: HUDType, externals: [AppModel.DisplayState])
+    -> (name: String, value: Double, muted: Bool) {
+    if kind == .volume || kind == .volumeMuted,
        let state = externals.first(where: {
          PanelView.showsVolumeSlider(for: $0, prefs: DisplayPrefs(persistenceKey: $0.display.persistenceKey))
        }) {
-      return (PanelView.title(for: state.display), state.volume.value)
+      return (PanelView.title(for: state.display),
+              state.volume.isMuted ? 0 : state.volume.value,
+              state.volume.isMuted)
     }
     if let state = externals.first {
-      return (PanelView.title(for: state.display), state.controller.brightness)
+      return (PanelView.title(for: state.display), state.controller.brightness, false)
     }
     if let builtIn = model.builtIn {
-      return (PanelView.title(for: builtIn.display), builtIn.controller.brightness)
+      return (PanelView.title(for: builtIn.display), builtIn.controller.brightness, false)
     }
-    return ("Display", 0.5)
+    // No hardware at all: the pill still previews position and style, on an
+    // illustrative value.
+    return ("Display", 0.5, false)
   }
 
   /// The selected `HUDStyle` at half scale (KMR-A3), from the spec's pinned
@@ -333,21 +379,24 @@ struct MenuBarPreviewView: View {
   /// pill (radius 18, margin 14). One definition in the spec, two
   /// implementations (here and `BrightnessHUD`), reconciled side by side.
   @ViewBuilder
-  private func pillMiniature(externals: [AppModel.DisplayState]) -> some View {
-    let subject = pillSubject(externals: externals)
+  private func pillMiniature(kind: HUDType, externals: [AppModel.DisplayState]) -> some View {
+    let subject = pillSubject(kind: kind, externals: externals)
+    // A muted volume pill shows the real HUD's muted anatomy: slashed
+    // speakers, empty bar.
+    let shownKind: HUDType = kind == .volume && subject.muted ? .volumeMuted : kind
     switch prefs.hudStyle {
     case .system, .segments:
       VStack(alignment: .leading, spacing: 4) {
         Text(subject.name)
           .font(.system(size: 12 * Self.s, weight: .semibold))
           .lineLimit(1)
-        pillBarRow(value: subject.value)
+        pillBarRow(kind: shownKind, value: subject.value)
       }
       .padding(.horizontal, 18 * Self.s)
       .frame(width: 314 * Self.s, height: 62 * Self.s, alignment: .leading)
       .modifier(PillChrome(radius: 22 * Self.s, ground: pillGround, hairline: pillHairline))
     case .compact:
-      pillBarRow(value: subject.value)
+      pillBarRow(kind: shownKind, value: subject.value)
         .padding(.horizontal, 14 * Self.s)
         .frame(width: 220 * Self.s, height: 36 * Self.s)
         .modifier(PillChrome(radius: 18 * Self.s, ground: pillGround, hairline: pillHairline))
@@ -356,9 +405,9 @@ struct MenuBarPreviewView: View {
 
   /// The icon-flanked value readout every style shares; only the track between
   /// the icons changes shape.
-  private func pillBarRow(value: Double) -> some View {
+  private func pillBarRow(kind: HUDType, value: Double) -> some View {
     HStack(spacing: 4.5) {
-      Image(systemName: pillKind.leftSymbolName)
+      Image(systemName: kind.leftSymbolName)
         .font(.system(size: 5.5, weight: .semibold))
         .foregroundStyle(.secondary)
       Group {
@@ -371,7 +420,7 @@ struct MenuBarPreviewView: View {
       // Kept at the real 4 pt rather than half: 2 pt reads as a hairline and
       // loses the fill boundary the pill exists to show.
       .frame(height: 4)
-      Image(systemName: pillKind.rightSymbolName)
+      Image(systemName: kind.rightSymbolName)
         .font(.system(size: 6.5, weight: .semibold))
         .foregroundStyle(.secondary)
     }
@@ -413,20 +462,14 @@ struct MenuBarPreviewView: View {
 
   // MARK: - Accessibility
 
-  private func accessibilitySummary(iconVisible: Bool) -> String {
-    let icon = iconVisible ? "the menu bar icon with its sliders open" : "no menu bar icon"
-    let kind = pillKind == .volume ? "volume" : "brightness"
-    let position: String = switch pillPosition {
+  private func pillAccessibilityLabel(kind: HUDType, position: HUDPosition) -> String {
+    let kindName = kind == .volume ? "volume" : "brightness"
+    let positionName: String = switch position {
     case .topLeft: "top left"
     case .topCenter: "top center"
     case .topRight: "top right"
     }
-    let style: String = switch prefs.hudStyle {
-    case .system: "macOS-matching"
-    case .segments: "segmented"
-    case .compact: "compact"
-    }
-    return "Preview of the current settings, showing \(icon), and the \(style) \(kind) indicator at the \(position) of the screen."
+    return "\(kindName.capitalized) indicator preview at the \(positionName) of the screen; opens the On-Screen Indicators settings below"
   }
 }
 
@@ -444,5 +487,30 @@ private struct PillChrome: ViewModifier {
       .clipShape(RoundedRectangle(cornerRadius: radius))
       .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(hairline, lineWidth: 0.5))
       .shadow(color: .black.opacity(0.22), radius: 5, y: 2)
+  }
+}
+
+/// The preview widgets' doorway affordance (KMR-A5): the OLED hero's "lift,
+/// not tint" hover, which survives an unfocused window because it never leans
+/// on the accent color. Scale is skipped under Reduce Motion; the shadow
+/// deepens either way, a non-moving cue.
+private struct LiftButton<Content: View>: View {
+  let label: String
+  let action: () -> Void
+  @ViewBuilder let content: Content
+
+  @State private var hovering = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  var body: some View {
+    Button(action: action) {
+      content
+        .scaleEffect(hovering && !reduceMotion ? 1.03 : 1)
+        .shadow(color: .black.opacity(hovering ? 0.3 : 0), radius: 8, y: 3)
+    }
+    .buttonStyle(.plain)
+    .onHover { hovering = $0 }
+    .animation(.easeOut(duration: 0.12), value: hovering)
+    .accessibilityLabel(label)
   }
 }
