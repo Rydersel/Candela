@@ -22,7 +22,11 @@ import SwiftUI
 /// the live rig's inputs; the rows are `PanelView.visibleDisplays` /
 /// `showsBuiltIn` / `showsVolumeSlider` / `showsContrastSlider`; the slider
 /// fills are the controllers' live values; the pill position is the persisted
-/// `HUDPosition`. Nothing is drawn that the current settings would not produce.
+/// `HUDPosition`, and its anatomy the persisted `HUDStyle` (KMR-A3), from the
+/// spec's pinned geometry. Nothing is drawn that the current settings would
+/// not produce. The default style's ground, hairline and tick dots lean
+/// toward the NATIVE pill the real HUD is being corrected to (KMR-A4); the
+/// integration pass reconciles the two side by side.
 ///
 /// Illustration, not control (KMR10): one accessibility element, no hit
 /// targets, and the label below summarizes what is currently depicted.
@@ -291,8 +295,17 @@ struct MenuBarPreviewView: View {
     }
   }
 
+  /// Lightened from the first pass (KMR-A4): the native pill's material reads
+  /// brighter than `.hudWindow` did, and the real HUD is being corrected the
+  /// same direction.
   private var pillGround: Color {
-    colorScheme == .dark ? Color(white: 0.20).opacity(0.97) : Color(white: 0.93).opacity(0.97)
+    colorScheme == .dark ? Color(white: 0.27).opacity(0.97) : Color(white: 0.95).opacity(0.97)
+  }
+
+  /// A LIGHT edge, never a dark one: the black-reading `separatorColor` border
+  /// is one of the deltas KMR-A4 names against the native pill.
+  private var pillHairline: Color {
+    colorScheme == .dark ? .white.opacity(0.22) : .black.opacity(0.08)
   }
 
   /// The display the pill names, and the value its bar shows: the first row
@@ -314,42 +327,88 @@ struct MenuBarPreviewView: View {
     return ("Display", 0.5)
   }
 
-  /// `BrightnessHUD` at half scale: 314 x 62 pill, corner radius 22, name
-  /// label above an icon-flanked 4 pt bar, secondary icons, primary fill.
+  /// The selected `HUDStyle` at half scale (KMR-A3), from the spec's pinned
+  /// geometry: Match macOS and Segmented share the 314 x 62 chrome (radius 22,
+  /// name label over an icon-flanked bar); Compact is a 220 x 36 name-less
+  /// pill (radius 18, margin 14). One definition in the spec, two
+  /// implementations (here and `BrightnessHUD`), reconciled side by side.
+  @ViewBuilder
   private func pillMiniature(externals: [AppModel.DisplayState]) -> some View {
     let subject = pillSubject(externals: externals)
-    let width = 314 * Self.s
-    let height = 62 * Self.s
-    let margin = 18 * Self.s
-    return VStack(alignment: .leading, spacing: 4) {
-      Text(subject.name)
-        .font(.system(size: 12 * Self.s, weight: .semibold))
-        .lineLimit(1)
-      HStack(spacing: 4.5) {
-        Image(systemName: pillKind.leftSymbolName)
-          .font(.system(size: 5.5, weight: .semibold))
-          .foregroundStyle(.secondary)
-        GeometryReader { geo in
-          ZStack(alignment: .leading) {
-            Capsule().fill(.quaternary)
-            Capsule().fill(.primary)
-              .frame(width: max(2, geo.size.width * CGFloat(min(max(subject.value, 0), 1))))
-          }
+    switch prefs.hudStyle {
+    case .system, .segments:
+      VStack(alignment: .leading, spacing: 4) {
+        Text(subject.name)
+          .font(.system(size: 12 * Self.s, weight: .semibold))
+          .lineLimit(1)
+        pillBarRow(value: subject.value)
+      }
+      .padding(.horizontal, 18 * Self.s)
+      .frame(width: 314 * Self.s, height: 62 * Self.s, alignment: .leading)
+      .modifier(PillChrome(radius: 22 * Self.s, ground: pillGround, hairline: pillHairline))
+    case .compact:
+      pillBarRow(value: subject.value)
+        .padding(.horizontal, 14 * Self.s)
+        .frame(width: 220 * Self.s, height: 36 * Self.s)
+        .modifier(PillChrome(radius: 18 * Self.s, ground: pillGround, hairline: pillHairline))
+    }
+  }
+
+  /// The icon-flanked value readout every style shares; only the track between
+  /// the icons changes shape.
+  private func pillBarRow(value: Double) -> some View {
+    HStack(spacing: 4.5) {
+      Image(systemName: pillKind.leftSymbolName)
+        .font(.system(size: 5.5, weight: .semibold))
+        .foregroundStyle(.secondary)
+      Group {
+        if prefs.hudStyle == .segments {
+          segmentedTrack(value: value)
+        } else {
+          continuousTrack(value: value)
         }
-        // Kept at the real 4 pt rather than half: 2 pt reads as a hairline and
-        // loses the fill boundary the pill exists to show.
-        .frame(height: 4)
-        Image(systemName: pillKind.rightSymbolName)
-          .font(.system(size: 6.5, weight: .semibold))
-          .foregroundStyle(.secondary)
+      }
+      // Kept at the real 4 pt rather than half: 2 pt reads as a hairline and
+      // loses the fill boundary the pill exists to show.
+      .frame(height: 4)
+      Image(systemName: pillKind.rightSymbolName)
+        .font(.system(size: 6.5, weight: .semibold))
+        .foregroundStyle(.secondary)
+    }
+  }
+
+  /// Match macOS: continuous fill, with the native track's tick dots hinted on
+  /// the unfilled portion (the fill paints over the rest), per KMR-A4.
+  private func continuousTrack(value: Double) -> some View {
+    GeometryReader { geo in
+      ZStack(alignment: .leading) {
+        Capsule().fill(.quaternary)
+        HStack(spacing: 0) {
+          ForEach(0..<15) { _ in
+            Spacer(minLength: 0)
+            Circle()
+              .fill(.secondary.opacity(0.5))
+              .frame(width: 1, height: 1)
+          }
+          Spacer(minLength: 0)
+        }
+        Capsule().fill(.primary)
+          .frame(width: max(2, geo.size.width * CGFloat(min(max(value, 0), 1))))
       }
     }
-    .padding(.horizontal, margin)
-    .frame(width: width, height: height, alignment: .leading)
-    .background(pillGround)
-    .clipShape(RoundedRectangle(cornerRadius: 22 * Self.s))
-    .overlay(RoundedRectangle(cornerRadius: 22 * Self.s).strokeBorder(.separator, lineWidth: 0.5))
-    .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
+  }
+
+  /// Segmented (KMR-A3): 16 segments, full-scale 8 pt tall with 2 pt gaps and
+  /// radius 2, filled count Int((value * 16).rounded()); halved here.
+  private func segmentedTrack(value: Double) -> some View {
+    let filled = Int((min(max(value, 0), 1) * 16).rounded())
+    return HStack(spacing: 2 * Self.s) {
+      ForEach(0..<16) { index in
+        RoundedRectangle(cornerRadius: 2 * Self.s)
+          .fill(index < filled ? AnyShapeStyle(.primary) : AnyShapeStyle(.quaternary))
+          .frame(maxWidth: .infinity)
+      }
+    }
   }
 
   // MARK: - Accessibility
@@ -362,6 +421,28 @@ struct MenuBarPreviewView: View {
     case .topCenter: "top center"
     case .topRight: "top right"
     }
-    return "Preview of the current settings, showing \(icon), and the \(kind) indicator at the \(position) of the screen."
+    let style: String = switch prefs.hudStyle {
+    case .system: "macOS-matching"
+    case .segments: "segmented"
+    case .compact: "compact"
+    }
+    return "Preview of the current settings, showing \(icon), and the \(style) \(kind) indicator at the \(position) of the screen."
+  }
+}
+
+/// The pill's shared chrome (KMR-A3): every style differs inside the pill, not
+/// around it. The light hairline and the softened shadow are KMR-A4's
+/// direction; the dark `separatorColor` edge was one of the named deltas.
+private struct PillChrome: ViewModifier {
+  let radius: CGFloat
+  let ground: Color
+  let hairline: Color
+
+  func body(content: Content) -> some View {
+    content
+      .background(ground)
+      .clipShape(RoundedRectangle(cornerRadius: radius))
+      .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(hairline, lineWidth: 0.5))
+      .shadow(color: .black.opacity(0.22), radius: 5, y: 2)
   }
 }
