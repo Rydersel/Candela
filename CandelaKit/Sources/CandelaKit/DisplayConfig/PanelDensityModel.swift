@@ -82,9 +82,21 @@ public struct IdealSize: Sendable, Equatable {
 /// One call in, one result out: nothing here knows which surface is asking.
 ///
 /// Exactly one of `recommendation` and `abstention` is non-nil.
+///
+/// Two fields name a size, and they answer different questions.
+/// `recommendation` is a CORRECTION, so it drives the callout and disappears
+/// the moment nothing needs correcting. `bestInBand` is an ENDORSEMENT, so it
+/// drives the passive mark and survives both in-band abstentions: a person
+/// already running the size the model would pick still gets to see that.
 public struct DensityVerdict: Sendable, Equatable {
   public let recommendation: SizeRecommendation?
   public let abstention: RecommendationAbstention?
+  /// The ranked best of the applicable sizes whose density falls inside the
+  /// band, whether or not the model went on to recommend it. Nil only where no
+  /// ranking happened (virtual, no trustworthy physical size) or where no
+  /// applicable size reaches the band. Equal to `recommendation` whenever that
+  /// is non-nil.
+  public let bestInBand: SizeRecommendation?
   /// Nil when the panel is virtual, or when its declared physical size is
   /// missing or untrustworthy: the three states where no ranking happened.
   /// A virtual display's density IS computable from its invented size, so
@@ -94,9 +106,11 @@ public struct DensityVerdict: Sendable, Equatable {
   public let currentPlacement: BandPlacement?
 
   public init(recommendation: SizeRecommendation?, abstention: RecommendationAbstention?,
+              bestInBand: SizeRecommendation?,
               ideal: IdealSize?, currentPlacement: BandPlacement?) {
     self.recommendation = recommendation
     self.abstention = abstention
+    self.bestInBand = bestInBand
     self.ideal = ideal
     self.currentPlacement = currentPlacement
   }
@@ -212,6 +226,13 @@ public enum PanelDensityModel {
   /// a different size might still rank higher but nothing needs saying. Testing
   /// the band first would make `.currentIsBest` unreachable, since every
   /// candidate is in band by construction.
+  ///
+  /// Both abstentions still carry `bestInBand`, and that is the point of the
+  /// field: the ranking ran and had an answer, the model simply had no
+  /// correction to offer. A surface showing a passive mark reads `bestInBand`
+  /// so the mark stays put while the display runs that size; a surface making
+  /// a suggestion reads `recommendation` so it goes quiet the moment there is
+  /// nothing to suggest.
   public static func evaluate(
     rows: [DisplayModeRow],
     currentLogicalWidth: Int?, currentLogicalHeight: Int?,
@@ -219,11 +240,11 @@ public enum PanelDensityModel {
   ) -> DensityVerdict {
     guard !geometry.isVirtual else {
       return DensityVerdict(recommendation: nil, abstention: .virtualDisplay,
-                            ideal: nil, currentPlacement: nil)
+                            bestInBand: nil, ideal: nil, currentPlacement: nil)
     }
     guard let panelPPI = physicalPPI(geometry) else {
       return DensityVerdict(recommendation: nil, abstention: .noPhysicalSize,
-                            ideal: nil, currentPlacement: nil)
+                            bestInBand: nil, ideal: nil, currentPlacement: nil)
     }
 
     let scale = targetLooksLikePPI / panelPPI
@@ -247,25 +268,29 @@ public enum PanelDensityModel {
 
     let ideal = IdealSize(logicalWidth: idealWidth, logicalHeight: idealHeight,
                           servedToday: !candidates.isEmpty)
-    let best = candidates.min(by: outranks)
+    let bestInBand = candidates.min(by: outranks).map {
+      SizeRecommendation(logicalWidth: $0.row.mode.logicalWidth,
+                         logicalHeight: $0.row.mode.logicalHeight,
+                         looksLikePPI: $0.density)
+    }
 
     func abstaining(_ reason: RecommendationAbstention) -> DensityVerdict {
       DensityVerdict(recommendation: nil, abstention: reason,
+                     bestInBand: bestInBand,
                      ideal: ideal, currentPlacement: currentPlacement)
     }
 
-    if let best, best.row.mode.logicalWidth == currentLogicalWidth,
-       best.row.mode.logicalHeight == currentLogicalHeight {
+    if let bestInBand, bestInBand.logicalWidth == currentLogicalWidth,
+       bestInBand.logicalHeight == currentLogicalHeight {
       return abstaining(.currentIsBest)
     }
     if currentPlacement == .inBand { return abstaining(.currentInBand) }
-    guard let best else { return abstaining(.noCandidateInBand) }
+    // Reached only with no candidate at all, so `bestInBand` is nil here.
+    guard bestInBand != nil else { return abstaining(.noCandidateInBand) }
 
     return DensityVerdict(
-      recommendation: SizeRecommendation(logicalWidth: best.row.mode.logicalWidth,
-                                         logicalHeight: best.row.mode.logicalHeight,
-                                         looksLikePPI: best.density),
-      abstention: nil, ideal: ideal, currentPlacement: currentPlacement
+      recommendation: bestInBand, abstention: nil, bestInBand: bestInBand,
+      ideal: ideal, currentPlacement: currentPlacement
     )
   }
 

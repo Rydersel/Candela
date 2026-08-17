@@ -1300,7 +1300,7 @@ extension DisplayModeCoordinator.Catalog {
     return current.logicalWidth == mode.logicalWidth && current.logicalHeight == mode.logicalHeight
   }
 
-  /// True for the row whose LOGICAL SIZE the density model named.
+  /// True for the row whose LOGICAL SIZE the density model ranked best.
   ///
   /// A size match, the same rule `isCurrentSize` and the hub's
   /// `curatedSelection` follow, because a recommendation IS a logical size:
@@ -1308,11 +1308,15 @@ extension DisplayModeCoordinator.Catalog {
   /// instability can never reach it, and a curated row's representative mode is
   /// its size's fastest rate.
   ///
-  /// False whenever there is no verdict or the verdict abstained. Three
-  /// offering surfaces ask this question, and one helper is the only way they
-  /// keep answering it the same way.
+  /// Reads `bestInBand` rather than `recommendation`, so the mark persists
+  /// while the display is already running the recommended size: a mark is an
+  /// endorsement, and the endorsement is still true once the suggestion has
+  /// nothing left to suggest. The callout keys to `recommendation` and so still
+  /// hides on every abstention. False whenever there is no verdict or nothing
+  /// applicable reached the band. Three offering surfaces ask this question,
+  /// and one helper is the only way they keep answering it the same way.
   func isRecommendedSize(_ mode: DisplayMode) -> Bool {
-    guard let recommendation = density?.recommendation else { return false }
+    guard let recommendation = density?.bestInBand else { return false }
     return recommendation.logicalWidth == mode.logicalWidth
       && recommendation.logicalHeight == mode.logicalHeight
   }
