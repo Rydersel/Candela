@@ -67,6 +67,18 @@ struct BannerRegion: View {
     // not an arrival; a page-wide or unkeyed animation here would put every one
     // of them on a curve.
     .animation(Motion.notice(reduceMotion: reduceMotion), value: cards)
+    // A failure notice describes a display that is still muted, so the display
+    // ceasing to be muted is what retires it, whichever route did it: the
+    // slider and the keys work again the moment the register does, and they are
+    // the likelier route once the user has turned HDR off.
+    // `.failed` only. A run in flight passes through unmuted on its way to its
+    // own answer (`toggleMute` clears the flag before the wire is settled), and
+    // clearing the phase there would retire the spinner over a recovery that
+    // has not finished and may yet put the mute back.
+    .onChange(of: state.volume.isMuted) { _, isMuted in
+      guard !isMuted, case .failed = model.muteRecoveryPhases[persistenceKey] else { return }
+      model.setMuteRecoveryPhase(nil, for: persistenceKey)
+    }
   }
 
   /// One banner's chrome. Applied per banner so an empty region is exactly
@@ -120,7 +132,7 @@ struct BannerRegion: View {
       countdown: countdownForm != nil,
       startFailure: startFailure != nil,
       reapply: reapplyReport != nil,
-      strandedMute: isStrandedMuted,
+      strandedMute: showsStrandedMute,
       firstSight: showsFirstSight
     )
   }
@@ -231,19 +243,47 @@ struct BannerRegion: View {
   /// the other, and that one only became a strand when the volume and mute keys
   /// started obeying the same verdict as the slider.
   @ViewBuilder private var strandedMuteBanner: some View {
-    if isStrandedMuted {
+    if showsStrandedMute {
       card {
         VStack(alignment: .leading, spacing: 6) {
           HStack {
-            Label("This display is muted in hardware.", systemImage: "speaker.slash")
+            Label(strandedMuteHeadline, systemImage: "speaker.slash")
             Spacer()
-            Button(strandedMuteButtonTitle) { recoverFromHardwareMute() }
+            // In flight, the button gives way to the spinner: the same shape
+            // the reset button takes while a reset runs, and for the same
+            // reason. This is not D29 rule 3's forbidden state (a recovery
+            // control disabled in the state it recovers from) but the seconds
+            // during which it is doing the recovering, released by a `defer`.
+            if recoveryPhase == .running {
+              ProgressView().controlSize(.small)
+            } else {
+              Button(strandedMuteButtonTitle) {
+                Task { await recoverFromHardwareMute() }
+              }
               .accessibilityLabel(strandedMuteButtonTitle)
+            }
           }
           SettingsCaption(strandedMuteExplanation)
         }
       }
     }
+  }
+
+  private var recoveryPhase: AppModel.MuteRecoveryPhase? {
+    model.muteRecoveryPhases[persistenceKey]
+  }
+
+  /// The strand, plus the two states the recovery itself can be in. The failure
+  /// notice has to outlive the strand: clearing the availability prefs reopens
+  /// the slider and the keys, so a recovery that got that far and then could not
+  /// reach the display is no longer `isStrandedMuted` while the display is still
+  /// silent, and the one thing the user must not be shown is the card vanishing
+  /// over a monitor that never came back.
+  private var showsStrandedMute: Bool { isStrandedMuted || recoveryPhase != nil }
+
+  private var strandedMuteHeadline: LocalizedStringKey {
+    if case .failed = recoveryPhase { return "This display is still muted." }
+    return "This display is muted in hardware."
   }
 
   /// Hardware-muted with no way back inside the app. Two ways to get there:
@@ -286,6 +326,16 @@ struct BannerRegion: View {
   /// refused, a user who set "Always disabled" themselves goes looking for a
   /// bad cable.
   private var strandedMuteExplanation: LocalizedStringKey {
+    // The failure sentences come first: once a recovery has run, the cause
+    // sentences below describe prefs it has already cleared.
+    switch recoveryPhase {
+    case .failed(.blockedByHDR):
+      return "Hardware control does not reach a display while it is in HDR mode, so no unmute was sent. Turn HDR off for this display and try again."
+    case .failed:
+      return "The unmute could not be confirmed as reaching the display, so it is still recorded as muted rather than reported as a change that may not have happened. Try again."
+    case .running, .none:
+      break
+    }
     if isHardwareControlOff {
       return "Muting used the display's own mute command, and that command can only be undone over hardware control. This turns hardware control back on for this display and unmutes it."
     }
@@ -300,37 +350,50 @@ struct BannerRegion: View {
   /// `toggleMute` returns `isMuted` unchanged while `isAvailable` is false, and
   /// the user is left believing they unmuted.
   ///
-  /// `audioSinkOverride` joins the two availability prefs because it is now one
-  /// of the ways in (D29 rule 2 covers whatever closed the routes, not a fixed
-  /// list). Clearing it to automatic is honest in both directions: it undoes an
-  /// "Always disabled" choice, and on a display that denies the command it
-  /// changes nothing, which is why the copy does not claim the slider returns.
-  ///
-  /// `enableMuteUnmute` is deliberately NOT touched — the display was muted
-  /// under whatever strategy is in force, and that strategy has to still be in
-  /// force for the unmute to send the right wire value.
-  ///
   /// The unmute itself drives the controller directly and consults no
   /// capability verdict, which is what makes this recovery immune to the gates
   /// that created the second cause.
-  private func recoverFromHardwareMute() {
-    // Three prefs, three rows, one union: `writeAll`, never a single
-    // representative name.
-    writer.writeAll([.forceSw, .unavailableDDC, .audioSinkOverride]) { prefs in
-      prefs.forceSoftware = false
-      var tuning = prefs.tuning(for: .volume)
-      tuning.unavailableDDC = false
-      prefs.setTuning(tuning, for: .volume)
-      prefs.audioSinkOverride = .auto
+  ///
+  /// The sequence itself is `StrandedMuteRecovery` in CandelaKit, where the
+  /// ordering can be tested; this end supplies the pref clearing and renders the
+  /// outcome. What the engine adds over the original inline version is evidence:
+  /// DDC is dead while a display is in HDR and the panel ACKs the loss anyway,
+  /// so an unmute sent then cleared the muted flag and hid this card over a
+  /// display that was still silent.
+  ///
+  /// The card fades out over 0.2 s and stays hit-testable while it does, so a
+  /// second click mid-fade must not drive a second unmute; the recovery's own
+  /// in-flight guard answers that, and `toggleMute` is never reached twice.
+  private func recoverFromHardwareMute() async {
+    model.setMuteRecoveryPhase(.running, for: persistenceKey)
+    let outcome = await StrandedMuteRecovery.recover(
+      volume: state.volume, hdrOwner: state.controller
+    ) {
+      // D29 rule 2, and it runs whatever the display turns out to be doing:
+      // three prefs, three rows, one union (`writeAll`, never a single
+      // representative name). `audioSinkOverride` is here because it is one of
+      // the ways in, and clearing it is honest in both directions: it undoes an
+      // "Always disabled" choice, and on a display that denies the command it
+      // changes nothing, which is why the copy does not claim the slider
+      // returns. `enableMuteUnmute` is deliberately NOT touched: the display was
+      // muted under whatever strategy is in force, and that strategy has to
+      // still be in force for the unmute to send the right wire value.
+      writer.writeAll([.forceSw, .unavailableDDC, .audioSinkOverride]) { prefs in
+        prefs.forceSoftware = false
+        var tuning = prefs.tuning(for: .volume)
+        tuning.unavailableDDC = false
+        prefs.setTuning(tuning, for: .volume)
+        prefs.audioSinkOverride = .auto
+      }
     }
-    // The card fades out over 0.2 s and stays hit-testable while it does, so a
-    // second click mid-fade must not toggle back: `toggleMute` is a real toggle
-    // and would re-mute the display over DDC. `DDCValueController` exposes no
-    // one-way unmute (`setMuted` is private), so the guard is the state this
-    // recovery exists to undo, read after the prefs are cleared so D29 rule 2's
-    // ordering is untouched.
-    guard state.volume.isMuted else { return }
-    _ = state.volume.toggleMute()
+    switch outcome {
+    case .unmuted, .notMuted:
+      model.setMuteRecoveryPhase(nil, for: persistenceKey)
+    case .blockedByHDR, .unconfirmed:
+      model.setMuteRecoveryPhase(.failed(outcome), for: persistenceKey)
+    case .alreadyRunning:
+      break // the click that owns the run also owns the phase
+    }
   }
 
   // MARK: - First sight (SO22)

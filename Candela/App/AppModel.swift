@@ -471,6 +471,27 @@ final class AppModel {
     dismissedFirstSightKeys.insert(persistenceKey)
   }
 
+  /// Where each display's stranded-mute recovery got to, by persistence key.
+  ///
+  /// Owned here rather than by `BannerRegion` because that region has TWO live
+  /// placements (the hub root and whatever sub-page is pushed over it), and
+  /// `@State` would give them a phase each: the user would click on one page
+  /// and walk back to find the outcome gone. In memory and session-scoped for
+  /// the same reason the first-sight dismissals are: it describes an action
+  /// just taken, not a setting.
+  private(set) var muteRecoveryPhases: [String: MuteRecoveryPhase] = [:]
+
+  enum MuteRecoveryPhase: Equatable {
+    case running
+    /// The unmute did not reach the display. Carries WHY, because HDR is a
+    /// thing the user can go and turn off and the other case is a retry.
+    case failed(StrandedMuteOutcome)
+  }
+
+  func setMuteRecoveryPhase(_ phase: MuteRecoveryPhase?, for persistenceKey: String) {
+    muteRecoveryPhases[persistenceKey] = phase
+  }
+
   /// Software-dimming islands (AppKit lives in the app target behind
   /// CandelaKit protocols). Constructed by StatusItemController and injected
   /// here — implementer's choice per the Task 6 brief, so tests can hand the
