@@ -696,6 +696,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// ourselves has no such moods. Skipped when the icon is hidden — there is
   /// nothing to point at.
   private var setupLandingPanel: NSPanel?
+  /// Bumped by every show. A pending dismissal compares the generation it
+  /// captured against this one and leaves the screen alone if a newer callout
+  /// has taken over.
+  private var setupLandingGeneration: UInt64 = 0
   private func showSetupLandingCallout() {
     guard let button = statusItem?.button, let buttonWindow = button.window else { return }
 
@@ -781,13 +785,60 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     )
     origin.x = max(visible.minX + 8, min(origin.x, visible.maxX - contentSize.width - 8))
     panel.setFrameOrigin(origin)
+
+    // Every show builds its own window, so no fade is ever in flight on the one
+    // arriving: alpha starts at 0 and there is no animator to cancel. What the
+    // generation does is strand a superseded panel's pending dismissal, which
+    // is why the outgoing panel is ordered out here, at once. Waiting for its
+    // own timeout would leave an identical card sitting behind the new one.
+    setupLandingGeneration &+= 1
+    let generation = setupLandingGeneration
+    setupLandingPanel?.orderOut(nil)
+    // Reduce Motion takes the direct assignment: no animation at all, not even
+    // a zero-duration one that could show a frame at the wrong opacity.
+    let fadeIn = Motion.windowFadeIn(reduceMotion: Motion.systemReduceMotion)
+    panel.alphaValue = fadeIn > 0 ? 0 : 1
     panel.orderFrontRegardless()
     setupLandingPanel = panel
+    if fadeIn > 0 {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = fadeIn
+        panel.animator().alphaValue = 1
+      }
+    }
 
     Task { @MainActor [weak self, weak panel] in
       try? await Task.sleep(for: .seconds(10))
-      panel?.orderOut(nil)
-      if let self, self.setupLandingPanel === panel { self.setupLandingPanel = nil }
+      guard let panel else { return }
+      // A newer callout already ordered this one out; nothing left to fade.
+      if let self, self.setupLandingGeneration != generation { return }
+      // Alpha does not suppress hit-testing, and this card sits over the
+      // status-item region: left live it would swallow a click meant for the icon
+      // it is pointing at. The panel is built fresh per show, so nothing has to
+      // put this back.
+      panel.ignoresMouseEvents = true
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = Motion.windowFadeOut(reduceMotion: Motion.systemReduceMotion)
+        panel.animator().alphaValue = 0
+      } completionHandler: { [weak self] in
+        // Typed `@Sendable`, but fires on the main thread where the panel lives.
+        MainActor.assumeIsolated {
+          if let self {
+            // A show that arrived mid-fade owns the screen now, and it took care
+            // of this window when it superseded it.
+            guard self.setupLandingGeneration == generation else { return }
+            if self.setupLandingPanel === panel { self.setupLandingPanel = nil }
+          }
+          // Fail-open, and deliberately the inverse of the HUD's guard, which
+          // returns without ordering out. The HUD reuses ONE window per display,
+          // so the show that superseded a fade owns that very window and has
+          // already re-shown it. Here every show builds its own panel, and this
+          // task is the only thing that ever orders this one out: returning early
+          // would leave an invisible window ordered in over the menu bar for the
+          // rest of the session. Do not "fix the inconsistency".
+          panel.orderOut(nil)
+        }
+      }
     }
   }
 
