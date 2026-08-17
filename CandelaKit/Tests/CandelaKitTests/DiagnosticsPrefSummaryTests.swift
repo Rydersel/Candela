@@ -66,6 +66,7 @@ struct DiagnosticsPrefSummaryTests {
     prefs.audioDeviceNameOverride = "Dell Speakers"
     prefs.pollingMode = .heavy
     prefs.pollingCount = 4
+    prefs.sizeRecommendationDismissed = true
     // Every OLED-care value off its Recommended-preset default (the accessor
     // defaults, pinned by `oledDefaultsAreTheRecommendedPreset`).
     prefs.oledCareEnrolled = true

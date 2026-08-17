@@ -236,6 +236,8 @@ struct DisplayHubView: View {
           SettingsCaption("\(AppInfo.productName) found no resolutions it can switch between on this display.")
         }
 
+        recommendationCallout(catalog)
+
         if !catalog.all.isEmpty {
           rememberRow
         }
@@ -254,6 +256,45 @@ struct DisplayHubView: View {
       }
     } header: {
       Text("Display").settingsHeading()
+    }
+  }
+
+  /// The density model's suggestion as an ACTION, where the badge on the size
+  /// picker is only a mark (PD8).
+  ///
+  /// Four conditions, and each removes the row for a different reason: no
+  /// recommendation (the model abstained, or no geometry ever reached it), the
+  /// user closed it, the named size has no curated row to apply (the wire-timing
+  /// guard can withhold one), or the display is already running that size. The
+  /// last is why applying writes no dismissal: the size becomes current, so the
+  /// row goes on its own, and a dismissal written here would also hide the row
+  /// for a LATER recommendation on this display.
+  ///
+  /// Matched through `isRecommendedSize`, the same predicate the picker's mark
+  /// uses, so the row this applies and the row that wears the mark cannot drift.
+  @ViewBuilder private func recommendationCallout(
+    _ catalog: DisplayModeCoordinator.Catalog
+  ) -> some View {
+    if let recommendation = catalog.density?.recommendation,
+       !prefs.sizeRecommendationDismissed,
+       let row = catalog.rows.first(where: { catalog.isRecommendedSize($0.mode) }),
+       !catalog.isCurrentSize(row.mode) {
+      SettingRow(caption: SettingsCaption(verbatim: DisplayModeCopy.recommendationCallout(
+        width: recommendation.logicalWidth, height: recommendation.logicalHeight
+      ))) {
+        HStack {
+          // The SAME apply the picker uses, countdown and all (PD9): a
+          // recommended mode is no safer than any other, and the keep/revert
+          // window is the only wire-timing detector that exists.
+          Button(DisplayModeCopy.recommendationApply) { select(size: row, in: catalog) }
+            .accessibilityLabel(DisplayModeCopy.recommendationApply)
+          Button(DisplayModeCopy.recommendationDismiss) {
+            writer.write(.sizeRecommendationDismissed) { $0.sizeRecommendationDismissed = true }
+          }
+          .accessibilityLabel(DisplayModeCopy.recommendationDismiss)
+          Spacer()
+        }
+      }
     }
   }
 

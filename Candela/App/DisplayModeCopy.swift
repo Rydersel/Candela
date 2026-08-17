@@ -40,7 +40,14 @@ enum DisplayModeCopy {
   /// live mode. Routed through one implementation so a remembered resolution is
   /// named the same way as the row the user picked it from.
   static func size(_ descriptor: DisplayModeDescriptor) -> String {
-    "\(descriptor.logicalWidth) × \(descriptor.logicalHeight)"
+    size(width: descriptor.logicalWidth, height: descriptor.logicalHeight)
+  }
+
+  /// The same label from bare numbers, for the density model's recommendation:
+  /// it names a logical SIZE with no mode behind it (`SizeRecommendation` holds
+  /// no `ioModeID` on purpose). Routed here so the times sign has one spelling.
+  static func size(width: Int, height: Int) -> String {
+    "\(width) × \(height)"
   }
 
   /// The mark on an option that is in the list because this app's own
@@ -77,6 +84,29 @@ enum DisplayModeCopy {
   /// missed: both mean "this is what we suggest", at list scale and at row
   /// scale, and RM11 fixes this word.
   static var recommended: String { "Recommended" }
+
+  /// The hub's one-line suggestion: the size and the reason in one sentence.
+  ///
+  /// "Renders larger and scales the result" is the RM11 half. Every size this
+  /// model can name is a scaled mode, so the sentence has to say so; what it
+  /// must never do is imply the panel is natively that size. It states the
+  /// mechanism plainly instead, which is also the honest answer to "why is this
+  /// better than what I have".
+  ///
+  /// The claim is about THIS panel's physical size and nothing else. No
+  /// measurement, no PPI, no band: those are the model's workings, and a
+  /// suggestion someone has to do arithmetic to evaluate is not a suggestion.
+  static func recommendationCallout(width: Int, height: Int) -> String {
+    "For this display's size, \(size(width: width, height: height)) is the comfortable fit. It renders larger and scales the result."
+  }
+
+  /// Names the ACT, not the size: the sentence above already named the size,
+  /// and a button repeating it would be read as a second, different size.
+  static var recommendationApply: String { "Use This Size" }
+
+  /// Closes the row for this display and nothing more. The Recommended mark
+  /// survives it, so this is "not now", never "never tell me again".
+  static var recommendationDismiss: String { "Dismiss" }
 
   /// Rates are quantized to one decimal at the CoreGraphics boundary, so 59.9
   /// is a real value and truncating it to "59 Hz" would both misreport it and

@@ -44,6 +44,10 @@ public enum PrefName: String, Sendable, CaseIterable {
   case pollingMode, pollingCount
   // Per-display — display configuration (W2 SP1)
   case rememberDisplayMode, storedDisplayMode
+  // Per-display: the density model's hub suggestion, closed by its own button.
+  // A dismissal with a button is a setting; the OLED standby note's dismissal,
+  // written by the hours tracker, is engine state and stays out (above).
+  case sizeRecommendationDismissed
   // Per-display — OLED care (W3a). The accessor defaults ARE the Recommended
   // preset. Two of these are the exception to the "raw values ARE the key
   // names" rule above: `oledLockDim` and `oledHoursTracking` default to TRUE
@@ -162,6 +166,12 @@ public enum PrefPropagation {
          .virtualSlotDefined:
       // Field edits apply on the next Create/Apply (VD17): `.refreshUI` is
       // unioned in below and is the whole row, a deliberate answer.
+      []
+
+    case .sizeRecommendationDismissed:
+      // Closing the suggestion changes what one settings row renders and
+      // nothing else: `.refreshUI` is unioned in below and is the whole row.
+      // No display work of any kind, or a "not now" would move the screen.
       []
 
     case .startupAction, .multiKeyboardBrightness,

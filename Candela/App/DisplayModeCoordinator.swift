@@ -90,9 +90,12 @@ final class DisplayModeCoordinator {
     /// rows this catalog publishes (PD1): a size the wire-timing guard withheld
     /// has no apply path, so it must never become a recommendation.
     ///
-    /// nil when the panel's native pixels are unknown, or when the app supplied
-    /// no physical facts for it. Both are "no geometry", and no geometry means
-    /// no judgement rather than a judgement from zeros.
+    /// nil when the panel's native pixels are unknown, or when no facts
+    /// provider is installed (the default closure, i.e. every test that does not
+    /// wire one). A display with no entry in the app's hardware facts is NOT
+    /// this case: the provider still answers, with nil sizes, and the model
+    /// abstains with a `.noPhysicalSize` verdict. Both cases here are "no
+    /// geometry", and no geometry means no judgement rather than one from zeros.
     let density: DensityVerdict?
 
     var nativeKnown: Bool { nativePixels != nil }
