@@ -60,4 +60,88 @@ import Testing
       logicalWidth: 3440, logicalHeight: 1440, in: Self.mag))
     #expect(PanelDensityModel.bandLooksLikePPI.contains(d))
   }
+
+  @Test func looksLikePPIAbstainsOnImplausibleGeometry() {
+    let g = PanelGeometry(nativePixelWidth: 3840, nativePixelHeight: 2160,
+                          physicalWidthCm: 1, physicalHeightCm: 1, isVirtual: false)
+    #expect(PanelDensityModel.looksLikePPI(logicalWidth: 1920, logicalHeight: 1080, in: g) == nil)
+  }
+
+  @Test func dellAtNativeGetsTheClassicRecommendation() {
+    let rows = DisplayModeCatalog.curated(
+      DisplayModeFixtures.dell, nativePixelWidth: 2160, nativePixelHeight: 3840)
+    let verdict = PanelDensityModel.evaluate(
+      rows: rows, currentLogicalWidth: 2160, currentLogicalHeight: 3840,
+      geometry: Self.dellRotated)
+    #expect(verdict.currentPlacement == .above)
+    #expect(verdict.recommendation?.logicalWidth == 1440)
+    #expect(verdict.recommendation?.logicalHeight == 2560)
+    #expect(verdict.ideal?.servedToday == true)
+  }
+
+  @Test func dellAlreadyOnTheRungAbstainsAsCurrentIsBest() {
+    let rows = DisplayModeCatalog.curated(
+      DisplayModeFixtures.dell, nativePixelWidth: 2160, nativePixelHeight: 3840)
+    let verdict = PanelDensityModel.evaluate(
+      rows: rows, currentLogicalWidth: 1440, currentLogicalHeight: 2560,
+      geometry: Self.dellRotated)
+    #expect(verdict.recommendation == nil)
+    #expect(verdict.abstention == .currentIsBest)
+  }
+
+  @Test func magAtNativeAbstainsInBand() {
+    let rows = DisplayModeCatalog.curated(
+      DisplayModeFixtures.mag, nativePixelWidth: 3440, nativePixelHeight: 1440)
+    let verdict = PanelDensityModel.evaluate(
+      rows: rows, currentLogicalWidth: 3440, currentLogicalHeight: 1440,
+      geometry: Self.mag)
+    #expect(verdict.recommendation == nil)
+    #expect(verdict.abstention == .currentInBand)
+  }
+
+  @Test func virtualDisplayAbstainsBeforeAnythingElse() {
+    let g = PanelGeometry(nativePixelWidth: 3840, nativePixelHeight: 2160,
+                          physicalWidthCm: 60, physicalHeightCm: 34,
+                          isVirtual: true)
+    let verdict = PanelDensityModel.evaluate(
+      rows: [], currentLogicalWidth: nil, currentLogicalHeight: nil, geometry: g)
+    #expect(verdict.abstention == .virtualDisplay)
+    #expect(verdict.ideal == nil)
+  }
+
+  @Test func noPhysicalSizeAbstainsWithNoIdeal() {
+    let g = PanelGeometry(nativePixelWidth: 3440, nativePixelHeight: 1440,
+                          physicalWidthCm: nil, physicalHeightCm: nil,
+                          isVirtual: false)
+    let verdict = PanelDensityModel.evaluate(
+      rows: [], currentLogicalWidth: 3440, currentLogicalHeight: 1440, geometry: g)
+    #expect(verdict.abstention == .noPhysicalSize)
+    #expect(verdict.ideal == nil)
+  }
+
+  @Test func idealIsAspectExactAndEven() throws {
+    let verdict = PanelDensityModel.evaluate(
+      rows: [], currentLogicalWidth: nil, currentLogicalHeight: nil,
+      geometry: Self.dellRotated)
+    let ideal = try #require(verdict.ideal)
+    #expect(ideal.logicalWidth % 2 == 0)
+    #expect(ideal.logicalHeight % 2 == 0)
+    // Aspect within a percent of native.
+    let native = Double(2160) / Double(3840)
+    let got = Double(ideal.logicalWidth) / Double(ideal.logicalHeight)
+    #expect(abs(got - native) / native < 0.01)
+    #expect(ideal.servedToday == false)   // no rows were offered
+  }
+
+  @Test func rankingIsOrderIndependent() {
+    let rows = DisplayModeCatalog.curated(
+      DisplayModeFixtures.dell, nativePixelWidth: 2160, nativePixelHeight: 3840)
+    let forward = PanelDensityModel.evaluate(
+      rows: rows, currentLogicalWidth: 2160, currentLogicalHeight: 3840,
+      geometry: Self.dellRotated)
+    let backward = PanelDensityModel.evaluate(
+      rows: rows.reversed(), currentLogicalWidth: 2160, currentLogicalHeight: 3840,
+      geometry: Self.dellRotated)
+    #expect(forward == backward)
+  }
 }

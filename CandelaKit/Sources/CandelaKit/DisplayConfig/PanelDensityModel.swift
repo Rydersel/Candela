@@ -25,6 +25,81 @@ public struct PanelGeometry: Sendable, Equatable {
   }
 }
 
+/// Where one logical size's density sits against the "looks right" band.
+public enum BandPlacement: Sendable, Equatable {
+  case below
+  case inBand
+  case above
+}
+
+/// Why the model named no size. Abstention is a first-class outcome, not an
+/// error: a wrong recommendation is worse than none.
+public enum RecommendationAbstention: Sendable, Equatable {
+  /// Virtual displays declare a fake physical size, so density is meaningless.
+  case virtualDisplay
+  /// No declared physical size, or one outside the plausible range. "The right
+  /// size for this panel" is a physical claim.
+  case noPhysicalSize
+  /// The size in use already looks right.
+  case currentInBand
+  /// The best applicable candidate IS the size in use.
+  case currentIsBest
+  /// Physical size is known and the current size is outside the band, but no
+  /// applicable candidate reaches it. The residue synthesis would serve.
+  case noCandidateInBand
+}
+
+/// A logical SIZE, never a mode: the applying surface routes through the
+/// existing size-row apply, so `ioModeID` instability never reaches this type.
+public struct SizeRecommendation: Sendable, Equatable {
+  public let logicalWidth: Int
+  public let logicalHeight: Int
+  public let looksLikePPI: Double
+
+  public init(logicalWidth: Int, logicalHeight: Int, looksLikePPI: Double) {
+    self.logicalWidth = logicalWidth
+    self.logicalHeight = logicalHeight
+    self.looksLikePPI = looksLikePPI
+  }
+}
+
+/// The size the model would pick with no availability constraint: the panel's
+/// native aspect at the target density, even in both axes because synthesis
+/// rejects odd dimensions. `servedToday` is the seam for the synthesis layer:
+/// false means no applicable candidate reaches the band.
+public struct IdealSize: Sendable, Equatable {
+  public let logicalWidth: Int
+  public let logicalHeight: Int
+  public let servedToday: Bool
+
+  public init(logicalWidth: Int, logicalHeight: Int, servedToday: Bool) {
+    self.logicalWidth = logicalWidth
+    self.logicalHeight = logicalHeight
+    self.servedToday = servedToday
+  }
+}
+
+/// One call in, one result out: nothing here knows which surface is asking.
+///
+/// Exactly one of `recommendation` and `abstention` is non-nil.
+public struct DensityVerdict: Sendable, Equatable {
+  public let recommendation: SizeRecommendation?
+  public let abstention: RecommendationAbstention?
+  /// Nil exactly when the panel's density is unknown, which is also the only
+  /// state in which no ranking happened.
+  public let ideal: IdealSize?
+  /// Nil when no current size was supplied, or when density is unknown.
+  public let currentPlacement: BandPlacement?
+
+  public init(recommendation: SizeRecommendation?, abstention: RecommendationAbstention?,
+              ideal: IdealSize?, currentPlacement: BandPlacement?) {
+    self.recommendation = recommendation
+    self.abstention = abstention
+    self.ideal = ideal
+    self.currentPlacement = currentPlacement
+  }
+}
+
 /// Density is the model: how big things actually look on a given panel at a
 /// given logical size, in logical pixels per physical inch.
 ///
@@ -113,5 +188,102 @@ public enum PanelDensityModel {
     else { return nil }
     let majorInches = Double(max(wCm, hCm)) / 2.54
     return Double(max(logicalWidth, logicalHeight)) / majorInches
+  }
+
+  public static func bandPlacement(of looksLike: Double) -> BandPlacement {
+    if looksLike < bandLooksLikePPI.lowerBound { return .below }
+    if looksLike > bandLooksLikePPI.upperBound { return .above }
+    return .inBand
+  }
+
+  /// The whole judgement: panel facts and the sizes that apply today in, one
+  /// verdict out.
+  ///
+  /// Only rows the caller hands over are ranked, so a size with no apply path
+  /// is never recommended. `ideal` is computed unconditionally alongside, which
+  /// is what tells a later synthesis layer what it would need to build.
+  ///
+  /// Decision order, and why the two "you are already fine" outcomes sit this
+  /// way round: the more specific one is tested first. Any size whose density
+  /// is in band and which the ranking would have chosen anyway is reported as
+  /// `.currentIsBest`, and `.currentInBand` covers the rest of the band, where
+  /// a different size might still rank higher but nothing needs saying. Testing
+  /// the band first would make `.currentIsBest` unreachable, since every
+  /// candidate is in band by construction.
+  public static func evaluate(
+    rows: [DisplayModeRow],
+    currentLogicalWidth: Int?, currentLogicalHeight: Int?,
+    geometry: PanelGeometry
+  ) -> DensityVerdict {
+    guard !geometry.isVirtual else {
+      return DensityVerdict(recommendation: nil, abstention: .virtualDisplay,
+                            ideal: nil, currentPlacement: nil)
+    }
+    guard let panelPPI = physicalPPI(geometry) else {
+      return DensityVerdict(recommendation: nil, abstention: .noPhysicalSize,
+                            ideal: nil, currentPlacement: nil)
+    }
+
+    let scale = targetLooksLikePPI / panelPPI
+    let idealWidth = evenRounded(Double(geometry.nativePixelWidth) * scale)
+    let idealHeight = evenRounded(Double(geometry.nativePixelHeight) * scale)
+
+    var currentPlacement: BandPlacement?
+    if let w = currentLogicalWidth, let h = currentLogicalHeight,
+       let density = looksLikePPI(logicalWidth: w, logicalHeight: h, in: geometry) {
+      currentPlacement = bandPlacement(of: density)
+    }
+
+    let candidates: [(row: DisplayModeRow, density: Double)] = rows.compactMap { row in
+      guard let density = looksLikePPI(logicalWidth: row.mode.logicalWidth,
+                                       logicalHeight: row.mode.logicalHeight,
+                                       in: geometry),
+            bandLooksLikePPI.contains(density)
+      else { return nil }
+      return (row, density)
+    }
+
+    let ideal = IdealSize(logicalWidth: idealWidth, logicalHeight: idealHeight,
+                          servedToday: !candidates.isEmpty)
+    let best = candidates.min(by: outranks)
+
+    func abstaining(_ reason: RecommendationAbstention) -> DensityVerdict {
+      DensityVerdict(recommendation: nil, abstention: reason,
+                     ideal: ideal, currentPlacement: currentPlacement)
+    }
+
+    if let best, best.row.mode.logicalWidth == currentLogicalWidth,
+       best.row.mode.logicalHeight == currentLogicalHeight {
+      return abstaining(.currentIsBest)
+    }
+    if currentPlacement == .inBand { return abstaining(.currentInBand) }
+    guard let best else { return abstaining(.noCandidateInBand) }
+
+    return DensityVerdict(
+      recommendation: SizeRecommendation(logicalWidth: best.row.mode.logicalWidth,
+                                         logicalHeight: best.row.mode.logicalHeight,
+                                         looksLikePPI: best.density),
+      abstention: nil, ideal: ideal, currentPlacement: currentPlacement
+    )
+  }
+
+  /// Fixed in the spec so two builds cannot disagree, and total so the answer
+  /// does not depend on the order the rows arrived in.
+  private static func outranks(
+    _ lhs: (row: DisplayModeRow, density: Double),
+    _ rhs: (row: DisplayModeRow, density: Double)
+  ) -> Bool {
+    let lhsGap = abs(lhs.density - targetLooksLikePPI)
+    let rhsGap = abs(rhs.density - targetLooksLikePPI)
+    if lhsGap != rhsGap { return lhsGap < rhsGap }
+    if lhs.row.mode.isHiDPI != rhs.row.mode.isHiDPI { return lhs.row.mode.isHiDPI }
+    if lhs.row.mode.logicalArea != rhs.row.mode.logicalArea {
+      return lhs.row.mode.logicalArea > rhs.row.mode.logicalArea
+    }
+    return lhs.row.mode.ioModeID < rhs.row.mode.ioModeID
+  }
+
+  private static func evenRounded(_ value: Double) -> Int {
+    Int((value / 2).rounded() * 2)
   }
 }
