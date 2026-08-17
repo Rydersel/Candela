@@ -59,6 +59,25 @@ enum DisplayModeCopy {
   /// abbreviation here for a screen reader to mispronounce.
   static var addedByApp: String { "Added by \(AppInfo.productName)" }
 
+  /// The mark on the size the density model names for this panel. Stated here
+  /// with the other marks because a row can carry both, and two literals in two
+  /// views is how one word becomes two.
+  ///
+  /// One word, and it is the whole claim (RM11): a suggestion about THIS
+  /// display's physical size, never a claim about the mode's quality and never
+  /// a HiDPI implication. Everything that would earn a longer sentence, the
+  /// physical measurement behind it included, belongs to a surface with room
+  /// for a sentence, never to this word.
+  ///
+  /// Spoken and seen are the same word, like `addedByApp`: nothing here for a
+  /// screen reader to mispronounce.
+  ///
+  /// It shares a word with `AllModesPage.ListMode.recommended`, whose segmented
+  /// control names the CURATED LIST. The overlap is deliberate rather than
+  /// missed: both mean "this is what we suggest", at list scale and at row
+  /// scale, and RM11 fixes this word.
+  static var recommended: String { "Recommended" }
+
   /// Rates are quantized to one decimal at the CoreGraphics boundary, so 59.9
   /// is a real value and truncating it to "59 Hz" would both misreport it and
   /// collide with a genuine 59 Hz row.

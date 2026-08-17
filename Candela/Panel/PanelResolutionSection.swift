@@ -25,6 +25,13 @@ import SwiftUI
 /// here only if it can be shown without truncating a 280 pt row. The
 /// "Added by Candela" source mark is in Settings for exactly that reason.
 ///
+/// The density model's "Recommended" mark DOES come here, and the difference is
+/// which question the mark answers. The source mark explains why a row is on
+/// the list, which is worth a sentence and no hurry; "Recommended" names the
+/// row worth pressing, which is the whole point of a five-row shortcut. It is
+/// one word, it lands on at most one of those five rows, and it rides in the
+/// bracket the tags already occupy rather than opening a second one.
+///
 /// This view never enumerates: `StatusItemController.warmModeCatalogs` does it
 /// outside the tracking session, because a `.task` here would be starved while
 /// the menu is open and the section would be missing on the open that wanted it.
@@ -72,12 +79,17 @@ struct PanelResolutionSection: View {
         if isExpanded {
           ForEach(catalog.rows.prefix(Self.maximumRows)) { row in
             PanelModeRow(
-              // Tagged, like every other surface that OFFERS a size to choose
-              // from: the size label is bare now, so these words are the whole
-              // of RM11 here. Measured at 280pt: the longest real label then,
+              // Tagged and marked, like every other surface that OFFERS a size
+              // to choose from: the size label is bare now, so these words are
+              // the whole of RM11 here.
+              //
+              // Width, measured at 280 pt: the longest real label then,
               // "1440 × 2560 (HiDPI, Scaled)" on the Dell, fit with room to
-              // spare, and retiring "HiDPI" (#96) only shortened it. (The
-              // disclosure summary above does not fit; see there.)
+              // spare, and retiring the "HiDPI" wording only shortened it.
+              // "Recommended" is the first thing added since, on a row that
+              // truncates rather than wraps, so the worst case here is
+              // "1440 × 2560 (Scaled, Recommended)". (The disclosure summary
+              // above does not fit even without it; see there.)
               title: catalog.badgedSize(row.mode),
               accessibilityName: displayName,
               isCurrent: catalog.isCurrentSize(row.mode)

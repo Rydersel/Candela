@@ -307,6 +307,13 @@ struct DisplayHubView: View {
   /// nobody can see at the moment of choosing is one the app does not appear to
   /// have.
   ///
+  /// **The density model's mark rides along too**, for the same reason: this
+  /// pop-up is where a size is chosen, and a suggestion nobody sees while
+  /// choosing is a suggestion the app did not make. One word is all of it: a
+  /// mark states the suggestion, and anything that has to be argued (the panel
+  /// measurement behind it, an apply button) belongs to a dismissible row that
+  /// this mark deliberately outlives.
+  ///
   /// `currentHz` is `outcome`'s contract, not a hint: when the display has no
   /// current mode the caps warning is SUPPRESSED entirely — a placeholder 0
   /// would both disable the warning and name the wrong rate.
@@ -323,6 +330,12 @@ struct DisplayHubView: View {
       // First: it is a warning about what this choice costs, and the source
       // mark is a note about where the choice came from.
       marks.append("caps at \(DisplayModeCopy.refresh(outcome.appliedHz))")
+    }
+    // Second, between the two: a note about this PANEL rather than a cost of
+    // the choice, and the reason the item is worth looking at rather than the
+    // reason it is on the list at all. By SIZE, like `curatedSelection` above.
+    if catalog.isRecommendedSize(row.mode) {
+      marks.append(DisplayModeCopy.recommended)
     }
     // The mode this item would APPLY, not the row's representative, which is
     // the same rule the caps warning above follows (SO18). They disagree

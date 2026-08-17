@@ -1194,10 +1194,17 @@ extension DisplayModeCoordinator.Catalog {
   /// (`representativeRanking` rule 1 outranks rule 2). Tagging a display's own
   /// native resolution "low resolution" would be an insult rather than a
   /// distinction, and the twin is not on screen here to be distinguished from.
+  ///
+  /// The density model's mark rides along, in the SAME bracket as the tags.
+  /// Its caller draws one string on one line, so a mark of its own would be a
+  /// second pair of brackets on a 280 pt row; and the marks a settings row can
+  /// afford to separate ("Added by Candela") are the ones that stayed in
+  /// Settings anyway.
   func badgedSize(_ mode: DisplayMode) -> String {
-    let tags = tags(for: mode, isLowResolutionDuplicate: false)
-    guard !tags.isEmpty else { return DisplayModeCopy.size(mode) }
-    return "\(DisplayModeCopy.size(mode)) (\(tags.joined(separator: ", ")))"
+    var marks = tags(for: mode, isLowResolutionDuplicate: false)
+    if isRecommendedSize(mode) { marks.append(DisplayModeCopy.recommended) }
+    guard !marks.isEmpty else { return DisplayModeCopy.size(mode) }
+    return "\(DisplayModeCopy.size(mode)) (\(marks.joined(separator: ", ")))"
   }
 
   /// The mode to apply for a curated row: the chosen SIZE at the refresh rate
@@ -1251,5 +1258,22 @@ extension DisplayModeCoordinator.Catalog {
   func isCurrentSize(_ mode: DisplayMode) -> Bool {
     guard let current else { return false }
     return current.logicalWidth == mode.logicalWidth && current.logicalHeight == mode.logicalHeight
+  }
+
+  /// True for the row whose LOGICAL SIZE the density model named.
+  ///
+  /// A size match, the same rule `isCurrentSize` and the hub's
+  /// `curatedSelection` follow, because a recommendation IS a logical size:
+  /// `SizeRecommendation` carries no `ioModeID` precisely so that mode-id
+  /// instability can never reach it, and a curated row's representative mode is
+  /// its size's fastest rate.
+  ///
+  /// False whenever there is no verdict or the verdict abstained. Three
+  /// offering surfaces ask this question, and one helper is the only way they
+  /// keep answering it the same way.
+  func isRecommendedSize(_ mode: DisplayMode) -> Bool {
+    guard let recommendation = density?.recommendation else { return false }
+    return recommendation.logicalWidth == mode.logicalWidth
+      && recommendation.logicalHeight == mode.logicalHeight
   }
 }
