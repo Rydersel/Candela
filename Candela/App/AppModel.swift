@@ -504,18 +504,38 @@ final class AppModel {
   /// when the grant appears while the panel is open).
   let accessibility = AccessibilityPermission()
 
+  /// What a discovery pass returns, named so the seam below can be spelled
+  /// without repeating the tuple.
+  typealias DiscoveredDisplays = [(
+    display: ExternalDisplay, writer: any DDCWriting, facts: DisplayHardwareFacts
+  )]
+
+  /// How this model finds displays.
+  ///
+  /// Injected for ONE case that cannot be produced by hand (#51): a different
+  /// panel arriving on a display ID we already hold, inside a SINGLE refresh
+  /// pass. Every physical unplug fires its own reconfiguration, so a same-port
+  /// swap always splits into a departure pass and an arrival pass, and the
+  /// reconciliation branch that matters is never entered. Verified on the rig
+  /// 2026-08-17 by the event ring's ordering, which distinguishes the two.
+  @ObservationIgnored private let discoverDisplays: (Set<CGDirectDisplayID>) -> DiscoveredDisplays
+
   init(
     shade: (any ShadeRendering)? = nil,
     gamma: (any GammaApplying)? = nil,
     hdrToggling: (any HDRToggling)? = nil,
     audioDevices: (any AudioDeviceProviding)? = nil,
-    safeMode: Bool = false
+    safeMode: Bool = false,
+    discoverDisplays: @escaping (Set<CGDirectDisplayID>) -> DiscoveredDisplays = {
+      DisplayDiscovery.discover(excluding: $0)
+    }
   ) {
     self.shade = shade
     self.gamma = gamma
     self.hdrToggling = hdrToggling ?? MonitorPanelService()
     self.audioDevices = audioDevices ?? CoreAudioDeviceProvider()
     self.safeMode = safeMode
+    self.discoverDisplays = discoverDisplays
     appPrefs = DisplayPrefs(persistenceKey: "app", safeMode: safeMode)
   }
 
@@ -1149,26 +1169,35 @@ final class AppModel {
   /// deinit finishes its coalescer, which lands any pending write before the
   /// drain task exits, so no explicit `waitForPendingWrites()` is needed.
   private func performRefresh() async -> [CGDirectDisplayID] {
-    var existing = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
+    let existing = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
     var appeared: [DisplayState] = []
     var kept: [DisplayState] = []
-    displays = DisplayDiscovery.discover(excluding: virtualDisplays.ownedDisplayIDs).map { entry in
+    let entries = discoverDisplays(virtualDisplays.ownedDisplayIDs)
+    // Reconciled on PANEL identity, not on the display ID (#51). A display ID is
+    // a slot: macOS reassigns them across a replug, so an ID that is still
+    // present can be a different monitor, and reusing its controllers would
+    // persist the new panel's brightness under the old panel's storage key and
+    // hand it the old panel's tuning. The rule and its bookkeeping live in
+    // `DisplayReconciliation`, where they are under test.
+    let plan = DisplayReconciliation.plan(
+      held: existing.mapValues(\.display.persistenceKey),
+      discovered: Dictionary(
+        uniqueKeysWithValues: entries.map { ($0.display.id, $0.display.persistenceKey) }))
+    displays = entries.map { entry in
       // B8: discovery has always read these and always thrown them away. Kept
       // for BOTH branches below — a kept display re-reports its facts on every
       // pass, and a link renegotiation is exactly when the transport string can
       // change under a display we already know.
       hardwareFacts[entry.display.persistenceKey] = entry.facts
-      if let previous = existing.removeValue(forKey: entry.display.id) {
+      if plan.reused.contains(entry.display.id), let previous = existing[entry.display.id] {
         // Fresh DisplayState (name may change), reused controllers, fresh
         // writer for all three (rebind also resets each duplicate memo).
         //
-        // The persistence key rides along because this branch runs on EVERY
-        // pass, not only after a replug, while the identity of the panel on the
-        // other end is what decides whether the controllers' read-derived facts
-        // still describe anything real. macOS reassigns display IDs across a
-        // replug and this reconciliation is keyed on the ID, so "same ID" is
-        // NOT "same monitor"; the persistence key (EDID UUID) is the only thing
-        // here that tells the two apart. See `rebind(writer:panelIdentity:)`.
+        // The persistence key rides along even though the plan has already
+        // established it is unchanged: `rebind` reads it to decide whether its
+        // read-derived facts still describe anything real, and passing it keeps
+        // that decision in one place rather than making this call site the
+        // thing that guarantees it.
         previous.controller.rebind(writer: entry.writer, panelIdentity: entry.display.persistenceKey)
         previous.volume.rebind(writer: entry.writer, panelIdentity: entry.display.persistenceKey)
         previous.contrast.rebind(writer: entry.writer, panelIdentity: entry.display.persistenceKey)
@@ -1239,7 +1268,13 @@ final class AppModel {
     // Recorded here rather than from a second observer, which would have to
     // re-derive the same difference and could disagree with it.
     for state in appeared { noteDisplayEvent("\(state.display.name) arrived") }
-    for state in existing.values { noteDisplayEvent("\(state.display.name) departed") }
+    // From the plan, so a panel REPLACED on a still-live ID is announced as
+    // leaving. Reading "whatever is left in `existing`" cannot see that one: its
+    // ID is still occupied, so the ring would show an arrival with no departure
+    // and the old panel's HUD would outlive it.
+    for state in plan.departed.sorted().compactMap({ existing[$0] }) {
+      noteDisplayEvent("\(state.display.name) departed")
+    }
     // Every controller — kept and appeared — gets the live epoch pair, so
     // each submit is stamped with the current epoch and the drain refuses
     // targets stamped before a reconfiguration/sleep.
@@ -1312,7 +1347,10 @@ final class AppModel {
     capabilityString = capabilityString.filter { live.contains($0.key) }
     hardwareFacts = hardwareFacts.filter { live.contains($0.key) }
     probeVolumeCapabilities()
-    return Array(existing.keys)
+    // Includes an ID whose panel was REPLACED: the HUD this returns to clean up
+    // belongs to the monitor that left, and the one now on that ID gets its own
+    // on the next keypress.
+    return Array(plan.departed)
   }
 
   /// Reconciles the built-in slot against discovery. Same identity rule as
