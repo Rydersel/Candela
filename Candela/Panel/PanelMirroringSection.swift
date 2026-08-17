@@ -149,7 +149,7 @@ struct PanelMirroringSection: View {
       // Animated HERE, not via .animation on the container: only the click
       // should animate. The menu-close reset in PanelView and a topology
       // re-sample mid-open must land instantly.
-      withAnimation(PanelMotion.disclosure(reduceMotion: reduceMotion)) {
+      withAnimation(Motion.disclosure(reduceMotion: reduceMotion)) {
         expanded = isExpanded ? nil : PanelDisclosureID(displayID, .mirroring)
       }
     }

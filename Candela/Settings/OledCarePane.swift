@@ -56,6 +56,7 @@ struct OledCarePane: View {
 
   /// Set by the hub's link, cleared by this pane the first time it appears.
   @Environment(\.oledCareScrollTarget) private var scrollTarget
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     ScrollViewReader { proxy in
@@ -83,7 +84,9 @@ struct OledCarePane: View {
       if !enrolledDisplays.isEmpty {
         Section {
           OledCareGlanceStrip(displays: enrolledDisplays) { key in
-            withAnimation { proxy.scrollTo(key, anchor: .top) }
+            withAnimation(Motion.scroll(reduceMotion: reduceMotion)) {
+              proxy.scrollTo(key, anchor: .top)
+            }
           }
         }
       }
@@ -329,6 +332,7 @@ private struct OledCareDisplaySection: View {
 
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   /// Slider drafts, live only while a drag is in progress. A `Slider` bound
   /// straight to a pref writes — and fans out, and bumps `prefsRevision` — on
@@ -490,7 +494,7 @@ private struct OledCareDisplaySection: View {
           Text(verbatim: hoursLine(tracker))
             .monospacedDigit()
             .contentTransition(.numericText())
-            .animation(.default, value: hoursLine(tracker))
+            .animation(Motion.value(reduceMotion: reduceMotion), value: hoursLine(tracker))
         }
         if !historyBlank, let relative = summary.hottestRelative,
           let multiple = PanelHealthCopy.multiple(relative)
@@ -500,7 +504,7 @@ private struct OledCareDisplaySection: View {
               Text(verbatim: "\(multiple) this display's average")
                 .monospacedDigit()
                 .contentTransition(.numericText())
-                .animation(.default, value: multiple)
+                .animation(Motion.value(reduceMotion: reduceMotion), value: multiple)
               if let sentence = hottestSentence(summary) {
                 Text(verbatim: sentence)
                   .font(.caption)

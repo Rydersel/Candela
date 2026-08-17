@@ -159,7 +159,7 @@ struct PanelView: View {
     .opacity(hasEntered ? 1 : 0)
     .offset(y: hasEntered ? 0 : -6)
     .onAppear {
-      withAnimation(PanelMotion.entrance(reduceMotion: reduceMotion)) { hasEntered = true }
+      withAnimation(Motion.entrance(reduceMotion: reduceMotion)) { hasEntered = true }
     }
     // The menu can close without a mouse-exit event, and it takes the panel's
     // view hierarchy with it; the same signal the hover fixes below rely on.
