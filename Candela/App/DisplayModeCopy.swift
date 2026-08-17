@@ -91,22 +91,28 @@ enum DisplayModeCopy {
   /// applies, because the recommended size is NOT always a scaled mode: on the
   /// MAG running 1920 × 1080 the model names 3440 × 1440, whose representative
   /// is the panel's own native mode. "It renders larger and scales the result"
-  /// scales nothing there, and the picker row beside it says Native at the same
-  /// moment.
+  /// scales nothing there.
+  ///
+  /// Keyed off the mode's NATIVE flag, never off framebuffer equality with the
+  /// panel's native pixel count: the exact-2x HiDPI mode of a 5K or 6K panel
+  /// renders into the native framebuffer while presenting half the logical
+  /// size, so a pixel-equality test calls it unscaled and this would tell a 5K
+  /// owner that looks-like-2560 × 1440 is their native resolution. The flag
+  /// answers the question actually being asked, and everything it leaves out
+  /// falls to the scaled sentence, which is the milder of the two claims.
   ///
   /// The scaled sentence is the RM11 half: it states the mechanism plainly and
-  /// never implies the panel is natively that size. The other states provenance
-  /// in the word the row tags already use (`Catalog.tags(for:)`), and neither
-  /// makes a quality claim.
+  /// never implies the panel is natively that size. The other states provenance,
+  /// and neither makes a quality claim.
   ///
   /// The claim is about THIS panel's physical size and nothing else. No
   /// measurement, no PPI, no band: those are the model's workings, and a
   /// suggestion someone has to do arithmetic to evaluate is not a suggestion.
-  static func recommendationCallout(width: Int, height: Int, isScaled: Bool) -> String {
+  static func recommendationCallout(width: Int, height: Int, isNative: Bool) -> String {
     let fit = "For this display's size, \(size(width: width, height: height)) is the comfortable fit."
-    return isScaled
-      ? "\(fit) It renders larger and scales the result."
-      : "\(fit) It is this display's native resolution."
+    return isNative
+      ? "\(fit) It is this display's native resolution."
+      : "\(fit) It renders larger and scales the result."
   }
 
   /// Names the ACT, not the size: the sentence above already named the size,

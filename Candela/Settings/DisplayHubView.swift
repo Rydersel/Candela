@@ -276,10 +276,15 @@ struct DisplayHubView: View {
   ///
   /// Matched through `isRecommendedSize`, the same predicate the picker's mark
   /// uses, so the row this applies and the row that wears the mark cannot drift.
-  /// `isScaled` comes off that same curated row, because a recommended size can
-  /// be the panel's own native one (the MAG running 1920 × 1080 is offered
-  /// 3440 × 1440), and the callout must not claim a scaling that is not
-  /// happening while the row beside it says Native.
+  /// The copy variant comes off that same curated row, because a recommended
+  /// size can be the panel's own native one (the MAG running 1920 × 1080 is
+  /// offered 3440 × 1440), and the callout must not claim a scaling that is not
+  /// happening. It asks the mode's NATIVE flag rather than the row's
+  /// `isScaled`, which is framebuffer equality: an exact-2x HiDPI mode on a 5K
+  /// or 6K panel renders into the native framebuffer at half the logical size,
+  /// so `isScaled` calls it unscaled and the native sentence would be false
+  /// there. Anything the flag leaves out gets the scaled sentence, the milder
+  /// claim.
   @ViewBuilder private func recommendationCallout(
     _ catalog: DisplayModeCoordinator.Catalog
   ) -> some View {
@@ -290,7 +295,7 @@ struct DisplayHubView: View {
        !catalog.isCurrentSize(row.mode) {
       SettingRow(caption: SettingsCaption(verbatim: DisplayModeCopy.recommendationCallout(
         width: recommendation.logicalWidth, height: recommendation.logicalHeight,
-        isScaled: row.isScaled
+        isNative: row.mode.isNative
       ))) {
         HStack {
           // The SAME apply the picker uses, countdown and all (PD9): a
