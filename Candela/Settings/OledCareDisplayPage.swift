@@ -43,6 +43,11 @@ struct OledCareDisplayPage: View {
   /// action that changes it from here (Dismiss); the numbers otherwise refresh
   /// whenever anything else re-renders the page.
   @State private var hoursRevision = 0
+  /// The hero map is a button into Display Health, and a still image does not
+  /// read as one. Hover lift plus a brightened caption say so before the
+  /// click; lift rather than tint, because an inactive window draws every
+  /// accent grey (the measured glance-tile lesson).
+  @State private var heroHovering = false
 
   private var persistenceKey: String { state.display.persistenceKey }
   private var writer: DisplayPrefWriter {
@@ -192,17 +197,28 @@ struct OledCareDisplayPage: View {
             }
             PanelExposureLegend()
           }
-          // The visible affordance for the button this whole column is.
+          // The visible affordance for the button this whole column is; on
+          // hover it brightens alongside the lift.
           Text("Display Health ›")
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(heroHovering ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
         }
         // A portrait display at the landscape width would tower over the stat
-        // column, so the map column takes the narrow cap.
-        .frame(maxWidth: aspect < 1 ? 200 : 300)
+        // column AND push the Dimming section below the fold (measured on the
+        // rotated Dell at 200 pt: the map ran ~355 pt tall in a 520 pt
+        // window). The hero is glanceable (OCR5), so a portrait map caps
+        // near the landscape map's own height; the big reading surface is
+        // one push away on Display Health.
+        .frame(maxWidth: aspect < 1 ? 130 : 300)
         .contentShape(Rectangle())
       }
-      .buttonStyle(.plain)
+      .buttonStyle(OledTileButtonStyle())
+      .scaleEffect(heroHovering && !reduceMotion ? 1.02 : 1)
+      .shadow(
+        color: .black.opacity(heroHovering ? 0.35 : 0),
+        radius: heroHovering ? 10 : 0, y: 3)
+      .animation(reduceMotion ? nil : .spring(duration: 0.25), value: heroHovering)
+      .onHover { heroHovering = $0 }
       .accessibilityLabel("Display Health")
 
       VStack(alignment: .leading, spacing: 10) {
@@ -267,7 +283,7 @@ struct OledCareDisplayPage: View {
             .strokeBorder(.separator, lineWidth: 1)
         }
         .aspectRatio(aspect, contentMode: .fit)
-        .frame(maxWidth: aspect < 1 ? 200 : 300)
+        .frame(maxWidth: aspect < 1 ? 130 : 300)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 10) {
         heroStat("Status") { Text("Not enrolled") }
