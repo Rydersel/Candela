@@ -53,8 +53,12 @@ struct SettingsRootView: View {
   /// `subPagePaths` because it rides the same `NavigationStack`; retained
   /// across selection changes like a display's stack (SO23's rule applied to
   /// the pane), cleared when a display in it departs, and popped by the
-  /// sidebar row's re-click.
+  /// sidebar row's re-click. Display Health is NOT in this stack: it opens
+  /// in its own window (OCR-A1), reached through `openWindow` below.
   @State private var oledCarePath: [OledCarePage] = []
+  /// For the debug capture route's Display Health window (OCR-A1); the pane's
+  /// own health links hold their own copy of this action.
+  @Environment(\.openWindow) private var openWindow
   /// The Keyboard pane's pushed-page stack (KMR11): same NavigationStack, same
   /// retention rules as the OLED pane's, minus the display dependence — these
   /// pages name no hardware, so departure clearing never touches this.
@@ -181,6 +185,12 @@ struct SettingsRootView: View {
           if let path = DebugSettingsHook.pendingKeyboardPath {
             DebugSettingsHook.pendingKeyboardPath = nil
             keyboardPath = path
+          }
+          // Display Health is a window, not a pushed page (OCR-A1), so its
+          // capture route opens the window over the pane it left behind.
+          if let key = DebugSettingsHook.pendingHealthWindowKey {
+            DebugSettingsHook.pendingHealthWindowKey = nil
+            openWindow(id: "displayHealth", value: key)
           }
         }
       }
@@ -448,9 +458,6 @@ struct SettingsRootView: View {
               displays: oledSwitcherDisplays, onSwitch: switchOledDisplay)
           case .measurement:
             OledCareMeasurementPage(
-              state: state, displays: oledSwitcherDisplays, onSwitch: switchOledDisplay)
-          case .health:
-            PanelHealthView(
               state: state, displays: oledSwitcherDisplays, onSwitch: switchOledDisplay)
           }
         }

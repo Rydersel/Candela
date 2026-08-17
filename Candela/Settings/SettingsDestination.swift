@@ -45,14 +45,18 @@ enum DisplaySubPage: String, CaseIterable, Hashable {
 /// The OLED Care pane's pushed pages (OCR1), keyed by persistence key like
 /// everything else that survives a replug. All elements of one presented path
 /// share one key by construction: the switcher rewrites every element.
+///
+/// Display Health is deliberately NOT a case (OCR-A1, #185): it opens in its
+/// own content-sized window, because a pushed page cannot resize the settings
+/// window to a portrait display's map. Navigation-only state, not on-disk
+/// schema, so the case's removal cost nothing stored.
 enum OledCarePage: Hashable {
   case display(String)
   case measurement(String)
-  case health(String)
 
   var displayKey: String {
     switch self {
-    case let .display(key), let .measurement(key), let .health(key): key
+    case let .display(key), let .measurement(key): key
     }
   }
 
@@ -60,7 +64,6 @@ enum OledCarePage: Hashable {
     switch self {
     case .display: .display(key)
     case .measurement: .measurement(key)
-    case .health: .health(key)
     }
   }
 }

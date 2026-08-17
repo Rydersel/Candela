@@ -26,6 +26,9 @@ struct OledCareDisplayPage: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  /// Display Health's doorway (OCR-A1): its own content-sized window, because
+  /// the settings window cannot resize to a portrait display's map.
+  @Environment(\.openWindow) private var openWindow
 
   /// `pmset -g` costs a 79 ms process spawn [MEASURED 2026-08-06]. Read ONCE
   /// per page appearance into state, never from `body` (which re-evaluates on
@@ -115,7 +118,10 @@ struct OledCareDisplayPage: View {
           NavigationRow(
             title: "Display Health",
             value: healthRowPreview,
-            action: { path.wrappedValue.append(.health(persistenceKey)) })
+            // A window, not a push (OCR-A1): the settings window cannot
+            // resize to a portrait display's map, and a window sized to its
+            // content can.
+            action: { openWindow(id: "displayHealth", value: persistenceKey) })
         } header: {
           Text("More").settingsHeading()
         }
@@ -164,7 +170,8 @@ struct OledCareDisplayPage: View {
 
     HStack(alignment: .top, spacing: 20) {
       Button {
-        path.wrappedValue.append(.health(persistenceKey))
+        // Same doorway as the More row: Display Health's own window (OCR-A1).
+        openWindow(id: "displayHealth", value: persistenceKey)
       } label: {
         VStack(alignment: .leading, spacing: 8) {
           if historyBlank {

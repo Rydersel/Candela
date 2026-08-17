@@ -2,12 +2,18 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// One panel's accumulated exposure, a page pushed from the display's OLED
-/// Care page rather than embedded in one of its sections (OC19, placement
-/// amended by OCR5: a pushed page, no longer a sheet). It owns the map
-/// instruments now: the History / Right now lens, the window outlines, and
-/// the crosshair readout, all moved here from the old hero so the app has ONE
-/// surface for interrogating the map.
+/// One panel's accumulated exposure, in its own content-sized window (OC19;
+/// placement amended twice: OCR5 made it a pushed page instead of a sheet,
+/// and OCR-A1 (#185) made it a window, because a pushed page cannot resize
+/// the settings window to a portrait display's map and a window sized to its
+/// content can). It owns the map instruments: the History / Right now lens,
+/// the window outlines, and the crosshair readout, all moved here from the
+/// old hero so the app has ONE surface for interrogating the map.
+///
+/// `DisplayHealthWindowRoot` below is the scene's root: it resolves the
+/// window's persistence key against the connected externals, closes the
+/// window on that display's departure (the same rule that pops a pushed path
+/// on departure), and feeds the switcher.
 ///
 /// Copy rule, and it is the reason half this file is text (OC11): software has
 /// two levers against OLED wear, namely reduce luminance and reduce time at
@@ -85,22 +91,24 @@ struct PanelHealthView: View {
 
   var body: some View {
     let summary = self.summary
-    ScrollView {
-      VStack(alignment: .leading, spacing: 20) {
-        SubPageHeader(
-          title: "Display Health",
-          currentKey: persistenceKey,
-          displays: displays,
-          onSwitch: onSwitch)
-        confidenceNote(summary)
-        mapCard(summary)
-        findings(summary)
-        ownersCard(summary)
-        deleteRow
-      }
-      .padding(20)
-      .frame(maxWidth: .infinity, alignment: .leading)
+    VStack(alignment: .leading, spacing: 20) {
+      switcherRow
+      confidenceNote(summary)
+      mapCard(summary)
+      findings(summary)
+      ownersCard(summary)
+      deleteRow
     }
+    .padding(20)
+    // Content-sized window (OCR-A1): the column's width decides the window's
+    // width and the sections' heights decide its height, with the map capped
+    // below so a portrait display cannot run the window off the screen.
+    // Deliberately NO ScrollView: a flexible scroll container reports no
+    // ideal height of its own, which collapses a `.contentSize` window.
+    // The page title is the window's title bar; `SubPageHeader` would draw
+    // it a second time (the duplicated-title defect), so the switcher stands
+    // alone at the trailing edge.
+    .frame(width: 560, alignment: .leading)
     .confirmationDialog(
       "Delete this display's measurement history?",
       isPresented: $confirmingDelete,
@@ -123,6 +131,27 @@ struct PanelHealthView: View {
   }
 
   // MARK: - Chrome
+
+  /// `SubPageHeader`'s switcher half without its title half: the window's
+  /// title bar already says Display Health. Same callback contract (SO23):
+  /// a persistence key out, navigation meaning owned by the caller.
+  @ViewBuilder private var switcherRow: some View {
+    if displays.count > 1 {
+      HStack {
+        Spacer()
+        Picker("Display", selection: Binding(get: { persistenceKey }, set: { onSwitch($0) })) {
+          ForEach(displays, id: \.key) { display in
+            // A display's name, never a lookup key.
+            Text(verbatim: display.name).tag(display.key)
+          }
+        }
+        .pickerStyle(.menu)
+        .labelsHidden()
+        .fixedSize()
+        .accessibilityLabel("Display")
+      }
+    }
+  }
 
   private var deleteRow: some View {
     Button("Delete History…", role: .destructive) { confirmingDelete = true }
@@ -278,6 +307,15 @@ struct PanelHealthView: View {
               rotation: rotation)
           }
         }
+        // The cap that keeps a portrait window ON the screen (OCR-A1): a
+        // rotated display's map fits 470 pt of height and narrows to match,
+        // instead of running the column to 995 pt the way full column width
+        // did on the pushed page. The aspect box is applied OUTSIDE the
+        // overlays so the crosshair's GeometryReader and the hotspot tag keep
+        // describing exactly the drawn map, never a wider frame around it.
+        .aspectRatio(aspect, contentMode: .fit)
+        .frame(maxHeight: 470)
+        .frame(maxWidth: .infinity)
         PanelExposureLegend()
         if surfaceMode == .now, let live {
           Text(verbatim: "Reading from \(live.at.formatted(date: .omitted, time: .standard)); brightness of what the display was showing.")
@@ -293,6 +331,10 @@ struct PanelHealthView: View {
               .strokeBorder(.separator, lineWidth: 1)
           }
           .aspectRatio(aspect, contentMode: .fit)
+          // Same cap as the drawn map: a blank portrait frame must not run
+          // the window off the screen either.
+          .frame(maxHeight: 470)
+          .frame(maxWidth: .infinity)
           .accessibilityHidden(true)
         // `summary.cells` is the accumulated history and is populated whatever
         // the confidence, so blanking the drawing must not also claim there is
@@ -574,6 +616,71 @@ struct PanelHealthView: View {
 
   private static func regionPhrase(_ index: Int) -> String {
     PanelHealthCopy.region(cell: index) ?? ""
+  }
+}
+
+// MARK: - Window root
+
+/// The Display Health window's root (OCR-A1, #185): resolves the scene value
+/// (a persistence key) against the connected externals, keeps the switcher's
+/// list fresh, and closes the window when its display departs, the same rule
+/// that pops a pushed path on departure. Switching displays repoints THIS
+/// window's value rather than opening another, so the comparison workflow
+/// (SO23) stays one window deep; opening health for a second display from the
+/// settings window creates that display's own window (WindowGroup-for-value
+/// semantics).
+@MainActor
+struct DisplayHealthWindowRoot: View {
+  @Binding var persistenceKey: String?
+
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+
+  var body: some View {
+    // Rename dependency, the switcher's rule: names come from `friendlyName`
+    // and `DisplayPrefs` has no observation of its own.
+    let _ = model.prefsRevision
+    Group {
+      if let key = persistenceKey,
+        let state = model.displays.first(where: { $0.display.persistenceKey == key })
+      {
+        PanelHealthView(
+          state: state,
+          displays: switcherDisplays,
+          onSwitch: { persistenceKey = $0 }
+        )
+        // A display switch resets page state (SO10's lesson: the lens and
+        // ghost toggles describe one display's map, not a session).
+        .id(key)
+      } else {
+        // One frame of a departed (or restored-without-value) window before
+        // `dismiss` lands; never a blank white sheet.
+        Text("This display is not connected.")
+          .foregroundStyle(.secondary)
+          .padding(40)
+      }
+    }
+    .onChange(of: model.displays.map(\.display.persistenceKey), initial: true) { _, connected in
+      if let key = persistenceKey, !connected.contains(key) {
+        dismiss()
+      }
+      if persistenceKey == nil {
+        // A window restored by the system without its value has nothing to
+        // show and no way to be given one; close rather than sit blank.
+        dismiss()
+      }
+    }
+  }
+
+  /// Externals only, like the pane's own switcher: OLED care never covers the
+  /// built-in display.
+  private var switcherDisplays: [(key: String, name: String)] {
+    model.displays.map { state in
+      (key: state.display.persistenceKey,
+       name: DisplayOrdering.title(
+         friendlyName: DisplayPrefs(persistenceKey: state.display.persistenceKey).friendlyName,
+         hardwareName: state.display.name))
+    }
   }
 }
 

@@ -30,11 +30,17 @@
   ///                                           hub's "All OLED Care Settings…"
   ///                                           link does)
   ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/first/measurement
-  ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/first/health (a further /<page>
-  ///                                           pushes that page on top of the
-  ///                                           display's; /display is the
-  ///                                           spelled-out default. This
-  ///                                           replaced CANDELA_DEBUG_PANEL_HEALTH,
+  ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/first/health
+  ///                                           (a further /<page>:
+  ///                                           /measurement pushes that page
+  ///                                           on top of the display's;
+  ///                                           /display is the spelled-out
+  ///                                           default; /health opens the
+  ///                                           Display Health WINDOW over the
+  ///                                           display page, since OCR-A1 it
+  ///                                           is not a pushed page. The
+  ///                                           route replaced
+  ///                                           CANDELA_DEBUG_PANEL_HEALTH,
   ///                                           whose whole job was reaching
   ///                                           the health surface when it was
   ///                                           a sheet no capture could open.)
@@ -89,6 +95,10 @@
     /// Only ever set alongside `pane:keyboard`: same job as `pendingOledPath`
     /// for the Keyboard pane's pushed pages (KMR11).
     static var pendingKeyboardPath: [KeyboardPage]?
+    /// Only ever set alongside `pane:oledCare/<key>/health`: Display Health is
+    /// a WINDOW now, not a pushed page (OCR-A1, #185), so the capture route
+    /// opens it over the display page it used to sit behind.
+    static var pendingHealthWindowKey: String?
 
     /// A parse that carries its own reason for failing. The reason is the whole
     /// point: `SettingsDestination?` cannot distinguish "you typo'd the pane
@@ -97,7 +107,7 @@
     enum Resolution {
       case resolved(
         SettingsDestination, subPage: DisplaySubPage?, oledPath: [OledCarePage]?,
-        keyboardPath: [KeyboardPage]?)
+        keyboardPath: [KeyboardPage]?, healthWindowKey: String?)
       case rejected(String)
     }
 
@@ -130,7 +140,7 @@
           return .rejected("unknown pane \(quoted(String(segments[0]))); ids are case-sensitive: \(known)")
         }
         guard segments.count > 1 else {
-          return .resolved(.pane(id), subPage: nil, oledPath: nil, keyboardPath: nil)
+          return .resolved(.pane(id), subPage: nil, oledPath: nil, keyboardPath: nil, healthWindowKey: nil)
         }
         if id == .keyboard {
           guard segments.count == 2 else {
@@ -140,7 +150,7 @@
             let known = KeyboardPage.allCases.map(\.rawValue).joined(separator: ", ")
             return .rejected("unknown keyboard page \(quoted(String(segments[1]))); ids are case-sensitive: \(known)")
           }
-          return .resolved(.pane(id), subPage: nil, oledPath: nil, keyboardPath: [page])
+          return .resolved(.pane(id), subPage: nil, oledPath: nil, keyboardPath: [page], healthWindowKey: nil)
         }
         guard id == .oledCare else {
           return .rejected("pane \(quoted(id.rawValue)) takes no suffix; only 'oledCare' and 'keyboard' do")
@@ -163,18 +173,22 @@
           key = targetBody
         }
         var path: [OledCarePage] = [.display(key)]
+        var healthWindowKey: String?
         if segments.count == 3 {
           // Validated like everything else here: a typo'd page must not
           // silently capture the display page.
           switch String(segments[2]) {
           case "display": break
           case "measurement": path.append(.measurement(key))
-          case "health": path.append(.health(key))
+          // A window, not a page (OCR-A1): the display page stays behind it.
+          case "health": healthWindowKey = key
           default:
             return .rejected("unknown OLED page \(quoted(String(segments[2]))); ids are case-sensitive: display, measurement, health")
           }
         }
-        return .resolved(.pane(id), subPage: nil, oledPath: path, keyboardPath: nil)
+        return .resolved(
+          .pane(id), subPage: nil, oledPath: path, keyboardPath: nil,
+          healthWindowKey: healthWindowKey)
       case "display":
         // Optional `/subPage` suffix pushes that sub-page onto the display's
         // navigation stack. Validated like everything else here: a typo'd
@@ -197,13 +211,13 @@
           guard let key = externalKeys.first else {
             return .rejected("display:first found no external display connected; try display:builtIn")
           }
-          return .resolved(.display(key), subPage: subPage, oledPath: nil, keyboardPath: nil)
+          return .resolved(.display(key), subPage: subPage, oledPath: nil, keyboardPath: nil, healthWindowKey: nil)
         }
         guard known.contains(keyBody) else {
           let list = known.map(quoted).joined(separator: ", ")
           return .rejected("unknown display key \(quoted(keyBody)); connected: \(list)")
         }
-        return .resolved(.display(keyBody), subPage: subPage, oledPath: nil, keyboardPath: nil)
+        return .resolved(.display(keyBody), subPage: subPage, oledPath: nil, keyboardPath: nil, healthWindowKey: nil)
       default:
         return .rejected("unknown kind \(quoted(String(parts[0]))); expected pane or display")
       }
@@ -212,7 +226,7 @@
     /// Kept as the brief's named interface, and as the shape most callers want.
     /// `resolve` is the one that can say why.
     static func destination(from value: String, externalKeys: [String]) -> SettingsDestination? {
-      guard case let .resolved(destination, _, _, _) = resolve(value, externalKeys: externalKeys)
+      guard case let .resolved(destination, _, _, _, _) = resolve(value, externalKeys: externalKeys)
       else {
         return nil
       }
@@ -228,9 +242,9 @@
         return
       }
       switch resolve(value, externalKeys: externalKeys) {
-      case let .resolved(destination, subPage, oledPath, keyboardPath):
+      case let .resolved(destination, subPage, oledPath, keyboardPath, healthWindowKey):
         log(
-          "opening \(describe(destination, subPage: subPage, oledPath: oledPath, keyboardPath: keyboardPath))"
+          "opening \(describe(destination, subPage: subPage, oledPath: oledPath, keyboardPath: keyboardPath, healthWindowKey: healthWindowKey))"
         )
         // Set BEFORE opening: `SettingsRootView.onAppear` runs as part of the
         // window coming up, so a later assignment would miss it entirely.
@@ -238,6 +252,7 @@
         pendingSubPage = subPage
         pendingOledPath = oledPath
         pendingKeyboardPath = keyboardPath
+        pendingHealthWindowKey = healthWindowKey
         SettingsOpener.open()
       case let .rejected(reason):
         log("ignored: \(reason)")
@@ -246,13 +261,14 @@
 
     private static func describe(
       _ destination: SettingsDestination, subPage: DisplaySubPage?, oledPath: [OledCarePage]?,
-      keyboardPath: [KeyboardPage]?
+      keyboardPath: [KeyboardPage]?, healthWindowKey: String?
     ) -> String {
       switch destination {
       case let .pane(id):
         "pane \(quoted(id.rawValue))"
           + (oledPath.map { ", pushed to \(quoted($0.map(describe).joined(separator: "/")))" } ?? "")
           + (keyboardPath.map { ", pushed to \(quoted($0.map(\.rawValue).joined(separator: "/")))" } ?? "")
+          + (healthWindowKey.map { ", health window for \(quoted($0))" } ?? "")
       case let .display(key):
         "display \(quoted(key))" + (subPage.map { ", sub-page \(quoted($0.rawValue))" } ?? "")
       }
@@ -262,7 +278,6 @@
       switch page {
       case let .display(key): "display(\(key))"
       case .measurement: "measurement"
-      case .health: "health"
       }
     }
 

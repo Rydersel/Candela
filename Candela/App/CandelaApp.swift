@@ -34,5 +34,26 @@ struct CandelaApp: App {
     // directions. `.contentMinSize` lets the user grow it, while the root
     // view's `minWidth`/`minHeight` still hold the floor.
     .windowResizability(.contentMinSize)
+
+    // Display Health (OCR-A1, #185): its own window, sized to its content, so
+    // a portrait display's map gets a portrait-fitting window the settings
+    // window can never be. The value is the display's persistence key, the
+    // only identity that survives a replug; the root closes the window when
+    // that display departs.
+    displayHealthScene
+  }
+
+  /// An auxiliary window scene in a menu-bar app can auto-open at launch (the
+  /// unprompted-window defect class, #180). `defaultLaunchBehavior(.suppressed)`
+  /// would state that outright but is macOS 15 API, and `SceneBuilder` on this
+  /// toolchain rejects `if #available`, so the root view's nil-value dismissal
+  /// is the net instead: an auto-opened window carries no value and closes
+  /// itself on appearance. Launch cleanliness is on #185's verification list.
+  private var displayHealthScene: some Scene {
+    WindowGroup("Display Health", id: "displayHealth", for: String.self) { $key in
+      DisplayHealthWindowRoot(persistenceKey: $key)
+        .environment(statusItemController.model)
+    }
+    .windowResizability(.contentSize)
   }
 }
