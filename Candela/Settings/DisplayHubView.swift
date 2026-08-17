@@ -42,8 +42,8 @@ struct DisplayHubView: View {
   /// preview: `.key` exactly when this view's window is the key window.
   @Environment(\.controlActiveState) private var controlActiveState
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  /// Written by the OLED Care link so the pane opens on THIS display's section.
-  @Environment(\.oledCareScrollTarget) private var oledCareScrollTarget
+  /// Written by the OLED Care link so the pane opens on THIS display's page.
+  @Environment(\.oledCarePath) private var oledCarePath
 
   /// Drafts, not direct pref bindings: a `TextField` bound straight to a pref
   /// would write (and fan out, and bump `prefsRevision`) on every keystroke,
@@ -665,13 +665,16 @@ struct DisplayHubView: View {
   /// thresholds, levels, hours and the global chrome switches are set-once and
   /// stay on the OLED Care pane, which OC3 keeps as their dedicated home.
   ///
-  /// The route to the rest is a sidebar-selection change, NOT a push: SO1
-  /// closes the pushed set at three sub-pages, and OLED Care is already a
-  /// top-level destination. It therefore wears the app's cross-pane LINK idiom
-  /// (the Sound section's Keyboard Settings link), never `NavigationRow`'s
-  /// chevron: a chevron promises a pushed page with a Back button, and this
-  /// jump keeps neither (combined pass D7). SO3's live preview stays, as the
-  /// row's value text beside the link.
+  /// The route to the rest is a sidebar-selection change, NOT a push from
+  /// THIS destination's stack: SO1 closes the display destination's pushed
+  /// set at three sub-pages, and OLED Care is a top-level destination whose
+  /// own pushed pages (OCR1) hang off the pane. It therefore wears the app's
+  /// cross-pane LINK idiom (the Sound section's Keyboard Settings link),
+  /// never `NavigationRow`'s chevron: a chevron promises a push on the
+  /// current destination, and this jump changes destinations (combined pass
+  /// D7). The link lands on this display's own OLED page, with Back leading
+  /// to the OLED overview. SO3's live preview stays, as the row's value text
+  /// beside the link.
   private var oledCareSection: some View {
     Section {
       SettingRow("Enrolling applies the recommended settings; nothing changes until this display has been idle for a while.") {
@@ -685,13 +688,14 @@ struct DisplayHubView: View {
           Text(verbatim: oledCarePreview)
             .foregroundStyle(.secondary)
             .accessibilityLabel(Text(oledCareSpokenPreview))
-          // Carries this display with the jump: the OLED Care pane holds one
-          // section per connected display, and a link from a display's own hub
-          // that lands at the top of a multi-display page makes the reader
-          // find their way back to where they already were. The pane consumes
-          // the target once, so a plain sidebar visit still opens at the top.
+          // Carries this display with the jump: a link from a display's own
+          // hub that lands on the OLED overview would make the reader click
+          // through to where they already were. Seeding the path and moving
+          // the selection land in one transaction, so the pane comes up with
+          // this display's page presented; a plain sidebar visit still opens
+          // the overview because nothing else writes the path.
           Button("All OLED Care Settings…") {
-            oledCareScrollTarget.wrappedValue = persistenceKey
+            oledCarePath.wrappedValue = [.display(persistenceKey)]
             selection = .pane(.oledCare)
           }
           .buttonStyle(.link)

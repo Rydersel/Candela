@@ -185,53 +185,27 @@ struct PanelExposureSurface: View {
   }
 }
 
-/// The pane's opening image: every enrolled display as a tile at its
-/// panel-native shape, filled with its measured exposure map where one exists.
+/// One display on the OLED Care overview: mini heat surface, name, enrollment
+/// badge, and a status line. The WHOLE card is the navigation row (OCR3); it
+/// holds no toggles, and it previews its page's value (SO3). The map is drawn
+/// only when the stored history is `.measured`; every other state gets the
+/// blank frame, never a stale or estimated picture presented as one (OC11).
 ///
-/// Enrolled only: this pane is about the displays in OLED care, and a strip
-/// of "Not enrolled" placeholders would be a list of things the page is not
-/// about. The tile earns its place the way the display hero's does: it
-/// carries the display's real manufactured shape and its real history, and
-/// clicking it jumps to that display's section. Every fact it draws is stated
-/// in words directly under it, so the tile itself stays decorative to
-/// VoiceOver.
+/// The status line follows the health page's honesty precedence exactly:
+/// Safe Mode first, then a missing Screen Recording grant, then the
+/// confidence states.
 @MainActor
-struct OledCareGlanceStrip: View {
-  let displays: [AppModel.DisplayState]
-  let jump: (String) -> Void
-
-  var body: some View {
-    HStack(alignment: .top, spacing: 24) {
-      ForEach(displays, id: \.display.persistenceKey) { state in
-        OledCareGlanceTile(state: state, jump: jump)
-      }
-    }
-    .frame(maxWidth: .infinity)
-  }
-}
-
-/// One display in the strip: shape, map, name, and a one-line state.
-///
-/// The state line follows the health view's honesty precedence exactly (its
-/// `confidenceNote` is the reference): Safe Mode first, then a missing Screen
-/// Recording grant, then the confidence states. The map is drawn only when the
-/// stored history is `.measured`; every other state gets the blank grid, never
-/// a stale or estimated picture presented as one (OC11).
-@MainActor
-struct OledCareGlanceTile: View {
+struct OledCareDisplayCard: View {
   let state: AppModel.DisplayState
-  let jump: (String) -> Void
 
   @Environment(AppModel.self) private var model
+  @Environment(\.oledCarePath) private var path
 
-  /// The display hero's fit rule at strip scale: the box the tile fits
+  /// The display hero's fit rule at card scale: the box the mini map fits
   /// inside, preserving aspect, so an ultrawide and a portrait-mounted panel
   /// take the same vertical room.
-  @ScaledMetric(relativeTo: .subheadline) private var boxWidth: CGFloat = 190
-  @ScaledMetric(relativeTo: .subheadline) private var boxHeight: CGFloat = 84
-
-  @State private var hovering = false
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @ScaledMetric(relativeTo: .body) private var boxWidth: CGFloat = 112
+  @ScaledMetric(relativeTo: .body) private var boxHeight: CGFloat = 50
 
   private var persistenceKey: String { state.display.persistenceKey }
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: persistenceKey) }
@@ -242,40 +216,55 @@ struct OledCareGlanceTile: View {
 
   var body: some View {
     let summary = model.oledCare.healthSummary(for: persistenceKey)
-    let showsMap = summary.confidence == .measured
     Button {
-      jump(persistenceKey)
+      path.wrappedValue.append(.display(persistenceKey))
     } label: {
-      VStack(spacing: 6) {
-        tile(summary: summary, showsMap: showsMap)
-        Text(verbatim: name)
-          .font(.subheadline.weight(.medium))
-          .lineLimit(1)
-          .truncationMode(.middle)
-        Text(verbatim: stateLine(summary: summary))
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
+      HStack(alignment: .center, spacing: 14) {
+        miniSurface(summary: summary)
+        VStack(alignment: .leading, spacing: 2) {
+          HStack(spacing: 8) {
+            Text(verbatim: name)
+              .font(.body.weight(.semibold))
+              .lineLimit(1)
+              .truncationMode(.middle)
+            enrollmentBadge
+          }
+          Text(verbatim: statusLine(summary: summary))
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+        }
+        Spacer(minLength: 8)
+        Image(systemName: "chevron.right")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.tertiary)
+          .accessibilityHidden(true)
       }
-      .frame(maxWidth: boxWidth * 1.25)
       .contentShape(Rectangle())
+      .padding(.vertical, 4)
     }
     .buttonStyle(OledTileButtonStyle())
-    // Lift, not tint: an inactive window draws every accent grey, so a hover
-    // treatment that only recolored would vanish exactly when screenshots are
-    // taken. Scale and shadow survive focus.
-    .scaleEffect(hovering && !reduceMotion ? 1.03 : 1)
-    .shadow(
-      color: .black.opacity(hovering ? 0.35 : 0),
-      radius: hovering ? 10 : 0, y: 3)
-    .animation(reduceMotion ? nil : .spring(duration: 0.25), value: hovering)
-    .onHover { hovering = $0 }
-    .accessibilityLabel(Text(verbatim: "\(name). \(stateLine(summary: summary))"))
+    .accessibilityLabel(Text(verbatim: name))
+    .accessibilityValue(Text(verbatim: statusLine(summary: summary)))
     .accessibilityHint(Text("Shows this display's OLED care settings."))
   }
 
-  private func tile(summary: PanelHealthSummary, showsMap: Bool) -> some View {
-    // Display aspect, not panel-native: the tile stands for the monitor on
+  /// The word IS the state; the tint only underlines it (never state by
+  /// colour alone).
+  private var enrollmentBadge: some View {
+    Text(prefs.oledCareEnrolled ? "Enrolled" : "Not enrolled")
+      .font(.caption2.weight(.semibold))
+      .padding(.horizontal, 7)
+      .padding(.vertical, 1.5)
+      .background(
+        prefs.oledCareEnrolled ? AnyShapeStyle(.green.opacity(0.15)) : AnyShapeStyle(.quaternary),
+        in: Capsule())
+      .foregroundStyle(
+        prefs.oledCareEnrolled ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
+  }
+
+  private func miniSurface(summary: PanelHealthSummary) -> some View {
+    // Display aspect, not panel-native: the card stands for the monitor on
     // the desk, so a portrait mount draws tall. Storage stays panel-native;
     // the surface re-orders for presentation.
     let aspect =
@@ -283,17 +272,20 @@ struct OledCareGlanceTile: View {
       ?? CGFloat(PanelGrid.cols) / CGFloat(PanelGrid.rows)
     let width = min(boxWidth, boxHeight * aspect)
     let size = CGSize(width: width, height: width / aspect)
+    let showsMap = prefs.oledCareEnrolled && summary.confidence == .measured
     return Group {
       if showsMap {
+        // No hottest-cell marker at this size (OCR8): the box would be an
+        // unreadable speck, and the status line carries the fact in words.
         PanelExposureSurface(
           cells: summary.cells,
-          highlighted: OledPanelGeometry.hottestIndex(summary.cells),
+          highlighted: nil,
           aspect: aspect,
           rotation: OledPanelGeometry.rotation(for: state.display.id),
           glowStrength: 0.35)
       } else {
-        // No dotted placeholder: a blank surface with the state line under it
-        // is quieter and does not read as faint data.
+        // No dotted placeholder: a blank surface with the status line beside
+        // it is quieter and does not read as faint data.
         RoundedRectangle(cornerRadius: 5, style: .continuous)
           .fill(.quaternary)
           .overlay {
@@ -303,38 +295,62 @@ struct OledCareGlanceTile: View {
       }
     }
     .frame(width: size.width, height: size.height)
-    .frame(height: boxHeight)
+    .frame(width: boxWidth, height: boxHeight)
     .accessibilityHidden(true)
   }
 
-  /// One line under the name. Everything the tile draws, in words (the hero's
-  /// A4 rule), and nothing the data cannot support.
-  private func stateLine(summary: PanelHealthSummary) -> String {
-    if model.isSafeMode { return "Paused (Safe Mode)" }
+  /// SO3's value preview, in words the data can support. For an enrolled
+  /// display: the engine's own dim state first (`dimStates` is the
+  /// coordinator's published truth, never a second opinion computed here),
+  /// then the line the glance tile carried: hours, then grant or confidence.
+  private func statusLine(summary: PanelHealthSummary) -> String {
+    guard prefs.oledCareEnrolled else { return "Enroll to start dimming when idle" }
+    var parts: [String] = []
+    if model.isSafeMode {
+      parts.append("Paused (Safe Mode)")
+    } else {
+      // Exhaustive, so a new engine state is a compile error here rather than
+      // a stale preview.
+      switch model.oledCare.dimStates[persistenceKey] {
+      case .active: parts.append("Not dimming")
+      case .idleDim, .unfocusedDim: parts.append("Dimmed")
+      // OC7 sub-ruling 4: a refused lock dim is recorded, never reported as
+      // dimmed.
+      case .lockDim:
+        parts.append(OledCareCopy.lockDimPreview(model.oledCare.lockDimSkips[persistenceKey]))
+      case .blackout: parts.append("Screen off")
+      case .suspended: parts.append("Paused while mirrored")
+      case nil: parts.append("Starting")
+      }
+    }
     let hours = PanelHealthCopy.hours(
       model.oledCare.hoursTracker(for: persistenceKey).totalHours)
-    if summary.confidence != .estimated, !CGPreflightScreenCaptureAccess() {
-      return "\(hours) · waiting on Screen Recording"
-    }
-    switch summary.confidence {
-    case .measured:
-      if let relative = summary.hottestRelative,
-        let multiple = PanelHealthCopy.multiple(relative)
-      {
-        return "\(hours) · hottest area \(multiple) average"
+    if model.isSafeMode {
+      parts.append(hours)
+    } else if summary.confidence != .estimated, !CGPreflightScreenCaptureAccess() {
+      parts.append("\(hours) · waiting on Screen Recording")
+    } else {
+      switch summary.confidence {
+      case .measured:
+        if let relative = summary.hottestRelative,
+          let multiple = PanelHealthCopy.multiple(relative)
+        {
+          parts.append("\(hours) · hottest area \(multiple) average")
+        } else {
+          parts.append(hours)
+        }
+      case .insufficient:
+        parts.append("\(hours) · \(summary.sampleCount) of \(ExposureAccumulator.minimumSamplesForAnalysis) readings")
+      case .estimated:
+        parts.append("\(hours) · brightness not measured")
       }
-      return hours
-    case .insufficient:
-      return "\(hours) · \(summary.sampleCount) of \(ExposureAccumulator.minimumSamplesForAnalysis) readings"
-    case .estimated:
-      return "\(hours) · brightness not measured"
     }
+    return parts.joined(separator: " · ")
   }
-
 }
 
-/// Pressed-state scale for the strip tiles; hover lift lives on the tile so
-/// both read from one animation.
+/// Pressed-state scale for the overview cards; any hover lift lives on the
+/// card so both read from one animation.
 struct OledTileButtonStyle: ButtonStyle {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 

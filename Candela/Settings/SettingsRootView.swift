@@ -49,12 +49,12 @@ struct SettingsRootView: View {
   /// remembered — an unrelated monitor unplugging must not hijack a later
   /// arrival.
   @State private var lastDisplayKey: String?
-  /// The display a jump into the OLED Care pane came from, as a persistence
-  /// key. Lives here because it travels with `selection`, which lives here;
-  /// the pane clears it as soon as it has scrolled, so it is never state
-  /// anyone has to keep in agreement with anything (see `oledCareScrollTarget`
-  /// in `OledCarePane`).
-  @State private var oledCareScrollTarget: String?
+  /// The OLED Care pane's pushed-page stack (OCR1). Lives here beside
+  /// `subPagePaths` because it rides the same `NavigationStack`; retained
+  /// across selection changes like a display's stack (SO23's rule applied to
+  /// the pane), cleared when a display in it departs, and popped by the
+  /// sidebar row's re-click.
+  @State private var oledCarePath: [OledCarePage] = []
   /// Accessibility contract 2: selecting a sidebar destination moves focus
   /// into the detail column. Anchored on the detail root; hand-verified only
   /// (no app test target, and synthetic keys go to the terminal, not an
@@ -87,7 +87,7 @@ struct SettingsRootView: View {
       // Window menu and accessibility without drawing a second copy.
       detail
         .background(.background)
-        .environment(\.oledCareScrollTarget, $oledCareScrollTarget)
+        .environment(\.oledCarePath, $oledCarePath)
         .focused($detailFocusAnchor)
         // Keyboard contract (accessibility contract 2): ⌘[ pops the current
         // display's sub-page; ⌘1–⌘9 select the first nine sidebar destinations
@@ -169,9 +169,9 @@ struct SettingsRootView: View {
             DebugSettingsHook.pendingSubPage = nil
             subPagePaths[key] = [page]
           }
-          if let target = DebugSettingsHook.pendingScrollTarget {
-            DebugSettingsHook.pendingScrollTarget = nil
-            oledCareScrollTarget = target
+          if let path = DebugSettingsHook.pendingOledPath {
+            DebugSettingsHook.pendingOledPath = nil
+            oledCarePath = path
           }
         }
       }
@@ -193,6 +193,12 @@ struct SettingsRootView: View {
       // it, whether or not it was selected — its return lands on the hub.
       for departed in Set(previous).subtracting(connected) {
         subPagePaths[departed] = nil
+      }
+      // The OLED pane's stack follows the same rule: a pushed page for a
+      // display that left pops back to the overview, and the return does not
+      // resume it.
+      if oledCarePath.contains(where: { !connected.contains($0.displayKey) }) {
+        oledCarePath = []
       }
 
       if case let .display(key) = selection {
@@ -316,8 +322,11 @@ struct SettingsRootView: View {
     NavigationStack(path: currentPathBinding) {
       detailRoot
         .toolbar { SettingsPrincipalTitle(title: currentTitle) }
-        .navigationDestination(for: DisplaySubPage.self) { page in
-          pushedPage(page)
+        .navigationDestination(for: SettingsPushedPage.self) { pushed in
+          switch pushed {
+          case let .display(page): pushedPage(page)
+          case let .oledCare(page): oledPushedPage(page)
+          }
         }
     }
   }
@@ -408,6 +417,51 @@ struct SettingsRootView: View {
     .toolbar { SettingsPrincipalTitle(title: currentTitle) }
   }
 
+  /// An OLED Care pushed page (OCR1), resolved against the connected
+  /// externals. Same placement rules as `pushedPage`: `.id` on the content so
+  /// a display switch resets page state (SO10's lesson), and the principal
+  /// title OUTSIDE the guard (#124). The guard goes empty for the frame in
+  /// which a departed display's page is still popping.
+  @ViewBuilder
+  private func oledPushedPage(_ page: OledCarePage) -> some View {
+    Group {
+      // Rename dependency, the sub-page switcher's rule: the switcher's names
+      // come from `friendlyName`, and `DisplayPrefs` has no observation of
+      // its own, so the values passed INTO the page register it here.
+      let _ = model.prefsRevision
+      if let state = model.displays.first(where: { $0.display.persistenceKey == page.displayKey }) {
+        Group {
+          switch page {
+          case .display:
+            OledCareDisplayPage(
+              state: state, path: $oledCarePath,
+              displays: oledSwitcherDisplays, onSwitch: switchOledDisplay)
+          case .measurement:
+            OledCareMeasurementPage(
+              state: state, displays: oledSwitcherDisplays, onSwitch: switchOledDisplay)
+          case .health:
+            PanelHealthView(
+              state: state, displays: oledSwitcherDisplays, onSwitch: switchOledDisplay)
+          }
+        }
+        .id(page.displayKey)
+      }
+    }
+    .toolbar { SettingsPrincipalTitle(title: currentTitle) }
+  }
+
+  /// External displays only: OLED care never covers the built-in (its copy
+  /// says so), so the switcher must not offer it.
+  private var oledSwitcherDisplays: [(key: String, name: String)] {
+    switcherDisplays.filter { $0.key != "builtIn" }
+  }
+
+  /// The OLED switcher swaps the SAME page depth onto another display by
+  /// rewriting every element's key; the sidebar selection stays on the pane.
+  private func switchOledDisplay(to newKey: String) {
+    oledCarePath = oledCarePath.map { $0.withDisplayKey(newKey) }
+  }
+
   /// The persistent stack's path: the selected display's retained sub-page
   /// stack, or empty for a pane. Selecting a pane changes this binding's VALUE
   /// to `[]`, which is what pops the outgoing display's sub-page while the
@@ -427,22 +481,38 @@ struct SettingsRootView: View {
   /// getter reports empty, the stack pops and writes `[]` back, and that write
   /// is dropped by the same guard, so the retained path is still there when the
   /// display returns.
-  private var currentPathBinding: Binding<[DisplaySubPage]> {
-    guard let boundKey = presentation.displayKey else {
-      return Binding(get: { [] }, set: { _ in })
+  private var currentPathBinding: Binding<[SettingsPushedPage]> {
+    if let boundKey = presentation.displayKey {
+      return Binding(
+        get: { (subPagePaths[boundKey] ?? []).map(SettingsPushedPage.display) },
+        // Against the PRESENTATION, not the selection: it is the stronger of
+        // the two (a presented display is a selected one), and it is what
+        // drops the `[]` the stack writes back as it pops a display that has
+        // left the list. Dropping that write is the point: the path stays
+        // retained (SO23) while nothing presents it.
+        set: { newPath in
+          guard presentation.displayKey == boundKey else { return }
+          subPagePaths[boundKey] = newPath.compactMap {
+            if case let .display(page) = $0 { page } else { nil }
+          }
+        }
+      )
     }
-    return Binding(
-      get: { subPagePaths[boundKey] ?? [] },
-      // Against the PRESENTATION, not the selection: it is the stronger of the
-      // two (a presented display is a selected one), and it is what drops the
-      // `[]` the stack writes back as it pops a display that has left the list.
-      // Dropping that write is the point: the path stays retained (SO23) while
-      // nothing presents it.
-      set: { newPath in
-        guard presentation.displayKey == boundKey else { return }
-        subPagePaths[boundKey] = newPath
-      }
-    )
+    if case .pane(.oledCare) = selection {
+      return Binding(
+        get: { oledCarePath.map(SettingsPushedPage.oledCare) },
+        // Same stale-write contract: a write landing after the selection
+        // moved is dropped, which is what retains the pane's path while
+        // nothing presents it.
+        set: { newPath in
+          guard case .pane(.oledCare) = selection else { return }
+          oledCarePath = newPath.compactMap {
+            if case let .oledCare(page) = $0 { page } else { nil }
+          }
+        }
+      )
+    }
+    return Binding(get: { [] }, set: { _ in })
   }
 
   /// One case per sub-page — all three pages are real. Each page owns its
@@ -494,12 +564,21 @@ struct SettingsRootView: View {
   }
 
   /// Feeds the window configurator's `navigationToken`: any push or pop must
-  /// re-run it (see the call site). Panes have no stack and sit at depth 0.
+  /// re-run it (see the call site). Panes other than OLED Care have no stack
+  /// and sit at depth 0.
   ///
   /// What is PRESENTED, never what is retained: a depth read from storage
   /// claimed a push for a display that had left the list, so the token stopped
-  /// moving on the pop that actually happened.
-  private var currentPathDepth: Int { presentation.pathDepth }
+  /// moving on the pop that actually happened. The OLED depth follows the same
+  /// rule through `oledPresentedDepth`'s selection gate.
+  private var currentPathDepth: Int { presentation.pathDepth + oledPresentedDepth }
+
+  /// The OLED pane's stack is presented only while the pane is selected;
+  /// retained depth counts for nothing (the same presented-not-retained rule
+  /// as `currentPathDepth`).
+  private var oledPresentedDepth: Int {
+    if case .pane(.oledCare) = selection { oledCarePath.count } else { 0 }
+  }
 
   /// Sidebar render order — registry panes, then built-in, then externals
   /// (`allControlledStates` is exactly that order). ⌘1–⌘9 index into this.
@@ -522,17 +601,24 @@ struct SettingsRootView: View {
   /// the selection this guard has just matched, so its stale-write check
   /// compares a key against itself and passes.
   private func returnToHub(_ destination: SettingsDestination) {
-    guard destination == selection,
-          case let .display(_, path) = presentation, !path.isEmpty
-    else { return }
-    currentPathBinding.wrappedValue = []
+    guard destination == selection else { return }
+    if case let .display(_, path) = presentation, !path.isEmpty {
+      currentPathBinding.wrappedValue = []
+    } else if case .pane(.oledCare) = selection, !oledCarePath.isEmpty {
+      // The OLED pane's row does the same thing a display's row does: return
+      // to this destination's root.
+      oledCarePath = []
+    }
   }
 
   /// ⌘[ pops what is on screen. Gated on the PRESENTED path, so the shortcut
   /// cannot quietly edit a stack that is not being shown.
   private func popCurrentSubPage() {
-    guard case let .display(key, path) = presentation, !path.isEmpty else { return }
-    subPagePaths[key] = Array(path.dropLast())
+    if case let .display(key, path) = presentation, !path.isEmpty {
+      subPagePaths[key] = Array(path.dropLast())
+    } else if case .pane(.oledCare) = selection, !oledCarePath.isEmpty {
+      oledCarePath.removeLast()
+    }
   }
 
   /// Every connected display, named the way the sidebar names it, so the
