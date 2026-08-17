@@ -86,8 +86,28 @@ final class DisplayModeCoordinator {
     /// silence we refuse elsewhere (CR11), and on the hardware pass this count
     /// is what distinguishes "the guard fired" from "revelation found nothing".
     let withheldForWireTiming: Int
+    /// What the density model made of this panel, judged over the SAME curated
+    /// rows this catalog publishes (PD1): a size the wire-timing guard withheld
+    /// has no apply path, so it must never become a recommendation.
+    ///
+    /// nil when the panel's native pixels are unknown, or when the app supplied
+    /// no physical facts for it. Both are "no geometry", and no geometry means
+    /// no judgement rather than a judgement from zeros.
+    let density: DensityVerdict?
 
     var nativeKnown: Bool { nativePixels != nil }
+  }
+
+  /// What the app layer knows about a panel that CoreGraphics mode enumeration
+  /// does not. Two joins meet here and neither belongs in the Kit (PD7): the
+  /// declared physical size, filed per `persistenceKey` because display IDs
+  /// reassign across a replug, and the is-virtual predicate, which no
+  /// plausibility range could ever stand in for (a virtual display declares a
+  /// perfectly ordinary fake size).
+  struct PhysicalPanelFacts: Equatable {
+    let physicalWidthCm: Int?
+    let physicalHeightCm: Int?
+    let isVirtual: Bool
   }
 
   struct PixelSize: Equatable {
@@ -217,6 +237,15 @@ final class DisplayModeCoordinator {
   /// the LATEST one per display and is cleared when the user dismisses it.
   @ObservationIgnored var didReportReapply: (CGDirectDisplayID, ModeReapplyNotice) -> Void = { _, _ in }
 
+  /// The app's answer to "what is this panel physically". Injected because the
+  /// lookup it performs (`AppModel.hardwareFacts`, the owned/foreign virtual
+  /// check) lives one layer up; the coordinator only enumerates modes.
+  ///
+  /// The default returns nil, which is the pre-density behaviour exactly: no
+  /// geometry reaches the Kit, the usability floor falls back to its
+  /// fraction-of-native rule, and no catalog carries a verdict.
+  @ObservationIgnored var physicalFacts: (ConfiguredDisplay) -> PhysicalPanelFacts? = { _ in nil }
+
   @ObservationIgnored private let session: ModePreviewSession
   /// Per display, not one value for the coordinator. A settings-select on B
   /// whose `begin()` fails leaves A's preview outstanding and reports the error
@@ -321,18 +350,46 @@ final class DisplayModeCoordinator {
     }
     let all = DisplayModeCatalog.full(configurator.modes(for: displayID))
     let native = configurator.nativePixels(for: displayID)
+    // Sampled here, once, and handed to both the catalog and the verdict: the
+    // size the model calls "current" has to be the size this enumeration saw,
+    // not one re-read after the rows were built.
+    let current = configurator.currentMode(for: displayID)
+    // Density is a claim about physical pixels, so no native size means no
+    // geometry at all rather than geometry over zeros.
+    let geometry = native.flatMap { native in
+      physicalFacts(display).map { facts in
+        PanelGeometry(
+          nativePixelWidth: native.width, nativePixelHeight: native.height,
+          physicalWidthCm: facts.physicalWidthCm,
+          physicalHeightCm: facts.physicalHeightCm,
+          isVirtual: facts.isVirtual
+        )
+      }
+    }
+    // One value, two readers (PD1). Curating twice would let the rows the user
+    // can pick and the rows the model ranks drift apart.
+    let rows = DisplayModeCatalog.curated(
+      all,
+      nativePixelWidth: native?.width ?? 0,
+      nativePixelHeight: native?.height ?? 0,
+      geometry: geometry
+    )
     catalogs[displayID] = Catalog(
       display: display,
-      rows: DisplayModeCatalog.curated(
-        all,
-        nativePixelWidth: native?.width ?? 0,
-        nativePixelHeight: native?.height ?? 0
-      ),
+      rows: rows,
       all: all,
-      current: configurator.currentMode(for: displayID),
+      current: current,
       distinctLogicalSizes: Set(all.map { LogicalSize(mode: $0) }).count,
       nativePixels: native.map { PixelSize(width: $0.width, height: $0.height) },
-      withheldForWireTiming: configurator.modesWithheldByWireTimingGuard(for: displayID)
+      withheldForWireTiming: configurator.modesWithheldByWireTimingGuard(for: displayID),
+      density: geometry.map {
+        PanelDensityModel.evaluate(
+          rows: rows,
+          currentLogicalWidth: current?.logicalWidth,
+          currentLogicalHeight: current?.logicalHeight,
+          geometry: $0
+        )
+      }
     )
   }
 
