@@ -345,6 +345,95 @@ struct OledTileButtonStyle: ButtonStyle {
   }
 }
 
+/// A note about the control directly ABOVE it, drawn inside that control's own
+/// `Form` row. Never its own row: a `Form` puts a divider and full padding
+/// around every row, so a note about a control reads as a separate setting,
+/// the defect `SettingRow` exists to prevent.
+///
+/// Symbol AND text, like the General pane's Safe Mode note; never state by
+/// colour alone. Stronger than a caption on purpose: every use says the
+/// control above it did not do, or is not doing, what it says.
+struct OledInlineNote: View {
+  private let text: Text
+
+  init(_ text: Text) { self.text = text }
+
+  var body: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 6) {
+      Image(systemName: "exclamationmark.triangle")
+        .foregroundStyle(.secondary)
+      text
+        .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+}
+
+/// The hottest-area marker's explanation, drawn ON the map: a tag on a
+/// hairline leader beside the hottest cell, so the reticle
+/// `PanelExposureSurface` draws is never a bare, legendless box (OCR8).
+/// Decorative to VoiceOver: every fact it shows is stated in words beside or
+/// below the map, which is the hero's standing rule.
+struct OledHotspotTag: View {
+  /// Panel-native cells; the tag re-orients the same way the surface does.
+  let cells: [Double]
+  let rotation: DisplayRotation
+  let text: String
+
+  var body: some View {
+    GeometryReader { geometry in
+      let oriented = OledPanelGeometry.displayOriented(cells, rotation: rotation)
+      if let panelIndex = OledPanelGeometry.hottestIndex(cells),
+        let displayIndex = oriented.panelFromDisplay.firstIndex(of: panelIndex),
+        geometry.size.width > 0, geometry.size.height > 0
+      {
+        let anchor = CGPoint(
+          x: (CGFloat(displayIndex % oriented.cols) + 0.5) / CGFloat(oriented.cols)
+            * geometry.size.width,
+          y: (CGFloat(displayIndex / oriented.cols) + 0.5) / CGFloat(oriented.rows)
+            * geometry.size.height)
+        // Leads right of the cell unless that would run off the map's edge;
+        // the anchor point is the leader's cell-side end either way, and the
+        // vertical position is clamped so the tag never clips top or bottom.
+        //
+        // `position` centres, so pinning one END of a variable-width tag to
+        // the anchor goes through an aligned frame spanning anchor-to-edge:
+        // the frame's aligned edge IS the anchor, and its centre is knowable
+        // without measuring the tag.
+        let leadsRight = anchor.x < geometry.size.width * 0.6
+        let y = min(max(anchor.y, 11), geometry.size.height - 11)
+        let span = leadsRight
+          ? max(geometry.size.width - anchor.x - 7, 0) : max(anchor.x - 7, 0)
+        HStack(spacing: 0) {
+          if leadsRight { leader }
+          tag
+          if !leadsRight { leader }
+        }
+        .fixedSize()
+        .frame(width: span, alignment: leadsRight ? .leading : .trailing)
+        .position(x: leadsRight ? anchor.x + 7 + span / 2 : span / 2, y: y)
+      }
+    }
+    .allowsHitTesting(false)
+    .accessibilityHidden(true)
+  }
+
+  private var tag: some View {
+    Text(verbatim: text)
+      .font(.caption2)
+      .foregroundStyle(.white)
+      .padding(.horizontal, 6)
+      .padding(.vertical, 3)
+      .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 4))
+      .overlay {
+        RoundedRectangle(cornerRadius: 4).strokeBorder(.white.opacity(0.28), lineWidth: 1)
+      }
+  }
+
+  private var leader: some View {
+    Rectangle().fill(.white.opacity(0.55)).frame(width: 12, height: 1)
+  }
+}
+
 /// Fine corner ticks over the hero surface: instrument framing, drawn, never
 /// data. Decorative to VoiceOver by way of the surface's own hidden marker.
 struct ReticleTicks: View {

@@ -41,3 +41,35 @@ enum DisplaySubPage: String, CaseIterable, Hashable {
     }
   }
 }
+
+/// The OLED Care pane's pushed pages (OCR1), keyed by persistence key like
+/// everything else that survives a replug. All elements of one presented path
+/// share one key by construction: the switcher rewrites every element.
+enum OledCarePage: Hashable {
+  case display(String)
+  case measurement(String)
+  case health(String)
+
+  var displayKey: String {
+    switch self {
+    case let .display(key), let .measurement(key), let .health(key): key
+    }
+  }
+
+  func withDisplayKey(_ key: String) -> OledCarePage {
+    switch self {
+    case .display: .display(key)
+    case .measurement: .measurement(key)
+    case .health: .health(key)
+    }
+  }
+}
+
+/// The window's single navigation stack holds pages from two families: a
+/// display destination's sub-pages, and the OLED Care pane's (OCR1). One
+/// wrapper type, so the stack's typed path stays inspectable and the
+/// per-family storage in `SettingsRootView` stays typed.
+enum SettingsPushedPage: Hashable {
+  case display(DisplaySubPage)
+  case oledCare(OledCarePage)
+}
