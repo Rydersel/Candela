@@ -65,11 +65,28 @@ enum OledCarePage: Hashable {
   }
 }
 
-/// The window's single navigation stack holds pages from two families: a
-/// display destination's sub-pages, and the OLED Care pane's (OCR1). One
-/// wrapper type, so the stack's typed path stays inspectable and the
-/// per-family storage in `SettingsRootView` stays typed.
+/// The Keyboard pane's pushed pages (KMR11). Raw values are the
+/// `CANDELA_DEBUG_SETTINGS` sub-page ids, like `DisplaySubPage`'s. Unlike the
+/// OLED pages these carry no display key: neither page depends on connected
+/// hardware, so a departure never pops them.
+enum KeyboardPage: String, CaseIterable, Hashable {
+  case modifiers = "mods"
+  case targeting = "target"
+
+  var title: String {
+    switch self {
+    case .modifiers: "Modifier Keys"
+    case .targeting: "Targeting & Precision"
+    }
+  }
+}
+
+/// The window's single navigation stack holds pages from three families: a
+/// display destination's sub-pages, the OLED Care pane's (OCR1), and the
+/// Keyboard pane's (KMR11). One wrapper type, so the stack's typed path stays
+/// inspectable and the per-family storage in `SettingsRootView` stays typed.
 enum SettingsPushedPage: Hashable {
   case display(DisplaySubPage)
   case oledCare(OledCarePage)
+  case keyboard(KeyboardPage)
 }

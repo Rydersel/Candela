@@ -38,6 +38,10 @@
   ///                                           whose whole job was reaching
   ///                                           the health surface when it was
   ///                                           a sheet no capture could open.)
+  ///   CANDELA_DEBUG_SETTINGS=pane:keyboard/mods  (also /target: opens the
+  ///                                           Keyboard pane with that pushed
+  ///                                           page presented, KMR11; ids are
+  ///                                           KeyboardPage raw values)
   ///   CANDELA_DEBUG_SETTINGS=display:builtIn
   ///   CANDELA_DEBUG_SETTINGS=display:first
   ///   CANDELA_DEBUG_SETTINGS=display:<persistenceKey>
@@ -82,13 +86,18 @@
     /// which cannot be clicked from a capture run (no Accessibility grant).
     /// Without this the pushed pages have no route to a screenshot at all.
     static var pendingOledPath: [OledCarePage]?
+    /// Only ever set alongside `pane:keyboard`: same job as `pendingOledPath`
+    /// for the Keyboard pane's pushed pages (KMR11).
+    static var pendingKeyboardPath: [KeyboardPage]?
 
     /// A parse that carries its own reason for failing. The reason is the whole
     /// point: `SettingsDestination?` cannot distinguish "you typo'd the pane
     /// id" from "the display you asked for is not plugged in", and those want
     /// opposite responses from whoever is driving the capture.
     enum Resolution {
-      case resolved(SettingsDestination, subPage: DisplaySubPage?, oledPath: [OledCarePage]?)
+      case resolved(
+        SettingsDestination, subPage: DisplaySubPage?, oledPath: [OledCarePage]?,
+        keyboardPath: [KeyboardPage]?)
       case rejected(String)
     }
 
@@ -110,19 +119,31 @@
       let body = String(parts[1])
       switch parts[0] {
       case "pane":
-        // Optional `/<displayKey>[/<page>]` suffix, accepted on `oledCare`
-        // alone: that is the only pane with pushed pages. Rejected elsewhere
-        // rather than ignored, because a suffix that silently did nothing
-        // would capture the top of a pane and look like evidence that the
-        // landing position was tested.
+        // Optional suffixes, accepted only on the panes with pushed pages:
+        // `oledCare` takes `/<displayKey>[/<page>]`, `keyboard` takes
+        // `/<page>` (KMR11). Rejected elsewhere rather than ignored, because
+        // a suffix that silently did nothing would capture the top of a pane
+        // and look like evidence that the landing position was tested.
         let segments = body.split(separator: "/", omittingEmptySubsequences: false)
         guard let id = PaneID(rawValue: String(segments[0])) else {
           let known = PaneID.allCases.map(\.rawValue).joined(separator: ", ")
           return .rejected("unknown pane \(quoted(String(segments[0]))); ids are case-sensitive: \(known)")
         }
-        guard segments.count > 1 else { return .resolved(.pane(id), subPage: nil, oledPath: nil) }
+        guard segments.count > 1 else {
+          return .resolved(.pane(id), subPage: nil, oledPath: nil, keyboardPath: nil)
+        }
+        if id == .keyboard {
+          guard segments.count == 2 else {
+            return .rejected("pane:keyboard takes at most one /<page>")
+          }
+          guard let page = KeyboardPage(rawValue: String(segments[1])) else {
+            let known = KeyboardPage.allCases.map(\.rawValue).joined(separator: ", ")
+            return .rejected("unknown keyboard page \(quoted(String(segments[1]))); ids are case-sensitive: \(known)")
+          }
+          return .resolved(.pane(id), subPage: nil, oledPath: nil, keyboardPath: [page])
+        }
         guard id == .oledCare else {
-          return .rejected("pane \(quoted(id.rawValue)) takes no /<displayKey> suffix; only 'oledCare' does")
+          return .rejected("pane \(quoted(id.rawValue)) takes no suffix; only 'oledCare' and 'keyboard' do")
         }
         guard segments.count <= 3 else {
           return .rejected("pane:oledCare takes at most /<displayKey>/<page>")
@@ -153,7 +174,7 @@
             return .rejected("unknown OLED page \(quoted(String(segments[2]))); ids are case-sensitive: display, measurement, health")
           }
         }
-        return .resolved(.pane(id), subPage: nil, oledPath: path)
+        return .resolved(.pane(id), subPage: nil, oledPath: path, keyboardPath: nil)
       case "display":
         // Optional `/subPage` suffix pushes that sub-page onto the display's
         // navigation stack. Validated like everything else here: a typo'd
@@ -176,13 +197,13 @@
           guard let key = externalKeys.first else {
             return .rejected("display:first found no external display connected; try display:builtIn")
           }
-          return .resolved(.display(key), subPage: subPage, oledPath: nil)
+          return .resolved(.display(key), subPage: subPage, oledPath: nil, keyboardPath: nil)
         }
         guard known.contains(keyBody) else {
           let list = known.map(quoted).joined(separator: ", ")
           return .rejected("unknown display key \(quoted(keyBody)); connected: \(list)")
         }
-        return .resolved(.display(keyBody), subPage: subPage, oledPath: nil)
+        return .resolved(.display(keyBody), subPage: subPage, oledPath: nil, keyboardPath: nil)
       default:
         return .rejected("unknown kind \(quoted(String(parts[0]))); expected pane or display")
       }
@@ -191,7 +212,8 @@
     /// Kept as the brief's named interface, and as the shape most callers want.
     /// `resolve` is the one that can say why.
     static func destination(from value: String, externalKeys: [String]) -> SettingsDestination? {
-      guard case let .resolved(destination, _, _) = resolve(value, externalKeys: externalKeys) else {
+      guard case let .resolved(destination, _, _, _) = resolve(value, externalKeys: externalKeys)
+      else {
         return nil
       }
       return destination
@@ -206,13 +228,16 @@
         return
       }
       switch resolve(value, externalKeys: externalKeys) {
-      case let .resolved(destination, subPage, oledPath):
-        log("opening \(describe(destination, subPage: subPage, oledPath: oledPath))")
+      case let .resolved(destination, subPage, oledPath, keyboardPath):
+        log(
+          "opening \(describe(destination, subPage: subPage, oledPath: oledPath, keyboardPath: keyboardPath))"
+        )
         // Set BEFORE opening: `SettingsRootView.onAppear` runs as part of the
         // window coming up, so a later assignment would miss it entirely.
         pendingSelection = destination
         pendingSubPage = subPage
         pendingOledPath = oledPath
+        pendingKeyboardPath = keyboardPath
         SettingsOpener.open()
       case let .rejected(reason):
         log("ignored: \(reason)")
@@ -220,12 +245,14 @@
     }
 
     private static func describe(
-      _ destination: SettingsDestination, subPage: DisplaySubPage?, oledPath: [OledCarePage]?
+      _ destination: SettingsDestination, subPage: DisplaySubPage?, oledPath: [OledCarePage]?,
+      keyboardPath: [KeyboardPage]?
     ) -> String {
       switch destination {
       case let .pane(id):
         "pane \(quoted(id.rawValue))"
           + (oledPath.map { ", pushed to \(quoted($0.map(describe).joined(separator: "/")))" } ?? "")
+          + (keyboardPath.map { ", pushed to \(quoted($0.map(\.rawValue).joined(separator: "/")))" } ?? "")
       case let .display(key):
         "display \(quoted(key))" + (subPage.map { ", sub-page \(quoted($0.rawValue))" } ?? "")
       }

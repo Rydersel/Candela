@@ -594,11 +594,13 @@ public final class DisplayPrefs: @unchecked Sendable {
   }
 
   /// Where the brightness and contrast pills sit on the display they are drawn
-  /// on. `HUDPosition` (defined with its placement math in `HUDPlacement`)
-  /// stores `topRight` as 0, so an install that has never touched this keeps
-  /// exactly the position the app always used.
+  /// on. The shipped default is `topCenter` (Ryder, 2026-08-17, KMR spec
+  /// amendment); `HUDPosition` stores `topRight` as 0, so the absent key and
+  /// an explicit top-right choice can only be told apart by presence, which is
+  /// why this reads `object(forKey:)` rather than `integer(forKey:)`. A stored
+  /// choice, top right included, is always honoured.
   public var hudPositionBrightness: HUDPosition {
-    get { HUDPosition(rawValue: defaults.integer(forKey: "hudPositionBrightness")) ?? .topRight }
+    get { storedHUDPosition(forKey: "hudPositionBrightness") }
     set { defaults.set(newValue.rawValue, forKey: "hudPositionBrightness") }
   }
 
@@ -614,8 +616,16 @@ public final class DisplayPrefs: @unchecked Sendable {
   /// other, which is the single-window behaviour the app has always had and not
   /// something these keys introduce.
   public var hudPositionVolume: HUDPosition {
-    get { HUDPosition(rawValue: defaults.integer(forKey: "hudPositionVolume")) ?? .topRight }
+    get { storedHUDPosition(forKey: "hudPositionVolume") }
     set { defaults.set(newValue.rawValue, forKey: "hudPositionVolume") }
+  }
+
+  /// Absent key or an unknown raw value: the shipped `topCenter`. A present,
+  /// valid value is the user's choice, and 0 (top right) is a choice like any
+  /// other, which `integer(forKey:)`'s 0-for-absent could not express.
+  private func storedHUDPosition(forKey key: String) -> HUDPosition {
+    guard let stored = defaults.object(forKey: key) as? Int else { return .topCenter }
+    return HUDPosition(rawValue: stored) ?? .topCenter
   }
 
   /// Hide the built-in display's panel section (Candela's positive-default
