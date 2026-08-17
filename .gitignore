@@ -5,3 +5,6 @@
 *.xcuserstate
 /Candela/Info.plist
 /build/
+
+# per-worktree scratch DerivedData used by the deploy loop
+dd/
