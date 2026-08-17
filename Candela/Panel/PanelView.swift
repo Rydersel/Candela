@@ -24,6 +24,13 @@ struct PanelView: View {
   /// opening either one opens the other underneath it.
   @State private var expandedSection: PanelDisclosureID?
 
+  /// False until the entrance settle has played for THIS open. The menu takes
+  /// the view hierarchy with it on close (the same fact the hover resets rely
+  /// on), so onAppear re-fires on every open and the settle plays each time.
+  @State private var hasEntered = false
+
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   var body: some View {
     // Prefs are plain UserDefaults, not observable. Touching prefsRevision
     // here is what re-renders the panel after a settings pane (or a
@@ -145,9 +152,23 @@ struct PanelView: View {
       footer
     }
     .frame(width: 280)
+    // The entrance: the content settles down into place from under the menu's
+    // top edge while fading in. The offset draws outside layout, so nothing
+    // reflows; the menu window clips the first frames, which is what makes the
+    // slide read as unfurling from the icon rather than as movement.
+    .opacity(hasEntered ? 1 : 0)
+    .offset(y: hasEntered ? 0 : -6)
+    .onAppear {
+      withAnimation(PanelMotion.entrance(reduceMotion: reduceMotion)) { hasEntered = true }
+    }
     // The menu can close without a mouse-exit event, and it takes the panel's
-    // view hierarchy with it — the same signal the hover fixes below rely on.
-    .onDisappear { expandedSection = nil }
+    // view hierarchy with it; the same signal the hover fixes below rely on.
+    // hasEntered re-arms here so the settle plays on the NEXT open, not once
+    // per app launch.
+    .onDisappear {
+      expandedSection = nil
+      hasEntered = false
+    }
   }
 
   // MARK: - What the panel renders

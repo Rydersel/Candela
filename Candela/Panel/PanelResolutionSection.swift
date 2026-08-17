@@ -50,6 +50,8 @@ struct PanelResolutionSection: View {
   /// underneath at the same time, because both tests are `== displayID`.
   @Binding var expanded: PanelDisclosureID?
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   private var catalog: DisplayModeCoordinator.Catalog? { coordinator.catalogs[displayID] }
   private var isExpanded: Bool { expanded == PanelDisclosureID(displayID, .resolution) }
 
@@ -70,23 +72,28 @@ struct PanelResolutionSection: View {
       VStack(alignment: .leading, spacing: 2) {
         disclosureRow(catalog)
         if isExpanded {
-          ForEach(catalog.rows.prefix(Self.maximumRows)) { row in
-            PanelModeRow(
-              // Tagged, like every other surface that OFFERS a size to choose
-              // from: the size label is bare now, so these words are the whole
-              // of RM11 here. Measured at 280pt: the longest real label then,
-              // "1440 × 2560 (HiDPI, Scaled)" on the Dell, fit with room to
-              // spare, and retiring "HiDPI" (#96) only shortened it. (The
-              // disclosure summary above does not fit; see there.)
-              title: catalog.badgedSize(row.mode),
-              accessibilityName: displayName,
-              isCurrent: catalog.isCurrentSize(row.mode)
-            ) {
-              apply(catalog.modeKeepingCurrentRefreshRate(for: row), in: catalog)
+          // One container so the whole list shares one fade: the rows dim as a
+          // block while the animated layout supplies the vertical unfurl.
+          VStack(alignment: .leading, spacing: 2) {
+            ForEach(catalog.rows.prefix(Self.maximumRows)) { row in
+              PanelModeRow(
+                // Tagged, like every other surface that OFFERS a size to choose
+                // from: the size label is bare now, so these words are the whole
+                // of RM11 here. Measured at 280pt: the longest real label then,
+                // "1440 × 2560 (HiDPI, Scaled)" on the Dell, fit with room to
+                // spare, and retiring "HiDPI" (#96) only shortened it. (The
+                // disclosure summary above does not fit; see there.)
+                title: catalog.badgedSize(row.mode),
+                accessibilityName: displayName,
+                isCurrent: catalog.isCurrentSize(row.mode)
+              ) {
+                apply(catalog.modeKeepingCurrentRefreshRate(for: row), in: catalog)
+              }
             }
+            .disabled(coordinator.isApplying || isAwaitingAnswer)
+            overflowCaption(catalog)
           }
-          .disabled(coordinator.isApplying || isAwaitingAnswer)
-          overflowCaption(catalog)
+          .transition(.opacity)
         }
         if isAwaitingAnswer {
           PanelCaption("Waiting for you to keep or revert the new resolution on \(displayName).", style: .tertiary)
@@ -134,7 +141,12 @@ struct PanelResolutionSection: View {
       accessibilityRole: "resolution",
       isExpanded: isExpanded
     ) {
-      expanded = isExpanded ? nil : PanelDisclosureID(displayID, .resolution)
+      // Animated HERE, not via .animation on the container: only the click
+      // should animate. The menu-close reset in PanelView and a catalog
+      // refresh mid-open must land instantly.
+      withAnimation(PanelMotion.disclosure(reduceMotion: reduceMotion)) {
+        expanded = isExpanded ? nil : PanelDisclosureID(displayID, .resolution)
+      }
     }
   }
 
