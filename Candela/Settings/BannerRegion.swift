@@ -315,7 +315,8 @@ private struct AnswerableModeBanner: View {
         // Both answers carry the preview THIS banner is rendering, so a
         // selection landing between the click and the queued operation is
         // refused as stale rather than resolved by an answer given about
-        // something else. Keeping writes NO stored mode (SO19).
+        // something else. Keeping writes the stored mode when this display's
+        // Remember toggle is on; reverting and expiry never do.
         Button("Keep") { Task { await coordinator.confirm(preview) } }
           .buttonStyle(.borderedProminent)
           .keyboardShortcut(.defaultAction)

@@ -326,8 +326,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     confirmation.drawableDisplayID = drawableDisplayID
     modeConfirmation = confirmation
     model.displayModes.confirmation = confirmation
-    // D27: the coordinator writes `storedDisplayMode` when the user PINS one
-    // (SO19 — no longer on a kept preview), and the seam has to hear about it
+    // D27: the coordinator writes `storedDisplayMode` when the user pins one and
+    // when a kept change updates it, and the seam has to hear about it
     // whichever surface asked. Wired once here rather than in each surface —
     // the panel's window has no `SettingsActions`, and a second copy of this
     // rule is a second thing to forget.

@@ -241,8 +241,9 @@ final class DisplayModeCoordinator {
   /// for panel selections" rather than to a crash.
   @ObservationIgnored weak var confirmation: (any ModeConfirmationPresenting)?
 
-  /// Called after a pin actually wrote `storedDisplayMode` (SO19), so the
-  /// propagation seam hears about it (D27) no matter which surface asked.
+  /// Called after something actually wrote `storedDisplayMode` (a pin or a kept
+  /// preview), so the propagation seam hears about it (D27) no matter which
+  /// surface asked.
   /// Owned here because it used to be the asking view's job, and two views
   /// answering the same question is one too many — the second one to be written
   /// is the one that forgets.
@@ -677,7 +678,7 @@ final class DisplayModeCoordinator {
   }
 
   /// Turning it ON also pins what is on screen now. Without that, the toggle
-  /// does nothing until the next `Set to Current` — a control that reads as
+  /// would store nothing until the next kept change: a control that reads as
   /// broken on the very reconnect it was turned on for. Turning it OFF leaves
   /// the stored mode alone, matching `ModePersistence.clear`'s ruling that
   /// "forget my choice" and "stop remembering" are separate answers, and
@@ -687,7 +688,7 @@ final class DisplayModeCoordinator {
   /// display — see `pinCurrentMode`), so turning it on mid-countdown enables
   /// the flag and pins nothing. That is the intended order: the flag is the
   /// user's answer, the pin is a mode, and there is no mode they have accepted
-  /// yet.
+  /// yet. Keeping that preview stores it, because the flag is on by then.
   func setRemembering(_ remembering: Bool, for displayID: CGDirectDisplayID) {
     guard let identity = identity(for: displayID) else { return }
     persistence.setEnabled(remembering, for: identity)
@@ -695,9 +696,12 @@ final class DisplayModeCoordinator {
     pinCurrentMode(on: displayID)
   }
 
-  /// SO19/A6: the stored mode is an explicit PIN. Kept previews do not write
-  /// it; this is the only route to `store`, reached from the Remember toggle's
+  /// Pins whatever is on screen now, reached from the Remember toggle's
   /// turn-on seeding and from the hub's `Set to Current`.
+  ///
+  /// No longer the only route to `store`: a kept preview writes the stored mode
+  /// too while the toggle is on, which makes `Set to Current` redundant in the
+  /// common case and leaves it as the re-pin for a mode already on screen.
   ///
   /// Queued, and it asks the SESSION whether that display is mid-preview, for
   /// `dropPreviewOnDepartedDisplay`'s reason: `preview` is nil for several
@@ -731,8 +735,8 @@ final class DisplayModeCoordinator {
   }
 
   /// The pin as stored, for the row that shows it and for `Set to Current`'s
-  /// enabled state. Read-only by design: `pinCurrentMode` is the write, and it
-  /// is the write BECAUSE it announces itself (`didStoreMode`).
+  /// enabled state. Read-only by design: the writes go through `store`, and they
+  /// go through it BECAUSE it announces itself (`didStoreMode`).
   func storedDescriptor(for displayID: CGDirectDisplayID) -> DisplayModeDescriptor? {
     guard let identity = identity(for: displayID) else { return nil }
     return persistence.storedMode(for: identity)
@@ -944,12 +948,27 @@ final class DisplayModeCoordinator {
     let outcome = keeping ? await session.confirm(intent) : await session.revert(intent)
     switch outcome {
     case .committed:
-      // SO19/A6: keeping a preview does NOT write the stored mode. The pin
-      // answers "what should come back on reconnect", and an afternoon of
-      // trying sizes out would otherwise rewrite it from whichever one was
-      // kept last — a change nobody asked for and nothing showed. The only
-      // route to a stored mode is `pinCurrentMode`.
+      // Supersedes SO19/A6: while the Remember toggle is on, the stored mode
+      // tracks the resolution the user KEEPS, so remembering means restoring
+      // how they left it. Only this branch writes: a reverted or expired
+      // preview is a mode nobody accepted and must never become the pin.
       //
+      // Deliberately NOT narrowed to size changes the way the recommendation
+      // below is. A kept rate-only change is still a kept resolution, and the
+      // stored descriptor carries the refresh rate.
+      //
+      // `answered.mode`, not a live read: `confirm` commits the mode that was
+      // PREVIEWED rather than whatever the display reports at confirm time,
+      // and it only reaches `.committed` when that apply succeeded and its
+      // achieved descriptor matched. Reading live here could store a mode the
+      // session deliberately refused to make permanent.
+      //
+      // In-app changes only, this version. A resolution changed in System
+      // Settings does not pass through here and does not move the pin.
+      if let identity = identity(for: answered.displayID),
+         persistence.isEnabled(for: identity) {
+        store(answered.mode, on: answered.displayID, for: identity)
+      }
       // The size recommendation IS answered here (PD8): a kept size is the
       // user's answer for this session, and only a kept one, since a revert or
       // an expiry leaves them on the size they were already being asked about.
@@ -1122,7 +1141,8 @@ final class DisplayModeCoordinator {
 
   /// THE only writer of `storedDisplayMode`. Announcing the write is part of
   /// making it, so no caller can perform one and forget the propagation.
-  /// Private, and `pinCurrentMode` is its only caller (SO19).
+  /// Private, with exactly two callers: `pinCurrentMode` (the explicit pin and
+  /// the toggle-on seeding) and the kept-preview branch of `performResolve`.
   private func store(
     _ mode: DisplayMode, on displayID: CGDirectDisplayID, for identity: DisplayConfigIdentity
   ) {

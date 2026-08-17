@@ -437,9 +437,10 @@ struct DisplayHubView: View {
     return rates.map(DisplayMode.quantizedRefresh).filter { seen.insert($0).inserted }
   }
 
-  /// SO19: the stored mode is an explicit pin — visible while the toggle is on,
-  /// written only by `Set to Current` and the toggle-on seeding, never by a kept
-  /// preview.
+  /// The stored mode is visible while the toggle is on, and it tracks the
+  /// resolution the user keeps. `Set to Current` stays as the explicit re-pin
+  /// for a mode already on screen; it disables itself once the pin and the
+  /// running mode agree, which auto-tracking now makes the usual state.
   private var rememberRow: some View {
     SettingRow("Restored when this display reconnects, not while you are using it.") {
       VStack(alignment: .leading, spacing: 6) {
