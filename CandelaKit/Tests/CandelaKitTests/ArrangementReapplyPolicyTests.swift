@@ -287,21 +287,76 @@ struct ArrangementReapplyPolicyTests {
     #expect(!decision.isDeferred)
   }
 
-  /// **AR7, and it is on the ordinary path.** Stored MODES are reapplied before
-  /// the layout is (§7.4), so a display can be a different size than it was when
-  /// the layout was captured — and the recorded origins then overlap. macOS
-  /// cannot be made to hold an invalid layout, and this is the exact case
-  /// `expectsExactOrigins` turns the post-commit check off for, so sending it
-  /// unattended would commit a layout nobody chose with nothing left to notice.
-  @Test func aSavedLayoutThatNoLongerTilesIsReportedRatherThanSent() {
-    // The Dell is now twice as wide, so the MAG's stored origin sits inside it.
+  /// **§7.4, and #180 is what it costs to get this wrong.** Stored MODES are
+  /// reapplied before the layout is, so a display really can be a different size
+  /// than it was when the layout was captured. Its recorded origins are then
+  /// about a machine that no longer exists, and nothing is applied.
+  ///
+  /// What must NOT happen is the app rebuilding the old origins onto the new
+  /// footprints, discovering that its own reconstruction overlaps, and reporting
+  /// that overlap as a refusal. That is what shipped: a panel at every launch
+  /// telling the user two displays covered each other while they sat side by
+  /// side.
+  @Test func aSavedLayoutRecordedAtDifferentSizesAppliesNothingAndReportsNoOverlap() {
+    // The Dell is now twice as wide, and macOS has already moved the MAG right
+    // to make room, so the machine on screen is perfectly legal.
     let resized = DisplayArrangement(tiles: [
       tile(2, "dell", DisplayRect(x: 0, y: 0, width: 3840, height: 1080)),
       tile(3, "mag", DisplayRect(x: 3840, y: 0, width: 1920, height: 1080)),
     ])
+    #expect(ArrangementRules.problems(in: resized).isEmpty)
+
     let decision = ArrangementReapplyPolicy.decide(
       isEnabled: true, arrivals: bothArrived, stored: saved,
       attached: attached, current: resized
+    )
+    #expect(decision.arrangementToApply == nil)
+    #expect(decision.notice == .savedForDifferentGeometry([Self.identity("dell").key]))
+    #expect(!decision.isDeferred)
+  }
+
+  /// The state is permanent: the saved layout is not rewritten, so this same
+  /// decision is reached again on every launch and every reconnect until the
+  /// user arranges the displays themselves. A surface that interrupts them for
+  /// it is therefore not a report, it is a recurring alarm with no off switch,
+  /// and there is nothing in it for them to act on.
+  ///
+  /// Genuine restore failures are unaffected: unattended, silence about an
+  /// attempt that went wrong is indistinguishable from one that worked, and that
+  /// is a different thing from silence about deciding not to attempt.
+  @Test func onlyAStaleFootprintIsKeptOffTheConfirmationSurface() {
+    #expect(!ArrangementReapplyNotice.savedForDifferentGeometry(["a"]).isWorthInterrupting)
+
+    let interrupting: [ArrangementReapplyNotice] = [
+      .ambiguousIdentity(["a"]),
+      .setDiffers(missing: ["a"], extra: ["b"]),
+      .layoutNoLongerFits([.overlap(1, 2)]),
+      .failed(DisplayConfigError(cgErrorCode: 1000)),
+    ]
+    for notice in interrupting {
+      #expect(notice.isWorthInterrupting, "\(notice) must still reach the user")
+    }
+  }
+
+  /// **AR7 stays as the backstop it was**, reachable now only for a stored
+  /// layout that does not tile at the very sizes it recorded: hand-edited or
+  /// corrupt data, since a layout is only ever saved from one the machine
+  /// achieved. macOS cannot be made to hold an invalid layout, and this is the
+  /// exact case `expectsExactOrigins` turns the post-commit check off for, so
+  /// sending it unattended would commit a layout nobody chose with nothing left
+  /// able to notice.
+  @Test func aStoredLayoutThatDoesNotTileAtItsOwnRecordedSizesIsStillRefused() {
+    let overlapping = SavedArrangement(entries: [
+      SavedArrangementEntry(
+        identity: Self.identity("dell").key, x: 0, y: 0, width: 1920, height: 1080
+      ),
+      SavedArrangementEntry(
+        identity: Self.identity("mag").key, x: 960, y: 0, width: 1920, height: 1080
+      ),
+    ])
+    let decision = ArrangementReapplyPolicy.decide(
+      isEnabled: true, arrivals: bothArrived, stored: overlapping,
+      attached: attached, current: onScreen
     )
     #expect(decision.arrangementToApply == nil)
     #expect(decision.notice == .layoutNoLongerFits([.overlap(2, 3)]))

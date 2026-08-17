@@ -292,26 +292,102 @@ struct ArrangementPersistenceTests {
 
   // MARK: - Geometry
 
-  /// §7.4: the recorded size is validation, never authority. A display that has
-  /// changed resolution since the layout was captured is a different size now,
-  /// and re-imposing the recorded one would describe a screen that does not
-  /// exist.
-  @Test func theStoredSizeIsNotAuthorityOverTheCurrentFootprint() {
+  /// §7.4: the recorded size is validation, never authority. Never authority is
+  /// the half that always held, and it still does: a resolved tile takes its
+  /// size from the display that is attached NOW, so nothing can re-impose a
+  /// footprint the screen no longer has.
+  @Test func aResolvedTileTakesItsSizeFromTheAttachedDisplay() {
+    // Recorded with the sizes the attached machine has, so the only thing the
+    // sizes below can be coming from is the tiles.
+    let saved = SavedArrangement(deskLayout.makingMain(2))
+    guard case let .exact(restored) = ArrangementPersistence.resolve(saved, against: deskLayout)
+    else {
+      Issue.record("a layout recorded at the attached sizes must resolve")
+      return
+    }
+    #expect(restored.tile(3)?.rect.width == left.width)
+    #expect(restored.tile(3)?.rect.height == left.height)
+    #expect(restored.tile(2)?.rect.width == right.width)
+    #expect(restored.tile(2)?.rect.height == right.height)
+  }
+
+  /// **Validation is the half that was written down and never built (#180).**
+  ///
+  /// A saved layout is a set of ORIGINS that tile one particular set of
+  /// footprints. Combining those origins with footprints they were never
+  /// measured against describes a machine that has never existed: the origins
+  /// stop meeting, and the app then read its own reconstruction back as though
+  /// the user's displays were sitting on top of each other.
+  ///
+  /// So a footprint that has changed is its own answer. Not `.exact`, because
+  /// this cannot be applied; not an overlap, because nothing overlaps.
+  @Test func aLayoutIsNotResolvedOntoFootprintsItWasNotRecordedAgainst() {
     let saved = SavedArrangement(deskLayout)
     let magIsNowUltrawide = DisplayArrangement(tiles: [
       tile(id: 3, identity: "mag", DisplayRect(x: 0, y: 0, width: 3440, height: 1440)),
       tile(id: 2, identity: "dell", DisplayRect(x: 3440, y: 0, width: 1920, height: 1080)),
     ])
-    guard case let .exact(restored) = ArrangementPersistence.resolve(
-      saved, against: magIsNowUltrawide
-    ) else {
-      Issue.record("a resolution change is not a set change")
-      return
+    #expect(ArrangementPersistence.resolve(saved, against: magIsNowUltrawide)
+      == .geometryDiffers([Self.magKey]))
+  }
+
+  /// Rotation changes a display's footprint without changing its resolution, so
+  /// it reaches the same answer by a different road. The Dell in this setup is
+  /// mounted at 270 degrees; turning it back upright swaps its width and height,
+  /// and the origins recorded for the tall shape cannot tile the wide one.
+  @Test func rotatingADisplayIsAFootprintChangeLikeAnyOther() {
+    let portrait = DisplayArrangement(tiles: [
+      tile(id: 3, identity: "mag", DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
+      tile(id: 2, identity: "dell", DisplayRect(x: 1920, y: 0, width: 1440, height: 2560)),
+    ])
+    let landscape = DisplayArrangement(tiles: [
+      tile(id: 3, identity: "mag", DisplayRect(x: 0, y: 0, width: 1920, height: 1080)),
+      tile(id: 2, identity: "dell", DisplayRect(x: 1920, y: 0, width: 2560, height: 1440)),
+    ])
+    #expect(ArrangementPersistence.resolve(SavedArrangement(portrait), against: landscape)
+      == .geometryDiffers([Self.dellKey]))
+  }
+
+  /// Every display whose footprint moved, not just the first one found: the
+  /// sentence the user reads names them, and naming one of three sends them
+  /// looking at the wrong screen.
+  @Test func everyDisplayWhoseFootprintChangedIsNamed() {
+    let saved = SavedArrangement(deskLayout)
+    let bothResized = DisplayArrangement(tiles: [
+      tile(id: 3, identity: "mag", DisplayRect(x: 0, y: 0, width: 2560, height: 1440)),
+      tile(id: 2, identity: "dell", DisplayRect(x: 2560, y: 0, width: 2560, height: 1440)),
+    ])
+    #expect(ArrangementPersistence.resolve(saved, against: bothResized)
+      == .geometryDiffers([Self.dellKey, Self.magKey].sorted()))
+  }
+
+  /// **The bug as it was reported, in the numbers it was measured in**
+  /// (2026-08-17, #180). The Dell had been recorded at 1296 x 2304 and was
+  /// 1440 x 2560 by the time the app next launched; macOS had already slid the
+  /// MAG 144 points right to make room, so the machine was in a perfectly
+  /// ordinary layout. Rebuilding the saved origins on the new footprints put the
+  /// Dell's right edge at 3240 and the MAG's left edge at 3096: a 144-point
+  /// overlap that existed nowhere but in the reconstruction, reported to the
+  /// user at every launch as though they had made it.
+  @Test func theLaunchTimeOverlapReportIsNotProducedAtAll() {
+    let saved = SavedArrangement(entries: [
+      SavedArrangementEntry(identity: "builtIn", x: 0, y: 0, width: 1800, height: 1169),
+      SavedArrangementEntry(identity: Self.dellKey, x: 1800, y: -1135, width: 1296, height: 2304),
+      SavedArrangementEntry(identity: Self.magKey, x: 3096, y: -450, width: 3440, height: 1440),
+    ])
+    let live = DisplayArrangement(tiles: [
+      tile(id: 1, identity: "builtIn", DisplayRect(x: 0, y: 0, width: 1800, height: 1169)),
+      tile(id: 3, identity: "dell", DisplayRect(x: 1800, y: -1135, width: 1440, height: 2560)),
+      tile(id: 2, identity: "mag", DisplayRect(x: 3240, y: -450, width: 3440, height: 1440)),
+    ])
+    // The live machine is fine, which is the whole point: the overlap was ours.
+    #expect(ArrangementRules.problems(in: live).isEmpty)
+
+    let match = ArrangementPersistence.resolve(saved, against: live)
+    #expect(match == .geometryDiffers([Self.dellKey]))
+    if case let .exact(rebuilt) = match {
+      Issue.record("resolved a layout onto footprints it was never measured against: \(rebuilt)")
     }
-    #expect(restored.tile(3)?.rect == DisplayRect(x: 0, y: 0, width: 3440, height: 1440))
-    // The stored origin still applies, gaps and all — the apply path reads back
-    // what macOS did with it rather than pretending here.
-    #expect(restored.tile(2)?.rect == DisplayRect(x: 1920, y: 0, width: 1920, height: 1080))
   }
 
   /// AR5: the display at (0, 0) is the one holding the menu bar, so origins are

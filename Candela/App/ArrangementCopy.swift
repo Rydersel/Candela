@@ -134,10 +134,18 @@ enum ArrangementCopy {
       Text("Two of your displays report the same identity, so \(AppInfo.productName) cannot tell which saved position belongs to which. The arrangement was left as it is.")
     case .setDiffers:
       Text("The saved arrangement is for a different set of displays, so it was not restored.")
+    case .savedForDifferentGeometry:
+      // Says what changed and what ends it. A display that has resized since the
+      // layout was saved is the ordinary cause, and the origins recorded for the
+      // old size cannot be put back on the new one, so the only way out is a new
+      // arrangement. Deliberately does NOT name the display: the sentence is
+      // about the saved layout being spent, and naming one screen reads as an
+      // accusation about that screen.
+      Text("Your displays are not the size they were when this arrangement was saved, so it was not restored. Arrange them again to save a new one.")
     case let .layoutNoLongerFits(problems):
       // The same sentence the interactive refusal uses, because it is the same
-      // fact about the same layout — usually a display that has changed
-      // resolution since the arrangement was saved.
+      // fact about the same layout: origins that do not tile at the sizes they
+      // were recorded at.
       invalidLayout(problems, name: name)
     case .failed:
       Text("\(AppInfo.productName) could not restore the saved arrangement.")

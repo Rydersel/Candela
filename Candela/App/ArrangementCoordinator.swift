@@ -479,7 +479,15 @@ final class ArrangementCoordinator {
       }
       restoreNotice = notice
       if let restoreNotice {
-        log.error("Could not restore the saved layout: \(String(describing: restoreNotice), privacy: .public)")
+        // Not every notice is a failure. A layout declined because the displays
+        // are no longer the size it was recorded at is an ordinary outcome, and
+        // logging it at `.error` puts a red line in the diagnostics for a
+        // machine that is working.
+        if restoreNotice.isWorthInterrupting {
+          log.error("Could not restore the saved layout: \(String(describing: restoreNotice), privacy: .public)")
+        } else {
+          log.info("Did not restore the saved layout: \(String(describing: restoreNotice), privacy: .public)")
+        }
       }
       syncConfirmation()
       refreshArrangement()
@@ -685,8 +693,13 @@ final class ArrangementCoordinator {
       )
       return
     }
+    // `isWorthInterrupting` rather than `!= nil`: this window is a floating panel
+    // over whatever the user is doing, and the restore pass runs at launch and on
+    // every reconnect with nobody having asked for anything. A notice that names
+    // no failure and offers no remedy does not earn that (#180). It still reaches
+    // the arrangement pane, where somebody came looking.
     if !lastInvalidLayout.isEmpty || lastFailure != nil || blockedBy != nil
-      || recoverableLayout != nil || restoreNotice != nil {
+      || recoverableLayout != nil || restoreNotice?.isWorthInterrupting == true {
       confirmation?.presentArrangementConfirmation(.report)
       return
     }
