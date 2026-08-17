@@ -85,8 +85,10 @@ public struct IdealSize: Sendable, Equatable {
 public struct DensityVerdict: Sendable, Equatable {
   public let recommendation: SizeRecommendation?
   public let abstention: RecommendationAbstention?
-  /// Nil exactly when the panel's density is unknown, which is also the only
-  /// state in which no ranking happened.
+  /// Nil when the panel is virtual, or when its declared physical size is
+  /// missing or untrustworthy: the three states where no ranking happened.
+  /// A virtual display's density IS computable from its invented size, so
+  /// "density is unknown" would be the wrong test to write against.
   public let ideal: IdealSize?
   /// Nil when no current size was supplied, or when density is unknown.
   public let currentPlacement: BandPlacement?

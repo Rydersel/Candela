@@ -64,11 +64,9 @@ public enum DisplayModeCatalog {
   ///   density floor never removes a size the fraction floor kept, which
   ///   `noCurrentlyCuratedRowDisappearsOnAnyPanel` pins on both panels.
   ///
-  ///   Pass nil for a VIRTUAL display. Its declared physical size is invented,
-  ///   so density computed from it is fiction, and the fraction of its native
-  ///   pixels is the honest answer. `PanelDensityModel.evaluate` refuses such a
-  ///   geometry outright; this floor does not re-check, because a floor that
-  ///   drops real modes is worse than one that keeps a few extra.
+  ///   A VIRTUAL display's geometry may be passed like any other: the floor
+  ///   itself treats `isVirtual` as no geometry at all, so no caller can
+  ///   density-floor an invented physical size by forgetting to strip it.
   public static func curated(
     _ modes: [DisplayMode], nativePixelWidth: Int, nativePixelHeight: Int,
     geometry: PanelGeometry? = nil
@@ -97,9 +95,13 @@ public enum DisplayModeCatalog {
   /// Is this size a usable desktop on THIS panel? Three floors, most informed
   /// first, each falling through to the next when its input is missing.
   ///
-  /// 1. Density, when the panel declares a physical size. "Too big to work in"
-  ///    is a physical claim, so this is the only floor that means the same
-  ///    thing on two panels of different sizes.
+  /// 1. Density, when the panel declares a physical size AND is not virtual.
+  ///    "Too big to work in" is a physical claim, so this is the only floor
+  ///    that means the same thing on two panels of different sizes. A virtual
+  ///    display's declared size is invented, so its density is fiction and the
+  ///    fraction of its native pixels is the honest answer: the exclusion lives
+  ///    here rather than in every caller, since a caller that forgets to strip
+  ///    the geometry gets a floor derived from a made-up 600x340 mm panel.
   /// 2. A fraction of the native minor axis, when only the pixel count is
   ///    known. Calibrated so nothing currently curated disappears, which makes
   ///    it deliberately permissive: on the MAG it lands at 475 where the flat
@@ -113,7 +115,7 @@ public enum DisplayModeCatalog {
     _ mode: DisplayMode, nativePixelWidth: Int, nativePixelHeight: Int,
     geometry: PanelGeometry?
   ) -> Bool {
-    if let geometry,
+    if let geometry, !geometry.isVirtual,
        let density = PanelDensityModel.looksLikePPI(
          logicalWidth: mode.logicalWidth, logicalHeight: mode.logicalHeight,
          in: geometry) {

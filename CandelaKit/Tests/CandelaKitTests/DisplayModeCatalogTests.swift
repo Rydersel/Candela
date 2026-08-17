@@ -97,6 +97,31 @@ struct DisplayModeCatalogTests {
     }
   }
 
+  /// A virtual display declares an invented physical size, so a density taken
+  /// from it is fiction. The floor refuses such a geometry itself rather than
+  /// relying on callers to strip it: forgetting once would silently floor a
+  /// panel against a made-up 600x340 mm size.
+  @Test func virtualGeometryFloorsExactlyAsNoGeometryDoes() {
+    let native = DisplayModeFixtures.magNativePixels
+    let virtualGeometry = PanelGeometry(
+      nativePixelWidth: native.0, nativePixelHeight: native.1,
+      physicalWidthCm: DisplayModeFixtures.magPhysicalCm.0,
+      physicalHeightCm: DisplayModeFixtures.magPhysicalCm.1, isVirtual: true)
+
+    let asVirtual = DisplayModeCatalog.curated(
+      mag, nativePixelWidth: native.0, nativePixelHeight: native.1,
+      geometry: virtualGeometry)
+    let asUnknown = DisplayModeCatalog.curated(
+      mag, nativePixelWidth: native.0, nativePixelHeight: native.1)
+    #expect(asVirtual == asUnknown)
+
+    // And the two floors really do differ on this input, so the equality above
+    // is a claim rather than a coincidence.
+    #expect(asVirtual != DisplayModeCatalog.curated(
+      mag, nativePixelWidth: native.0, nativePixelHeight: native.1,
+      geometry: PanelDensityModelTests.mag))
+  }
+
   @Test func fractionFallbackGovernsWithoutPhysicalSize() {
     // nil geometry: floor is a fraction of the native pixel minor axis.
     let rows = DisplayModeCatalog.curated(

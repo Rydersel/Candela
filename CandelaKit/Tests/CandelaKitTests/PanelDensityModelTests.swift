@@ -14,6 +14,11 @@ import Testing
     nativePixelWidth: 2160, nativePixelHeight: 3840,
     physicalWidthCm: DisplayModeFixtures.dellPhysicalCm.0,
     physicalHeightCm: DisplayModeFixtures.dellPhysicalCm.1, isVirtual: false)
+  static let builtIn = PanelGeometry(
+    nativePixelWidth: DisplayModeFixtures.builtInNativePixels.0,
+    nativePixelHeight: DisplayModeFixtures.builtInNativePixels.1,
+    physicalWidthCm: DisplayModeFixtures.builtInPhysicalCm.0,
+    physicalHeightCm: DisplayModeFixtures.builtInPhysicalCm.1, isVirtual: false)
 
   @Test func physicalPPIPairsMajorAxes() throws {
     // The Dell arrives rotated: pixel major 3840 pairs with the physical
@@ -143,5 +148,62 @@ import Testing
       rows: rows.reversed(), currentLogicalWidth: 2160, currentLogicalHeight: 3840,
       geometry: Self.dellRotated)
     #expect(forward == backward)
+  }
+
+  /// The tie-break past the density gap is only reachable when two candidates
+  /// are EXACTLY equal at the first comparison, which the major-axis derivation
+  /// makes routine: the built-in panel offers three pairs sharing a major
+  /// (1800x1125/1800x1169, 1512x945/1512x982, 1352x845/1352x878). The 1800 pair
+  /// is above the band, so the two in-band pairs are what a ranking is actually
+  /// asked to separate.
+  ///
+  /// 1280x800 is withheld deliberately. It beats both pairs on gap, so with it
+  /// present no tie decides anything and a ranking cut down to its first
+  /// comparison would pass. Without it the winner comes from the tie, and
+  /// `min(by:)` keeps whichever tied row it saw first: the reversed run then
+  /// disagrees with the forward one.
+  @Test func tiedDensitiesRankTheSameWhicheverOrderTheyArriveIn() throws {
+    let rows = DisplayModeCatalog.curated(
+      DisplayModeFixtures.builtIn,
+      nativePixelWidth: DisplayModeFixtures.builtInNativePixels.0,
+      nativePixelHeight: DisplayModeFixtures.builtInNativePixels.1,
+      geometry: Self.builtIn
+    ).filter { $0.mode.logicalWidth != 1280 }
+
+    func verdict(for rows: [DisplayModeRow]) -> DensityVerdict {
+      // 3024x1964 is the 1x native size, far above the band, so nothing here
+      // short-circuits on the current size.
+      PanelDensityModel.evaluate(rows: rows, currentLogicalWidth: 3024,
+                                 currentLogicalHeight: 1964, geometry: Self.builtIn)
+    }
+    #expect(verdict(for: rows) == verdict(for: rows.reversed()))
+
+    // Both members of the winning pair are HiDPI, so the tie falls through to
+    // logical area and the taller one takes the row.
+    let picked = try #require(verdict(for: rows).recommendation)
+    #expect(picked.logicalWidth == 1352)
+    #expect(picked.logicalHeight == 878)
+  }
+
+  /// Abstention with physical size KNOWN, which is the state the synthesis seam
+  /// exists for. Every size the ultrawide publishes is below the band once
+  /// density is applied: its 2x native mode looks like roughly 55 PPI, and the
+  /// panel offers nothing between that and 1x native.
+  @Test func noApplicableSizeReachesTheBandOnTheUltrawide() throws {
+    let rows = DisplayModeCatalog.curated(
+      DisplayModeFixtures.mag,
+      nativePixelWidth: DisplayModeFixtures.magNativePixels.0,
+      nativePixelHeight: DisplayModeFixtures.magNativePixels.1,
+      geometry: Self.mag)
+    #expect(!rows.isEmpty)   // an empty list would abstain for the wrong reason
+
+    let verdict = PanelDensityModel.evaluate(
+      rows: rows, currentLogicalWidth: 1720, currentLogicalHeight: 720,
+      geometry: Self.mag)
+    #expect(verdict.abstention == .noCandidateInBand)
+    #expect(verdict.recommendation == nil)
+    #expect(verdict.currentPlacement == .below)
+    let ideal = try #require(verdict.ideal)
+    #expect(ideal.servedToday == false)
   }
 }
