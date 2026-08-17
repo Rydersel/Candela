@@ -357,8 +357,18 @@ struct AllModesPage: View {
     // match being honest rather than a repeat: the suggestion is a size, so
     // each of its modes gets you the suggested size. Marking one rate here
     // would invent a recommendation the model never made.
+    //
+    // The low-resolution twins are the exception, and the ONLY surface that has
+    // to state it: the model ranked the curated representative, which is the
+    // sharp mode at that size, and the twins are on screen here beside it. A
+    // row reading "low resolution" while wearing "Recommended" would be the
+    // quality claim RM11 forbids, made about the one mode the model rejected.
+    // Measured shape on the Dell: logical 1440 × 2560 is one HiDPI rung and ten
+    // 1x modes, so this is ten wrong marks rather than an edge case.
     let badge = rowBadge(
-      isRecommendedSize: catalog.isRecommendedSize(mode), isRevealed: mode.isRevealed
+      isRecommendedSize: catalog.isRecommendedSize(mode)
+        && !lowResolution.contains(mode.ioModeID),
+      isRevealed: mode.isRevealed
     )
 
     return modeRow(
@@ -436,6 +446,12 @@ struct AllModesPage: View {
   /// Recommended leads. Both are notes rather than costs (the caps warning, the
   /// only cost either list states, is in `detail` ahead of both), and between
   /// two notes the one about the DISPLAY outranks the one about the list.
+  ///
+  /// **A low-resolution twin never counts as recommended**, which is why the
+  /// caller decides rather than passing a bare size match: the model ranked the
+  /// curated representative, so the blurry mode at the same logical size is not
+  /// what it named. Only the full list can hit this, and only there is the
+  /// sharp twin one row away to be distinguished from.
   ///
   /// The source mark shows on both lists: the curated one, where it is why the
   /// row exists, and the full one, where it separates a mode we found from its
