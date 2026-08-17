@@ -9,21 +9,25 @@ import SwiftUI
 enum KeyboardHeroModel {
   // MARK: - Cluster annotations (KMR2: the space under the keys IS the information)
 
+  // Sentences with a verb, not noun phrases: "The brightness keys · the
+  // display under the pointer" read as a caption describing the feature, and
+  // the line's whole job is to state what the keys are doing RIGHT NOW
+  // (Ryder, 2026-08-17).
   static func brightnessLine(mode: KeyMode, target: MultiKeyboardBrightness) -> String {
     switch mode {
-    case .media: "The brightness keys · \(phrase(for: target))"
-    case .custom: "Custom shortcuts only · keys left to macOS"
-    case .both: "Media keys and shortcuts · \(phrase(for: target))"
-    case .disabled: "Left to macOS"
+    case .media: "Media keys act on \(phrase(for: target))"
+    case .custom: "Custom shortcuts only; the keys go to macOS"
+    case .both: "Media keys and shortcuts act on \(phrase(for: target))"
+    case .disabled: "Off; the keys go to macOS"
     }
   }
 
   static func volumeLine(mode: KeyMode, target: MultiKeyboardVolume) -> String {
     switch mode {
-    case .media: "The volume and mute keys · \(phrase(for: target))"
-    case .custom: "Custom shortcuts only · keys left to macOS"
-    case .both: "Media keys and shortcuts · \(phrase(for: target))"
-    case .disabled: "Left to macOS"
+    case .media: "Media keys \(verbPhrase(for: target))"
+    case .custom: "Custom shortcuts only; the keys go to macOS"
+    case .both: "Media keys and shortcuts \(verbPhrase(for: target))"
+    case .disabled: "Off; the keys go to macOS"
     }
   }
 
@@ -84,11 +88,13 @@ enum KeyboardHeroModel {
     }
   }
 
-  private static func phrase(for target: MultiKeyboardVolume) -> String {
+  /// Verb included, because the audio-matching case needs its own verb:
+  /// "follow the audio output device", never "act on" it.
+  private static func verbPhrase(for target: MultiKeyboardVolume) -> String {
     switch target {
-    case .mouse: "the display under the pointer"
-    case .allScreens: "every display"
-    case .audioDeviceNameMatching: "follows the audio output device"
+    case .mouse: "act on the display under the pointer"
+    case .allScreens: "act on every display"
+    case .audioDeviceNameMatching: "follow the audio output device"
     }
   }
 
