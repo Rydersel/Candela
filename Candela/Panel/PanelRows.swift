@@ -36,6 +36,23 @@ struct PanelDisclosureID: Hashable {
 /// button shapes and nothing more — which is what lets both sections use them
 /// without either one owning the other.
 
+/// The panel's one motion voice, shared by both disclosures so their open and
+/// close cannot drift apart. Same curve and duration as the settings
+/// arrangement canvas, so the app animates with one accent.
+enum PanelMotion {
+  /// nil under Reduce Motion: the change lands instantly, which is exactly the
+  /// panel's pre-motion behaviour, not a degraded version of the animation.
+  static func disclosure(reduceMotion: Bool) -> Animation? {
+    reduceMotion ? nil : .snappy(duration: 0.2)
+  }
+
+  /// The panel's arrival on each menu open. Ease-out so the settle decelerates
+  /// into place; shorter than the disclosure because it plays on every open.
+  static func entrance(reduceMotion: Bool) -> Animation? {
+    reduceMotion ? nil : .easeOut(duration: 0.18)
+  }
+}
+
 /// Hover plus — required for any custom button (`buttons.md`) — a distinct
 /// pressed state, in the same visual language as the panel's footer buttons.
 struct PanelRowButtonStyle: ButtonStyle {
@@ -97,9 +114,12 @@ struct PanelDisclosureRow: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
         }
-        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+        // One glyph rotated, not an up/down symbol swap: rotation rides the
+        // same animation as the disclosure toggle, and a swap cannot.
+        Image(systemName: "chevron.down")
           .font(.system(size: 9, weight: .semibold))
           .foregroundStyle(.secondary)
+          .rotationEffect(.degrees(isExpanded ? 180 : 0))
       }
       .padding(.horizontal, 4)
       .frame(height: 22)

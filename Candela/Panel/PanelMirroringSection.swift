@@ -55,6 +55,8 @@ struct PanelMirroringSection: View {
   /// leave the resolution list open underneath it — one binding, two open lists.
   @Binding var expanded: PanelDisclosureID?
 
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   private var topology: MirrorTopology { coordinator.topology }
   private var isExpanded: Bool { expanded == PanelDisclosureID(displayID, .mirroring) }
   private var isInSet: Bool { !topology.setMembers(containing: displayID).isEmpty }
@@ -112,7 +114,12 @@ struct PanelMirroringSection: View {
     if isUsable {
       VStack(alignment: .leading, spacing: 2) {
         disclosureRow
-        if isExpanded { actions }
+        if isExpanded {
+          // One container so the open block shares one fade: the animated
+          // layout supplies the vertical unfurl, same as the resolution list.
+          VStack(alignment: .leading, spacing: 2) { actions }
+            .transition(.opacity)
+        }
         // OUTSIDE the disclosure, deliberately: a report about what did not
         // happen is not something to make someone go looking for.
         partialBreakReport
@@ -139,7 +146,12 @@ struct PanelMirroringSection: View {
       accessibilityRole: "mirroring",
       isExpanded: isExpanded
     ) {
-      expanded = isExpanded ? nil : PanelDisclosureID(displayID, .mirroring)
+      // Animated HERE, not via .animation on the container: only the click
+      // should animate. The menu-close reset in PanelView and a topology
+      // re-sample mid-open must land instantly.
+      withAnimation(PanelMotion.disclosure(reduceMotion: reduceMotion)) {
+        expanded = isExpanded ? nil : PanelDisclosureID(displayID, .mirroring)
+      }
     }
   }
 
