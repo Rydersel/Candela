@@ -22,8 +22,9 @@ import SwiftUI
 /// offering surface of record: it holds every curated size, while this list is
 /// a shortcut capped at five rows that says so in its own overflow caption. So
 /// a mark that exists to be read while choosing goes there first, and comes
-/// here only if it can be shown without truncating a 280 pt row. The
-/// "Added by Candela" source mark is in Settings for exactly that reason.
+/// here only if it can be shown without truncating a 280 pt row. Neither
+/// curated list carries the "Added by Candela" source mark: it lives on
+/// Settings' All Sizes page, where a row has the width for it.
 ///
 /// The density model's "Recommended" mark DOES come here, and the difference is
 /// which question the mark answers. The source mark explains why a row is on

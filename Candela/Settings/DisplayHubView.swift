@@ -355,13 +355,12 @@ struct DisplayHubView: View {
   /// deduplicated by logical size, so the distinction words belong to the
   /// surfaces that show the duplicates (SO14/SO18, Task 14).
   ///
-  /// **The source mark DOES ride along, and the difference is the point.**
-  /// Native and Scaled tell two entries of one size apart, which this picker
-  /// has none of. "Added by Candela" says why the entry is on the list at all,
-  /// and this pop-up is the offering surface of record (the menu bar's list is
-  /// a five-row shortcut; see `PanelResolutionSection`): a differentiator
-  /// nobody can see at the moment of choosing is one the app does not appear to
-  /// have.
+  /// **The source mark does not ride along either.** Three marks on one
+  /// dropdown item read as a badge queue, so this pop-up states only the cost
+  /// of the choice (the caps warning) and the recommendation. "Added by
+  /// Candela" belongs to the All Sizes page, where a row has the width for it
+  /// and where a mode we found sits beside its published neighbour at the same
+  /// size; see `AllModesPage.rowBadge`.
   ///
   /// **The density model's mark rides along too**, for the same reason: this
   /// pop-up is where a size is chosen, and a suggestion nobody sees while
@@ -383,24 +382,13 @@ struct DisplayHubView: View {
          in: catalog.all
        ),
        outcome.lowersCurrentRate {
-      // First: it is a warning about what this choice costs, and the source
-      // mark is a note about where the choice came from.
+      // First: what this choice costs outranks a note about the display.
       marks.append("caps at \(DisplayModeCopy.refresh(outcome.appliedHz))")
     }
-    // Second, between the two: a note about this PANEL rather than a cost of
-    // the choice, and the reason the item is worth looking at rather than the
-    // reason it is on the list at all. By SIZE, like `curatedSelection` above.
+    // Second: a note about this PANEL rather than a cost of the choice. By
+    // SIZE, like `curatedSelection` above.
     if catalog.isRecommendedSize(row.mode) {
       marks.append(DisplayModeCopy.recommended)
-    }
-    // The mode this item would APPLY, not the row's representative, which is
-    // the same rule the caps warning above follows (SO18). They disagree
-    // whenever a size holds both kinds: measured on the MAG after 1920×804 was
-    // engaged, CoreGraphics began publishing that one rate while the rest of
-    // that framebuffer's rates stayed ours, so the representative can be
-    // published while the mode this item applies is one we added.
-    if catalog.modeKeepingCurrentRefreshRate(for: row).isRevealed {
-      marks.append(DisplayModeCopy.addedByApp)
     }
 
     let base = DisplayModeCopy.size(row.mode)
