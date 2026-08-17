@@ -4,9 +4,10 @@
 # system: green meant somebody remembered to run `swift test` locally and read
 # the output.
 #
-# Two jobs, and only the first one is load-bearing:
-#   test       CandelaKit's suite, the project's only automated coverage
-#   app-build  the app target compiles, which the suite cannot tell you
+# Two jobs, and both now run tests:
+#   test       CandelaKit's suite, the engine's automated coverage
+#   app-build  the app target compiles, which the Kit suite cannot tell you,
+#              then CandelaAppTests runs over the app's own sources
 #
 # Why a hosted runner is a valid environment for the suite and not a degraded
 # one: CandelaKit is hardware-free by design (CLAUDE.md §5), imports no AppKit
@@ -160,11 +161,26 @@ jobs:
   # architecture, so the job compiles what a developer compiles. It built clean
   # in 49 seconds.
   #
-  # What this job is for: the test suite cannot see the app target at all. There
-  # is no app test target (D21), CandelaKit is barred from importing SwiftUI, and
-  # so every SwiftUI view, every AppKit island and every use of the engine's API
-  # from the app side is currently uncompiled by CI. A signature change in the
-  # Kit that breaks a call site in Candela/ passes `swift test` and always will.
+  # What this job is for: the Kit suite cannot see the app target at all.
+  # CandelaKit is barred from importing SwiftUI, so every SwiftUI view, every
+  # AppKit island and every use of the engine's API from the app side goes
+  # uncompiled by `swift test`, and a signature change in the Kit that breaks a
+  # call site in Candela/ passes that suite and always will. Compiling the app
+  # here is what closes the hole.
+  #
+  # The job now also RUNS a suite over those sources: CandelaAppTests, a
+  # host-free unit-test bundle that compiles the app's own sources into itself
+  # and calls their symbols directly, with no TEST_HOST and no launched app.
+  # `CandelaMain.main()` never runs inside it, so no status item, no poller and
+  # no DDC writer ever exists in the test process; the suite is as safe on a
+  # machine with panels attached as it is meaningful on a runner with none.
+  #
+  # What that covers: view-adjacent derivation (which rows a surface produces,
+  # in what order, with what enabled and why), the copy builders, and a render
+  # smoke layer asserting a view rasterises at all. What it does NOT cover, and
+  # what no green here may be read as covering: display behaviour of any kind,
+  # window presentation, reset ordering, `SMAppService` registration, TCC
+  # grants. Those need a launched app in front of a person and stay manual.
   app-build:
     # Not `needs: test`. They are independent questions and running them in
     # parallel answers both on every push, where chaining would hide a build
@@ -220,3 +236,74 @@ jobs:
             exit 1
           fi
           echo "Positive control OK: $(file -b "$app/Contents/MacOS/Candela")"
+
+      # Folded into app-build rather than given a third job, for the same
+      # 10x-billing reason the trigger split at the top of this file documents.
+      # The test bundle compiles the app's sources, so a separate runner would
+      # have to repeat this job's checkout, `brew install xcodegen` and
+      # `xcodegen generate` in full before it could run one test, and would buy
+      # no signal that running it from here does not already buy. The setup is
+      # already paid for; reuse it.
+      #
+      # Its own -derivedDataPath, separate from the build above. The product
+      # control that just passed described THIS job's Debug build, and a test
+      # build writing over that location would leave the control describing
+      # something else.
+      #
+      # Unmeasured as of 2026-08-17, and stated rather than assumed: the render
+      # smoke layer drives `ImageRenderer`, which is proven only on an unlocked
+      # local session. Whether offscreen rendering works in an xctest process on
+      # a headless runner is an open question, and THE FIRST RUN OF THIS STEP IS
+      # THE MEASUREMENT. If those tests fail here for environmental reasons, the
+      # fix is an environment gate on the smoke layer alone (runs locally, skips
+      # on the runner, with the measured fact written back into this comment)
+      # while the structural layer keeps running everywhere regardless. The gate
+      # is deliberately not built ahead of the evidence: gating on a guess would
+      # silently drop coverage that may well work.
+      - name: Run the app suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          # pipefail for the same reason the Kit job's "Run the suite" step
+          # spells out: a pipeline reports its LAST command's status, so without
+          # it this reports tee's, and tee succeeds whatever xcodebuild did.
+          # Every failing suite would be published as green.
+          xcodebuild test -project Candela.xcodeproj -scheme CandelaAppTests \
+            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/dd-tests" \
+            2>&1 | tee "$RUNNER_TEMP/app-tests.log"
+
+      # The Kit job's control, applied to the app suite for the same reason: a
+      # zero exit from a run that discovered nothing is indistinguishable from a
+      # pass. A test bundle that built empty, a scheme that stopped listing the
+      # target, a filter matching no name: each exits 0 having exercised
+      # nothing, and the step above cannot tell those apart from success. So the
+      # run's own summary line is read back out of the log, and its absence is
+      # itself a failure.
+      - name: Positive control (the app suite discovered its tests)
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/app-tests.log"
+
+          # A collapse detector, not a ratchet, exactly as the Kit job's floor
+          # is. It sits far below the count this suite had when the step was
+          # written, so ordinary churn (folding two suites together, moving
+          # coverage down into the Kit) never has to touch it, and far enough
+          # above zero that a run discovering nothing cannot slip past. If it
+          # ever stops discriminating, raise it; never track the real count.
+          floor=25
+
+          line="$(grep -E 'Test run with [0-9]+ tests' "$log" | tail -1 || true)"
+          if [ -z "$line" ]; then
+            echo "::error::The app suite printed no run summary. Either it executed no tests, or the summary format changed and this control has gone blind. Under both readings the green exit code from the previous step is not evidence that anything was exercised."
+            exit 1
+          fi
+
+          count="$(printf '%s\n' "$line" | sed -E 's/.*Test run with ([0-9]+) tests.*/\1/')"
+          echo "Reported by the run: $line"
+
+          if [ "$count" -lt "$floor" ]; then
+            echo "::error::Only $count app tests ran, under the floor of $floor. The suite has collapsed or is being filtered, and a pass over $count tests is not the gate this step exists to be."
+            exit 1
+          fi
+          echo "Positive control OK: $count app tests discovered and run, above the floor of $floor."
