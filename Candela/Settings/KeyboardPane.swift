@@ -2,8 +2,27 @@ import CandelaKit
 import KeyboardShortcuts
 import SwiftUI
 
-/// Keyboard input settings: which machinery each key family engages, the custom
-/// shortcut recorders, which display the keys act on, and the step size.
+/// The Keyboard pane's navigation path, owned by `SettingsRootView` beside the
+/// display destinations' and the OLED pane's paths, and injected here because
+/// the pane's root is built by the registry with no arguments. The default is
+/// a no-op constant, so any view rendered outside the injection can render but
+/// never navigate.
+private struct KeyboardPathKey: EnvironmentKey {
+  static let defaultValue: Binding<[KeyboardPage]> = .constant([])
+}
+
+extension EnvironmentValues {
+  var keyboardPath: Binding<[KeyboardPage]> {
+    get { self[KeyboardPathKey.self] }
+    set { self[KeyboardPathKey.self] = newValue }
+  }
+}
+
+/// Keyboard input settings as a hub (KMR1): the keycap hero answers "what do
+/// my keys do right now", the two mode pickers and their conditional recorders
+/// stay on the root because they are the change-often controls, and the
+/// reference legend and the set-once targeting and precision controls live one
+/// push deeper behind chevron rows that preview their value (KMR4).
 ///
 /// Layout follows the HIG's reading-order rule (layout.md): the Accessibility
 /// warning is the pane's most important state, so it sits at the TOP — a mode
@@ -17,23 +36,23 @@ import SwiftUI
 struct KeyboardPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
+  @Environment(\.keyboardPath) private var keyboardPath
 
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
   var body: some View {
     // `.refreshUI` (on every known PrefName) is the ONLY invalidation signal
-    // this pane has — `DisplayPrefs` is plain UserDefaults and not observable.
+    // this pane has; `DisplayPrefs` is plain UserDefaults and not observable.
     // Without this reference `body` never re-evaluates after a picker writes,
     // so the recorder rows below would never appear and the picker would look
     // like it snapped back.
     let _ = model.prefsRevision
     Form {
       accessibilitySection
+      heroSection
       brightnessSection
-      modifierSection
       volumeSection
-      targetSection
-      precisionSection
+      moreSection
     }
     .formStyle(.grouped)
   }
@@ -43,11 +62,11 @@ struct KeyboardPane: View {
   /// Shown only when a mode that actually needs the CGEvent tap is selected
   /// AND the grant is missing. Custom shortcuts are Carbon hotkeys and work
   /// without the grant (`KeyModePolicy.requiresAccessibility`), so an
-  /// all-custom rig is never warned about a permission it does not use — the
+  /// all-custom rig is never warned about a permission it does not use: the
   /// same gate as on `SettingsActions.recheckPermissions`.
   ///
   /// `AppModel.accessibility` polls while the grant is missing, so this row
-  /// clears itself the moment the grant appears — no reopen, no relaunch.
+  /// clears itself the moment the grant appears; no reopen, no relaunch.
   ///
   /// The predicate is `AccessibilityPermission.isWarningWarranted`, the SAME
   /// property the panel's banner gates on, not a second local copy of the rule.
@@ -58,7 +77,7 @@ struct KeyboardPane: View {
       Section {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
           // Symbol AND text: the state is never signalled by color alone
-          // (color.md, inclusive color). No custom color — the row is
+          // (color.md, inclusive color). No custom color: the row is
           // monochrome in both appearances.
           Image(systemName: "exclamationmark.triangle")
             .foregroundStyle(.secondary)
@@ -76,6 +95,26 @@ struct KeyboardPane: View {
           .accessibilityLabel("Open System Settings…")
         }
       }
+    }
+  }
+
+  // MARK: - Hero
+
+  /// The self-annotating keycap strip (KMR2). Every input comes from the same
+  /// prefs and policies the engine uses (KMR3), read here so the strip
+  /// re-derives on the same `prefsRevision` bump the controls below cause.
+  /// The good-news Accessibility line gates itself inside the hero; while the
+  /// warning above is warranted it stays silent, so the two never both speak.
+  private var heroSection: some View {
+    Section {
+      KeyboardKeysHero(
+        brightnessMode: prefs.keyboardBrightness,
+        volumeMode: prefs.keyboardVolume,
+        brightnessTarget: prefs.multiKeyboardBrightness,
+        volumeTarget: prefs.multiKeyboardVolume,
+        alternateAccepted: prefs.interceptAlternateBrightnessKeys,
+        accessibilityGranted: model.accessibility.isGranted
+      )
     }
   }
 
@@ -120,60 +159,6 @@ struct KeyboardPane: View {
     }
   }
 
-  // MARK: - Modifier keys
-
-  /// The two prose captions that used to explain the modifiers, as one row per
-  /// mapping (spec §8, SO16 — each row's spoken label IS the sentence it
-  /// replaced, so nothing a screen reader could hear was lost by the change).
-  ///
-  /// Gated on `watchesMediaKeys`, i.e. shown for "Both" as well as for the
-  /// media-key mode — the fork hid this documentation under "Both" while the
-  /// modifiers stayed live (ch.1 QUIRK, fixed). Deliberately NOT shown for
-  /// "Custom shortcuts": `AppModel.tapConfig` puts no brightness key in the
-  /// watched set in that mode, so the physical keys go to macOS and every
-  /// combination below would be describing something that cannot happen.
-  /// A shortcut carries its own fixed modifiers and none of these rules reach
-  /// it — `KeyRouter` routes `MediaKeyPress` only.
-  @ViewBuilder private var modifierSection: some View {
-    if KeyModePolicy.watchesMediaKeys(prefs.keyboardBrightness) {
-      Section("Modifier Keys") {
-        ModifierLegendRow(
-          title: "Built-in display",
-          combination: "⌃ + brightness key",
-          spoken: "Control plus a brightness key adjusts the built-in display."
-        )
-        ModifierLegendRow(
-          title: "All external displays",
-          combination: "⌃⌘ + brightness key",
-          spoken: "Control Command plus a brightness key adjusts every external display."
-        )
-        // Kept from the deleted prose: the contrast combination is documented
-        // nowhere else in the pane, unlike the fine-step modifiers, which the
-        // Precision section below still spells out.
-        ModifierLegendRow(
-          title: "Contrast",
-          combination: "⌃⌥⌘ + brightness key",
-          spoken: "Control Option Command plus a brightness key adjusts contrast."
-        )
-        // "+ brightness key" is accuracy, not column symmetry: `KeyRouter`
-        // rule 2 needs a brightness key, and Option on a VOLUME key opens Sound
-        // settings instead (`routeVolume`).
-        ModifierLegendRow(
-          title: "Open Displays settings",
-          combination: "⌥ + brightness key",
-          spoken: "Option with a brightness key opens Displays settings."
-        )
-        // Its own row, not a variation on the ones above: it is a different
-        // action on a specific key, and `KeyRouter` rule 1 treats it that way.
-        ModifierLegendRow(
-          title: "Toggle mirroring",
-          combination: "⌘ + brightness down",
-          spoken: "Command with the brightness-down key switches mirroring on or off."
-        )
-      }
-    }
-  }
-
   // MARK: - Volume
 
   @ViewBuilder private var volumeSection: some View {
@@ -200,8 +185,9 @@ struct KeyboardPane: View {
 
       if KeyModePolicy.watchesMediaKeys(prefs.keyboardVolume) {
         // The output-device rule is NOT restated here. It does not hold in every
-        // mode (name matching never consults it), and `volumeTargetCaption`
-        // already states it beside the picker that decides whether it applies.
+        // mode (name matching never consults it), and the Targeting page's
+        // `volumeTargetCaption` already states it beside the picker that decides
+        // whether it applies.
         SettingsCaption("While macOS reports an output device, the volume keys go to it instead whenever no display those keys would reach can take the command they send. Option on its own opens Sound settings.")
       }
     }
@@ -216,84 +202,28 @@ struct KeyboardPane: View {
   private static let modifierHint: LocalizedStringKey =
     "Click a field and press the keys you want. A shortcut has to include ⌘, ⌃, ⌥ or ⇧. A letter or number on its own is ignored, because it would be captured in every app."
 
-  // MARK: - Targeting
+  // MARK: - More (KMR4)
 
-  @ViewBuilder private var targetSection: some View {
-    Section("Target Display") {
-      SettingRow {
-        Picker("Brightness keys affect:", selection: Binding(
-          get: { prefs.multiKeyboardBrightness },
-          set: { setBrightnessTarget($0) }
-        )) {
-          Text("The display under the pointer").tag(MultiKeyboardBrightness.mouse)
-          Text("Every display").tag(MultiKeyboardBrightness.allScreens)
-          Text("The display with the active window").tag(MultiKeyboardBrightness.focusInsteadOfMouse)
-        }
-        .disabled(prefs.keyboardBrightness == .disabled)
-        if prefs.multiKeyboardBrightness == .focusInsteadOfMouse {
-          SettingsCaption("Window focus may not resolve correctly for full-screen apps.")
-        }
-      }
-
-      SettingRow(volumeTargetCaption) {
-        Picker("Volume keys affect:", selection: Binding(
-          get: { prefs.multiKeyboardVolume },
-          set: { setVolumeTarget($0) }
-        )) {
-          Text("The display under the pointer").tag(MultiKeyboardVolume.mouse)
-          Text("Every display").tag(MultiKeyboardVolume.allScreens)
-          Text("The display matching the audio output device").tag(MultiKeyboardVolume.audioDeviceNameMatching)
-        }
-        .disabled(prefs.keyboardVolume == .disabled)
-      }
-    }
-  }
-
-  private var volumeTargetCaption: LocalizedStringKey {
-    prefs.multiKeyboardVolume == .audioDeviceNameMatching
-      ? "Matches on the display's name, which you can override under Sound on that display's page."
-      : "Applies when the selected audio device has no volume control of its own."
-  }
-
-  // MARK: - Precision
-
-  @ViewBuilder private var precisionSection: some View {
-    Section("Precision") {
-      Toggle("Fine steps for brightness and contrast", isOn: Binding(
-        get: { prefs.useFineScaleBrightness },
-        set: { setFineScaleBrightness($0) }
-      ))
-      .disabled(prefs.keyboardBrightness == .disabled)
-
-      // D25: the fork's "Fine OSD scale for…" leaked internal vocabulary. "On-screen
-      // indicator" is the house term for the HUD across this pane and the Displays pane.
-      SettingRow("A key press normally moves one notch of the on-screen indicator, and holding Shift and Option moves a quarter of that. Turning these on swaps the two, so every press is fine by default.") {
-        Toggle("Fine steps for volume", isOn: Binding(
-          get: { prefs.useFineScaleVolume },
-          set: { setFineScaleVolume($0) }
-        ))
-        .disabled(prefs.keyboardVolume == .disabled)
-      }
-      SettingsCaption("Custom shortcuts have no modifiers of their own, so they always use the step size selected here.")
-
-      // A1 relitigated D26 for this one: it is a key-step setting, which is
-      // what this section is, and the decision behind it ("how far does one
-      // press move while a display is dimming past its minimum") is one a
-      // person can make. `separateCombinedScale` stays app-level and stays a
-      // documented `defaults write` key.
-      // "A normal press" is load-bearing, not hedging: `DimmingMath.step`
-      // branches on `isFine` BEFORE it reads the chiclet count, so a fine step
-      // is a flat ±0.01 on both scales and this toggle does nothing to it.
-      // With "Fine steps for brightness and contrast" on two rows above, that
-      // is every press — a caption promising otherwise would contradict its
-      // own neighbour (the D11 defect class).
-      SettingRow("Halves how far a normal press moves on a display that is dimming past its minimum; fine steps are unchanged.") {
-        Toggle("Extra-fine steps while combined dimming is active", isOn: Binding(
-          get: { prefs.separateCombinedScale },
-          set: { setSeparateCombinedScale($0) }
-        ))
-        .disabled(prefs.keyboardBrightness == .disabled)
-      }
+  /// The two pushed pages: the reference legend and the set-once controls.
+  /// Both rows are always present; a nav row that appears and disappears
+  /// breaks path retention (KMR5), so inactivity is stated on the page rather
+  /// than by hiding the way there.
+  private var moreSection: some View {
+    Section {
+      NavigationRow(
+        title: "Modifier Keys",
+        value: KeyboardHeroModel.modifiersPreview,
+        action: { keyboardPath.wrappedValue.append(.modifiers) })
+      NavigationRow(
+        title: "Targeting & Precision",
+        value: KeyboardHeroModel.targetingPreview(
+          brightnessMode: prefs.keyboardBrightness,
+          target: prefs.multiKeyboardBrightness,
+          fineBrightness: prefs.useFineScaleBrightness,
+          fineVolume: prefs.useFineScaleVolume),
+        action: { keyboardPath.wrappedValue.append(.targeting) })
+    } header: {
+      Text("More").settingsHeading()
     }
   }
 
@@ -303,6 +233,8 @@ struct KeyboardPane: View {
   // that writes a pref and does not propagate is a broken control: the engine
   // reads prefs at construction and at key time, not reactively (D20).
   // `prefDidChange` takes a `PrefName` case, never a string (D27).
+  // The targeting and precision writes moved to `KeyboardTargetingPage` with
+  // their controls (KMR6).
 
   /// Without this call site a mode change never re-arms the media-key tap, so
   /// the setting appears to do nothing until relaunch.
@@ -330,81 +262,5 @@ struct KeyboardPane: View {
     // only the label and the accessor are positive. It feeds `tapConfig`, so
     // its row is rearmTap + refreshUI.
     actions.prefDidChange(.disableAltBrightnessKeys)
-  }
-
-  /// Deliberately inert in the engine: the executor reads this live per press,
-  /// so the row is `.refreshUI` alone. The call site still exists — the pane
-  /// must not be the one place that decides a pref needs no propagation.
-  private func setBrightnessTarget(_ target: MultiKeyboardBrightness) {
-    prefs.multiKeyboardBrightness = target
-    actions.prefDidChange(.multiKeyboardBrightness)
-  }
-
-  /// Unlike the brightness target, this one feeds `AppModel.tapConfig` through
-  /// `volumeMode`, so its row carries `.rearmTap`.
-  private func setVolumeTarget(_ target: MultiKeyboardVolume) {
-    prefs.multiKeyboardVolume = target
-    actions.prefDidChange(.multiKeyboardVolume)
-  }
-
-  /// No `.rearmTap` row, and that is correct rather than missing:
-  /// `KeyRouterConfig` is built INSIDE the tap's press closure, so the fine
-  /// scale is read at event time on every press (fork bug 3 closed by
-  /// construction, D2).
-  private func setFineScaleBrightness(_ fine: Bool) {
-    prefs.useFineScaleBrightness = fine
-    actions.prefDidChange(.useFineScaleBrightness)
-  }
-
-  private func setFineScaleVolume(_ fine: Bool) {
-    prefs.useFineScaleVolume = fine
-    actions.prefDidChange(.useFineScaleVolume)
-  }
-
-  /// No `persistenceKey:`, like every other write in this pane. The parameter
-  /// is not a defaults domain — it is a FILTER on which display's controller
-  /// `.reapplyDimming` reaches (`SettingsActions.apply`), and `separateCombinedScale`
-  /// is app-level, so `"app"` would match zero displays and silently swallow a
-  /// future reapply row. The row is `.refreshUI` alone today because
-  /// `BrightnessController.step` reads the pref at key time (D20).
-  private func setSeparateCombinedScale(_ separate: Bool) {
-    prefs.separateCombinedScale = separate
-    actions.prefDidChange(.separateCombinedScale)
-  }
-}
-
-/// One modifier combination and what it does.
-///
-/// ONE accessibility element (SO16 + contract 5's shape): the label is the
-/// whole sentence the caption used to say, so the glyphs are never spelled out
-/// character by character and the combination is described in words. At
-/// accessibility text sizes the combination drops onto its own line rather than
-/// truncating (contract 10), the same `ViewThatFits` measurement `NavigationRow`
-/// uses.
-private struct ModifierLegendRow: View {
-  let title: LocalizedStringKey
-  let combination: String
-  let spoken: String
-
-  var body: some View {
-    ViewThatFits(in: .horizontal) {
-      HStack(spacing: 8) {
-        Text(title)
-        Spacer(minLength: 8)
-        // Only on this candidate: a wrapping combination would let the row
-        // "fit" at any width and the fallback would never be reached.
-        combinationText.lineLimit(1)
-      }
-      VStack(alignment: .leading, spacing: 2) {
-        Text(title)
-        combinationText
-      }
-    }
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel(spoken)
-  }
-
-  private var combinationText: some View {
-    Text(verbatim: combination).foregroundStyle(.secondary)
   }
 }

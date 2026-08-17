@@ -55,6 +55,10 @@ struct SettingsRootView: View {
   /// the pane), cleared when a display in it departs, and popped by the
   /// sidebar row's re-click.
   @State private var oledCarePath: [OledCarePage] = []
+  /// The Keyboard pane's pushed-page stack (KMR11): same NavigationStack, same
+  /// retention rules as the OLED pane's, minus the display dependence — these
+  /// pages name no hardware, so departure clearing never touches this.
+  @State private var keyboardPath: [KeyboardPage] = []
   /// Accessibility contract 2: selecting a sidebar destination moves focus
   /// into the detail column. Anchored on the detail root; hand-verified only
   /// (no app test target, and synthetic keys go to the terminal, not an
@@ -88,6 +92,7 @@ struct SettingsRootView: View {
       detail
         .background(.background)
         .environment(\.oledCarePath, $oledCarePath)
+        .environment(\.keyboardPath, $keyboardPath)
         .focused($detailFocusAnchor)
         // Keyboard contract (accessibility contract 2): ⌘[ pops the current
         // display's sub-page; ⌘1–⌘9 select the first nine sidebar destinations
@@ -172,6 +177,10 @@ struct SettingsRootView: View {
           if let path = DebugSettingsHook.pendingOledPath {
             DebugSettingsHook.pendingOledPath = nil
             oledCarePath = path
+          }
+          if let path = DebugSettingsHook.pendingKeyboardPath {
+            DebugSettingsHook.pendingKeyboardPath = nil
+            keyboardPath = path
           }
         }
       }
@@ -326,6 +335,7 @@ struct SettingsRootView: View {
           switch pushed {
           case let .display(page): pushedPage(page)
           case let .oledCare(page): oledPushedPage(page)
+          case let .keyboard(page): keyboardPushedPage(page)
           }
         }
     }
@@ -450,6 +460,21 @@ struct SettingsRootView: View {
     .toolbar { SettingsPrincipalTitle(title: currentTitle) }
   }
 
+  /// A Keyboard pushed page (KMR11). No display dependence: no resolution
+  /// guard, no `.id` re-key, no switcher; the page renders from app-level
+  /// prefs alone. The principal title is re-declared for the same #124 reason
+  /// as every other pushed page.
+  @ViewBuilder
+  private func keyboardPushedPage(_ page: KeyboardPage) -> some View {
+    Group {
+      switch page {
+      case .modifiers: KeyboardModifierKeysPage()
+      case .targeting: KeyboardTargetingPage()
+      }
+    }
+    .toolbar { SettingsPrincipalTitle(title: currentTitle) }
+  }
+
   /// External displays only: OLED care never covers the built-in (its copy
   /// says so), so the switcher must not offer it.
   private var oledSwitcherDisplays: [(key: String, name: String)] {
@@ -508,6 +533,18 @@ struct SettingsRootView: View {
           guard case .pane(.oledCare) = selection else { return }
           oledCarePath = newPath.compactMap {
             if case let .oledCare(page) = $0 { page } else { nil }
+          }
+        }
+      )
+    }
+    if case .pane(.keyboard) = selection {
+      return Binding(
+        get: { keyboardPath.map(SettingsPushedPage.keyboard) },
+        // Same stale-write contract as the OLED branch above (KMR11).
+        set: { newPath in
+          guard case .pane(.keyboard) = selection else { return }
+          keyboardPath = newPath.compactMap {
+            if case let .keyboard(page) = $0 { page } else { nil }
           }
         }
       )
@@ -571,13 +608,20 @@ struct SettingsRootView: View {
   /// claimed a push for a display that had left the list, so the token stopped
   /// moving on the pop that actually happened. The OLED depth follows the same
   /// rule through `oledPresentedDepth`'s selection gate.
-  private var currentPathDepth: Int { presentation.pathDepth + oledPresentedDepth }
+  private var currentPathDepth: Int {
+    presentation.pathDepth + oledPresentedDepth + keyboardPresentedDepth
+  }
 
   /// The OLED pane's stack is presented only while the pane is selected;
   /// retained depth counts for nothing (the same presented-not-retained rule
   /// as `currentPathDepth`).
   private var oledPresentedDepth: Int {
     if case .pane(.oledCare) = selection { oledCarePath.count } else { 0 }
+  }
+
+  /// Same presented-not-retained rule for the Keyboard pane's stack (KMR11).
+  private var keyboardPresentedDepth: Int {
+    if case .pane(.keyboard) = selection { keyboardPath.count } else { 0 }
   }
 
   /// Sidebar render order — registry panes, then built-in, then externals
@@ -608,6 +652,8 @@ struct SettingsRootView: View {
       // The OLED pane's row does the same thing a display's row does: return
       // to this destination's root.
       oledCarePath = []
+    } else if case .pane(.keyboard) = selection, !keyboardPath.isEmpty {
+      keyboardPath = []
     }
   }
 
@@ -618,6 +664,8 @@ struct SettingsRootView: View {
       subPagePaths[key] = Array(path.dropLast())
     } else if case .pane(.oledCare) = selection, !oledCarePath.isEmpty {
       oledCarePath.removeLast()
+    } else if case .pane(.keyboard) = selection, !keyboardPath.isEmpty {
+      keyboardPath.removeLast()
     }
   }
 
