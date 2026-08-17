@@ -259,6 +259,27 @@ public final class DDCValueController: PendingWireDraining {
     return isMuted
   }
 
+  /// Puts the mute belief back after an unmute that could not be confirmed as
+  /// applied, touching no register.
+  ///
+  /// Both halves move together, and that is the point. The persisted flag is
+  /// what survives a relaunch; the live one is what keeps the ordinary mute
+  /// control honest and the recovery affordance on screen. Writing only the
+  /// pref (what the per-display reset did) leaves this object believing an
+  /// unmuted display, so the next press of the mute control MUTES a display
+  /// that never stopped being muted.
+  ///
+  /// No second write, deliberately. The first could not be confirmed, and
+  /// repeating it would be another unconfirmed write rather than evidence; over
+  /// a register locked by HDR it is also how a memo comes to name a value the
+  /// panel never took.
+  @discardableResult
+  public func reassertUnconfirmedMute() -> Bool {
+    guard command == .volume, !isMuted else { return false }
+    setMuted(true)
+    return true
+  }
+
   // MARK: - Startup/wake restore (D5)
 
   /// Re-writes the saved value (+ mute companion under the dedicated mute

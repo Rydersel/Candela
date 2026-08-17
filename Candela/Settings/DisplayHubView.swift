@@ -1004,12 +1004,13 @@ struct DisplayHubView: View {
           )
           // `toggleMute` cleared the stored flag on the way out, and the panel
           // may still be muted, so put it back: the same two facts Reset All
-          // keeps across its wipe, kept here for the same reason. The live
-          // controller keeps its own belief until it is next rebuilt, which is
-          // a divergence in the safe direction (the record that survives a
-          // relaunch is the pessimistic one), and the ordinary mute control
-          // drives fresh writes from either state.
-          DisplayPrefs(persistenceKey: key).muted = true
+          // keeps across its wipe, kept here for the same reason. Both halves
+          // move together rather than the pref alone. A live controller left
+          // believing an unmuted display makes the next press of the ordinary
+          // mute control MUTE one that never stopped being muted, and it hides
+          // the state from every surface that reads the controller until
+          // something rebuilds it.
+          state.volume.reassertUnconfirmedMute()
         }
       case .unknown:
         resetLog.error(

@@ -60,6 +60,24 @@ public enum HDRResetDisengage: Sendable, Equatable {
   case unknown
 }
 
+/// Whether a DDC write can be trusted to reach a display right now, as measured
+/// rather than as mirrored.
+///
+/// The three cases are not a tri-state mood: `.open` is the only one that
+/// licenses a caller to report its write as landed, and the other two differ
+/// only in what a person can be told to do about it.
+public enum HDRWriteWindow: Sendable, Equatable {
+  /// Measured out of HDR with no transition racing the read: the register is
+  /// not locked, so a write that the wire then settles did reach the panel.
+  case open
+  /// Measured in HDR. DDC goes nowhere and the panel ACKs the loss, so a write
+  /// sent now is a write nothing downstream can tell from a success.
+  case locked
+  /// A transition moved this display while the read was out. The answer
+  /// describes a state that is nobody's to vouch for.
+  case unknown
+}
+
 /// Single source of truth for one display's brightness (spec §5: every input
 /// funnels through here; every surface renders from `brightness`).
 ///
@@ -1090,6 +1108,43 @@ public final class BrightnessController: PendingWireDraining {
   private func invalidateWireMemos() {
     resetWriteMemo()
     for sibling in wireSiblings { sibling.resetWriteMemo() }
+  }
+
+  /// Asks the display whether the DDC register is free, for a caller that is
+  /// about to write it and must not report the write as landed unless it did.
+  ///
+  /// The read-only half of `disengageHDRForReset`, and it exists because the
+  /// difference matters: that door CHANGES the display (it drops HDR and clears
+  /// the stored mode), which is right for a button whose whole job is clearing
+  /// settings and wrong for one that promises only an unmute. This one measures
+  /// and reports.
+  ///
+  /// Deliberately not `isHDREngaged`. That mirror is written optimistically by
+  /// transitions and lags a System Settings toggle until the reconfiguration
+  /// arrives; a write licensed by it can go straight into a locked register
+  /// while every reading here says the register is free.
+  ///
+  /// Drops the wire's duplicate memos for the same reason the reset door does:
+  /// a value ACKed and swallowed inside an HDR window nobody observed closing
+  /// leaves a memo naming a value the register never took, and the first write
+  /// over the top of one is usually the unmute.
+  ///
+  /// The bound, stated because it is the same one the reset door carries: this
+  /// describes the display as of this call. Nothing here stops a transition
+  /// that begins after it returns, which is why a caller confirms afterwards
+  /// rather than only asking first.
+  public func hdrWriteWindow() async -> HDRWriteWindow {
+    defer { invalidateWireMemos() }
+    // The built-in takes no DDC at all, so the register question is moot; the
+    // reset door returns early on the same test.
+    guard role == .external else { return .open }
+    // An observation, not a transition (the reset door's fence, same reason):
+    // bumping the generation here would supersede a transition parked on its
+    // own await.
+    let observed = hdrTransitionGeneration
+    await refreshHDRCaches(measured: true)
+    guard hdrTransitionGeneration == observed else { return .unknown }
+    return cachedHDRActive ? .locked : .open
   }
 
   /// The reset paths' HDR disengage: makes the DISPLAY leave HDR, and asks the
