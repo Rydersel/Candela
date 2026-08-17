@@ -224,9 +224,18 @@ case "modes":
     let published = all.filter { $0.provenance == .coreGraphics }
     let revealed = all.filter { $0.provenance == .coreGraphicsServices }
     let withheld = configurator.modesWithheldByWireTimingGuard(for: display.id)
+    // #95's regression detector. Rows alike in every field the pickers render
+    // are rows a person cannot choose between, and the count is only meaningful
+    // against real hardware: the duplicates came from CoreGraphics itself, so no
+    // fixture can produce them.
+    let rendered = all.map {
+      "\($0.logicalWidth)x\($0.logicalHeight)|\($0.pixelWidth)x\($0.pixelHeight)|\($0.refreshHz)"
+    }
+    let duplicateRows = rendered.count - Set(rendered).count
     print(
       "\n\(display.name)  published \(published.count)  revealed \(revealed.count)"
-        + (withheld > 0 ? "  withheld-wire-timing \(withheld)" : ""))
+        + (withheld > 0 ? "  withheld-wire-timing \(withheld)" : "")
+        + "  indistinguishable-rows \(duplicateRows)")
     if withheld > 0 {
       let parents = CGSModeRevelation.nativeParentRefreshes(
         in: published,
