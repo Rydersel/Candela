@@ -1828,9 +1828,18 @@ extension DisplayModeCoordinator.Catalog {
   /// second pair of brackets on a 280 pt row; and the marks a settings row can
   /// afford to separate ("Added by Candela") are the ones that stayed in
   /// Settings anyway.
+  ///
+  /// "Rendered by Candela" rides along too (SS5), and it is not in that
+  /// category: it is a COST rather than a note about provenance. The menu-bar
+  /// panel offers these stops from this very label, and pressing one stands a
+  /// virtual display up for as long as the size is in use, so a label that left
+  /// it out would offer the cost invisibly. It is last, after the tags and the
+  /// recommendation, for the same reason the caps warning leads elsewhere:
+  /// nothing above it is longer than a word.
   func badgedSize(_ mode: DisplayMode) -> String {
     var marks = tags(for: mode, isLowResolutionDuplicate: false)
     if isRecommendedSize(mode) { marks.append(DisplayModeCopy.recommended) }
+    if mode.isSynthesized { marks.append(SynthesisCopy.badge) }
     guard !marks.isEmpty else { return DisplayModeCopy.size(mode) }
     return "\(DisplayModeCopy.size(mode)) (\(marks.joined(separator: ", ")))"
   }

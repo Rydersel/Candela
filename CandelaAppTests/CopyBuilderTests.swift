@@ -903,6 +903,7 @@ struct CopyBuilderTests {
     // sharpness claim, in `SynthesisCopyTests`; they are here as well because
     // this is the suite-wide em-dash scan and a builder outside it is a builder
     // the house rule is not mechanical for.
+    add("SynthesisCopy.reportMode", SynthesisCopy.reportMode(width: 3096, height: 1296, slot: 4))
     add("SynthesisCopy.optInTitle", SynthesisCopy.optInTitle)
     add("SynthesisCopy.optInCaption", SynthesisCopy.optInCaption)
     add("SynthesisCopy.badge", SynthesisCopy.badge)

@@ -281,7 +281,8 @@ struct AllModesPage: View {
           // though it had lost track of the size on screen. (`catalog.current`
           // is no help either: a mirrored display reports a fabricated
           // descriptor that appears in no enumeration [MEASURED 2026-08-17].)
-          if catalog.engagedSyntheticSize != nil {
+          //
+          if Self.showsEngagedSizeNotice(in: catalog) {
             SettingsCaption(verbatim: SynthesisCopy.engagedSizeNotListed)
           }
           ForEach(filteredGroups(catalog), id: \.header) { group in
@@ -605,6 +606,24 @@ struct AllModesPage: View {
         }
       }
     }
+  }
+
+  /// Whether the All list says that the size in use is one this app renders
+  /// (SS4's All clause).
+  ///
+  /// BOTH clauses are load-bearing. The list enumerates what the display
+  /// reports, so an engaged stop has no row here and the checkmark sits on
+  /// nothing: that is the first. But the caption points at the Recommended
+  /// segment, and that segment holds the stop only while the opt-in does
+  /// (`catalog.rows` is the merged list). A size can be engaged with the opt-in
+  /// off, from reset residue or a teardown that cleared the pref and failed, and
+  /// the caption would then send someone to a list that does not have what it
+  /// promised.
+  ///
+  /// A named function rather than a predicate inline in `body` so a test can
+  /// call it (AT10).
+  static func showsEngagedSizeNotice(in catalog: DisplayModeCoordinator.Catalog) -> Bool {
+    catalog.engagedSyntheticSize != nil && catalog.rows.contains { $0.mode.isSynthesized }
   }
 
   /// The one id space the list, its focus and `scrollTo` all speak.

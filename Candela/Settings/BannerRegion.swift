@@ -9,7 +9,8 @@ import SwiftUI
 /// display — a preview on another display renders nothing on this one.
 ///
 /// Top to bottom: the countdown surface (answerable or passive, SO6), a
-/// settings-origin start failure, unread reapply notices (SO8), the
+/// settings-origin start failure, a synthesis refusal (SS9), unread reapply
+/// notices (SO8), the
 /// stranded-mute recovery block (SO4/D29 rule 3 — the hub root renders this
 /// region, so the recovery is visible in the state it recovers from without any
 /// drill-in), and the first-sight line (SO22).
@@ -57,6 +58,7 @@ struct BannerRegion: View {
     VStack(spacing: 0) {
       countdownBanner
       startFailureBanner
+      synthesisRefusalBanner
       reapplyBanner
       strandedMuteBanner
       firstSightBanner(cards.firstSight)
@@ -113,6 +115,7 @@ struct BannerRegion: View {
   private struct VisibleCards: Equatable {
     var countdown: Bool
     var startFailure: Bool
+    var synthesisRefusal: Bool
     var reapply: Bool
     var strandedMute: Bool
     var firstSight: Bool
@@ -131,6 +134,7 @@ struct BannerRegion: View {
       // animation and the form swap would cross-fade a live control.
       countdown: countdownForm != nil,
       startFailure: startFailure != nil,
+      synthesisRefusal: synthesisRefusal != nil,
       reapply: reapplyReport != nil,
       strandedMute: showsStrandedMute,
       firstSight: showsFirstSight
@@ -198,6 +202,39 @@ struct BannerRegion: View {
   private var startFailure: DisplayModeCoordinator.StartFailure? {
     guard let failure = coordinator.startFailure, failure.displayID == displayID else { return nil }
     return failure
+  }
+
+  /// A synthesized size that did not engage, or a teardown that did not finish
+  /// (SS9, and `SynthesisFailure.unwindIncomplete`).
+  ///
+  /// HERE rather than beside the opt-in row it usually answers, for SO7's
+  /// reason: this region renders above the hub root AND above every pushed
+  /// page, and a synthesized size can be picked from the All Sizes page, which
+  /// is a pushed page whose own body a hub-root row never reaches. Same
+  /// placement as the start failure directly above, whose route into this
+  /// region was the same argument.
+  ///
+  /// No `.help`: the diagnostic a start failure puts in a tooltip is a
+  /// CoreGraphics error code, and no synthesis refusal has one. The sentence is
+  /// the whole answer.
+  @ViewBuilder private var synthesisRefusalBanner: some View {
+    if let refusal = synthesisRefusal {
+      card {
+        VStack(alignment: .leading, spacing: 6) {
+          SettingsCaption(SynthesisCopy.refusal(refusal.reason))
+          Button("OK") { model.synthesis.dismissRefusal() }
+            .accessibilityLabel("OK")
+        }
+      }
+    }
+  }
+
+  /// This display's refusal, or nil. One reading for the builder and the key,
+  /// like the start failure above: the coordinator holds ONE refusal for the
+  /// request just made, and every surface that renders it checks the display.
+  private var synthesisRefusal: SynthesisCoordinator.Refusal? {
+    guard let refusal = model.synthesis.refusal, refusal.displayID == displayID else { return nil }
+    return refusal
   }
 
   // MARK: - Reapply notices (SO8)

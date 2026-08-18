@@ -50,8 +50,17 @@ struct SynthesisCopyTests {
     #expect(SynthesisCopy.badge != DisplayModeCopy.addedByApp)
   }
 
+  /// "display", never "panel": SO14 retired the word from visible copy while
+  /// leaving it in the type vocabulary this property is named from.
   @Test func theRateColumnStatesTheRuleRatherThanAFigure() {
-    #expect(SynthesisCopy.keepsPanelRefresh == "Keeps the panel's refresh rate")
+    #expect(SynthesisCopy.keepsPanelRefresh == "Keeps the display's refresh rate")
+  }
+
+  /// The same rule over everything this feature can put on screen.
+  @Test func noSentenceSaysPanel() {
+    for entry in everyString() {
+      #expect(!entry.text.lowercased().contains("panel"), "\(entry.site) says panel: \(entry.text)")
+    }
   }
 
   /// Pinned through the quoted key rather than by equality: a
@@ -63,12 +72,27 @@ struct SynthesisCopyTests {
       .contains("\"Turn off HDR to use a synthesized size.\""))
   }
 
+  /// The times sign comes from `DisplayModeCopy.size`, which exists so there is
+  /// one spelling of it: a report line a search cannot match against the picker
+  /// it was chosen in is a line nobody can follow up.
   @Test func theDiagnosticsLinesCarryTheSizeTheSlotAndTheCount() {
     #expect(
       SynthesisCopy.diagnosticsActive(width: 3096, height: 1296, slot: 4)
-        == "Synthesized size active: 3096 x 1296 (virtual display slot 4)")
+        == "Synthesized size active: \(DisplayModeCopy.size(width: 3096, height: 1296)) (virtual display slot 4)")
+    #expect(SynthesisCopy.diagnosticsActive(width: 3096, height: 1296, slot: 4)
+      == "Synthesized size active: 3096 × 1296 (virtual display slot 4)")
     #expect(SynthesisCopy.diagnosticsOffered(5) == "Synthesized sizes offered: 5")
     #expect(SynthesisCopy.diagnosticsOffered(0) == "Synthesized sizes offered: 0")
+  }
+
+  /// The pasted report's mode line while a stop is engaged: the size in force
+  /// and the slot, from the engine, with no rate. The readback it replaces is
+  /// the virtual master's descriptor under a fabricated mode id [MEASURED
+  /// 2026-08-17], so quoting it would name a mode nobody can look up.
+  @Test func theReportModeLineNamesTheStopAndItsSlot() {
+    #expect(
+      SynthesisCopy.reportMode(width: 3096, height: 1296, slot: 5)
+        == "3096 × 1296 (synthesized, virtual display slot 5)")
   }
 
   // MARK: - The three scans
@@ -163,6 +187,9 @@ struct SynthesisCopyTests {
       out.append((
         "diagnosticsActive(\(width))",
         SynthesisCopy.diagnosticsActive(width: width, height: height, slot: slot)))
+      out.append((
+        "reportMode(\(width))",
+        SynthesisCopy.reportMode(width: width, height: height, slot: slot)))
     }
     for count in [0, 1, 7] {
       out.append(("diagnosticsOffered(\(count))", SynthesisCopy.diagnosticsOffered(count)))
@@ -268,6 +295,38 @@ struct SynthesisCopyTests {
       == DisplayModeCopy.size(width: engaged.logicalWidth, height: engaged.logicalHeight))
     #expect(try #require(current.first).badge?.contains(SynthesisCopy.badge) == true)
   }
+
+  /// The All list's caption needs BOTH facts, and the second is the one a
+  /// reachable state can take away: a size engaged with the opt-in off leaves
+  /// the Recommended segment holding no stop either, so pointing at it would
+  /// send someone to a list that does not have what the caption promised.
+  @Test func theAllListNoticeNeedsARowToPointAt() throws {
+    let engaged = try #require(SynthesisFixtures.stops.first)
+
+    #expect(AllModesPage.showsEngagedSizeNotice(
+      in: SynthesisFixtures.catalog(engaged: engaged)))
+    // Engaged, opted out: the residue state.
+    #expect(!AllModesPage.showsEngagedSizeNotice(
+      in: SynthesisFixtures.catalog(engaged: engaged, offering: false)))
+    // Offered, nothing engaged: an offer is not a state.
+    #expect(!AllModesPage.showsEngagedSizeNotice(in: SynthesisFixtures.catalog()))
+  }
+
+  /// The menu-bar panel offers stops from `badgedSize` and from nothing else,
+  /// so the mark has to be in that label or the panel offers the cost of a
+  /// virtual display invisibly.
+  @Test func theOneLineLabelTheMenuBarUsesCarriesTheMark() throws {
+    let catalog = SynthesisFixtures.catalog()
+    let stop = try #require(catalog.rows.first { $0.mode.isSynthesized })
+
+    #expect(catalog.badgedSize(stop.mode).contains(SynthesisCopy.badge))
+    #expect(catalog.badgedSize(stop.mode).hasPrefix(DisplayModeCopy.size(stop.mode)))
+    #expect(!Self.namesZeroHertz(catalog.badgedSize(stop.mode)))
+    // Unchanged for a published row: the mark is about the stop, not about the
+    // label.
+    let published = try #require(catalog.rows.first { !$0.mode.isSynthesized })
+    #expect(!catalog.badgedSize(published.mode).contains(SynthesisCopy.badge))
+  }
 }
 
 /// A MAG-shaped panel with the real stop ladder on it: the fixtures come from
@@ -286,9 +345,16 @@ private enum SynthesisFixtures {
     ceilingPixelWidth: VirtualDisplayIdentity.maxPixels.wide,
     ceilingPixelHeight: VirtualDisplayIdentity.maxPixels.high)
 
-  static func catalog(engaged: SyntheticSize? = nil) -> DisplayModeCoordinator.Catalog {
+  /// `offering: false` is the opted-out shape the coordinator builds when the
+  /// pref is off: no stops in the rows and none in `syntheticStops`, which with
+  /// `engaged:` set is the reset-residue state (a size on the glass that the
+  /// picker no longer offers).
+  static func catalog(
+    engaged: SyntheticSize? = nil, offering: Bool = true
+  ) -> DisplayModeCoordinator.Catalog {
     let published = DisplayModeCatalog.curated(
       panel, nativePixelWidth: 3440, nativePixelHeight: 1440)
+    let stops = offering ? stops : []
     return DisplayModeCoordinator.Catalog(
       display: ConfiguredDisplay(
         id: 3,

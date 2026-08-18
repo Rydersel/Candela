@@ -698,7 +698,19 @@ final class AppModel {
       // Never `catalogs[...]?.current` directly: the catalog exists only for
       // displays something has already shown, so the built-in's entry depends
       // on which pages were visited this session (combined pass D8).
-      currentMode: displayModes.currentMode(for: state.id).map(DiagnosticsCopy.mode),
+      //
+      // A synthesis-engaged display answers from the ENGINE instead, and this
+      // is Phase 0's binding rule rather than a preference: while a stop is
+      // engaged the readback is the virtual master's geometry under a
+      // fabricated mode id that appears in no enumeration, so a report quoting
+      // it would name a mode nobody can look up. The engine's pairing carries
+      // the slot too, which is what tells two engaged displays apart in a
+      // pasted report and is the handoff's "the stop in force belongs in the
+      // report's mode line".
+      currentMode: synthesis.pairing(forPhysical: state.id).map {
+        SynthesisCopy.reportMode(
+          width: $0.size.logicalWidth, height: $0.size.logicalHeight, slot: $0.slot)
+      } ?? displayModes.currentMode(for: state.id).map(DiagnosticsCopy.mode),
       controlMethod: DiagnosticsCopy.brightnessPath(state.controller.brightnessPath),
       readbackVerdict: isBuiltIn
         ? "Not applicable: no data cable"

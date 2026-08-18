@@ -112,15 +112,21 @@ struct PanelResolutionSection: View {
           PanelCaption("Waiting for you to keep or revert the new resolution on \(displayName).", style: .tertiary)
         }
         startFailure
+        synthesisRefusal
         reapplyReport
       }
-    } else if report != nil {
+    } else if report != nil || refusal != nil {
       // The list is absent — one usable size, or none — and a reapply still had
       // something to say about this display. Saying it anyway is the point:
       // this is the surface most people see, and a report that renders only
       // when a picker happens to be worth drawing is a report that goes missing
-      // exactly on the displays with the fewest options.
-      VStack(alignment: .leading, spacing: 2) { reapplyReport }
+      // exactly on the displays with the fewest options. A synthesis refusal
+      // joins it for the same reason and one of its own: the unattended reapply
+      // at launch can produce one on a display whose list is too short to draw.
+      VStack(alignment: .leading, spacing: 2) {
+        synthesisRefusal
+        reapplyReport
+      }
     }
   }
 
@@ -206,6 +212,34 @@ struct PanelResolutionSection: View {
       // The same diagnostic reaches the user from the confirmation window and
       // from the settings page's banner, both of which are ordinary windows.
     }
+  }
+
+  /// A synthesized size that did not engage, or a teardown that did not finish
+  /// (SS9, and `SynthesisFailure.unwindIncomplete`).
+  ///
+  /// The panel can pick a synthesized stop: `badgedSize` marks it and the rows
+  /// above apply it like any other size. So the refusal has to be answerable
+  /// here as well as in the settings window, or a stop refused from the menu
+  /// bar would change nothing and say nothing.
+  ///
+  /// Same dismissal as everywhere else, against the coordinator's one refusal
+  /// slot: OK here clears the settings banner too, which is right, because it
+  /// is one answer to one request rather than one notice per surface.
+  @ViewBuilder private var synthesisRefusal: some View {
+    if let refusal, let synthesis = coordinator.synthesis {
+      PanelReportRow(text: Text(SynthesisCopy.refusal(refusal.reason))) {
+        synthesis.dismissRefusal()
+      }
+      .padding(.horizontal, 4)
+    }
+  }
+
+  /// This display's refusal, or nil. One reading for the builder above and for
+  /// the branch that renders it with no list.
+  private var refusal: SynthesisCoordinator.Refusal? {
+    guard let refusal = coordinator.synthesis?.refusal, refusal.displayID == displayID
+    else { return nil }
+    return refusal
   }
 
   /// What reapply could not do on this display, at launch or when it

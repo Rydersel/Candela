@@ -383,7 +383,13 @@ struct DisplayHubView: View {
   /// would both disable the warning and name the wrong rate.
   private func sizeItemLabel(_ row: DisplayModeRow, in catalog: DisplayModeCoordinator.Catalog) -> String {
     var marks: [String] = []
-    if let current = catalog.current,
+    // Never asked of a synthesized row, which `AllModesPage.recommendedRowModel`
+    // skips for the same reason: the question is "what rate does this size get
+    // in the display's own list", and a stop is not in that list. A stop whose
+    // logical size collided with a published 1x size would otherwise be
+    // answered about the OTHER size and print a rate this row never applies.
+    if !row.mode.isSynthesized,
+       let current = catalog.current,
        let outcome = DisplayModeCatalog.outcome(
          selectingWidth: row.mode.logicalWidth,
          selectingHeight: row.mode.logicalHeight,
@@ -473,8 +479,12 @@ struct DisplayHubView: View {
     }
   }
 
-  /// SS4's per-display opt-in, plus whatever the last synthesis request had to
-  /// refuse.
+  /// SS4's per-display opt-in.
+  ///
+  /// What a refusal says is NOT here: `BannerRegion` renders it, above this
+  /// page and above every pushed page (SO7), because a synthesized size can be
+  /// picked from All Sizes as well as from this pop-up, and a row in this
+  /// section is unreachable from there.
   ///
   /// It sits with the size controls rather than under Advanced because it
   /// changes what the Size pop-up directly above it offers, and a switch whose
@@ -498,25 +508,6 @@ struct DisplayHubView: View {
         // more. Courtesy, not the guard: the engine is non-reentrant and the
         // coordinator answers `.busy` regardless.
         .disabled(synthesis.isWorking)
-      }
-      refusalRow
-    }
-  }
-
-  /// The last synthesis refusal, if it was about THIS display.
-  ///
-  /// One state with several reasons, rendered here rather than in
-  /// `BannerRegion`, whose two placements carry the preview surfaces: this is
-  /// the answer to a control on this page, and it belongs beside the control.
-  /// Dismissed explicitly, like every other failure notice in the window: a
-  /// refusal that cleared itself on the next render would be gone before it was
-  /// read.
-  @ViewBuilder private var refusalRow: some View {
-    if let refusal = synthesis.refusal, refusal.displayID == displayID {
-      VStack(alignment: .leading, spacing: 6) {
-        SettingsCaption(SynthesisCopy.refusal(refusal.reason))
-        Button("OK") { synthesis.dismissRefusal() }
-          .accessibilityLabel("OK")
       }
     }
   }
@@ -845,11 +836,12 @@ struct DisplayHubView: View {
     // mirroring the user set up. `synthesisSuspensions` is the same tick's
     // verdict as `dimStates`, so the two cannot disagree about why this display
     // is paused; the sighted preview above says "Paused" and leaves the reason
-    // to the pane, which is why only this one has to tell them apart.
+    // to the pane, which is why only this one has to tell them apart. The words
+    // are `OledCareCopy`'s, like the lock-dim previews above: written for this
+    // site, and shared so the pane and this preview cannot drift.
     case .suspended:
-      return model.oledCare.synthesisSuspensions.contains(persistenceKey)
-        ? "Paused while a synthesized size is active"
-        : "Paused while this display is mirrored"
+      return OledCareCopy.suspendedSpokenPreview(
+        synthesized: model.oledCare.synthesisSuspensions.contains(persistenceKey))
     case nil: return "Starting"
     }
   }

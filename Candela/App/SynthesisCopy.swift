@@ -53,7 +53,11 @@ enum SynthesisCopy {
 
   /// The rate column of a synthesized row. The stop has no rate of its own:
   /// what scans out is whatever the display was already running.
-  static var keepsPanelRefresh: String { "Keeps the panel's refresh rate" }
+  ///
+  /// "display", not "panel". SO14 retired that word from visible copy while
+  /// leaving it in the type and comment vocabulary, which is exactly the split
+  /// this property's own name sits on the other side of.
+  static var keepsPanelRefresh: String { "Keeps the display's refresh rate" }
 
   /// The All list enumerates what the display reports, and a synthesized size
   /// is not in it, so the row the checkmark would sit on is absent while a size
@@ -125,8 +129,24 @@ enum SynthesisCopy {
   /// The engaged pairing, as one report line: the size on the glass and the
   /// slot its virtual display holds. The slot is what distinguishes two engaged
   /// displays from each other in a pasted report.
+  ///
+  /// The size goes through `DisplayModeCopy.size`, which exists so the times
+  /// sign has ONE spelling: a report line naming a size with a different
+  /// character from the picker it was chosen in is a size that does not match
+  /// itself under a search.
   static func diagnosticsActive(width: Int, height: Int, slot: Int) -> String {
-    "Synthesized size active: \(width) x \(height) (virtual display slot \(slot))"
+    "Synthesized size active: \(DisplayModeCopy.size(width: width, height: height)) (virtual display slot \(slot))"
+  }
+
+  /// The pasted report's mode line while a stop is engaged.
+  ///
+  /// Its own sentence rather than the page's line above, because a report line
+  /// is already labelled ("current mode: ...") and would otherwise read as two
+  /// labels stacked. It names NO rate: the readback it replaces is the virtual
+  /// master's descriptor, and the display's own rate is preserved by the mirror
+  /// rather than chosen here.
+  static func reportMode(width: Int, height: Int, slot: Int) -> String {
+    "\(DisplayModeCopy.size(width: width, height: height)) (synthesized, virtual display slot \(slot))"
   }
 
   /// How many stops the ladder offers this display. Shown only where the opt-in

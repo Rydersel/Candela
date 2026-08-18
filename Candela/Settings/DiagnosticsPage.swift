@@ -241,12 +241,14 @@ struct DiagnosticsPage: View {
   /// A whole line rather than a label and a value, because it is a report line
   /// about what this app added rather than a property of the display, and the
   /// two facts it carries (that sizes are offered at all, and how many) only
-  /// mean anything together.
+  /// mean anything together. Secondary, like every value in this page's rows,
+  /// so a line that is not a heading does not read as one.
   @ViewBuilder private func synthesizedOfferRow(
     _ catalog: DisplayModeCoordinator.Catalog
   ) -> some View {
     if model.synthesis.offersSyntheticSizes(displayID: state.id) {
       Text(verbatim: SynthesisCopy.diagnosticsOffered(catalog.syntheticStops.count))
+        .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
     }
   }
@@ -633,6 +635,7 @@ struct DiagnosticsPage: View {
         height: pairing.size.logicalHeight,
         slot: pairing.slot
       ))
+      .foregroundStyle(.secondary)
       .fixedSize(horizontal: false, vertical: true)
     }
   }
