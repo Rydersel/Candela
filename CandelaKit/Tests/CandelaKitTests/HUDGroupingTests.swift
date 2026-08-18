@@ -80,6 +80,80 @@ struct HUDGroupingTests {
     )
   }
 
+  // MARK: - Synthesis sets (SS1)
+
+  /// A synthesized size is ONE panel as far as the person pressing the key is
+  /// concerned. The pill still has to be drawn on the virtual display, which
+  /// owns the framebuffer and is the only member with a screen, but it must
+  /// name the panel and count nothing: "+ 1 more" would announce a display
+  /// nobody can look at, created by the app to serve the size.
+  @Test func aSynthesisSetNamesThePanelAndCountsNoOtherMembers() {
+    let topology = MirrorFixtures.synthesisPair()
+    #expect(
+      HUDGrouping.pills(forStepped: topology.expand(5), topology: topology)
+        == [HUDGrouping.Pill(placement: 5, named: 2, othersInSet: 0)]
+    )
+  }
+
+  /// The realistic shape: only the panel steps, because the virtual display has
+  /// no controller and takes no DDC. The answer must be the same one, so the
+  /// pill does not change identity depending on which members the step path
+  /// happened to resolve.
+  @Test func aSynthesisPanelSteppingAloneGivesTheSamePill() {
+    let topology = MirrorFixtures.synthesisPair()
+    #expect(
+      HUDGrouping.pills(forStepped: [2], topology: topology)
+        == [HUDGrouping.Pill(placement: 5, named: 2, othersInSet: 0)]
+    )
+  }
+
+  /// The carve-out is not the CG flags: a virtual master that reports no mirror
+  /// flag at all is still a synthesis master, because the pairing says so.
+  @Test func theSynthesisPillDoesNotDependOnTheMasterReportingMirrorFlags() {
+    let topology = MirrorFixtures.synthesisPair(masterReportsFlags: false)
+    #expect(
+      HUDGrouping.pills(forStepped: [5, 2], topology: topology)
+        == [HUDGrouping.Pill(placement: 5, named: 2, othersInSet: 0)]
+    )
+  }
+
+  /// Only the synthesis master is discounted, never a real panel. A second
+  /// display genuinely showing the same framebuffer is one the user CAN look
+  /// at, so it is counted exactly as it would be in any other set.
+  @Test func aSecondPanelInASynthesisSetIsStillCounted() {
+    let topology = MirrorTopology(
+      [
+        MirrorFixtures.display(2, mirrors: 5),
+        MirrorFixtures.display(3, mirrors: 5),
+        MirrorFixtures.display(5, inSet: true),
+      ],
+      synthesisMasters: [5]
+    )
+    #expect(
+      HUDGrouping.pills(forStepped: [5, 2, 3], topology: topology)
+        == [HUDGrouping.Pill(placement: 5, named: 2, othersInSet: 1)]
+    )
+  }
+
+  /// A mirror set the user built keeps naming its master and counting its
+  /// members, on a machine that also has a synthesis set engaged. The carve-out
+  /// is per set, not per machine.
+  @Test func aUserMirrorSetIsUntouchedByTheSynthesisCarveOut() {
+    let topology = MirrorTopology(
+      [
+        MirrorFixtures.display(2, inSet: true),
+        MirrorFixtures.display(3, mirrors: 2),
+        MirrorFixtures.display(4, mirrors: 5),
+        MirrorFixtures.display(5, inSet: true),
+      ],
+      synthesisMasters: [5]
+    )
+    #expect(
+      HUDGrouping.pills(forStepped: [2, 3], topology: topology)
+        == [HUDGrouping.Pill(placement: 2, named: 2, othersInSet: 1)]
+    )
+  }
+
   @Test func anEmptyStepProducesNoPills() {
     #expect(HUDGrouping.pills(forStepped: [], topology: MirrorFixtures.unmirroredPair).isEmpty)
   }

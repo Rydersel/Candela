@@ -770,6 +770,39 @@ public final class BrightnessController: PendingWireDraining {
     mirrorTopology.drawableDisplayID(for: displayID)
   }
 
+  /// Every gamma write this controller makes, and the ONE place SS15's double
+  /// write is decided.
+  ///
+  /// While a synthesis set is engaged the panel and the virtual display holding
+  /// its framebuffer are two different display IDs with two different transfer
+  /// tables. Phase 0 measured that the slave's table stores and reads back
+  /// changed, and that whether it reaches the glass is not decidable from
+  /// software: scanout comes from the master's framebuffer, and no reachable
+  /// layer distinguishes a dimmed panel from an undimmed one. So both are
+  /// written. Nothing here claims either one lands; the tables are identical and
+  /// a gamma write is idempotent, so the pair costs a second CoreGraphics call
+  /// and nothing else, and the hardware pass's eyes item picks the survivor.
+  ///
+  /// Restricted to a SYNTHESIS set (SS1's pairing, never the mirror flags). In a
+  /// mirror set the user built, the master is somebody else's desktop and
+  /// scaling its table would dim a display nobody asked about.
+  ///
+  /// Only the PANEL's write decides the return value. The process that created a
+  /// virtual display cannot read it back, so the companion write can refuse for
+  /// reasons that say nothing about the dimming, and letting that answer
+  /// `landed` would clear the dedupe memo and re-attempt on every drag event:
+  /// the live-lock DT17's reporting rule exists to avoid.
+  @discardableResult
+  private func writeGammaScale(
+    _ scale: Double, using gamma: any GammaApplying, enforcerOn drawable: CGDirectDisplayID
+  ) -> Bool {
+    let landed = gamma.applyGammaScale(scale, on: displayID, enforcerOn: drawable)
+    if drawable != displayID, mirrorTopology.topology().isSynthesisSet(containing: displayID) {
+      gamma.applyGammaScale(scale, on: drawable, enforcerOn: drawable)
+    }
+    return landed
+  }
+
   /// The software leg, inline and synchronous on the main actor. `sw` is the
   /// raw 0…1 software value; the backend receives the transformed physical
   /// multiplier (dossier §3: the transform applies before any gamma/shade
@@ -794,8 +827,9 @@ public final class BrightnessController: PendingWireDraining {
       } ?? true
     } else if let gamma = backends.gamma {
       preGammaApplyHook?()
-      // The WRITE target stays the RAW panel ID; only the enforcer resolves.
-      landed = gamma.applyGammaScale(transformed, on: displayID, enforcerOn: drawable)
+      // The WRITE target stays the RAW panel ID; only the enforcer resolves, and
+      // an engaged synthesis set adds a second write (SS15, `writeGammaScale`).
+      landed = writeGammaScale(transformed, using: gamma, enforcerOn: drawable)
     } else {
       landed = true
     }
@@ -827,7 +861,12 @@ public final class BrightnessController: PendingWireDraining {
     supersedeHeldSoftwareLeg()
     let drawable = drawableDisplayID
     backends.shade?.removeShade(for: drawable)
-    backends.gamma?.applyGammaScale(1.0, on: displayID, enforcerOn: drawable)
+    // Through the same helper as the dim, so the restore reaches every table the
+    // dim wrote: a synthesis companion left scaled is a virtual display holding
+    // a dark framebuffer nothing else will ever hand back.
+    if let gamma = backends.gamma {
+      writeGammaScale(1.0, using: gamma, enforcerOn: drawable)
+    }
     lastAppliedSw = nil
   }
 
@@ -1949,7 +1988,9 @@ public final class BrightnessController: PendingWireDraining {
     let choice = softwareBackendChoice
     let drawable = drawableDisplayID
     if choice != .shade { backends.shade?.removeShade(for: drawable) }
-    if choice != .gamma { backends.gamma?.applyGammaScale(1.0, on: displayID, enforcerOn: drawable) }
+    if choice != .gamma, let gamma = backends.gamma {
+      writeGammaScale(1.0, using: gamma, enforcerOn: drawable)
+    }
     lastAppliedSw = nil
     applyPaths(.software)
     handBackDDCLegIfAbandoned()

@@ -116,3 +116,132 @@ struct SoftwareDimmingReportingTests {
     #expect(shade.alphaCalls.last?.id == Self.slaveID)
   }
 }
+
+/// Records the write target of every gamma apply and can be told which targets
+/// refuse. `RecordingGamma`'s single `succeeds` flag answers the same for both
+/// halves of a synthesis double write, which is exactly the distinction these
+/// tests are about.
+@MainActor
+private final class SelectiveGamma: GammaApplying {
+  var refuses: Set<CGDirectDisplayID> = []
+  private(set) var writes: [(scale: Double, write: CGDirectDisplayID, enforcer: CGDirectDisplayID)] = []
+  private(set) var verified: [CGDirectDisplayID] = []
+
+  @discardableResult
+  func applyGammaScale(
+    _ scale: Double, on displayID: CGDirectDisplayID, enforcerOn drawableDisplayID: CGDirectDisplayID
+  ) -> Bool {
+    writes.append((scale, displayID, drawableDisplayID))
+    return !refuses.contains(displayID)
+  }
+
+  func verifyTableIntact(on displayID: CGDirectDisplayID) -> Bool {
+    verified.append(displayID)
+    return true
+  }
+
+  func recaptureDefaultTable(on _: CGDirectDisplayID) {}
+  func resetAllGamma() {}
+}
+
+/// SS15, amended by Phase 0 (d): a synthesis set has two display IDs and
+/// nothing in software can say which one's transfer table reaches the glass, so
+/// the dimming scale is written to both.
+@Suite("Gamma dimming under an engaged synthesis set (SS15)")
+@MainActor
+struct SynthesisGammaRoutingTests {
+  /// `MirrorFixtures.synthesisPair`: panel 2 shows virtual display 5's
+  /// framebuffer, and the engine's pairing names 5.
+  private static let panelID: CGDirectDisplayID = 2
+  private static let virtualID: CGDirectDisplayID = 5
+
+  private func controller(
+    displayID: CGDirectDisplayID, gamma: any GammaApplying, store: MirrorTopologyStore
+  ) -> BrightnessController {
+    let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "synthesis")
+    prefs.forceSoftware = true
+    prefs.avoidGamma = false
+    return BrightnessController(
+      writer: FakeDDC(readResult: nil),
+      backends: BrightnessBackends(
+        applierNative: FakeNativeApplier(), hdr: nil, shade: RecordingShade(), gamma: gamma
+      ),
+      prefs: prefs,
+      displayID: displayID,
+      mirrorTopology: store,
+      wireSiblings: []
+    )
+  }
+
+  @Test func theScaleIsWrittenToThePanelAndToTheVirtualDisplayItIsMirroredOnto() {
+    let gamma = SelectiveGamma()
+    let controller = controller(
+      displayID: Self.panelID, gamma: gamma,
+      store: MirrorTopologyStore(MirrorFixtures.synthesisPair())
+    )
+    controller.setBrightness(0.4)
+    #expect(gamma.writes.map(\.write) == [Self.panelID, Self.virtualID])
+    // Both halves carry the same scale: the tables are identical, which is what
+    // makes writing both cost nothing but a second call.
+    #expect(Set(gamma.writes.map(\.scale)).count == 1)
+    // And the enforcer stays where it has to be: only the virtual display has a
+    // compositor to force a pass on.
+    #expect(gamma.writes.allSatisfy { $0.enforcer == Self.virtualID })
+  }
+
+  /// The carve-out is the pairing, not the mirror flags: a mirror set the user
+  /// built keeps the single write to the panel. The master there is somebody
+  /// else's desktop, and scaling its table would dim a display nobody asked
+  /// about.
+  @Test func aMirrorSetTheUserBuiltKeepsTheSingleWriteToThePanel() {
+    let gamma = SelectiveGamma()
+    let controller = controller(
+      displayID: 3, gamma: gamma,
+      store: MirrorTopologyStore(MirrorTopology([
+        MirrorFixtures.display(2, inSet: true),
+        MirrorFixtures.display(3, mirrors: 2),
+      ]))
+    )
+    controller.setBrightness(0.4)
+    #expect(gamma.writes.map(\.write) == [3])
+  }
+
+  @Test func anUnmirroredDisplayKeepsTheSingleWrite() {
+    let gamma = SelectiveGamma()
+    let controller = controller(
+      displayID: 2, gamma: gamma, store: MirrorTopologyStore(MirrorFixtures.unmirroredPair)
+    )
+    controller.setBrightness(0.4)
+    #expect(gamma.writes.map(\.write) == [2])
+  }
+
+  /// Only the PANEL's write decides whether the dimming landed. The process that
+  /// created a virtual display cannot read it back, so its write can refuse for
+  /// reasons that say nothing about the dimming; letting that clear the dedupe
+  /// memo would re-attempt on every drag event, which is the live-lock DT17's
+  /// reporting rule was written to avoid.
+  @Test func aRefusedCompanionWriteDoesNotUnMemoiseTheValue() {
+    let gamma = SelectiveGamma()
+    gamma.refuses = [Self.virtualID]
+    let controller = controller(
+      displayID: Self.panelID, gamma: gamma,
+      store: MirrorTopologyStore(MirrorFixtures.synthesisPair())
+    )
+    controller.setBrightness(0.4)
+    controller.setBrightness(0.4)
+    #expect(gamma.writes.count == 2)
+  }
+
+  /// The other direction, unchanged: a refused PANEL write is still retried.
+  @Test func aRefusedPanelWriteIsStillRetried() {
+    let gamma = SelectiveGamma()
+    gamma.refuses = [Self.panelID]
+    let controller = controller(
+      displayID: Self.panelID, gamma: gamma,
+      store: MirrorTopologyStore(MirrorFixtures.synthesisPair())
+    )
+    controller.setBrightness(0.4)
+    controller.setBrightness(0.4)
+    #expect(gamma.writes.count == 4)
+  }
+}

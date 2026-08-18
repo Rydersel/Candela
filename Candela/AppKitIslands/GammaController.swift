@@ -43,6 +43,16 @@ final class GammaController: GammaApplying {
   private var defaultTables: [CGDirectDisplayID: DefaultTable] = [:]
   private var lastAppliedScale: [CGDirectDisplayID: Double] = [:]
 
+  /// Displays whose baseline capture already failed and was already logged.
+  ///
+  /// The capture is still RETRIED every time, so a display that starts
+  /// answering gets its baseline; only the line is written once, because the
+  /// failure is now reachable at drag rate. SS15 writes the table to both ends of a
+  /// synthesis set, and the second end is a virtual display this process created
+  /// and measurably cannot read back; without this, one drag on a synthesized
+  /// size fills the log with the same error at 60 lines a second.
+  private var loggedCaptureFailures: Set<CGDirectDisplayID> = []
+
   // MARK: - GammaApplying
 
   @discardableResult
@@ -74,10 +84,17 @@ final class GammaController: GammaApplying {
       )
       return false
     }
-    // The WRITE keeps the raw panel ID: gamma is per-display and the slave's own
-    // panel is what we want dimmed. Whether it reaches a hardware mirror slave
-    // is UNVERIFIED — and nothing depends on the answer, because a failure is
-    // now reported.
+    // The WRITE keeps whatever ID it was handed: gamma is a per-display property
+    // and this holds no opinion about which display should be dimmed.
+    //
+    // For a mirror SLAVE, whether the write reaches the glass is not decidable
+    // from here, or from anywhere else in software. Phase 0 measured a slave's
+    // table storing and reading back changed, with an unmirrored positive
+    // control, while its scanout comes from the master's framebuffer: both
+    // outcomes are consistent with everything observable. That is why the engine
+    // writes both ends of a synthesis set (SS15) and why nothing on this path
+    // claims a write landed on the panel. A `.success` here means CoreGraphics
+    // accepted the table, no more.
     let result = CGSetDisplayTransferByTable(displayID, table.sampleCount, red, green, blue)
     guard result == .success else {
       Self.log.error("CGSetDisplayTransferByTable failed for display \(displayID, privacy: .public): \(result.rawValue)")
@@ -110,6 +127,9 @@ final class GammaController: GammaApplying {
     // The previous scale was measured against the previous baseline; keeping it
     // would make `verifyTableIntact` compare against a stale reference.
     self.lastAppliedScale.removeValue(forKey: displayID)
+    // A reconfiguration is a new machine state, so a display that refused to
+    // answer before gets its one log line again if it still refuses.
+    self.loggedCaptureFailures.remove(displayID)
     _ = self.defaultTable(for: displayID)
   }
 
@@ -127,21 +147,29 @@ final class GammaController: GammaApplying {
     if let existing = self.defaultTables[displayID] {
       return existing
     }
-    guard let captured = Self.captureDefaultTable(for: displayID) else {
+    guard let captured = Self.captureDefaultTable(
+      for: displayID, quiet: self.loggedCaptureFailures.contains(displayID)
+    ) else {
+      self.loggedCaptureFailures.insert(displayID)
       return nil
     }
+    self.loggedCaptureFailures.remove(displayID)
     self.defaultTables[displayID] = captured
     return captured
   }
 
-  private static func captureDefaultTable(for displayID: CGDirectDisplayID) -> DefaultTable? {
+  private static func captureDefaultTable(
+    for displayID: CGDirectDisplayID, quiet: Bool = false
+  ) -> DefaultTable? {
     var red = [CGGammaValue](repeating: 0, count: Int(self.sampleCapacity))
     var green = red
     var blue = red
     var sampleCount: UInt32 = 0
     let result = CGGetDisplayTransferByTable(displayID, self.sampleCapacity, &red, &green, &blue, &sampleCount)
     guard result == .success, sampleCount > 0 else {
-      self.log.error("CGGetDisplayTransferByTable failed for display \(displayID, privacy: .public): \(result.rawValue)")
+      if !quiet {
+        self.log.error("CGGetDisplayTransferByTable failed for display \(displayID, privacy: .public): \(result.rawValue)")
+      }
       return nil
     }
     let peak = max(red.max() ?? 0, green.max() ?? 0, blue.max() ?? 0)
@@ -149,7 +177,9 @@ final class GammaController: GammaApplying {
     // divides by it on readback (NaN/inf) and scales an all-zero table into a
     // black screen. A zero-peak capture is a failed capture.
     guard peak > 0 else {
-      self.log.error("Captured an all-zero gamma table for display \(displayID, privacy: .public); treating as a failed capture")
+      if !quiet {
+        self.log.error("Captured an all-zero gamma table for display \(displayID, privacy: .public); treating as a failed capture")
+      }
       return nil
     }
     return DefaultTable(red: red, green: green, blue: blue, sampleCount: sampleCount, peak: peak)
