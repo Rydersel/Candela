@@ -9,6 +9,7 @@ let package = Package(
     .executable(name: "candela-probe", targets: ["CandelaProbe"]),
     .executable(name: "candela-model-capture", targets: ["CandelaModelCapture"]),
     .executable(name: "candela-model-fit", targets: ["CandelaModelFit"]),
+    .executable(name: "candela-paint", targets: ["CandelaPaint"]),
   ],
   targets: [
     .target(name: "CandelaPrivateAPIs",
@@ -19,6 +20,7 @@ let package = Package(
     // binds the CandelaKit library target, which is what stays UI-free.
     .executableTarget(name: "CandelaModelCapture", dependencies: ["CandelaKit"]),
     .executableTarget(name: "CandelaModelFit", dependencies: ["CandelaKit"]),
+    .executableTarget(name: "CandelaPaint", dependencies: ["CandelaKit"]),
     .testTarget(name: "CandelaKitTests", dependencies: ["CandelaKit"]),
   ]
 )

@@ -18,6 +18,9 @@ var directory = FileManager.default.homeDirectoryForCurrentUser
   .appendingPathComponent("Library/Application Support/Candela/model-replay")
 var fitFraction = 0.6
 var topApps = 8
+// Read from nonisolated scoring helpers; written once during argument parsing,
+// before any of them run.
+nonisolated(unsafe) var objective = "rmse"
 
 var index = 0
 while index < arguments.count {
@@ -35,6 +38,7 @@ while index < arguments.count {
   case "--log": directory = URL(fileURLWithPath: value())
   case "--fit-fraction": fitFraction = Double(value()) ?? 0.6
   case "--top-apps": topApps = Int(value()) ?? 8
+  case "--objective": objective = value()
   default:
     print("""
       candela-model-fit: score candidate exposure models against a recorded log
@@ -42,6 +46,7 @@ while index < arguments.count {
         --log <dir>            replay log directory
         --fit-fraction <f>     temporal split; leading fraction fits, rest scores (default 0.6)
         --top-apps <n>         how many apps get a fitted prior (default 8)
+        --objective <name>     rmse (default) or pearson
       """)
     exit(2)
   }
@@ -204,11 +209,51 @@ func accumulate(
   return (measured, modelled)
 }
 
+/// Higher is better, for both objectives.
+///
+/// **Pearson cannot fit absolute luminance, and that is not a subtlety.** It is
+/// invariant under `y -> a*y + b`, so scaling and offsetting every prior leaves
+/// it unmoved. The ground-truth harness demonstrated it directly: windows of
+/// known luminance 0.85, 0.35 and 0.05 were recovered in the right ORDER as
+/// 1.00, 0.61 and 0.25, biased high throughout. Meanwhile MP2's bar is the
+/// hottest multiple, which an offset does change. Fitting on a scale-blind
+/// objective and judging on a scale-sensitive one is incoherent, and it is what
+/// produced a fit that drove the dark prior to 0.000 and overshot the peak.
+///
+/// Both maps are in the same unit, luminance times seconds, so a residual
+/// between them is meaningful as it stands. RMSE is normalised by the measured
+/// mean only so the number reads comparably across panels.
 func score(
   _ records: [Prepared], _ parameters: ExposureModelParameters, includeChrome: Bool = false
 ) -> Double {
-  let (measured, modelled) = accumulate(records, parameters, includeChrome: includeChrome)
-  return pearson(measured, modelled) ?? -1
+  if objective == "pearson" {
+    let (measured, modelled) = accumulate(records, parameters, includeChrome: includeChrome)
+    return pearson(measured, modelled) ?? -1
+  }
+  // Fit on PER-RECORD residuals, not on the accumulated map.
+  //
+  // Each instant is an observation; summing first throws away which app was
+  // where at the time. The ground-truth harness showed exactly what that costs:
+  // with three known luminances rotating through three tiles, every cell ends
+  // up averaging all three apps, so the summed map constrains only their SUM
+  // and the fit compresses all three toward the mean (0.85, 0.35 and 0.05 came
+  // back as 0.64, 0.41 and 0.19). The report below still uses accumulated maps,
+  // because accumulation is what the shipped comparison does.
+  var squared = 0.0
+  var total = 0.0
+  var count = 0
+  for record in records {
+    let grid = record.modelled(parameters, includeChrome: includeChrome)
+    for cell in 0..<PanelGrid.cellCount {
+      let delta = record.measured[cell] - grid[cell]
+      squared += delta * delta
+      total += record.measured[cell]
+      count += 1
+    }
+  }
+  guard count > 0, total > 0 else { return -1 }
+  let mean = total / Double(count)
+  return -((squared / Double(count)).squareRoot() / mean)
 }
 
 /// Mean per-display Pearson.

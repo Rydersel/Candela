@@ -186,6 +186,7 @@ for entry in discovered {
   let resolved = wallpaperURL(for: entry.display.id)?.lastPathComponent ?? "(unreadable)"
   print("  display \(entry.display.id): wallpaper \(resolved)")
 }
+fflush(stdout)
 
 var taken = 0
 var skippedLocked = 0
@@ -215,9 +216,15 @@ while taken < options.maxSamples {
       skippedAsleep += 1
       continue
     }
-    guard let entry = discovered.first(where: { $0.display.id == scDisplay.displayID }) else {
-      continue
-    }
+    // DisplayDiscovery returns only external DDC-capable panels, so a virtual
+    // display and the built-in have no entry. They are still perfectly good
+    // capture surfaces: EM13 makes the measured side the composited
+    // framebuffer rather than emitted light, so nothing here needs a physical
+    // panel. Fall back to a key derived from the display ID, which is stable
+    // for the life of a run and is only used to group records.
+    let persistenceKey =
+      discovered.first(where: { $0.display.id == scDisplay.displayID })?.display.persistenceKey
+      ?? "cgdisplay-\(scDisplay.displayID)"
     guard let rotation = DisplayRotation(degrees: CGDisplayRotation(scDisplay.displayID)) else {
       continue
     }
@@ -287,7 +294,7 @@ while taken < options.maxSamples {
       ModelReplayRecord(
         t: Date().timeIntervalSinceReferenceDate, elapsed: options.interval,
         display: .init(
-          persistenceKey: entry.display.persistenceKey, displayID: scDisplay.displayID,
+          persistenceKey: persistenceKey, displayID: scDisplay.displayID,
           pixelWidth: scDisplay.width, pixelHeight: scDisplay.height, rotation: rotation),
         capture: .init(cols: cols, rows: rows, grid: captured),
         measuredPanel: measuredPanel, modelledBaseline: modelled,
