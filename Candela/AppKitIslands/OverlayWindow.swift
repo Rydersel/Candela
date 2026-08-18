@@ -1,8 +1,13 @@
-//  The full-screen overlay window recipe, described once as a value and applied
-//  by a thin function, so both overlay owners agree on it and so the description
-//  can be checked without an NSWindow. The property values are the standard
-//  macOS recipe for a click-through, shielding-level overlay and are dictated by
-//  what AppKit will honour.
+//  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
+//  The window recipe is transplanted from the MonitorControl project (MIT),
+//  from Support/DisplayManager.swift (`createShadeOnDisplay`): the property
+//  sequence, the 10x1 seed rect and the alpha-0 layer-backed content view are
+//  upstream's. It moved here out of `ShadeOverlay` so both overlay owners share
+//  one description; moving it did not make it Candela's.
+//
+//  Candela's own: describing the recipe as a checkable value rather than an
+//  inline sequence, `isReleasedWhenClosed = false`, `.fullScreenAuxiliary`, and
+//  leaving the window ordering to the caller.
 
 import AppKit
 

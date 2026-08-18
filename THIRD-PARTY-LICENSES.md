@@ -32,7 +32,9 @@ its code:
 | `CandelaKit/Sources/CandelaKit/Brightness/DimmingMath.swift` | the dimming curve |
 | `CandelaKit/Sources/CandelaKit/Input/KeyRouter.swift` | the modifier semantics of `MediaKeyTapManager.handle` |
 | `Candela/AppKitIslands/GammaController.swift` | the gamma activity enforcer and per-channel scaling |
-| `Candela/AppKitIslands/ShadeOverlay.swift` | the per-display shade lifecycle (its window construction is Candela's `OverlayWindow`) |
+| `Candela/AppKitIslands/ShadeOverlay.swift` | the per-display shade lifecycle (`getShade`, `createShadeOnDisplay`, `updateShade`, `destroyShade`) |
+| `Candela/AppKitIslands/OverlayWindow.swift` | the overlay window recipe, moved out of `ShadeOverlay` (`createShadeOnDisplay`) |
+| `Candela/AppKitIslands/VolumeFeedbackSound.swift` | the feedback sound and the global-prefs read (`playVolumeChangedSound`, `getSystemSettings`) |
 | `Candela/AppKitIslands/BrightnessHUD.swift` | the custom HUD |
 | `Candela/AppKitIslands/MediaKeyEventTap.swift` | the event tap (and MediaKeyTap below) |
 

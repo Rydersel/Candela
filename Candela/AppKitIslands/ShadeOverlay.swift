@@ -3,8 +3,9 @@
 //  project (MIT), Support/DisplayManager.swift: `getShade` is `shade(for:)`,
 //  `createShadeOnDisplay` is `createShade`, `updateShade` is `setShadeAlpha`,
 //  `destroyShade` is `removeShade`. The window construction those methods used
-//  to inline is no longer here: it is Candela's `OverlayWindow`, and the three
-//  DIVERGENCE notes below are Candela's fixes to fork bugs.
+//  to inline has moved to `OverlayWindow`, where it stays MonitorControl-derived
+//  and carries this same header. The three DIVERGENCE notes below are Candela's
+//  fixes to fork bugs.
 
 import AppKit
 import CandelaKit

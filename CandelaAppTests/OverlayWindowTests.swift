@@ -49,6 +49,12 @@ struct OverlayWindowTests {
     let window = NSWindow(
       contentRect: OverlayWindow.seedRect, styleMask: OverlayWindow.styleMask,
       backing: .buffered, defer: false)
+    // Seed every property the recipe sets to FALSE with its opposite first.
+    // `isMovableByWindowBackground` is the one whose NSWindow default already
+    // equals the configured value, so without this the assertion below passes
+    // whether or not `configure` ever writes it: a check that cannot fail.
+    window.isMovableByWindowBackground = true
+    window.ignoresMouseEvents = false
     // Not the seed rect, and not any screen's frame: an arbitrary rect proves
     // the frame argument is what lands.
     let frame = NSRect(x: 120, y: 60, width: 400, height: 300)
