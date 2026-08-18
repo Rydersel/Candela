@@ -1235,6 +1235,22 @@ final class DisplayModeCoordinator {
       // a reassigned ioModeID surfaces as a reported failure, never a wrong
       // mode.
       refreshCatalog(for: displayID)
+      // The disengage restored the pre-engage mode. When that IS the picked
+      // mode there is no change left to preview, and `begin` would wait on a
+      // reconfigure that never comes: measured 2026-08-18, the select hung
+      // and every later pick queued behind it. Ordinary picks cannot hit
+      // this (a same-value selection never fires), so it is handled here.
+      // The kept-mode funnel runs so the stored stop is cleared.
+      if let current = configurator.currentMode(for: displayID),
+         current.descriptor == mode.descriptor {
+        if let identity = identity(for: displayID), persistence.isEnabled(for: identity) {
+          store(mode, on: displayID, for: identity)
+        } else {
+          synthesis?.clearStoredSize(displayID: displayID)
+        }
+        await adopt(.clear)
+        return
+      }
     }
     // AR12, asked BEFORE `begin()` because that is what makes a refusal cost
     // nothing: no transaction has been opened and no display has moved, so there
