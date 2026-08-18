@@ -53,7 +53,7 @@ struct SynthesisCopyTests {
   /// "display", never "panel": SO14 retired the word from visible copy while
   /// leaving it in the type vocabulary this property is named from.
   @Test func theRateColumnStatesTheRuleRatherThanAFigure() {
-    #expect(SynthesisCopy.keepsPanelRefresh == "May lower the refresh rate while in use")
+    #expect(SynthesisCopy.keepsPanelRefresh == "Keeps the display's refresh rate")
   }
 
   /// Pinned through the quoted key rather than by equality: a
@@ -222,7 +222,10 @@ struct SynthesisCopyTests {
   /// values and cannot be `CaseIterable`, and a scan that silently skipped a
   /// reason is exactly what these tests exist to prevent.
   private static let everyReason: [SynthesisCoordinator.Refusal.Reason] =
-    [.builtIn, .hdrEngaged, .alreadyMirrored, .notOffered, .sizeNoLongerOffered, .busy]
+    [
+      .builtIn, .hdrEngaged, .alreadyMirrored, .notOffered, .sizeNoLongerOffered,
+      .hdrLeftStanding, .busy,
+    ]
       + ReconfigurationClaimant.allCases.map { .blocked(by: $0) }
       + everyFailure.map { .engine($0) }
 

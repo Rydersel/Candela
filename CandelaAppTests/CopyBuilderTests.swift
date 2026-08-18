@@ -1178,7 +1178,10 @@ struct CopyBuilderTests {
   }
 
   private static let allSynthesisRefusalReasons: [SynthesisCoordinator.Refusal.Reason] =
-    [.builtIn, .hdrEngaged, .alreadyMirrored, .notOffered, .sizeNoLongerOffered, .busy]
+    [
+      .builtIn, .hdrEngaged, .alreadyMirrored, .notOffered, .sizeNoLongerOffered,
+      .hdrLeftStanding, .busy,
+    ]
       + ReconfigurationClaimant.allCases.map { .blocked(by: $0) }
       + allSynthesisFailures.map { .engine($0) }
 
@@ -1191,9 +1194,10 @@ struct CopyBuilderTests {
     case .alreadyMirrored: 2
     case .notOffered: 3
     case .sizeNoLongerOffered: 4
-    case .busy: 5
-    case .blocked: 6
-    case .engine: 7
+    case .hdrLeftStanding: 5
+    case .busy: 6
+    case .blocked: 7
+    case .engine: 8
     }
   }
 
@@ -1231,6 +1235,6 @@ struct CopyBuilderTests {
     #expect(Set(Self.allStartFailureReasons.map(Self.guardStartFailureReason)).count == 2)
     #expect(Set(Self.allLockDimSkips.map(Self.guardLockDimSkip)).count == 4)
     #expect(Set(Self.allSynthesisFailures.map(Self.guardSynthesisFailure)).count == 8)
-    #expect(Set(Self.allSynthesisRefusalReasons.map(Self.guardSynthesisRefusalReason)).count == 8)
+    #expect(Set(Self.allSynthesisRefusalReasons.map(Self.guardSynthesisRefusalReason)).count == 9)
   }
 }

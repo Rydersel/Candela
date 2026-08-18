@@ -52,14 +52,24 @@ enum SynthesisCopy {
   /// two marks stay distinguishable (SS5).
   static var badge: String { "Rendered by \(AppInfo.productName)" }
 
-  /// The rate column of a synthesized row. The stop has no rate of its own,
-  /// and the engaged rate can be LOWER than what the display ran before
-  /// [MEASURED 2026-08-18], so this is a cost note rather than a promise.
+  /// The rate column of a synthesized row. The stop has no rate of its own, so
+  /// the column states what happens to the display's rate rather than naming a
+  /// figure that would be this panel's.
+  ///
+  /// **Ruled back to a promise on 2026-08-18**, after a spell as a cost note
+  /// ("May lower the refresh rate while in use"). That sentence was ruled while
+  /// the master paced the wire: the mirror left the slave on a timing of the
+  /// OS's choosing, measured at 100 Hz from a 175 Hz start. The engage tail now
+  /// re-times the slave onto its own mode and CHECKS the achieved state, with
+  /// the HDR round trip as the fallback when it cannot, so the display keeps
+  /// its own rate. A cost claim that is usually false costs the feature its
+  /// adoption; it is also rendered on every OFFERED row, so the wrong sentence
+  /// is a caution attached to every stop before anybody chooses one.
   ///
   /// "display", not "panel". SO14 retired that word from visible copy while
   /// leaving it in the type and comment vocabulary, which is exactly the split
   /// this property's own name sits on the other side of.
-  static var keepsPanelRefresh: String { "May lower the refresh rate while in use" }
+  static var keepsPanelRefresh: String { "Keeps the display's refresh rate" }
 
   /// The All list enumerates what the display reports, and a synthesized size
   /// is not in it, so the row the checkmark would sit on is absent while a size
@@ -93,6 +103,11 @@ enum SynthesisCopy {
       // can fire while the size is engaged and visible, and a sentence
       // contradicting the screen is worse than a vague one.
       "\(AppInfo.productName) could not match that size to this display. Pick one from the list of sizes."
+    case .hdrLeftStanding:
+      // The one state this feature can leave behind that only the person can
+      // clear, so it names the control rather than describing the mechanism.
+      // Brightness and volume go over the data cable, which HDR takes away.
+      "\(AppInfo.productName) turned HDR on to renegotiate this display's link and could not turn it off again. Turn HDR off in System Settings: brightness and volume controls cannot reach the display while it is on."
     case .busy:
       "\(AppInfo.productName) is still finishing the last display change. Try again in a moment."
     case let .blocked(claimant):

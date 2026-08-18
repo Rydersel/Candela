@@ -61,6 +61,11 @@ final class SynthesisCoordinator {
       case notOffered
       /// The size asked for is no longer one the catalog offers for this panel.
       case sizeNoLongerOffered
+      /// The post-engage link bounce turned HDR on to renegotiate the wire
+      /// and could not turn it back off. Not a refused request: the size is on
+      /// the glass. It is the one state this feature can leave behind that a
+      /// person has to clear themselves, and DDC is dead until they do.
+      case hdrLeftStanding
       /// A hardware sequence was already running. THE one reason worth
       /// retrying: both busy shapes the session can answer with
       /// (`SynthesisPreviewRefusal.busy` and `SynthesisPreviewOutcome.busy`)
@@ -186,7 +191,8 @@ final class SynthesisCoordinator {
     configurator: any DisplayConfiguring,
     gate: DisplayReconfigurationGate,
     topologyStore: MirrorTopologyStore,
-    hdr: any HDRToggling
+    hdr: SynthesisHDRBounce,
+    bounceDurations: BouncingSynthesisDriver.Durations = .production
   ) {
     // The synthesis pairing enters the published topology HERE, before the
     // mirror it describes, and not at `refreshSnapshot` alone.
@@ -220,7 +226,9 @@ final class SynthesisCoordinator {
     // Both engage entry points route through the bouncing driver, so the
     // post-engage link bounce runs for a picked size and an unattended
     // restore alike. Disengage and the pairing read forward untouched.
-    let driver = BouncingSynthesisDriver(engine: engine, hdr: hdr, configurator: configurator)
+    let driver = BouncingSynthesisDriver(
+      engine: engine, hdr: hdr, configurator: configurator, durations: bounceDurations
+    )
     self.driver = driver
     session = SynthesisPreviewSession(driver: driver)
     self.gate = gate

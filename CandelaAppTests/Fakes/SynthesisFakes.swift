@@ -29,6 +29,18 @@ final class FakeDisplayWorld: @unchecked Sendable {
   private var ownModeByID: [CGDirectDisplayID: DisplayMode] = [:]
   private var nativeByID: [CGDirectDisplayID: (width: Int, height: Int)] = [:]
   private(set) var mirrorChanges: [[MirrorChange]] = []
+  private var _applies: [(mode: DisplayMode, displayID: CGDirectDisplayID)] = []
+
+  /// Every mode apply the configurator was asked for, in order. The engage
+  /// tail's re-time is one of these, and it is the only evidence of it a fake
+  /// world can honestly carry.
+  var applies: [(mode: DisplayMode, displayID: CGDirectDisplayID)] {
+    lock.withLock { _applies }
+  }
+
+  func recordApply(_ mode: DisplayMode, to displayID: CGDirectDisplayID) {
+    lock.withLock { _applies.append((mode, displayID)) }
+  }
 
   func attach(
     _ display: ConfiguredDisplay, modes: [DisplayMode], current: DisplayMode,
@@ -72,7 +84,11 @@ final class FakeDisplayWorld: @unchecked Sendable {
   }
 
   /// A slave takes its master's geometry and keeps its own refresh, which is
-  /// the measured behaviour the whole feature rests on (Phase 0). A null master
+  /// what a mirror does at the instant it lands (Phase 0). It models the world
+  /// BEFORE the engage tail, deliberately: on hardware the tail re-times the
+  /// slave onto its own mode about two seconds later, and `apply` here records
+  /// the call without moving the world, so a test that wants the retimed world
+  /// asserts on the recorded apply rather than on the readback. A null master
   /// puts the display back on its OWN mode, matching the Kit's
   /// `FakeSynthesisWorld`: without that half, the engine's unwind never sees
   /// the panel return to its own geometry and every disengage answers
@@ -126,8 +142,14 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   let world: FakeDisplayWorld
   /// Refuse the mirror, to reach the engine's `mirrorRefused` arm.
   var refusesMirroring = false
+  /// Throw from `apply`, to reach the engage tail's bounce fallback.
+  var refusesModeApplies = false
 
   init(_ world: FakeDisplayWorld) { self.world = world }
+
+  /// Every mode apply, in order. Forwarded from the world so a test asserting
+  /// on the engage tail reads it off the object it configured.
+  var applies: [(mode: DisplayMode, displayID: CGDirectDisplayID)] { world.applies }
 
   func displays() -> [ConfiguredDisplay] { world.displays() }
   func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] { world.modes(for: displayID) }
@@ -139,7 +161,16 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
     world.nativePixels(for: displayID)
   }
 
-  func apply(_: DisplayMode, to _: CGDirectDisplayID, scope _: DisplayConfigScope) throws {}
+  /// Recorded, and the world is deliberately NOT moved. The engage tail's
+  /// re-time is a mode apply on a mirror SLAVE: on hardware the picture keeps
+  /// coming from the master while the wire changes timing, which no fake
+  /// readback models, so the assertion a test can honestly make is about the
+  /// call rather than about a readback. The tail's own achieved-state check
+  /// then answers false here, which is what puts the bounce under test.
+  func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope _: DisplayConfigScope) throws {
+    if refusesModeApplies { throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue) }
+    world.recordApply(mode, to: displayID)
+  }
 
   func applyMirroring(_ changes: [MirrorChange], scope _: DisplayConfigScope) throws {
     guard !refusesMirroring else { throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue) }
@@ -245,13 +276,49 @@ final class FakeSynthesisVirtualDisplayHost: VirtualDisplayAchievedModeReporting
   }
 }
 
-/// HDR that is not there: the link bounce becomes a structural no-op, which
-/// is the right fixture for tests that are not about the bounce.
-struct FakeNoHDR: HDRToggling {
-  func supportsHDR(displayID: CGDirectDisplayID) async -> Bool { false }
-  func isHDREnabled(displayID: CGDirectDisplayID) async -> Bool { false }
-  func measuredHDREnabled(displayID: CGDirectDisplayID) async -> Bool { false }
-  @discardableResult
-  func setHDR(displayID: CGDirectDisplayID, enabled: Bool) async -> Bool { false }
-  func displaysReconfigured() async {}
+/// A scriptable stand-in for the display's own HDR seam, so the engage tail's
+/// bounce can be driven without a `BrightnessController`.
+///
+/// Lock-backed: the driver runs on the generic executor while the test body
+/// reads the log from its own task.
+final class FakeSynthesisHDR: @unchecked Sendable {
+  private let lock = NSLock()
+  private var _supports: Bool
+  private var _live: Bool?
+  /// Every leg the bounce asked for, in order, as (requested, granted).
+  private var _legs: [(enabled: Bool, granted: Bool)] = []
+  private var _leftStanding: [CGDirectDisplayID] = []
+  /// Which legs the display ACHIEVES. An off leg that never achieves is the
+  /// stranding path the bounce gives up loudly on.
+  private var _achievesOn: Bool
+  private var _achievesOff: Bool
+
+  init(supports: Bool = true, live: Bool? = false, achievesOn: Bool = true, achievesOff: Bool = true) {
+    _supports = supports
+    _live = live
+    _achievesOn = achievesOn
+    _achievesOff = achievesOff
+  }
+
+  var legs: [(enabled: Bool, granted: Bool)] { lock.withLock { _legs } }
+  var leftStanding: [CGDirectDisplayID] { lock.withLock { _leftStanding } }
+
+  /// The seam a `SynthesisCoordinator` takes, over this fake.
+  var seam: SynthesisHDRBounce {
+    SynthesisHDRBounce(
+      supportsHDR: { [self] _ in lock.withLock { _supports } },
+      measuredHDREnabled: { [self] _ in lock.withLock { _live } },
+      setHDR: { [self] _, enabled in
+        lock.withLock {
+          let granted = enabled ? _achievesOn : _achievesOff
+          if granted { _live = enabled }
+          _legs.append((enabled, granted))
+          return granted
+        }
+      },
+      reportHDRLeftStanding: { [self] displayID in
+        lock.withLock { _leftStanding.append(displayID) }
+      }
+    )
+  }
 }

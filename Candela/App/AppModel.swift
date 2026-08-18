@@ -93,7 +93,41 @@ final class AppModel {
       configurator: CoreGraphicsDisplayConfigurator(),
       gate: reconfigurationGate,
       topologyStore: mirrorTopology,
-      hdr: hdrToggling
+      // The link bounce's HDR seam, and every leg of it goes through the
+      // DISPLAY'S OWN controller rather than the shared panel service. The
+      // controller owns the transition token, the settle window and the
+      // wire-memo invalidation; HDR driven past it opens a window in which DDC
+      // writes are ACKed, swallowed and memo-recorded as landed, which on a
+      // write-only display nothing downstream can detect.
+      //
+      // No controller means no bounce. A display the app is not controlling is
+      // one nothing can vouch for, and skipping is the safe direction: the
+      // bounce is cosmetic and HDR left standing is not.
+      hdr: SynthesisHDRBounce(
+        supportsHDR: { [weak self] displayID in
+          await MainActor.run { self?.controller(for: displayID)?.supportsHDR ?? false }
+        },
+        measuredHDREnabled: { [weak self] displayID in
+          guard let controller = await MainActor.run(body: { self?.controller(for: displayID) })
+          else { return nil }
+          // A MEASURED read past the backend's own cache, and `.unknown` when a
+          // transition raced it. nil rather than a guess: the bounce refuses to
+          // decide from a state nobody established.
+          return switch await controller.hdrWriteWindow() {
+          case .locked: true
+          case .open: false
+          case .unknown: nil
+          }
+        },
+        setHDR: { [weak self] displayID, enabled in
+          guard let controller = await MainActor.run(body: { self?.controller(for: displayID) })
+          else { return false }
+          return await controller.setTransientHDR(enabled)
+        },
+        reportHDRLeftStanding: { [weak self] displayID in
+          await MainActor.run { self?.synthesis.note(.hdrLeftStanding, for: displayID) }
+        }
+      )
     )
     // The prefs join. Built from the DISPLAY PREFS persistence key, which is
     // what every per-display accessor suffixes on; `DisplayConfigIdentity.key`
@@ -108,9 +142,21 @@ final class AppModel {
       // Launch ordering: the unattended reapply pass can run before the first
       // controller build populates the list above. A nil here reads as "not
       // opted in" and silently drops the relaunch restore, so ask discovery
-      // directly rather than defaulting. Rare, and the walk is synchronous.
-      return discoverDisplays(virtualDisplays.ownedDisplayIDs)
-        .first { $0.display.id == displayID }?.display.persistenceKey
+      // directly rather than defaulting.
+      //
+      // MEMOIZED, including the nil answer, and that is the load-bearing half.
+      // The walk is a full IOKit service iteration on the main actor, and this
+      // closure is reached from `offersSyntheticSizes`, which `refreshCatalog`
+      // calls for every observed display on every screen-parameters
+      // notification and which a Diagnostics body calls on every render. A
+      // display discovery never returns (a dummy, a non-DDC external) misses
+      // the table above PERMANENTLY, so an unmemoized fallback is an unbounded
+      // retry of a walk that has already answered. `performRefresh` clears the
+      // memo, which is exactly the event that can change the answer.
+      return discoveredPersistenceKeys.value(for: displayID) {
+        discoverDisplays(virtualDisplays.ownedDisplayIDs)
+          .first { $0.display.id == displayID }?.display.persistenceKey
+      }
     }
     // SS9. The achieved state first, and the stored intent as well: at launch
     // the controllers may not exist yet, and refusing on either answer is the
@@ -613,6 +659,13 @@ final class AppModel {
   /// 2026-08-17 by the event ring's ordering, which distinguishes the two.
   @ObservationIgnored private let discoverDisplays: (Set<CGDirectDisplayID>) -> DiscoveredDisplays
 
+  /// What the persistence-key fallback's discovery walk answered, per display
+  /// id, for this display configuration. A reference type so the escaping
+  /// closure that owns the fallback can write it without capturing `self`
+  /// mutably; cleared by `performRefresh`, which is the one event that can
+  /// change what discovery would say.
+  @ObservationIgnored private let discoveredPersistenceKeys = DiscoveredKeyMemo()
+
   init(
     shade: (any ShadeRendering)? = nil,
     gamma: (any GammaApplying)? = nil,
@@ -639,6 +692,15 @@ final class AppModel {
   /// poller ticks must not replicate onto a departed controller.
   var allControlledStates: [DisplayState] {
     (builtIn.map { [$0] } ?? []) + displays
+  }
+
+  /// The brightness controller driving one display, or nil when nothing is
+  /// driving it: a virtual display, a launch pass that has not built the
+  /// controllers yet, or a display that has departed. Callers that reach for a
+  /// controller to CHANGE the display treat nil as "do not proceed", never as
+  /// a licence to go around it.
+  func controller(for displayID: CGDirectDisplayID) -> BrightnessController? {
+    allControlledStates.first { $0.id == displayID }?.controller
   }
 
   /// SO21: two connected displays resolving to ONE persistence key — identical
@@ -701,10 +763,11 @@ final class AppModel {
       // on which pages were visited this session (combined pass D8).
       //
       // A synthesis-engaged display answers from the ENGINE instead, and this
-      // is Phase 0's binding rule rather than a preference: while a stop is
-      // engaged the readback is the virtual master's geometry under a
-      // fabricated mode id that appears in no enumeration, so a report quoting
-      // it would name a mode nobody can look up. The engine's pairing carries
+      // is binding rather than a preference: the engage tail re-times the
+      // slave, so the readback names the display's own native mode [MEASURED
+      // 2026-08-18]. A report quoting it would name a real, lookup-able mode
+      // that is not the one on the glass, which is worse than naming an
+      // unresolvable one. The engine's pairing carries
       // the slot too, which is what tells two engaged displays apart in a
       // pasted report and is the handoff's "the stop in force belongs in the
       // report's mode line".
@@ -1274,6 +1337,9 @@ final class AppModel {
   /// deinit finishes its coalescer, which lands any pending write before the
   /// drain task exits, so no explicit `waitForPendingWrites()` is needed.
   private func performRefresh() async -> [CGDirectDisplayID] {
+    // The display set is about to be re-derived, so a memoized "discovery does
+    // not know this id" is no longer evidence about anything.
+    discoveredPersistenceKeys.clear()
     let existing = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
     var appeared: [DisplayState] = []
     var kept: [DisplayState] = []
