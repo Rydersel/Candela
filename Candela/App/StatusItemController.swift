@@ -393,12 +393,29 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // the menu bar ended up rather than where the request was made.
     let arrangementConfirmation = ArrangementConfirmationWindow(coordinator: model.arrangement)
     arrangementConfirmation.drawableDisplayID = drawableDisplayID
-    arrangementConfirmation.displayName = displayName
+    // SS12: while a synthesized size stands, the display this window is talking
+    // about is the virtual display holding the desktop, and the person reading
+    // the sentence is looking at their monitor. So it names the panel the pair
+    // is standing in for, exactly as the arrangement map does. An empty answer
+    // stays possible and is already handled: `ArrangementCopy` falls back to an
+    // unnamed sentence rather than leaving a gap where a name should be.
+    arrangementConfirmation.displayName = { [weak self] displayID in
+      guard let self else { return "" }
+      let pairing = model.synthesis.pairings.first { $0.virtualDisplayID == displayID }
+      return displayName(pairing?.physicalDisplayID ?? displayID)
+    }
     self.arrangementConfirmation = arrangementConfirmation
     model.arrangement.confirmation = arrangementConfirmation
     // The canvas names its tiles through the coordinator, so the map and the
     // confirmation window call a display by the same name.
     model.arrangement.displayName = displayName
+    // SS12. What the coordinator keys a saved layout, its lookup and the arrival
+    // gate on: a synthesized size puts the desktop on a virtual display and
+    // makes the panel its mirror slave, so without the pairing the topology
+    // signature moves the moment a size engages and orphans the layout saved for
+    // that display set. Read live and held nowhere: the pairing changes, and its
+    // display IDs are reassigned across a replug.
+    model.arrangement.synthesisPairings = { [weak self] in self?.model.synthesis.pairings ?? [] }
     // D27, the same wiring `didStoreMode` gets and for the same reason: the
     // coordinator writes `savedArrangements` when a layout is kept, and the seam
     // has to hear about it whichever surface answered. App-level, so no

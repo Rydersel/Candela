@@ -71,11 +71,14 @@ struct ArrangementPane: View {
       guard let panel = panels[id] else { return coordinator.displayName(id) }
       let friendly = coordinator.displayName(panel)
       guard friendly.isEmpty else { return friendly }
-      // Every caller falls back to the name the topology carries when this
-      // answers "", and for a pair that name is the virtual display's: the one
-      // string that must never appear on this map. So the fallback is resolved
-      // for the PANEL here, where the pairing is still in hand.
-      return model.mirrorTopology.topology().displays.first { $0.id == panel }?.name ?? ""
+      // NEVER "" for a pair, which is why this fallback is spelled out rather
+      // than left to the caller: the canvas answers an empty name with the name
+      // the TILE carries, and for a pair that is the virtual display's, the one
+      // string that must not appear on this map. So the panel's own name from
+      // the topology, and behind that the last-resort wording the app already
+      // uses for a display nothing can name.
+      let panelName = model.mirrorTopology.topology().displays.first { $0.id == panel }?.name ?? ""
+      return panelName.isEmpty ? "Display" : panelName
     }
   }
 

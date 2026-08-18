@@ -491,7 +491,10 @@ final class ArrangementCoordinator {
       arrivals: claimed,
       stored: persistence.savedArrangement(
         // The ONLINE spelling of the signature, which is the one the arrival
-        // gate above signs; the two agree by construction and by test.
+        // gate above signs; the two agree by construction and by test. They can
+        // diverge on one input, a display whose bounds are unreadable, which the
+        // layout spelling drops and this one keeps: inert here, because `decide`
+        // defers on exactly that discrepancy before it consults `stored`.
         for: TopologySignature(online: topology.displays, substituting: substituting)
       ),
       attached: topology.displays,

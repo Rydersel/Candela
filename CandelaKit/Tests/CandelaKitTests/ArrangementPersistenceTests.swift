@@ -460,6 +460,33 @@ struct ArrangementPersistenceTests {
     )
   }
 
+  /// The v1 outcome for the case a user meets first, and it is intended rather
+  /// than a gap: a synthesized size changes the desktop's footprint, so the
+  /// layout is FOUND under the panel and then declined, because its origins were
+  /// measured on a screen that is not the shape this one is now (#180).
+  @Test func aSizeThatChangesTheFootprintIsFoundAndThenDeclinedOnGeometry() throws {
+    let store = ArrangementPersistence(defaults: InMemoryDefaults())
+    store.save(deskLayout)
+
+    // A stop the size ladder actually offers under a 1920x1080 panel, rather
+    // than a difference invented to make the assertion fire.
+    let engaged = DisplayArrangement(tiles: [
+      tile(
+        id: 7, identity: "vd", DisplayRect(x: 0, y: 0, width: 1728, height: 972),
+        mirroredIDs: [3]
+      ),
+      tile(id: 2, identity: "dell", right),
+    ])
+    let substituting = [CGDirectDisplayID(7): Self.magKey]
+    let saved = try #require(
+      store.savedArrangement(for: TopologySignature(engaged, substituting: substituting))
+    )
+    #expect(
+      ArrangementPersistence.resolve(saved, against: engaged, substituting: substituting)
+        == .geometryDiffers([Self.magKey])
+    )
+  }
+
   /// Both spellings of the substituted signature agree, for the reason the
   /// unsubstituted pair does: the arrival gate reads the online list and the
   /// store keys on the layout, and a disagreement between them would file a
