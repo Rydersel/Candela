@@ -115,14 +115,29 @@ public enum ExposureModel {
 
   /// Window layers that count as content coverage (EM4).
   ///
-  /// Includes ordinary app windows (layer 0) up through the Dock and the menu
-  /// bar. Excludes two families for opposite reasons. Below zero is the desktop
-  /// backdrop, which fills the screen: counting it would read the wallpaper as
-  /// full-screen window coverage and delete the wallpaper term on every
-  /// display. Above the range are transient high layers such as pop-up menus
-  /// and drag images, which are on screen for a moment and would book a
-  /// sampling interval's worth of coverage for it. Chrome auto-hide needs no
-  /// special case: a hidden menu bar is not in the on-screen list.
+  /// Ordinary app windows and their panels. Excludes two families for opposite
+  /// reasons. Below zero is the desktop backdrop, which fills the screen:
+  /// counting it would read the wallpaper as full-screen window coverage and
+  /// delete the wallpaper term on every display. Above the range are transient
+  /// high layers such as pop-up menus and drag images, which are on screen for
+  /// a moment and would book a sampling interval's worth of coverage for it.
+  ///
+  /// **This range does NOT reach the Dock or the menu bar, and never did**
+  /// [MEASURED 2026-08-18]. An earlier version of this comment said it did.
+  /// Both live near `-2147483602`, far below zero, and the window source
+  /// applies `.excludeDesktopElements` before this range is ever consulted, so
+  /// system chrome does not reach the model by either route. The measured
+  /// capture does contain its light, so the two sides of the comparison are
+  /// asymmetric there.
+  ///
+  /// Widening the range is not the fix. The Dock and Wallpaper entries are
+  /// full-display backing windows (3440x1440 on the MAG), so admitting them
+  /// would blanket every cell and delete the wallpaper term, which is the
+  /// failure the paragraph above already describes. Only the menu-bar strips
+  /// are genuinely chrome-sized.
+  ///
+  /// Chrome auto-hide needs no special case: a hidden menu bar is not in the
+  /// on-screen list.
   public static let includedLayers: ClosedRange<Int> = 0...25
 
   /// Estimated content luminance per panel-native cell, always exactly
