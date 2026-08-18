@@ -110,16 +110,19 @@ let candidates = realWindows.filter { window in
   let name = string(window, kAXTitleAttribute as String)
   return !decoys.contains { name.hasPrefix($0) }
 }
-guard candidates.count == 1, let settings = candidates.first else {
+// More than one candidate is a real state, not an error: a mode change opens
+// the keep/revert countdown window beside the settings window, and "Keep"
+// lives in the countdown. Walk every candidate; press keeps its own guarantee
+// by requiring exactly one matching ELEMENT across all of them.
+guard !candidates.isEmpty else {
   if realWindows.isEmpty {
     print("no settings window: open Settings first (AXWindows held \(windows.count) non-window elements)")
-    exit(1)
+  } else {
+    print("no settings window: every open window is a named decoy")
+    for window in realWindows { print("  [\(string(window, kAXTitleAttribute as String))]") }
   }
-  print("axprobe: settings window not uniquely identified: \(candidates.count) candidates.")
-  for window in realWindows { print("  [\(string(window, kAXTitleAttribute as String))]") }
   exit(1)
 }
-print("window [\(string(settings, kAXTitleAttribute as String))]")
 
 var pressable: [AXUIElement] = []
 
@@ -163,7 +166,11 @@ func walk(_ element: AXUIElement, depth: Int) {
   for kid in children(element) { walk(kid, depth: depth + 1) }
 }
 
-walk(settings, depth: 0)
+for window in candidates {
+  print("window [\(string(window, kAXTitleAttribute as String))]")
+  pendingCaption = ""
+  walk(window, depth: 0)
+}
 
 if verb == "press" {
   guard pressable.count == 1 else {

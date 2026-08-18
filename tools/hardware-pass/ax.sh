@@ -146,7 +146,15 @@ tell application "System Events"
             delay 0.6
             click menu item "$2" of menu 1 of u
             delay 1.2
-            return "$1 -> " & (value of u as text)
+            -- The click may fire a display reconfigure that tears the AX tree;
+            -- reading the value back then throws, and the outer try would turn
+            -- a SUCCESSFUL pick into NOT FOUND. The click is the deed; the
+            -- readback is best-effort.
+            set v to "(value unreadable: reconfigure in flight)"
+            try
+              set v to value of u as text
+            end try
+            return "$1 -> " & v
           end if
         end repeat
       end try
