@@ -114,6 +114,11 @@ struct PreparedWindow {
 
 struct Prepared {
   let windows: [PreparedWindow]
+  /// Menu-bar-sized system chrome only. The Dock and Wallpaper entries are
+  /// full-display backing windows; admitting those would blanket every cell
+  /// and delete the wallpaper term, so they are filtered by area rather than
+  /// by layer, which cannot tell them apart.
+  let chrome: [PreparedWindow]
   let backdrop: [Double]?
   let dark: Bool
   let measured: [Double]
@@ -121,12 +126,15 @@ struct Prepared {
   let recordedBaseline: [Double]
   let key: String
 
-  func modelled(_ parameters: ExposureModelParameters) -> [Double] {
+  func modelled(_ parameters: ExposureModelParameters, includeChrome: Bool = false) -> [Double] {
     let prior = dark ? parameters.darkAppearancePrior : parameters.lightAppearancePrior
+    // Chrome is BEHIND every app window: it is what a window occludes, never
+    // the reverse, so it goes last in a front-to-back walk.
+    let all = includeChrome ? windows + chrome : windows
     switch parameters.compositing {
     case .summedCoverage:
       var coverage = [Double](repeating: 0, count: PanelGrid.cellCount)
-      for window in windows {
+      for window in all {
         for cell in coverage.indices { coverage[cell] += window.coverage[cell] }
       }
       return (0..<PanelGrid.cellCount).map { cell in
@@ -136,7 +144,7 @@ struct Prepared {
     case .topmostWins:
       var remaining = [Double](repeating: 1, count: PanelGrid.cellCount)
       var accumulated = [Double](repeating: 0, count: PanelGrid.cellCount)
-      for window in windows {
+      for window in all {
         let luminance =
           parameters.appPriors[window.owner] ?? parameters.layerPriors[window.layer] ?? prior
         for cell in 0..<PanelGrid.cellCount {
@@ -162,21 +170,32 @@ func prepare(_ record: ModelReplayRecord) -> Prepared {
         owner: $0.ownerName, layer: $0.layer,
         coverage: transform.coverage(ofDisplayRect: $0.bounds))
     }
+  let displayArea = transform.displaySize.width * transform.displaySize.height
+  let chrome = record.chrome.map(\.snapshot)
+    .filter { snapshot in
+      let area = snapshot.bounds.width * snapshot.bounds.height
+      return area > 0 && displayArea > 0 && area < 0.5 * displayArea
+    }
+    .map {
+      PreparedWindow(
+        owner: "chrome", layer: $0.layer,
+        coverage: transform.coverage(ofDisplayRect: $0.bounds))
+    }
   return Prepared(
-    windows: windows, backdrop: record.wallpaper, dark: record.appearanceIsDark,
+    windows: windows, chrome: chrome, backdrop: record.wallpaper, dark: record.appearanceIsDark,
     measured: record.measuredPanel, elapsed: record.elapsed,
     recordedBaseline: record.modelledBaseline, key: record.display.persistenceKey)
 }
 
 /// Accumulated (measured, modelled) maps over a set of records, in the same
 /// exposure unit the shipped comparison uses.
-func accumulate(_ records: [Prepared], _ parameters: ExposureModelParameters)
-  -> ([Double], [Double])
-{
+func accumulate(
+  _ records: [Prepared], _ parameters: ExposureModelParameters, includeChrome: Bool = false
+) -> ([Double], [Double]) {
   var measured = [Double](repeating: 0, count: PanelGrid.cellCount)
   var modelled = [Double](repeating: 0, count: PanelGrid.cellCount)
   for record in records {
-    let grid = record.modelled(parameters)
+    let grid = record.modelled(parameters, includeChrome: includeChrome)
     for cell in 0..<PanelGrid.cellCount {
       measured[cell] += record.measured[cell] * record.elapsed
       modelled[cell] += grid[cell] * record.elapsed
@@ -185,8 +204,10 @@ func accumulate(_ records: [Prepared], _ parameters: ExposureModelParameters)
   return (measured, modelled)
 }
 
-func score(_ records: [Prepared], _ parameters: ExposureModelParameters) -> Double {
-  let (measured, modelled) = accumulate(records, parameters)
+func score(
+  _ records: [Prepared], _ parameters: ExposureModelParameters, includeChrome: Bool = false
+) -> Double {
+  let (measured, modelled) = accumulate(records, parameters, includeChrome: includeChrome)
   return pearson(measured, modelled) ?? -1
 }
 
@@ -258,10 +279,10 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
 func refine(
   _ start: ExposureModelParameters, keys: [(get: (ExposureModelParameters) -> Double,
     set: (inout ExposureModelParameters, Double) -> Void)],
-  on records: [Prepared], passes: Int = 3
+  on records: [Prepared], includeChrome: Bool = false, passes: Int = 3
 ) -> ExposureModelParameters {
   var best = start
-  var bestScore = score(records, best)
+  var bestScore = score(records, best, includeChrome: includeChrome)
   guard !keys.isEmpty else { return best }
   for pass in 0..<passes {
     let step = 0.1 / pow(2.0, Double(pass))
@@ -273,7 +294,7 @@ func refine(
         let candidateValue = min(1, max(0, centre + offset * step))
         var candidate = best
         key.set(&candidate, candidateValue)
-        let candidateScore = score(records, candidate)
+        let candidateScore = score(records, candidate, includeChrome: includeChrome)
         if candidateScore > localScore {
           localScore = candidateScore
           localBest = candidateValue
@@ -287,9 +308,9 @@ func refine(
 }
 
 func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelParameters,
-  freeParameters: Int)
+  freeParameters: Int, includeChrome: Bool = false)
 {
-  let (measured, modelled) = accumulate(records, parameters)
+  let (measured, modelled) = accumulate(records, parameters, includeChrome: includeChrome)
   let p = pearson(measured, modelled) ?? .nan
   let s = pearson(averageRanks(measured), averageRanks(modelled)) ?? .nan
   let multiple = hottestMultiple(modelled)
@@ -376,6 +397,17 @@ for (key, raw) in byDisplay.sorted(by: { $0.value.count > $1.value.count }) {
       (get: { $0.appPriors[app] ?? 0.5 }, set: { $0.appPriors[app] = $1 })
     }, on: fit)
   report("V4 + app priors", hold, v4, freeParameters: layers.count + 2 + apps.count)
+
+  // V5: admit menu-bar-sized chrome, which the shipped window source discards
+  // and the measured capture contains. Its own prior, fitted.
+  var v5 = v4
+  v5.appPriors["chrome"] = v4.lightAppearancePrior
+  v5 = refine(
+    v5, keys: [(get: { $0.appPriors["chrome"] ?? 0.5 }, set: { $0.appPriors["chrome"] = $1 })],
+    on: fit, includeChrome: true)
+  report(
+    "V5 + menu-bar chrome", hold, v5, freeParameters: layers.count + 3 + apps.count,
+    includeChrome: true)
 
   print("\n  fitted V4: light \(String(format: "%.3f", v4.lightAppearancePrior)) dark \(String(format: "%.3f", v4.darkAppearancePrior))")
   for (app, value) in v4.appPriors.sorted(by: { $0.key < $1.key }) {
