@@ -83,6 +83,7 @@ struct DisplayHubView: View {
   }
   private var displayID: CGDirectDisplayID { state.display.id }
   private var coordinator: DisplayModeCoordinator { model.displayModes }
+  private var synthesis: SynthesisCoordinator { model.synthesis }
   private var catalog: DisplayModeCoordinator.Catalog? { coordinator.catalogs[displayID] }
 
   var body: some View {
@@ -227,6 +228,7 @@ struct DisplayHubView: View {
             sizePicker(catalog)
           }
           refreshPicker(catalog)
+          synthesizedRateRow(catalog)
         } else if !catalog.all.isEmpty {
           // Every size this panel reports is under the usability floor. The
           // curated list is empty, the full one is not — so the sub-page below
@@ -238,6 +240,7 @@ struct DisplayHubView: View {
         }
 
         recommendationCallout(catalog)
+        moreSizesRows(catalog)
 
         if !catalog.all.isEmpty {
           rememberRow
@@ -356,12 +359,17 @@ struct DisplayHubView: View {
   /// deduplicated by logical size, so the distinction words belong to the
   /// surfaces that show the duplicates (SO14/SO18, Task 14).
   ///
-  /// **The source mark does not ride along either.** Three marks on one
-  /// dropdown item read as a badge queue, so this pop-up states only the cost
-  /// of the choice (the caps warning) and the recommendation. "Added by
-  /// Candela" belongs to the All Sizes page, where a row has the width for it
-  /// and where a mode we found sits beside its published neighbour at the same
-  /// size; see `AllModesPage.rowBadge`.
+  /// **The revealed-source mark does not ride along.** Marks on one dropdown
+  /// item read as a badge queue, so this pop-up states the cost of the choice
+  /// (the caps warning) and the recommendation. "Added by Candela" belongs to
+  /// the All Sizes page, where a row has the width for it and where a mode we
+  /// found sits beside its published neighbour at the same size; see
+  /// `AllModesPage.rowBadge`.
+  ///
+  /// **"Rendered by Candela" does ride along** (SS5), because it is not the
+  /// same kind of statement: a synthesized size is one the display does not
+  /// have, and choosing it stands a virtual display up. That is a cost, like
+  /// the caps warning, and a cost belongs where the choice is made.
   ///
   /// **The density model's mark rides along too**, for the same reason: this
   /// pop-up is where a size is chosen, and a suggestion nobody sees while
@@ -391,6 +399,15 @@ struct DisplayHubView: View {
     if catalog.isRecommendedSize(row.mode) {
       marks.append(DisplayModeCopy.recommended)
     }
+    // Third, and the exception to the paragraph above: a synthesized row IS
+    // marked here (SS5). "Added by Candela" is a note about where a mode came
+    // from, which is why it stays on the All Sizes page; this one is a cost of
+    // the choice, in the same family as the caps warning. Picking it stands a
+    // virtual display up, takes seconds, and shows in System Settings, so the
+    // pop-up where the choice is made is exactly where it has to be legible.
+    if row.mode.isSynthesized {
+      marks.append(SynthesisCopy.badge)
+    }
 
     let base = DisplayModeCopy.size(row.mode)
     guard !marks.isEmpty else { return base }
@@ -411,8 +428,14 @@ struct DisplayHubView: View {
   /// deduplication: `refreshRates(in:)` dedupes raw doubles and would list 60
   /// twice the day float noise reached it, while NTSC's genuine 59.9 survives
   /// quantization as its own entry.
+  ///
+  /// Absent entirely while a synthesized size is engaged, and `synthesizedRateRow`
+  /// takes its place. Two reasons, either of which is enough: the rates it would
+  /// list belong to a size that is not on the glass (the display is showing the
+  /// virtual master's geometry), and picking one would apply a published mode to
+  /// a display whose picture comes from somewhere else.
   @ViewBuilder private func refreshPicker(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
-    if let current = catalog.current {
+    if let current = catalog.current, catalog.engagedSyntheticSize == nil {
       let selected = catalog.rows.first { $0.id == curatedSelection(in: catalog) }?.mode ?? current
       let raw = DisplayModeCatalog.refreshRates(
         in: catalog.all,
@@ -431,6 +454,85 @@ struct DisplayHubView: View {
         }
       }
     }
+  }
+
+  /// What the refresh picker's slot says while a synthesized size is engaged.
+  ///
+  /// The rate is not a property of the stop: the mirror preserves whatever the
+  /// display was already running [MEASURED 2026-08-17, 100 Hz before, during
+  /// and after], so this states the rule and never a figure. A row rather than
+  /// nothing, because a refresh control that simply vanished would read as the
+  /// feature having taken the rate away.
+  @ViewBuilder private func synthesizedRateRow(
+    _ catalog: DisplayModeCoordinator.Catalog
+  ) -> some View {
+    if catalog.engagedSyntheticSize != nil {
+      LabeledContent("Refresh rate") {
+        Text(verbatim: SynthesisCopy.keepsPanelRefresh).foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  /// SS4's per-display opt-in, plus whatever the last synthesis request had to
+  /// refuse.
+  ///
+  /// It sits with the size controls rather than under Advanced because it
+  /// changes what the Size pop-up directly above it offers, and a switch whose
+  /// only visible effect is somewhere else is a switch nobody connects to its
+  /// effect.
+  ///
+  /// SS14: the built-in is never a synthesis target. This page is the external
+  /// hub, so the guard is a belt over a structural fact rather than the only
+  /// thing keeping the row away from a laptop panel.
+  @ViewBuilder private func moreSizesRows(
+    _ catalog: DisplayModeCoordinator.Catalog
+  ) -> some View {
+    if !catalog.display.isBuiltIn {
+      SettingRow(caption: SettingsCaption(verbatim: SynthesisCopy.optInCaption)) {
+        Toggle(SynthesisCopy.optInTitle, isOn: Binding(
+          get: { prefs.offerSyntheticSizes },
+          set: { on in setMoreSizes(on, on: catalog.display) }
+        ))
+        // An engage or a teardown is a multi-second hardware sequence, and a
+        // second flip queued behind one answers a question nobody is asking any
+        // more. Courtesy, not the guard: the engine is non-reentrant and the
+        // coordinator answers `.busy` regardless.
+        .disabled(synthesis.isWorking)
+      }
+      refusalRow
+    }
+  }
+
+  /// The last synthesis refusal, if it was about THIS display.
+  ///
+  /// One state with several reasons, rendered here rather than in
+  /// `BannerRegion`, whose two placements carry the preview surfaces: this is
+  /// the answer to a control on this page, and it belongs beside the control.
+  /// Dismissed explicitly, like every other failure notice in the window: a
+  /// refusal that cleared itself on the next render would be gone before it was
+  /// read.
+  @ViewBuilder private var refusalRow: some View {
+    if let refusal = synthesis.refusal, refusal.displayID == displayID {
+      VStack(alignment: .leading, spacing: 6) {
+        SettingsCaption(SynthesisCopy.refusal(refusal.reason))
+        Button("OK") { synthesis.dismissRefusal() }
+          .accessibilityLabel("OK")
+      }
+    }
+  }
+
+  /// SS11's ordering, which is why this is a method and not two lines in a
+  /// binding: turning the opt-in OFF disengages and verifies BEFORE the pref is
+  /// written, so a failed teardown leaves the display opted in with the
+  /// synthesized rows still in the picker. Those rows are the only surface that
+  /// can take an engaged size down, so writing the pref first would hide the
+  /// recovery behind the state it recovers from.
+  ///
+  /// The coordinator owns the write and its D27 announcement
+  /// (`didWriteSynthesisPref`), so nothing here touches `DisplayPrefs` or names
+  /// a `PrefName`: a second write path would be a second ordering to get wrong.
+  private func setMoreSizes(_ enabled: Bool, on display: ConfiguredDisplay) {
+    Task { await synthesis.setOptIn(enabled, on: display) }
   }
 
   private func dedupedQuantized(_ rates: [Double]) -> [Double] {
@@ -739,7 +841,15 @@ struct DisplayHubView: View {
       return OledCareCopy.lockDimSpokenPreview(model.oledCare.lockDimSkips[persistenceKey])
     case .unfocusedDim: return "Dimmed, no window in focus on this display"
     case .blackout: return "Screen off, the display has been idle"
-    case .suspended: return "Paused while this display is mirrored"
+    // SS8: v1 pauses care under a synthesized size too, and the reason is not
+    // mirroring the user set up. `synthesisSuspensions` is the same tick's
+    // verdict as `dimStates`, so the two cannot disagree about why this display
+    // is paused; the sighted preview above says "Paused" and leaves the reason
+    // to the pane, which is why only this one has to tell them apart.
+    case .suspended:
+      return model.oledCare.synthesisSuspensions.contains(persistenceKey)
+        ? "Paused while a synthesized size is active"
+        : "Paused while this display is mirrored"
     case nil: return "Starting"
     }
   }
@@ -826,7 +936,7 @@ struct DisplayHubView: View {
           // are macOS-visible state this button deliberately leaves alone.
           // Counted panel hours are wear data, kept for the same reason the
           // levels are.
-          Text("This unmutes \(state.display.name), turns HDR off while it runs, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, and everything under Advanced, including control-code remaps and response curves. HDR that was turned on in System Settings goes back on at the end. If the display cannot be reached at the time, nothing is sent to it that cannot be confirmed, so some of these may be left for you to change yourself. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
+          Text("This unmutes \(state.display.name), turns HDR off while it runs, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, More sizes, and everything under Advanced, including control-code remaps and response curves. A size \(AppInfo.productName) was rendering for this display is taken down first, so the display goes back to one of its own. HDR that was turned on in System Settings goes back on at the end. If the display cannot be reached at the time, nothing is sent to it that cannot be confirmed, so some of these may be left for you to change yourself. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
         }
     }
   }
@@ -867,6 +977,25 @@ struct DisplayHubView: View {
         model.oledCare.displayResetDidComplete(key)
         model.endReset()
       }
+      // 0. SS11 for the reset path: the synthesized size comes DOWN, verified,
+      //    and only then are its two prefs cleared. The coordinator owns both
+      //    halves and their order; nothing here writes either key, and neither
+      //    appears in the batch below.
+      //
+      //    First, before HDR and before the pref batch, for two reasons. A
+      //    teardown re-lays-out the whole arrangement, so everything after it
+      //    runs against a display showing its own desktop rather than a virtual
+      //    master's; and the display's own mode is what step 1's HDR work and
+      //    the dimming fan-out below are about.
+      //
+      //    A failure REPORTS and does not stop the reset: the refusal row above
+      //    says what is still standing, and the rest of this button's promise
+      //    (the mute strand, the prefs, HDR) is not worth withholding over a
+      //    virtual display that would not come down.
+      if let configured = coordinator.configurator.displays().first(where: { $0.id == displayID }) {
+        await synthesis.reset(configured)
+      }
+
       // 1. D22: HDR goes through the controller's state machine (settle window,
       //    poller gating, rollback), never through `prefs.hdrMode`. Done first
       //    so the DDC register is unlocked for everything below.

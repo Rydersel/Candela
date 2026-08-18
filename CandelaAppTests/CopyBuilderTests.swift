@@ -3,8 +3,10 @@ import CoreGraphics
 import SwiftUI
 import Testing
 
-// Direct assertions over the app target's six copy builders (AT5), plus the
-// suite-wide em-dash scan that makes the house rule mechanical.
+// Direct assertions over the app target's eight copy builders (AT5), plus the
+// suite-wide em-dash scan that makes the house rule mechanical. `OledCareCopy`
+// and `SynthesisCopy` are the two most recent; `SynthesisCopy`'s own pins, and
+// the two scans only that feature needs, live in `SynthesisCopyTests`.
 //
 // The builders return three different types and every one of them is read
 // through `String(describing:)`:
@@ -856,6 +858,19 @@ struct CopyBuilderTests {
       }
     }
 
+    // OledCareCopy
+    for skip in Self.allLockDimSkips {
+      let name = String(describing: skip)
+      add("OledCareCopy.lockDimStatus(\(name))", OledCareCopy.lockDimStatus(skip))
+      add("OledCareCopy.lockDimPreview(\(name))", OledCareCopy.lockDimPreview(skip))
+      add("OledCareCopy.lockDimSpokenPreview(\(name))", OledCareCopy.lockDimSpokenPreview(skip))
+    }
+    for synthesized in [true, false] {
+      add(
+        "OledCareCopy.suspendedStatus(\(synthesized))",
+        OledCareCopy.suspendedStatus(synthesized: synthesized))
+    }
+
     // ReconfigurationCopy
     for claimant in ReconfigurationClaimant.allCases {
       add("ReconfigurationCopy.blocked(by: \(claimant))", ReconfigurationCopy.blocked(by: claimant))
@@ -883,6 +898,26 @@ struct CopyBuilderTests {
     for refusal in Self.allRotationRefusals {
       add("RotationCopy.refusal(\(refusal))", RotationCopy.refusal(refusal))
     }
+
+    // SynthesisCopy. Its strings are pinned, and scanned for a rate and for a
+    // sharpness claim, in `SynthesisCopyTests`; they are here as well because
+    // this is the suite-wide em-dash scan and a builder outside it is a builder
+    // the house rule is not mechanical for.
+    add("SynthesisCopy.optInTitle", SynthesisCopy.optInTitle)
+    add("SynthesisCopy.optInCaption", SynthesisCopy.optInCaption)
+    add("SynthesisCopy.badge", SynthesisCopy.badge)
+    add("SynthesisCopy.keepsPanelRefresh", SynthesisCopy.keepsPanelRefresh)
+    add("SynthesisCopy.engagedSizeNotListed", SynthesisCopy.engagedSizeNotListed)
+    for reason in Self.allSynthesisRefusalReasons {
+      add("SynthesisCopy.refusal(\(reason))", SynthesisCopy.refusal(reason))
+    }
+    for failure in Self.allSynthesisFailures {
+      add("SynthesisCopy.engineFailure(\(failure))", SynthesisCopy.engineFailure(failure))
+    }
+    add(
+      "SynthesisCopy.diagnosticsActive",
+      SynthesisCopy.diagnosticsActive(width: 3096, height: 1296, slot: 4))
+    for count in counts { add("SynthesisCopy.diagnosticsOffered(\(count))", SynthesisCopy.diagnosticsOffered(count)) }
 
     return out
   }
@@ -1050,6 +1085,58 @@ struct CopyBuilderTests {
     }
   }
 
+  /// nil is a sample too: it is the case both lock-dim builders treat as "the
+  /// dim happened", and the one the OC7 defect printed for a refusal.
+  private static let allLockDimSkips: [LockDimSkip?] =
+    [nil, .nothingDrivesBrightness, .outsideSoftwareBand, .alreadyAtTarget]
+
+  private static func guardLockDimSkip(_ skip: LockDimSkip?) -> Int {
+    switch skip {
+    case nil: 0
+    case .nothingDrivesBrightness: 1
+    case .outsideSoftwareBand: 2
+    case .alreadyAtTarget: 3
+    }
+  }
+
+  private static let allSynthesisFailures: [SynthesisFailure] = [
+    .unavailable, .noFreeSlot, .createFailed(.classFamilyUnavailable),
+    .virtualModeNotAchieved, .mirrorRefused, .engageNotAchieved, .notEngaged,
+    .unwindIncomplete,
+  ]
+
+  private static func guardSynthesisFailure(_ failure: SynthesisFailure) -> Int {
+    switch failure {
+    case .unavailable: 0
+    case .noFreeSlot: 1
+    case .createFailed: 2
+    case .virtualModeNotAchieved: 3
+    case .mirrorRefused: 4
+    case .engageNotAchieved: 5
+    case .notEngaged: 6
+    case .unwindIncomplete: 7
+    }
+  }
+
+  private static let allSynthesisRefusalReasons: [SynthesisCoordinator.Refusal.Reason] =
+    [.builtIn, .hdrEngaged, .notOffered, .sizeNoLongerOffered, .busy]
+      + ReconfigurationClaimant.allCases.map { .blocked(by: $0) }
+      + allSynthesisFailures.map { .engine($0) }
+
+  private static func guardSynthesisRefusalReason(
+    _ reason: SynthesisCoordinator.Refusal.Reason
+  ) -> Int {
+    switch reason {
+    case .builtIn: 0
+    case .hdrEngaged: 1
+    case .notOffered: 2
+    case .sizeNoLongerOffered: 3
+    case .busy: 4
+    case .blocked: 5
+    case .engine: 6
+    }
+  }
+
   /// Both naming outcomes for the two count-fallback builders: fully named,
   /// partly named (which falls back), and a single member.
   private static let allDisplayIDLists: [[CGDirectDisplayID]] = [
@@ -1082,5 +1169,8 @@ struct CopyBuilderTests {
     #expect(Set(Self.allRotationRefusals.map(Self.guardRotationRefusal)).count == 4)
     #expect(Set(Self.allModeReapplyNotices.map(Self.guardModeReapplyNotice)).count == 3)
     #expect(Set(Self.allStartFailureReasons.map(Self.guardStartFailureReason)).count == 2)
+    #expect(Set(Self.allLockDimSkips.map(Self.guardLockDimSkip)).count == 4)
+    #expect(Set(Self.allSynthesisFailures.map(Self.guardSynthesisFailure)).count == 8)
+    #expect(Set(Self.allSynthesisRefusalReasons.map(Self.guardSynthesisRefusalReason)).count == 7)
   }
 }

@@ -275,6 +275,15 @@ struct AllModesPage: View {
         // than headers, and a header repeating the row directly under it is the
         // same words twice.
         Section {
+          // SS4's All clause. This list enumerates what the DISPLAY reports, so
+          // a synthesized stop has no row here and, while one is engaged, the
+          // checkmark is on nothing at all. Saying so beats a list that reads as
+          // though it had lost track of the size on screen. (`catalog.current`
+          // is no help either: a mirrored display reports a fabricated
+          // descriptor that appears in no enumeration [MEASURED 2026-08-17].)
+          if catalog.engagedSyntheticSize != nil {
+            SettingsCaption(verbatim: SynthesisCopy.engagedSizeNotListed)
+          }
           ForEach(filteredGroups(catalog), id: \.header) { group in
             choice(
               Self.sizeRowModel(group, in: catalog, expanded: isExpanded(group)), in: catalog
@@ -336,7 +345,13 @@ struct AllModesPage: View {
   static func recommendedRowModel(
     _ row: DisplayModeRow, in catalog: DisplayModeCoordinator.Catalog
   ) -> AllModesRow {
-    let outcome = DisplayModeCatalog.outcome(
+    // A synthesized stop is not in `catalog.all` and has no rate of its own, so
+    // the outcome question does not apply to it: what scans out is whatever the
+    // display was already running, which the mirror preserves [MEASURED
+    // 2026-08-17]. Asking anyway would compare its size against a list that
+    // does not hold it and answer nil for every field.
+    let synthesized = row.mode.isSynthesized
+    let outcome = synthesized ? nil : DisplayModeCatalog.outcome(
       selectingWidth: row.mode.logicalWidth,
       selectingHeight: row.mode.logicalHeight,
       currentHz: catalog.current?.refreshHz ?? row.mode.refreshHz,
@@ -348,10 +363,22 @@ struct AllModesPage: View {
     // A mode with no rate has no rate: nil, never 0, because "at 0 hertz" is a
     // claim and "0 Hz" is a value nobody can act on. The row then names the
     // size alone, which is all it knows.
-    let rate = hz > 0 ? (caps ? "caps at \(DisplayModeCopy.refresh(hz))" : DisplayModeCopy.refresh(hz)) : nil
-    let spokenRate = hz > 0
-      ? (caps ? "caps at \(ModeSpeech.spokenRate(hz))" : ModeSpeech.spokenRate(hz))
-      : nil
+    //
+    // A synthesized row is the third case, and the one that has something to
+    // say: its `refreshHz` is the 0 sentinel, so the branch above would leave
+    // the column blank on the rows most in need of explaining. It names the
+    // rule instead, and never a figure: 175 Hz is a prediction rather than a
+    // measurement.
+    let rate = synthesized
+      ? SynthesisCopy.keepsPanelRefresh
+      : (hz > 0
+        ? (caps ? "caps at \(DisplayModeCopy.refresh(hz))" : DisplayModeCopy.refresh(hz))
+        : nil)
+    let spokenRate = synthesized
+      ? SynthesisCopy.keepsPanelRefresh
+      : (hz > 0
+        ? (caps ? "caps at \(ModeSpeech.spokenRate(hz))" : ModeSpeech.spokenRate(hz))
+        : nil)
     // The mode this row would APPLY, not its representative, for the same
     // reason the rate above is the applied one (SO18). The two carry different
     // provenance whenever a size holds both kinds: measured on the MAG after
@@ -362,7 +389,8 @@ struct AllModesPage: View {
     let badge = rowBadge(
       // By SIZE, like the checkmark below and like the hub's pop-up.
       isRecommendedSize: catalog.isRecommendedSize(row.mode),
-      isRevealed: applied.isRevealed
+      isRevealed: applied.isRevealed,
+      isSynthesized: applied.isSynthesized
     )
 
     return AllModesRow(
@@ -415,7 +443,10 @@ struct AllModesPage: View {
     let badge = rowBadge(
       isRecommendedSize: catalog.isRecommendedSize(mode)
         && !lowResolution.contains(mode.ioModeID),
-      isRevealed: mode.isRevealed
+      isRevealed: mode.isRevealed,
+      // `catalog.all` is the display's own enumeration and holds no synthesized
+      // stop, so this arm is false by construction rather than by policy.
+      isSynthesized: mode.isSynthesized
     )
 
     return AllModesRow(
@@ -526,10 +557,22 @@ struct AllModesPage: View {
   /// The recommendation IS about the size, so a mark there would be honest,
   /// and it is still absent: the curated list is where a suggestion is meant to
   /// be read, and this page's own `Recommended` list is one segment away.
-  static func rowBadge(isRecommendedSize: Bool, isRevealed: Bool) -> String? {
+  ///
+  /// There are TWO source marks now, and they say different things (SS5).
+  /// "Added by Candela" marks a mode our enumeration found on the display;
+  /// "Rendered by Candela" marks a size the display does not have, which this
+  /// app produces by mirroring it onto a virtual display. They are mutually
+  /// exclusive by construction and stay separate parameters anyway, so a row
+  /// that somehow claimed both renders both rather than silently choosing one.
+  /// Only the curated list can carry the second: `catalog.all` is the display's
+  /// own enumeration and holds no synthesized stop.
+  static func rowBadge(
+    isRecommendedSize: Bool, isRevealed: Bool, isSynthesized: Bool
+  ) -> String? {
     let marks = [
       isRecommendedSize ? DisplayModeCopy.recommended : nil,
       isRevealed ? DisplayModeCopy.addedByApp : nil,
+      isSynthesized ? SynthesisCopy.badge : nil,
     ].compactMap { $0 }
     return marks.isEmpty ? nil : marks.joined(separator: ", ")
   }
