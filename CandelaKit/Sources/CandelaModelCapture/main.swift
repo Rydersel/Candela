@@ -225,6 +225,28 @@ var captureFailures = 0
 var writeFailures = 0
 var contentFailures = 0
 while taken < options.maxSamples {
+  // `defer`, so every path counts and reports: it runs on `continue` too.
+  //
+  // The locked path used to `continue` before the progress print at the bottom
+  // of the loop, so a run started on a locked screen burned its entire sample
+  // budget in TOTAL silence and exited having written nothing. At the run
+  // card's settings that is 16.7 hours of a blank terminal. Caught by running
+  // the tool end to end at 02:00 with the screen locked, after four code
+  // reviews had read the same lines without seeing it.
+  defer {
+    taken += 1
+    if taken % 10 == 0 {
+      // `written` first, deliberately. Counting ticks made a run whose grant
+      // had been revoked look identical to a healthy one.
+      print(
+        "written \(written) records over \(taken) ticks  "
+          + "skipped: locked \(skippedLocked), asleep \(skippedAsleep), black \(skippedBlack), "
+          + "unusable \(skippedUnusable)  "
+          + "failures: content \(contentFailures), capture \(captureFailures), write \(writeFailures)")
+      fflush(stdout)
+    }
+  }
+
   let content: SCShareableContent
   do {
     content = try await SCShareableContent.excludingDesktopWindows(
@@ -233,7 +255,6 @@ while taken < options.maxSamples {
     // `taken` still advances: otherwise a permanently failing fetch spins past
     // --max-samples forever, writing nothing.
     contentFailures += 1
-    taken += 1
     FileHandle.standardError.write(Data("shareable content failed: \(error)\n".utf8))
     try await Task.sleep(for: .seconds(options.interval))
     continue
@@ -258,9 +279,6 @@ while taken < options.maxSamples {
 
   if screenIsLocked() {
     skippedLocked += 1
-    // Advances `taken` for the same reason the content-failure path does: a
-    // machine left locked would otherwise never reach --max-samples.
-    taken += 1
     try await Task.sleep(for: .seconds(options.interval))
     continue
   }
@@ -375,17 +393,16 @@ while taken < options.maxSamples {
     }
   }
 
-  taken += 1
-  if taken % 10 == 0 {
-    // `written` first, deliberately. Counting ticks made a run whose grant had
-    // been revoked look identical to a healthy one: the number climbed while
-    // nothing reached disk.
-    print(
-      "written \(written) records over \(taken) ticks  "
-        + "skipped: locked \(skippedLocked), asleep \(skippedAsleep), black \(skippedBlack), "
-        + "unusable \(skippedUnusable)  "
-        + "failures: content \(contentFailures), capture \(captureFailures), write \(writeFailures)")
-    fflush(stdout)
-  }
   try await Task.sleep(for: .seconds(options.interval))
 }
+
+if written == 0 {
+  FileHandle.standardError.write(
+    Data(
+      ("\nWROTE NOTHING over \(taken) ticks: locked \(skippedLocked), asleep \(skippedAsleep), "
+        + "black \(skippedBlack), unusable \(skippedUnusable), content \(contentFailures), "
+        + "capture \(captureFailures), write \(writeFailures).\n"
+        + "A locked screen is the usual cause; nothing was recorded.\n").utf8))
+  exit(1)
+}
+print("done: \(written) records over \(taken) ticks")
