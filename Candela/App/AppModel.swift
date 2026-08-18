@@ -119,10 +119,10 @@ final class AppModel {
           case .unknown: nil
           }
         },
-        setHDR: { [weak self] displayID, enabled in
+        setHDR: { [weak self] displayID, enabled, settle in
           guard let controller = await MainActor.run(body: { self?.controller(for: displayID) })
           else { return false }
-          return await controller.setTransientHDR(enabled)
+          return await controller.setTransientHDR(enabled, settle: settle)
         },
         reportHDRLeftStanding: { [weak self] displayID in
           await MainActor.run { self?.synthesis.note(.hdrLeftStanding, for: displayID) }
@@ -1270,6 +1270,14 @@ final class AppModel {
   /// launch/menu-close call sites warning-free.
   @discardableResult
   func refresh() async -> [CGDirectDisplayID] {
+    // Cleared HERE as well as inside `performRefresh`, and the piggyback is
+    // exactly why. A caller asking for a refresh is telling us the display set
+    // may have moved; a caller that JOINS an in-flight pass never reaches
+    // `performRefresh`, so its own change would otherwise be remembered as
+    // answered until some later pass happened to run. Display ids reassign
+    // across a replug, so a memo keyed on one has to be cleared on every edge
+    // that can invalidate it, not only on the edge that recomputes it.
+    discoveredPersistenceKeys.clear()
     if let refreshTask {
       _ = await refreshTask.value
       return []

@@ -36,14 +36,34 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     /// access lock: the first write straight after an engage was measured
     /// refused.
     var beforeBounce: Duration
-    /// Between one refused HDR write and the next.
+    /// The controller's HDR settle window, named HERE rather than left to
+    /// `BrightnessController.settleDelay`, because this is the object that has
+    /// to state the worst case: every leg pays it, and there can be six.
+    var hdrSettle: Duration
+    /// Between one HDR leg that did not take and the next.
     var betweenAttempts: Duration
-    /// How long HDR stands before the off leg goes out.
+    /// How long HDR stands before the off leg goes out, ON TOP of the settle
+    /// the on leg already waited. Zero, and that is deliberate: routing through
+    /// the controller moved a full settle inside the on leg, so a non-zero hold
+    /// here would keep the display in HDR for twice as long as the sequence the
+    /// eyes verification actually watched.
     var hdrHeld: Duration
 
+    /// Worst case, and it is worth being able to read off the page because the
+    /// whole of it is spent holding the `.displayModes` claim, the preview
+    /// queue slot and a raised work depth, with no revert countdown armed yet:
+    ///
+    ///   retime 2 + bounce settle 3
+    ///   + on leg (3 x settle 2, with 2 waits of 2 between) = 10
+    ///   + hold 0
+    ///   + off leg, same shape = 10
+    ///   = about 25 seconds.
+    ///
+    /// The waits are BETWEEN attempts rather than after each one, which is
+    /// where four seconds of the earlier arithmetic went.
     static let production = Durations(
-      beforeRetime: .seconds(2), beforeBounce: .seconds(3),
-      betweenAttempts: .seconds(2), hdrHeld: .seconds(2)
+      beforeRetime: .seconds(2), beforeBounce: .seconds(3), hdrSettle: .seconds(2),
+      betweenAttempts: .seconds(2), hdrHeld: .zero
     )
   }
 
@@ -149,35 +169,63 @@ struct BouncingSynthesisDriver: SynthesisDriving {
       return
     }
     var wentOn = false
-    for _ in 1...3 {
+    for attempt in 1...3 {
       // ACHIEVED, not issued: the seam answers with the controller's own
       // measured read after its settle window. A write that was accepted while
-      // the display did not switch leaves nothing to renegotiate, and the off
-      // leg would then be ending a state this call never established.
-      if await hdr.setHDR(displayID, true) { wentOn = true; break }
-      try? await Task.sleep(for: durations.betweenAttempts)
+      // the display did not switch leaves nothing to renegotiate.
+      if await hdr.setHDR(displayID, true, durations.hdrSettle) { wentOn = true; break }
+      if attempt < 3 { try? await Task.sleep(for: durations.betweenAttempts) }
     }
-    guard wentOn else {
-      Self.log.info("synthesis.bounce skipped on display \(displayID): it did not enter HDR")
-      return
+    if !wentOn {
+      // **The off leg runs anyway**, and this is the one place it would be easy
+      // to skip it. The seam's false is TWO facts: the display measured out of
+      // HDR, or a newer transition superseded the call, which established
+      // nothing and left the register assumed locked. This code cannot tell
+      // them apart, and the second one means HDR may well be standing right
+      // now, with the entry writes this loop just issued behind it. Walking
+      // away on a maybe is the mute-strand shape exactly: a best-effort path
+      // leaving the disabling state standing, on a display where the only
+      // symptom is brightness and volume quietly not working.
+      Self.log.info(
+        "synthesis.bounce did not get display \(displayID) into HDR; standing the off leg down anyway, because a refused leg is not evidence the display is out"
+      )
+    } else {
+      try? await Task.sleep(for: durations.hdrHeld)
     }
-    try? await Task.sleep(for: durations.hdrHeld)
-    for _ in 1...3 {
-      if await hdr.setHDR(displayID, false) {
-        // The seam answers with a measured read, so this line says only what
-        // was established: HDR went on and came back off. Whether the round
-        // trip cleared the flashing is an eyes question with no instrument
-        // behind it, and nothing here may claim it.
-        Self.log.info(
-          "synthesis.bounce completed on display \(displayID): HDR went on and is measured off again"
-        )
-        return
-      }
-      try? await Task.sleep(for: durations.betweenAttempts)
+    if await standDownHDR(displayID) {
+      // The seam answers with a measured read, so this line says only what was
+      // established. Whether the round trip cleared the flashing is an eyes
+      // question with no instrument behind it, and nothing here may claim it.
+      Self.log.info(
+        "synthesis.bounce finished on display \(displayID): HDR is measured off (round trip \(wentOn, privacy: .public))"
+      )
+    }
+  }
+
+  /// The OFF discipline, and the one hard rule in this file: HDR left standing
+  /// kills DDC to the display, so the write is issued, settled and CHECKED,
+  /// three times, before giving up loudly and reporting it somewhere a person
+  /// can read. Returns whether the display is MEASURED out of HDR.
+  private func standDownHDR(_ displayID: CGDirectDisplayID) async -> Bool {
+    // Fresh, and it is the last chance NOT to write. `false` is a measured
+    // answer with no transition racing it: the display is out of HDR, there is
+    // nothing to stand down, and an off write would be this feature reaching
+    // into a state it did not create. nil is "nobody vouches", which takes the
+    // discipline below, because making sure is the safe direction.
+    //
+    // What this CANNOT do, stated rather than implied: once HDR is on, the
+    // bounce cannot tell its own from HDR a person switched on during the hold.
+    // Both read identically at every layer, so the off leg ends either. The
+    // window is a few seconds and the alternative is leaving DDC dead.
+    if await hdr.measuredHDREnabled(displayID) == false { return true }
+    for attempt in 1...3 {
+      if await hdr.setHDR(displayID, false, durations.hdrSettle) { return true }
+      if attempt < 3 { try? await Task.sleep(for: durations.betweenAttempts) }
     }
     Self.log.error(
       "synthesis.bounce left HDR standing on display \(displayID): DDC to the display is dead until it is turned off"
     )
     await hdr.reportHDRLeftStanding(displayID)
+    return false
   }
 }

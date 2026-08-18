@@ -25,9 +25,15 @@ struct SynthesisHDRBounce: Sendable {
   /// touch this display's HDR": a state nobody established is not one to make
   /// a decision from.
   var measuredHDREnabled: @Sendable (CGDirectDisplayID) async -> Bool?
-  /// One leg. Returns the MEASURED state after the controller's settle window,
-  /// never the write's ACK.
-  var setHDR: @Sendable (CGDirectDisplayID, Bool) async -> Bool
+  /// One leg. Returns the MEASURED state after the settle, never the write's
+  /// ACK, and **false is two facts**: the display measured the other way, or a
+  /// newer transition superseded the call, which establishes nothing and leaves
+  /// the register assumed locked. A caller may not read false as "HDR is off".
+  ///
+  /// The settle is the caller's to name, because the caller is the one that has
+  /// to state its own worst case: a full round trip pays this window up to six
+  /// times inside one gate claim.
+  var setHDR: @Sendable (CGDirectDisplayID, Bool, Duration) async -> Bool
   /// The off leg gave up with HDR standing, which kills DDC to the display.
   /// Surfaced rather than logged alone: the person is the only recovery path
   /// left, and they cannot act on a log line.
@@ -38,7 +44,7 @@ struct SynthesisHDRBounce: Sendable {
   static let none = SynthesisHDRBounce(
     supportsHDR: { _ in false },
     measuredHDREnabled: { _ in false },
-    setHDR: { _, _ in false },
+    setHDR: { _, _, _ in false },
     reportHDRLeftStanding: { _ in }
   )
 }
