@@ -1,3 +1,4 @@
+import AppKit
 import CandelaKit
 import CoreGraphics
 import Foundation
@@ -13,9 +14,17 @@ import ScreenCaptureKit
 // disturb a soak in progress. Nothing here writes DDC; it only reads the
 // screen, so it is safe to run alongside the live comparison.
 //
-// AppKit is deliberately absent: the wallpaper arrives as an explicit path
-// rather than an ambient NSWorkspace read, which also makes it a recorded
-// input of the run rather than something that can change underneath one.
+// The wallpaper is read PER DISPLAY through NSWorkspace, the same source the
+// app's own wallpaper island uses. An earlier version took a single explicit
+// --wallpaper path, on the theory that an explicit input is more reproducible
+// than an ambient one. That was wrong in effect twice over: this rig runs a
+// different wallpaper on each panel, which one path cannot express, and it
+// diverged from the app on precisely the input being fitted. A run where the
+// Dell showed nothing but wallpaper scored 0.201 against its own wallpaper
+// term where it should have scored ~1.0, which is what surfaced it.
+//
+// The resolved path is recorded per sample, so the log stays self-describing
+// and --wallpaper survives as an override.
 
 struct Options {
   var displayFilter: CGDirectDisplayID?
@@ -78,10 +87,21 @@ guard CGPreflightScreenCaptureAccess() else {
 
 let ownPID = ProcessInfo.processInfo.processIdentifier
 
+/// The wallpaper macOS is actually showing on this display.
+@MainActor func wallpaperURL(for displayID: CGDirectDisplayID) -> URL? {
+  if let override = options.wallpaper { return override }
+  let screen = NSScreen.screens.first {
+    ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+      == displayID
+  }
+  guard let screen else { return nil }
+  return NSWorkspace.shared.desktopImageURL(for: screen)
+}
+
 /// Panel-physical wallpaper cells, through the same reduction the app uses so
 /// the model and the measurement disagree only about content.
-@MainActor func wallpaperCells(for transform: PanelSpaceTransform) -> [Double]? {
-  guard let url = options.wallpaper,
+@MainActor func wallpaperCells(url: URL?, for transform: PanelSpaceTransform) -> [Double]? {
+  guard let url,
     let source = CGImageSourceCreateWithURL(url as CFURL, nil),
     let image = CGImageSourceCreateThumbnailAtIndex(
       source, 0,
@@ -94,7 +114,9 @@ let ownPID = ProcessInfo.processInfo.processIdentifier
   let (cols, rows) = LuminanceReduction.requestedSize(
     displayWidth: Int(transform.displaySize.width),
     displayHeight: Int(transform.displaySize.height))
-  guard let grid = LuminanceReduction.meanLuminance(of: image, cols: cols, rows: rows) else {
+  let filled = LuminanceReduction.cropToFill(
+    image, aspect: transform.displaySize.width / transform.displaySize.height)
+  guard let grid = LuminanceReduction.meanLuminance(of: filled, cols: cols, rows: rows) else {
     return nil
   }
   return transform.panelNativeGrid(fromDisplayGrid: grid, cols: cols, rows: rows)
@@ -147,7 +169,10 @@ try? JSONSerialization.data(withJSONObject: header, options: [.prettyPrinted])
   .write(to: options.out.appendingPathComponent("run.json"))
 
 print("candela-model-capture: interval \(options.interval)s, out \(options.out.path)")
-print("wallpaper: \(options.wallpaper?.path ?? "(none, backdrop falls back to the prior)")")
+for entry in discovered {
+  let resolved = wallpaperURL(for: entry.display.id)?.lastPathComponent ?? "(unreadable)"
+  print("  display \(entry.display.id): wallpaper \(resolved)")
+}
 
 var taken = 0
 while taken < options.maxSamples {
@@ -207,7 +232,8 @@ while taken < options.maxSamples {
 
     let measuredPanel = transform.panelNativeGrid(
       fromDisplayGrid: captured, cols: cols, rows: rows)
-    let paper = wallpaperCells(for: transform)
+    let paperURL = wallpaperURL(for: scDisplay.displayID)
+    let paper = wallpaperCells(url: paperURL, for: transform)
     let displayOrigin = CGDisplayBounds(scDisplay.displayID).origin
     // Exactly what the app's own source reports, so the baseline is reproducible.
     let observed = windows(
@@ -230,8 +256,8 @@ while taken < options.maxSamples {
           pixelWidth: scDisplay.width, pixelHeight: scDisplay.height, rotation: rotation),
         capture: .init(cols: cols, rows: rows, grid: captured),
         measuredPanel: measuredPanel, modelledBaseline: modelled,
-        wallpaper: paper, appearanceIsDark: appearanceIsDark, windows: observed,
-        chrome: chrome))
+        wallpaper: paper, wallpaperPath: paperURL?.path ?? "",
+        appearanceIsDark: appearanceIsDark, windows: observed, chrome: chrome))
   }
 
   taken += 1

@@ -149,3 +149,51 @@ struct LuminanceReductionGeometryTests {
     #expect(deadColumns == [0, 1, 2, 3, 4, 5], "the stored signature was 6 dead panel columns")
   }
 }
+
+// The wallpaper is scaled to FILL a display and its overflow cropped; the
+// reduction stretches whatever it is handed. On the rotated Dell that
+// difference measured 0.186 against 0.584 correlation with the panel's own
+// capture, taken while it showed nothing but wallpaper.
+@Suite("Wallpaper crop to fill")
+struct WallpaperCropTests {
+
+  private func image(width: Int, height: Int) -> CGImage {
+    let space = CGColorSpace(name: CGColorSpace.sRGB)!
+    let context = CGContext(
+      data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+      space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+    return context.makeImage()!
+  }
+
+  @Test("a wide image loses width, not height")
+  func landscapeIntoPortrait() {
+    let cropped = LuminanceReduction.cropToFill(image(width: 3840, height: 2160), aspect: 14.0 / 24)
+    #expect(cropped.height == 2160)
+    // `CGRect.integral` expands outward, so a pixel either way is expected.
+    #expect(abs(cropped.width - Int((2160.0 * 14 / 24).rounded())) <= 1)
+  }
+
+  @Test("a tall image loses height, not width")
+  func portraitIntoLandscape() {
+    let cropped = LuminanceReduction.cropToFill(image(width: 1000, height: 4000), aspect: 24.0 / 10)
+    #expect(cropped.width == 1000)
+    #expect(abs(cropped.height - Int((1000.0 / 2.4).rounded())) <= 1)
+  }
+
+  @Test("a matching aspect is left alone")
+  func matchingAspectIsUntouched() {
+    let source = image(width: 2400, height: 1000)
+    let cropped = LuminanceReduction.cropToFill(source, aspect: 2.4)
+    #expect(cropped.width == 2400)
+    #expect(cropped.height == 1000)
+  }
+
+  @Test("a nonsense aspect degrades to the original rather than to nothing")
+  func degenerateAspectIsSafe() {
+    let source = image(width: 100, height: 100)
+    for aspect in [0.0, -1.0, Double.nan, Double.infinity] {
+      let cropped = LuminanceReduction.cropToFill(source, aspect: aspect)
+      #expect(cropped.width == 100 && cropped.height == 100)
+    }
+  }
+}

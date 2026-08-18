@@ -81,6 +81,32 @@ public enum LuminanceReduction {
       : (max(1, Int((Double(long) * aspect).rounded())), long)
   }
 
+  /// The centre crop macOS shows when it fills a display with an image whose
+  /// aspect does not match.
+  ///
+  /// **A capture needs no crop; a wallpaper does** [MEASURED 2026-08-18]. A
+  /// ScreenCaptureKit frame already has the display's aspect, so drawing it
+  /// into a grid of that aspect is the identity. A wallpaper is an arbitrary
+  /// image that macOS scales to FILL and crops the overflow of, while
+  /// `meanLuminance` stretches whatever it is handed. On the Dell, a 3840x2160
+  /// wallpaper stretched into the rotated 14x24 request correlated 0.186 with
+  /// the panel's own capture; cropped to fill first, 0.584. The panel was
+  /// showing nothing but wallpaper at the time, so that capture IS the
+  /// wallpaper and the comparison is direct.
+  ///
+  /// Returns the image unchanged when it cannot crop, which keeps a failure
+  /// here degrading to the old behaviour rather than to nothing.
+  public static func cropToFill(_ image: CGImage, aspect: Double) -> CGImage {
+    let width = Double(image.width)
+    let height = Double(image.height)
+    guard width > 0, height > 0, aspect.isFinite, aspect > 0 else { return image }
+    let rect: CGRect =
+      width / height > aspect
+      ? CGRect(x: (width - height * aspect) / 2, y: 0, width: height * aspect, height: height)
+      : CGRect(x: 0, y: (height - width / aspect) / 2, width: width, height: width / aspect)
+    return image.cropping(to: rect.integral) ?? image
+  }
+
   /// sRGB EOTF, tabulated over the 256 encoded values.
   ///
   /// **Transfer function: sRGB, and it IS applied.** Capture pins its colour

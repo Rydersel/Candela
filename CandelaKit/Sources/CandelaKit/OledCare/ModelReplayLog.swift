@@ -13,7 +13,7 @@ import Foundation
 /// can be restructured freely; the field exists only so the harness refuses a
 /// log it does not understand instead of misreading one.
 public struct ModelReplayRecord: Codable, Equatable, Sendable {
-  public static let formatVersion = 2
+  public static let formatVersion = 3
 
   public struct Display: Codable, Equatable, Sendable {
     public var persistenceKey: String
@@ -110,6 +110,10 @@ public struct ModelReplayRecord: Codable, Equatable, Sendable {
   /// `.baseline` must reproduce it, or the log is lossy.
   public var modelledBaseline: [Double]
   public var wallpaper: [Double]?
+  /// Which image the cells above came from. Recorded per sample because this
+  /// rig runs a different wallpaper per display, and because a run whose
+  /// wallpaper is wrong looks exactly like a model that cannot predict.
+  public var wallpaperPath: String
   public var appearanceIsDark: Bool
   /// Exactly what the app's own window source reports, so `modelledBaseline`
   /// is reproducible from this alone.
@@ -129,7 +133,8 @@ public struct ModelReplayRecord: Codable, Equatable, Sendable {
   public init(
     v: Int = ModelReplayRecord.formatVersion, t: Double, elapsed: TimeInterval,
     display: Display, capture: Capture, measuredPanel: [Double], modelledBaseline: [Double],
-    wallpaper: [Double]?, appearanceIsDark: Bool, windows: [Window], chrome: [Window] = []
+    wallpaper: [Double]?, wallpaperPath: String = "", appearanceIsDark: Bool,
+    windows: [Window], chrome: [Window] = []
   ) {
     self.v = v
     self.t = t
@@ -139,6 +144,7 @@ public struct ModelReplayRecord: Codable, Equatable, Sendable {
     self.measuredPanel = measuredPanel
     self.modelledBaseline = modelledBaseline
     self.wallpaper = wallpaper
+    self.wallpaperPath = wallpaperPath
     self.appearanceIsDark = appearanceIsDark
     self.windows = windows
     self.chrome = chrome
