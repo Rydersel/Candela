@@ -24,7 +24,8 @@ struct SynthesisFixture {
   /// case, which is the difference between a test that exists and one that
   /// does not.
   static let instantDurations = BouncingSynthesisDriver.Durations(
-    beforeRetime: .zero, beforeBounce: .zero, betweenAttempts: .zero, hdrHeld: .zero
+    beforeRetime: .zero, beforeBounce: .zero, hdrSettle: .zero,
+    betweenAttempts: .zero, hdrHeld: .zero
   )
 
   let modes: DisplayModeCoordinator
@@ -55,9 +56,13 @@ struct SynthesisFixture {
   /// size and the HiDPI twin whose framebuffer is that size, so taking the
   /// first native-flagged entry out of the RAW list picks whichever came back
   /// first.
+  /// `enumerateOnInit: false` leaves the panel baseline EMPTY, which is what a
+  /// display first seen inside a mirror window has: no cached measurement of
+  /// its own to fall back on.
   init(
     optedIn: Bool = true, secondPanel: Bool = false, mirroring: CGDirectDisplayID? = nil,
     mirrorMaster: Bool = false, nativeRidesTheHiDPITwin: Bool = false,
+    enumerateOnInit: Bool = true,
     hdr: FakeSynthesisHDR = FakeSynthesisHDR(supports: false)
   ) {
     let world = FakeDisplayWorld()
@@ -113,8 +118,10 @@ struct SynthesisFixture {
 
     let modes = DisplayModeCoordinator(gate: gate, configurator: configurator)
     modes.synthesis = synthesis
-    modes.refreshCatalog(for: Self.panelID)
-    if secondPanel { modes.refreshCatalog(for: Self.secondPanelID) }
+    if enumerateOnInit {
+      modes.refreshCatalog(for: Self.panelID)
+      if secondPanel { modes.refreshCatalog(for: Self.secondPanelID) }
+    }
 
     self.modes = modes
     self.synthesis = synthesis

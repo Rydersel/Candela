@@ -126,10 +126,15 @@ struct SynthesisTailTests {
     #expect(hdr.legs.isEmpty)
   }
 
-  /// The on leg reports ACHIEVED, not issued. A write the display did not act
-  /// on leaves nothing to renegotiate, and the off leg would then be ending a
-  /// state this call never established.
-  @Test func anOnLegThatDoesNotTakeIsRetriedAndThenAbandoned() async throws {
+  /// The on leg reports ACHIEVED, not issued, and abandoning it still runs the
+  /// off discipline.
+  ///
+  /// A false from the seam is TWO facts: the display measured the other way, or
+  /// a newer transition superseded the call, which established nothing and left
+  /// the register assumed locked. Reading it as "HDR never came on" and walking
+  /// away is a best-effort path leaving the disabling state standing, on a
+  /// display whose only symptom is brightness and volume quietly not working.
+  @Test func anAbandonedOnLegStillStandsTheOffLegDown() async throws {
     let hdr = FakeSynthesisHDR(achievesOn: false)
     let fixture = Fixture(hdr: hdr)
     defer { fixture.forgetPrefs() }
@@ -139,8 +144,42 @@ struct SynthesisTailTests {
 
     _ = await fixture.synthesis.engage(stop, on: display)
 
-    #expect(hdr.legs.map(\.enabled) == [true, true, true], "three tries, then it gives up")
-    #expect(hdr.leftStanding.isEmpty, "nothing went on, so nothing was left standing")
+    #expect(hdr.legs.map(\.enabled) == [true, true, true, false], "three tries, then it makes sure")
+    #expect(hdr.leftStanding.isEmpty, "and the off leg took, so nothing is standing")
+  }
+
+  /// The same shape with the off leg refusing too: this is the state that kills
+  /// DDC, and it has to reach a person whichever leg failed first.
+  @Test func anAbandonedOnLegThatCannotBeStoodDownIsReported() async throws {
+    let hdr = FakeSynthesisHDR(achievesOn: false, achievesOff: false)
+    let fixture = Fixture(hdr: hdr)
+    defer { fixture.forgetPrefs() }
+    let display = try fixture.configured(Self.panelID)
+    let stop = try firstStop(fixture)
+    fixture.configurator.refusesModeApplies = true
+
+    _ = await fixture.synthesis.engage(stop, on: display)
+
+    #expect(hdr.legs.filter { $0.enabled == false }.count == 3)
+    #expect(hdr.leftStanding == [Self.panelID])
+  }
+
+  /// And the one case that does NOT write: the on leg was never issued, so the
+  /// display is measured out of HDR and there is nothing to stand down. The
+  /// fresh read before the off leg is the last chance not to reach into a state
+  /// this feature did not create.
+  @Test func anOnLegThatWasNeverIssuedSkipsTheOffWriteEntirely() async throws {
+    let hdr = FakeSynthesisHDR(achievesOn: false, stateAfterFailedOn: false)
+    let fixture = Fixture(hdr: hdr)
+    defer { fixture.forgetPrefs() }
+    let display = try fixture.configured(Self.panelID)
+    let stop = try firstStop(fixture)
+    fixture.configurator.refusesModeApplies = true
+
+    _ = await fixture.synthesis.engage(stop, on: display)
+
+    #expect(hdr.legs.map(\.enabled) == [true, true, true], "no off write over a display already out")
+    #expect(hdr.leftStanding.isEmpty)
   }
 
   /// The one hard rule. HDR left standing kills DDC to the display, so the off
@@ -198,19 +237,44 @@ struct SynthesisTailTests {
     #expect(after.alreadyOnScreenModeID == nil)
   }
 
-  /// The mid-engage catalog pass that poisoned the ladder. A refresh landing
-  /// while the display sits in a mirror set must not replace the cached
-  /// baseline, and must not seed one either: the stops have to survive.
+  /// The mid-engage catalog pass that poisoned the ladder, driven at the one
+  /// instant it can happen: the mirror stands, the pairing snapshot is still
+  /// empty (so `isEngaged` reads FALSE and the baseline lookup does not take
+  /// its cached-value shortcut), the work depth is still raised, and the world
+  /// is already publishing the master's twins.
+  ///
+  /// That combination is what reaches the guard the fix changed. A pass run
+  /// after the engage returns cannot: `isEngaged` is true by then and
+  /// `baseline` answers from the cache before the guard is evaluated at all.
+  ///
+  /// Fails under the mutation this pins, which is dropping `!unstable` from the
+  /// guard: the poisoned baseline replaces the good one and the ladder, the
+  /// native pixels and the engaged row all go with it.
   @Test func aCatalogRefreshInsideTheEngageWindowKeepsTheLadder() async throws {
     let fixture = Fixture()
     defer { fixture.forgetPrefs() }
+    fixture.world.publishesMasterTwinsWhileMirrored = true
     let display = try fixture.configured(Self.panelID)
     let stop = try firstStop(fixture)
     let stopsBefore = fixture.modes.catalogs[Self.panelID]?.syntheticStops ?? []
+    #expect(!stopsBefore.isEmpty, "the fixture's own control")
+
+    // Runs on the engine's executor with the mirror standing. Hopping to the
+    // main actor and BLOCKING there is what makes the pass land inside the
+    // window rather than after it.
+    let refreshed = DispatchSemaphore(value: 0)
+    fixture.configurator.onMirrorApplied = { [modes = fixture.modes, synthesis = fixture.synthesis] in
+      Task { @MainActor in
+        // The state under test, asserted rather than assumed.
+        #expect(synthesis.pairings.isEmpty, "the snapshot is empty for the whole engage")
+        #expect(synthesis.baselineUnstable(displayID: Self.panelID))
+        modes.refreshCatalog(for: Self.panelID)
+        refreshed.signal()
+      }
+      _ = refreshed.wait(timeout: .now() + 5)
+    }
 
     _ = await fixture.synthesis.engage(stop, on: display)
-    // The engaged display is a mirror slave now, so this pass reads the
-    // master's geometry for everything it would derive.
     fixture.modes.refreshCatalog(for: Self.panelID)
 
     let catalog = try #require(fixture.modes.catalogs[Self.panelID])
@@ -222,29 +286,54 @@ struct SynthesisTailTests {
     )
   }
 
-  /// The first-sight escape hatch, closed. A display first enumerated while it
-  /// is in a mirror set used to cache the mirror-derived baseline and keep it
-  /// for as long as the set stood, because a non-nil entry is never replaced by
-  /// an unstable pass.
+  /// The first-sight escape hatch, closed: a pass that runs while the baseline
+  /// is untrustworthy stores NOTHING, even when nothing is cached yet.
+  ///
+  /// The scope of that is narrow and worth stating, because the test has to
+  /// model it exactly. While the set stands, a pass computes from a world that
+  /// is publishing the master's twins, so it is poisoned whether or not the
+  /// cache is consulted. What the old `|| baselines[key] == nil` escape added
+  /// was PERMANENCE: the poison became the cached answer, and `isEngaged` then
+  /// short-circuits to it for the rest of the set's life, so nothing can
+  /// recover even once the world stops lying. That is what this drives: first
+  /// sight inside the mirror window, then the OS list settling back, then a
+  /// second pass.
+  ///
+  /// Fails under the mutation: the cached first-sight poison is returned by the
+  /// `isEngaged` shortcut and the second pass never gets to look.
   @Test func anUnstableFirstPassCachesNothing() async throws {
-    let fixture = Fixture()
+    let fixture = Fixture(enumerateOnInit: false)
     defer { fixture.forgetPrefs() }
+    fixture.world.publishesMasterTwinsWhileMirrored = true
     let display = try fixture.configured(Self.panelID)
-    let stop = try firstStop(fixture)
+    let stop = try #require(SyntheticSizeCatalog.stops(
+      nativeLogicalWidth: Fixture.nativeWidth, nativeLogicalHeight: Fixture.nativeHeight,
+      existingRows: fixture.world.modes(for: Self.panelID),
+      ceilingPixelWidth: VirtualDisplayIdentity.maxPixels.wide,
+      ceilingPixelHeight: VirtualDisplayIdentity.maxPixels.high
+    ).first)
+
+    let refreshed = DispatchSemaphore(value: 0)
+    fixture.configurator.onMirrorApplied = { [modes = fixture.modes] in
+      Task { @MainActor in
+        // FIRST sight for this identity, and it happens inside the window.
+        modes.refreshCatalog(for: Self.panelID)
+        refreshed.signal()
+      }
+      _ = refreshed.wait(timeout: .now() + 5)
+    }
 
     _ = await fixture.synthesis.engage(stop, on: display)
-    // A display id nothing has enumerated before, mid-mirror: this is first
-    // sight for the second panel's identity.
-    fixture.modes.refreshCatalog(for: Self.panelID)
-    let duringMirror = try #require(fixture.modes.catalogs[Self.panelID])
-    #expect(duringMirror.nativePixels?.width == Fixture.nativeWidth)
+    #expect(fixture.synthesis.isEngaged(displayID: Self.panelID))
 
-    _ = await fixture.synthesis.disengageAllForReset()
+    // The OS list settles back to the panel's own while the set still stands.
+    fixture.world.publishesMasterTwinsWhileMirrored = false
     fixture.modes.refreshCatalog(for: Self.panelID)
 
-    let afterMirror = try #require(fixture.modes.catalogs[Self.panelID])
-    #expect(afterMirror.nativePixels?.width == Fixture.nativeWidth)
-    #expect(!afterMirror.syntheticStops.isEmpty)
+    let catalog = try #require(fixture.modes.catalogs[Self.panelID])
+    #expect(catalog.nativePixels?.width == Fixture.nativeWidth)
+    #expect(!catalog.syntheticStops.isEmpty)
+    #expect(catalog.rows.contains { catalog.isCurrentSize($0.mode) })
   }
 
   /// The enumeration order that made the launch restore report a stale
@@ -331,6 +420,134 @@ struct SynthesisTailTests {
     #expect(gate.isGranted, "and the claim is not left held by the restore")
     await fixture.gate.release(.mirroring)
     await fixture.revertAnyPreview()
+  }
+
+  /// A STAND-DOWN is not an answer, and it must not restore.
+  ///
+  /// `endOutstandingPreview` produces the same `.reverted` outcome a person's
+  /// own Revert does, and every caller of it is about to reconfigure these
+  /// displays for itself: the mirror path claims the gate and then stands
+  /// previews down, the opt-out and the whole-app reset stand them down before
+  /// claiming. `SynthesisCoordinator.engage` takes no claim of its own, so a
+  /// restore from any of those is tens of seconds of display reconfiguration
+  /// performed inside somebody else's operation, and in the mirror case it
+  /// mirrors the user's own topology on top of a display this app has just
+  /// made a synthesis slave.
+  ///
+  /// The stash is CONSUMED rather than dropped, so the stored stop cannot
+  /// re-engage at the next launch behind a person who is looking at something
+  /// else, and the disappearance gets a sentence.
+  @Test func aStandDownConsumesTheRestoreWithoutPerformingIt() async throws {
+    let fixture = Fixture()
+    defer { fixture.forgetPrefs() }
+    let display = try fixture.configured(Self.panelID)
+    let stop = try firstStop(fixture)
+    let smaller = try #require(
+      fixture.modes.catalogs[Self.panelID]?.all.first { $0.logicalWidth == 2560 })
+
+    _ = await fixture.synthesis.engage(stop, on: display)
+    fixture.synthesis.persist(
+      SynthesisPairing(
+        physicalDisplayID: Self.panelID, physicalIdentityKey: display.identity.key,
+        virtualDisplayID: 91, slot: 4, size: stop
+      ),
+      unwindWasIncomplete: false
+    )
+    fixture.modes.refreshCatalog(for: Self.panelID)
+    fixture.modes.select(smaller, on: Self.panelID, from: .settings, surface: .settingsBanner)
+    await fixture.settle()
+    #expect(fixture.synthesis.pairings.isEmpty, "the pick took the set down")
+    #expect(fixture.modes.preview != nil, "and a countdown is standing over it")
+
+    // Exactly what `MirroringCoordinator` awaits before its own apply.
+    let stoodDown = await fixture.modes.endOutstandingPreview()
+
+    #expect(stoodDown)
+    #expect(fixture.synthesis.pairings.isEmpty, "no virtual display stood up inside the stand-down")
+    #expect(fixture.host.live().isEmpty)
+    #expect(fixture.prefs.storedSyntheticSize == nil, "the stash was consumed, not merely dropped")
+    #expect(fixture.synthesis.refusal?.reason == .restoreSuperseded)
+  }
+
+  /// A superseding pick consumes the stash too, and the stored stop goes with
+  /// it. Pick A's preview is resolved inside `ModePreviewSession.begin`'s
+  /// revert-first, which reaches no arm here, so a bare drop left the pref
+  /// naming a size that will not be on the glass under either outcome: the
+  /// machine-versus-pref divergence one gesture further along.
+  @Test func aSupersedingPickConsumesTheStashSoNothingReEngagesLater() async throws {
+    let fixture = Fixture()
+    defer { fixture.forgetPrefs() }
+    let display = try fixture.configured(Self.panelID)
+    let stop = try firstStop(fixture)
+    let catalog = try #require(fixture.modes.catalogs[Self.panelID])
+    let pickA = try #require(catalog.all.first { $0.logicalWidth == 2560 })
+
+    _ = await fixture.synthesis.engage(stop, on: display)
+    fixture.synthesis.persist(
+      SynthesisPairing(
+        physicalDisplayID: Self.panelID, physicalIdentityKey: display.identity.key,
+        virtualDisplayID: 91, slot: 4, size: stop
+      ),
+      unwindWasIncomplete: false
+    )
+    fixture.modes.refreshCatalog(for: Self.panelID)
+    fixture.modes.select(pickA, on: Self.panelID, from: .settings, surface: .settingsBanner)
+    await fixture.settle()
+    #expect(fixture.prefs.storedSyntheticSize != nil, "the control: the pref still names the stop")
+
+    let pickB = try #require(
+      fixture.modes.catalogs[Self.panelID]?.all.first { $0.isNative })
+    fixture.modes.select(pickB, on: Self.panelID, from: .settings, surface: .settingsBanner)
+    await fixture.settle()
+
+    #expect(fixture.prefs.storedSyntheticSize == nil)
+    await fixture.revertAnyPreview()
+    await fixture.settle()
+    #expect(fixture.synthesis.pairings.isEmpty, "and nothing re-engages behind the second pick")
+  }
+
+  /// The restore re-validates against the ladder this display generates NOW.
+  ///
+  /// The refusal guard it already asks covers the opt-in, HDR, the built-in and
+  /// user mirroring; it has no `sizeNoLongerOffered` arm, because that answer
+  /// belongs to the catalog lookup the restore would otherwise bypass. Thirty
+  /// seconds is long enough for a rotation or a native-geometry change to
+  /// regenerate the ladder underneath a captured stop.
+  @Test func aRestoreRefusesAStopTheLadderNoLongerOffers() async throws {
+    let fixture = Fixture()
+    defer { fixture.forgetPrefs() }
+    let display = try fixture.configured(Self.panelID)
+    let stop = try firstStop(fixture)
+    let smaller = try #require(
+      fixture.modes.catalogs[Self.panelID]?.all.first { $0.logicalWidth == 2560 })
+
+    _ = await fixture.synthesis.engage(stop, on: display)
+    fixture.modes.refreshCatalog(for: Self.panelID)
+    fixture.modes.select(smaller, on: Self.panelID, from: .settings, surface: .settingsBanner)
+    await fixture.settle()
+
+    // The ladder regenerates from a different native geometry, the way a
+    // rotation makes it.
+    let rotated = DisplayMode(
+      ioModeID: 11, logicalWidth: 1920, logicalHeight: 1080,
+      pixelWidth: 1920, pixelHeight: 1080, refreshHz: 60, isNative: true
+    )
+    fixture.world.attach(
+      display, modes: [rotated], current: rotated,
+      nativePixels: (width: 1920, height: 1080)
+    )
+    fixture.modes.refreshCatalog(for: Self.panelID)
+    #expect(
+      fixture.modes.catalogs[Self.panelID]?.syntheticStops.contains(stop) == false,
+      "the control: the captured stop is not in the ladder any more")
+
+    let preview = try #require(fixture.modes.preview)
+    _ = await fixture.modes.revert(preview)
+    await fixture.settle()
+
+    #expect(fixture.synthesis.pairings.isEmpty, "nothing was engaged")
+    #expect(fixture.synthesis.refusal?.reason == .sizeNoLongerOffered)
+    #expect(fixture.prefs.storedSyntheticSize == nil, "and the pref cannot outlive the ladder")
   }
 
   /// The queue-context flags, asserted the only way a hang can be: the select

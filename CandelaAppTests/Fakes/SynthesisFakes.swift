@@ -28,6 +28,17 @@ final class FakeDisplayWorld: @unchecked Sendable {
   /// answers `unwindIncomplete` against a fake that did unwind.
   private var ownModeByID: [CGDirectDisplayID: DisplayMode] = [:]
   private var nativeByID: [CGDirectDisplayID: (width: Int, height: Int)] = [:]
+  private var _publishesMasterTwinsWhileMirrored = false
+
+  /// While mirrored, the OS republishes the SLAVE's mode list around the
+  /// master's geometry: the native flag rides a twin at the master's size, and
+  /// `nativePixels` follows it. That is the poison the baseline cache exists to
+  /// keep out, and without it a fake makes an unstable pass compute exactly
+  /// what a stable one would, so caching it or not is unobservable.
+  var publishesMasterTwinsWhileMirrored: Bool {
+    get { lock.withLock { _publishesMasterTwinsWhileMirrored } }
+    set { lock.withLock { _publishesMasterTwinsWhileMirrored = newValue } }
+  }
   private(set) var mirrorChanges: [[MirrorChange]] = []
   private var _applies: [(mode: DisplayMode, displayID: CGDirectDisplayID)] = []
 
@@ -72,7 +83,10 @@ final class FakeDisplayWorld: @unchecked Sendable {
   }
 
   func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] {
-    lock.withLock { modesByID[displayID] ?? [] }
+    lock.withLock {
+      guard let twin = masterTwinLocked(displayID) else { return modesByID[displayID] ?? [] }
+      return [twin]
+    }
   }
 
   func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
@@ -80,7 +94,26 @@ final class FakeDisplayWorld: @unchecked Sendable {
   }
 
   func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
-    lock.withLock { nativeByID[displayID] ?? nil }
+    lock.withLock {
+      guard let twin = masterTwinLocked(displayID) else { return nativeByID[displayID] ?? nil }
+      return (width: twin.pixelWidth, height: twin.pixelHeight)
+    }
+  }
+
+  /// The native-flagged twin a mirrored slave publishes at the master's
+  /// geometry, or nil when this display is not one. Caller holds the lock.
+  private func masterTwinLocked(_ displayID: CGDirectDisplayID) -> DisplayMode? {
+    guard _publishesMasterTwinsWhileMirrored,
+          let master = displaysByID[displayID]?.mirrorsDisplay,
+          master != kCGNullDirectDisplay,
+          let masterMode = currentByID[master]
+    else { return nil }
+    return DisplayMode(
+      ioModeID: 900,
+      logicalWidth: masterMode.logicalWidth, logicalHeight: masterMode.logicalHeight,
+      pixelWidth: masterMode.pixelWidth, pixelHeight: masterMode.pixelHeight,
+      refreshHz: masterMode.refreshHz, isNative: true
+    )
   }
 
   /// A slave takes its master's geometry and keeps its own refresh, which is
@@ -142,6 +175,11 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   let world: FakeDisplayWorld
   /// Refuse the mirror, to reach the engine's `mirrorRefused` arm.
   var refusesMirroring = false
+  /// Runs on the ENGINE's executor immediately after a mirror has been applied
+  /// to the world, which is the one instant a test cannot otherwise reach: the
+  /// set stands, the pairing snapshot is still empty, and the work depth is
+  /// still raised. Anything it touches must be safe there on its own terms.
+  var onMirrorApplied: (@Sendable () -> Void)?
   /// Throw from `apply`, to reach the engage tail's bounce fallback.
   var refusesModeApplies = false
 
@@ -175,6 +213,7 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
   func applyMirroring(_ changes: [MirrorChange], scope _: DisplayConfigScope) throws {
     guard !refusesMirroring else { throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue) }
     world.applyMirroring(changes)
+    if changes.contains(where: { $0.master != kCGNullDirectDisplay }) { onMirrorApplied?() }
   }
 
   var revealsHiddenModes: Bool { false }
@@ -292,12 +331,21 @@ final class FakeSynthesisHDR: @unchecked Sendable {
   /// stranding path the bounce gives up loudly on.
   private var _achievesOn: Bool
   private var _achievesOff: Bool
+  /// What a measured read answers after an ON leg that did not take. nil is the
+  /// real seam's own answer for a superseded call, which established nothing;
+  /// `false` models the write that was never issued at all, where the display
+  /// is genuinely still out of HDR.
+  private var _stateAfterFailedOn: Bool?
 
-  init(supports: Bool = true, live: Bool? = false, achievesOn: Bool = true, achievesOff: Bool = true) {
+  init(
+    supports: Bool = true, live: Bool? = false, achievesOn: Bool = true,
+    achievesOff: Bool = true, stateAfterFailedOn: Bool? = nil
+  ) {
     _supports = supports
     _live = live
     _achievesOn = achievesOn
     _achievesOff = achievesOff
+    _stateAfterFailedOn = stateAfterFailedOn
   }
 
   var legs: [(enabled: Bool, granted: Bool)] { lock.withLock { _legs } }
@@ -308,10 +356,16 @@ final class FakeSynthesisHDR: @unchecked Sendable {
     SynthesisHDRBounce(
       supportsHDR: { [self] _ in lock.withLock { _supports } },
       measuredHDREnabled: { [self] _ in lock.withLock { _live } },
-      setHDR: { [self] _, enabled in
+      setHDR: { [self] _, enabled, _ in
         lock.withLock {
           let granted = enabled ? _achievesOn : _achievesOff
           if granted { _live = enabled }
+          // A leg that did not take leaves the state the fixture says it does:
+          // nil by default, which is what the real seam reports for a
+          // superseded call (it established nothing and the register is assumed
+          // locked). Modelling every failure as "still off" is what made the
+          // old on-leg give-up look safe.
+          if !granted, enabled { _live = _stateAfterFailedOn }
           _legs.append((enabled, granted))
           return granted
         }
