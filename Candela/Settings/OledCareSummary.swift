@@ -322,7 +322,14 @@ struct OledCareDisplayCard: View {
       case .lockDim:
         parts.append(OledCareCopy.lockDimPreview(model.oledCare.lockDimSkips[persistenceKey]))
       case .blackout: parts.append("Screen off")
-      case .suspended: parts.append("Paused while mirrored")
+      // SS8: v1 pauses under a synthesized size too, and this line is the tile's
+      // only words, so it names which mirror rather than reporting a user
+      // mirroring that never happened. One call feeds the sighted line and the
+      // accessibility value, which are the same string by construction.
+      case .suspended:
+        parts.append(
+          OledCareCopy.suspendedPreview(
+            synthesized: model.oledCare.synthesisSuspensions.contains(persistenceKey)))
       case nil: parts.append("Starting")
       }
     }

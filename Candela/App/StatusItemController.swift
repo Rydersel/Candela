@@ -355,6 +355,14 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       else { return }
       self.settingsActions.prefDidChange(.storedDisplayMode, persistenceKey: key)
     }
+    // The same rule for the two synthesis prefs, which the coordinator writes
+    // rather than a pane: the opt-in is settable from the hub and from a reset,
+    // and the stored size is written by the picker and by an unattended reapply.
+    // The persistence key comes with the call because the coordinator already
+    // resolved it to write the pref.
+    model.synthesis.didWriteSynthesisPref = { [weak self] name, key in
+      self?.settingsActions.prefDidChange(name, persistenceKey: key)
+    }
     // Spec §7: a failed resolution restore joins the diagnostics event ring.
     // Wired here for the reason above — a reapply runs unattended at reconnect,
     // with no view on screen to notice it.
@@ -393,12 +401,29 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // the menu bar ended up rather than where the request was made.
     let arrangementConfirmation = ArrangementConfirmationWindow(coordinator: model.arrangement)
     arrangementConfirmation.drawableDisplayID = drawableDisplayID
-    arrangementConfirmation.displayName = displayName
+    // SS12: while a synthesized size stands, the display this window is talking
+    // about is the virtual display holding the desktop, and the person reading
+    // the sentence is looking at their monitor. So it names the panel the pair
+    // is standing in for, exactly as the arrangement map does. An empty answer
+    // stays possible and is already handled: `ArrangementCopy` falls back to an
+    // unnamed sentence rather than leaving a gap where a name should be.
+    arrangementConfirmation.displayName = { [weak self] displayID in
+      guard let self else { return "" }
+      let pairing = model.synthesis.pairings.first { $0.virtualDisplayID == displayID }
+      return displayName(pairing?.physicalDisplayID ?? displayID)
+    }
     self.arrangementConfirmation = arrangementConfirmation
     model.arrangement.confirmation = arrangementConfirmation
     // The canvas names its tiles through the coordinator, so the map and the
     // confirmation window call a display by the same name.
     model.arrangement.displayName = displayName
+    // SS12. What the coordinator keys a saved layout, its lookup and the arrival
+    // gate on: a synthesized size puts the desktop on a virtual display and
+    // makes the panel its mirror slave, so without the pairing the topology
+    // signature moves the moment a size engages and orphans the layout saved for
+    // that display set. Read live and held nowhere: the pairing changes, and its
+    // display IDs are reassigned across a replug.
+    model.arrangement.synthesisPairings = { [weak self] in self?.model.synthesis.pairings ?? [] }
     // D27, the same wiring `didStoreMode` gets and for the same reason: the
     // coordinator writes `savedArrangements` when a layout is kept, and the seam
     // has to hear about it whichever surface answered. App-level, so no
@@ -1309,21 +1334,18 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       let displayName = state.display.name
       let persistenceKey = state.display.persistenceKey
       let monitor = interferenceMonitor
-      let gamma = gammaController
-      // Hoisted like the two above so the hook never captures `self`.
-      let topology = model.mirrorTopology
       state.controller.preGammaApplyHook = { [weak controller = state.controller] in
         monitor.checkBeforeApply(displayID: displayID, displayName: displayName) {
           // Accept: this display stops using gamma for good...
           DisplayPrefs(persistenceKey: persistenceKey).avoidGamma = true
-          // ...hand its table back (per-display; `resetAllGamma` would drop
+          // ...hand its tables back (per-display; `resetAllGamma` would drop
           // every other display's dimming too)...
-          // Scale 1.0 is a hand-back, so the write target and the enforcer
-          // target are the same display; the enforcer still has to be on a
-          // drawable one, which is the store's job to say (DT15).
-          gamma.applyGammaScale(
-            1.0, on: displayID, enforcerOn: topology.drawableDisplayID(for: displayID)
-          )
+          // Through the controller rather than straight to the island: under an
+          // engaged synthesis pairing the dim wrote TWO tables (SS15), and the
+          // island call would restore only the panel's, leaving the virtual
+          // display holding a scaled one under a display the shade now dims as
+          // well. The controller also owns the enforcer target (DT15).
+          controller?.handBackGammaTables()
           // ...and re-apply the current brightness through the shade backend.
           // `handleReconfigure` is the public door for that: it clears the
           // software dedupe memo (which `setBrightness` alone would trip over,

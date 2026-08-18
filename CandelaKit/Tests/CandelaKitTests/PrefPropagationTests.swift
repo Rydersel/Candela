@@ -101,7 +101,12 @@ struct PrefPropagationTests {
     // The density model's hub callout added its per-display dismissal: 64 -> 65.
     #expect(PrefName.sizeRecommendationDismissed.rawValue == "sizeRecommendationDismissed")
     // KMR-A3's indicator style: 65 -> 66.
-    #expect(PrefName.allCases.count == 66)
+    // SS4 added the two synthesized-size keys: 66 -> 68. `storedSyntheticSize`
+    // holds a JSON descriptor, the `storedDisplayMode` precedent, and both raw
+    // values are the keys `DisplayPrefs` composes with `.<pk>`.
+    #expect(PrefName.offerSyntheticSizes.rawValue == "offerSyntheticSizes")
+    #expect(PrefName.storedSyntheticSize.rawValue == "storedSyntheticSize")
+    #expect(PrefName.allCases.count == 68)
   }
 
   // MARK: - Rows
@@ -293,6 +298,18 @@ struct PrefPropagationTests {
     // someone tried a position out.
     for name in [PrefName.hudPositionBrightness, .hudPositionVolume, .hudStyle] {
       #expect(PrefPropagation.effects(forChange: name) == [.refreshUI])
+    }
+  }
+
+  @Test func synthesisPrefsRefreshTheUIAndNothingElse() {
+    // The same answer, and for the same reason, as the two remembered-mode rows
+    // (SS11): engaging and disengaging a synthesis set is verified engine work
+    // the caller does AROUND the write, so a row that fanned out to display
+    // work would run it a second time, unsequenced, from the pref edit.
+    // `.refreshUI` is what the opt-in owes: it decides which rows the size
+    // picker shows (SS4).
+    for name in [PrefName.offerSyntheticSizes, .storedSyntheticSize] {
+      #expect(PrefPropagation.effects(forChange: name) == [.refreshUI], "\(name.rawValue)")
     }
   }
 }

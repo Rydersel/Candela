@@ -770,6 +770,78 @@ public final class BrightnessController: PendingWireDraining {
     mirrorTopology.drawableDisplayID(for: displayID)
   }
 
+  /// The companion ID the last gamma write went to, so a reconfigure can clear
+  /// the baseline the island cached for it.
+  ///
+  /// Remembered rather than re-derived: a synthesis disengage destroys the
+  /// virtual display and the topology stops naming it in the same breath, so by
+  /// the time `handleReconfigure` runs there is nothing left to ask. Without
+  /// this the island keeps a baseline keyed on an ID CoreGraphics is free to
+  /// hand to the next display that arrives, and a re-engaged slot would scale a
+  /// new display's table against a destroyed one's.
+  private var lastGammaCompanionID: CGDirectDisplayID?
+
+  /// Every gamma write this controller makes, and the ONE place SS15's double
+  /// write is decided.
+  ///
+  /// While a synthesis set is engaged the panel and the virtual display holding
+  /// its framebuffer are two different display IDs with two different transfer
+  /// tables. Phase 0 measured that the slave's table stores and reads back
+  /// changed, and that whether it reaches the glass is not decidable from
+  /// software: scanout comes from the master's framebuffer, and no reachable
+  /// layer distinguishes a dimmed panel from an undimmed one. So both are
+  /// written, which is what SS15 asks for.
+  ///
+  /// **This is not a free double write, and nothing here claims otherwise.**
+  /// Zero, one or both of the two tables may reach the glass, and software
+  /// cannot tell which. Two LUTs in one scanout chain COMPOUND: 0.5 applied
+  /// twice is 0.25, a visibly darker panel than the value asked for. The
+  /// hardware pass's eyes item is therefore checking for doubled dimming exactly
+  /// as much as for missing dimming, and it is what decides the final single
+  /// routing.
+  ///
+  /// Restricted to a SYNTHESIS set (SS1's pairing, never the mirror flags). In a
+  /// mirror set the user built, the master is somebody else's desktop and
+  /// scaling its table would dim a display nobody asked about.
+  ///
+  /// The companion leg goes through the assumed-linear-baseline entry point,
+  /// because the process that created a virtual display cannot read its table
+  /// back and the ordinary leg refuses a display whose baseline it never
+  /// captured. Without it the second write is issued here and never made.
+  ///
+  /// Only the PANEL's write decides the return value. The companion can refuse
+  /// for reasons that say nothing about the dimming, and letting that answer
+  /// `landed` would clear the dedupe memo and re-attempt on every drag event:
+  /// the live-lock DT17's reporting rule exists to avoid.
+  @discardableResult
+  private func writeGammaScale(
+    _ scale: Double, using gamma: any GammaApplying, enforcerOn drawable: CGDirectDisplayID
+  ) -> Bool {
+    let landed = gamma.applyGammaScale(scale, on: displayID, enforcerOn: drawable)
+    if drawable != displayID, mirrorTopology.topology().isSynthesisSet(containing: displayID) {
+      gamma.applyGammaScale(assumingLinearBaseline: scale, on: drawable, enforcerOn: drawable)
+      lastGammaCompanionID = drawable
+    }
+    return landed
+  }
+
+  /// Hands this display's gamma tables back at scale 1.0, on every leg the dim
+  /// wrote to.
+  ///
+  /// The interference-accept path abandons gamma for the shade for good and has
+  /// to restore what it scaled. It cannot write the island directly: under an
+  /// engaged synthesis pairing the dim wrote TWO tables (SS15), and a companion
+  /// left scaled is a virtual display holding a dark framebuffer that no other
+  /// door hands back, on a display the shade is now dimming as well. Public
+  /// because the accept hook lives in the app target.
+  ///
+  /// Deliberately does NOT clear `lastAppliedSw`: the caller follows with
+  /// `handleReconfigure`, which owns that and the re-apply through the shade.
+  public func handBackGammaTables() {
+    guard let gamma = backends.gamma else { return }
+    writeGammaScale(1.0, using: gamma, enforcerOn: drawableDisplayID)
+  }
+
   /// The software leg, inline and synchronous on the main actor. `sw` is the
   /// raw 0…1 software value; the backend receives the transformed physical
   /// multiplier (dossier §3: the transform applies before any gamma/shade
@@ -794,8 +866,9 @@ public final class BrightnessController: PendingWireDraining {
       } ?? true
     } else if let gamma = backends.gamma {
       preGammaApplyHook?()
-      // The WRITE target stays the RAW panel ID; only the enforcer resolves.
-      landed = gamma.applyGammaScale(transformed, on: displayID, enforcerOn: drawable)
+      // The WRITE target stays the RAW panel ID; only the enforcer resolves, and
+      // an engaged synthesis set adds a second write (SS15, `writeGammaScale`).
+      landed = writeGammaScale(transformed, using: gamma, enforcerOn: drawable)
     } else {
       landed = true
     }
@@ -827,7 +900,12 @@ public final class BrightnessController: PendingWireDraining {
     supersedeHeldSoftwareLeg()
     let drawable = drawableDisplayID
     backends.shade?.removeShade(for: drawable)
-    backends.gamma?.applyGammaScale(1.0, on: displayID, enforcerOn: drawable)
+    // Through the same helper as the dim, so the restore reaches every table the
+    // dim wrote: a synthesis companion left scaled is a virtual display holding
+    // a dark framebuffer nothing else will ever hand back.
+    if let gamma = backends.gamma {
+      writeGammaScale(1.0, using: gamma, enforcerOn: drawable)
+    }
     lastAppliedSw = nil
   }
 
@@ -1338,6 +1416,66 @@ public final class BrightnessController: PendingWireDraining {
     }
   }
 
+  /// One leg of a TRANSIENT HDR round trip another feature needs on this
+  /// display, taken through the controller so the brightness stack sees the
+  /// window it opens.
+  ///
+  /// Deliberately NOT `setHDRMode`. Nothing here is a preference: `hdrMode` and
+  /// `prefs.hdrMode` are untouched, so a link renegotiation cannot rewrite the
+  /// mode a person chose, and the `.off` door stays live afterwards because
+  /// `cachedHDRActive` ends this call as a measured answer rather than the
+  /// stale false the mode guard would return early on.
+  ///
+  /// What the routing buys is the whole reason it exists: DDC does not work
+  /// while the display is in HDR. The transition token supersedes a parked
+  /// transition; `settleInProgress` and the optimistic mirror take the
+  /// brightness legs off DDC BEFORE the write goes out; and the wire's
+  /// duplicate memos are dropped on the way out of every leg. A window the
+  /// brightness stack never heard about leaves values ACKed, swallowed and
+  /// recorded as landed, which on a write-only display nothing downstream can
+  /// detect.
+  ///
+  /// Returns the MEASURED state after the settle, never the write's ACK. False
+  /// whenever a newer transition took the display mid-flight: a superseded call
+  /// established nothing, so it may not claim its leg landed.
+  ///
+  /// `settle` is the caller's, not this controller's, because the caller is the
+  /// one that has to state its own worst case: six legs of a link bounce pay
+  /// this window six times, inside a gate claim nothing else can take. Omit it
+  /// to take `settleDelay`.
+  @discardableResult
+  public func setTransientHDR(_ enabled: Bool, settle: Duration? = nil) async -> Bool {
+    guard role == .external else { return false }
+    beginHDRTransition()
+    let generation = hdrTransitionGeneration
+    // Optimistic for the duration, in both directions, and written BEFORE the
+    // await: the legs have to stop treating DDC as reachable while the display
+    // enters HDR, and must not resume until the exit has been confirmed.
+    cachedHDRActive = enabled
+    _ = await backends.hdr?.setHDR(displayID: displayID, enabled: enabled)
+    guard hdrTransitionGeneration == generation else {
+      cachedHDRActive = true // assume locked: the exit path's rule, same reason
+      return false
+    }
+    try? await Task.sleep(for: settle ?? settleDelay)
+    guard hdrTransitionGeneration == generation else {
+      cachedHDRActive = true // assume locked
+      return false
+    }
+    settleInProgress = false
+    // Unconditional, and on BOTH legs. The observed edge in `refreshHDRCaches`
+    // only fires for a window some refresh saw live, and a bounce is precisely
+    // the window that can open and close between two refreshes.
+    invalidateWireMemos()
+    await refreshHDRCaches(measured: true)
+    guard hdrTransitionGeneration == generation else { return false }
+    // No `clearSoftwareLeg` on the way in, so there is no cleared leg to
+    // rebuild: leaving the window only needs the current value re-asserted
+    // through whichever path applies now that the register is back.
+    if !enabled { applyPaths() }
+    return cachedHDRActive == enabled
+  }
+
   /// Re-evaluates the cached HDR state (Task 4's topology loop calls this for
   /// every surviving display after `HDRToggling.displaysReconfigured()`).
   /// Detecting an externally-toggled HDR entry runs the C1 clearing.
@@ -1376,6 +1514,15 @@ public final class BrightnessController: PendingWireDraining {
     // next real reconfiguration recaptures normally.
     if recapture {
       backends.gamma?.recaptureDefaultTable(on: displayID)
+      // SS15's companion leg makes the island hold a baseline for a display this
+      // controller does not own, and a synthesis disengage destroys that display
+      // while CoreGraphics is free to reissue its ID. Dropping the baseline here
+      // is what stops a re-engaged slot from scaling a new display's table
+      // against a destroyed one's.
+      if let companion = lastGammaCompanionID, companion != displayID {
+        backends.gamma?.recaptureDefaultTable(on: companion)
+        lastGammaCompanionID = nil
+      }
     }
     backends.shade?.repinFrames()
     lastAppliedSw = nil
@@ -1949,7 +2096,9 @@ public final class BrightnessController: PendingWireDraining {
     let choice = softwareBackendChoice
     let drawable = drawableDisplayID
     if choice != .shade { backends.shade?.removeShade(for: drawable) }
-    if choice != .gamma { backends.gamma?.applyGammaScale(1.0, on: displayID, enforcerOn: drawable) }
+    if choice != .gamma, let gamma = backends.gamma {
+      writeGammaScale(1.0, using: gamma, enforcerOn: drawable)
+    }
     lastAppliedSw = nil
     applyPaths(.software)
     handBackDDCLegIfAbandoned()

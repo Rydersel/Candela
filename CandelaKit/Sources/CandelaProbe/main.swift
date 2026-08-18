@@ -46,7 +46,7 @@ usage: candela-probe [--display <id>] <subcommand>
   gamma reset                             CGDisplayRestoreColorSyncSettings
   watch [seconds=10]                      100 ms native-brightness delta log
   topology                                online displays: kind, identity, virtual verdict, DDC pool
-  vd create <slot> <w> <h> [--hidpi] [--hold <s>]  create a virtual display, hold, destroy
+  vd create <slot 1-3> <w> <h> [--hidpi] [--hold <s>]  create a virtual display, hold, destroy
 """
 
 /// The DDC subcommands need a DDC-capable external display. The private-API
@@ -175,7 +175,11 @@ case "vd":
     print(usage)
     exit(2)
   }
+  // User slots only. The host stands synthesis slots 4 and 5 too, but those
+  // are engine-internal (SS6) and standing one by hand would leave a display
+  // the app's reconciler does not own.
   guard arguments.count >= 4, let slot = Int(arguments[2]),
+        VirtualDisplayIdentity.userSlotRange.contains(slot),
         let width = Int(arguments[3]), arguments.count >= 5, let height = Int(arguments[4])
   else {
     print("usage: vd create <slot 1-3> <width> <height> [--hidpi] [--hold <seconds>]")
@@ -255,6 +259,31 @@ case "modes":
           + "  @\(String(format: "%g", mode.refreshHz))Hz"
           + "  id \(mode.ioModeID)")
     }
+  }
+case "synthstops":
+  // The synthesized-size ladder exactly as the launch reapply computes it:
+  // raw configurator rows, native from the native flag, and the stored-stop
+  // resolution beside it. Built for the #186 pass, where the pane and the
+  // launch path disagreed and nothing could print the launch path's view.
+  guard let target = displayFilter else {
+    print("synthstops requires --display <id>")
+    exit(2)
+  }
+  let configurator = CoreGraphicsDisplayConfigurator()
+  let rows = configurator.modes(for: target)
+  print("rows: \(rows.count)")
+  let native = rows.first(where: \.isNative)
+  print("native: \(native.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) @\($0.refreshHz)Hz" } ?? "NIL")")
+  if let native {
+    let stops = SyntheticSizeCatalog.stops(
+      nativeLogicalWidth: native.logicalWidth, nativeLogicalHeight: native.logicalHeight,
+      existingRows: rows,
+      ceilingPixelWidth: VirtualDisplayIdentity.maxPixels.wide,
+      ceilingPixelHeight: VirtualDisplayIdentity.maxPixels.high)
+    for stop in stops {
+      print("stop: \(stop.logicalWidth)x\(stop.logicalHeight) @\(stop.percentOfNative)%")
+    }
+    if stops.isEmpty { print("stop: NONE") }
   }
 case "curated":
   // What the DEFAULT picker actually shows, after DisplayModeCatalog curation.

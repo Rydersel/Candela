@@ -112,15 +112,21 @@ struct PanelResolutionSection: View {
           PanelCaption("Waiting for you to keep or revert the new resolution on \(displayName).", style: .tertiary)
         }
         startFailure
+        synthesisRefusal
         reapplyReport
       }
-    } else if report != nil {
+    } else if report != nil || refusal != nil {
       // The list is absent — one usable size, or none — and a reapply still had
       // something to say about this display. Saying it anyway is the point:
       // this is the surface most people see, and a report that renders only
       // when a picker happens to be worth drawing is a report that goes missing
-      // exactly on the displays with the fewest options.
-      VStack(alignment: .leading, spacing: 2) { reapplyReport }
+      // exactly on the displays with the fewest options. A synthesis refusal
+      // joins it for the same reason and one of its own: the unattended reapply
+      // at launch can produce one on a display whose list is too short to draw.
+      VStack(alignment: .leading, spacing: 2) {
+        synthesisRefusal
+        reapplyReport
+      }
     }
   }
 
@@ -148,8 +154,11 @@ struct PanelResolutionSection: View {
       // to find out. It costs 50 pt of the row's slack (measured at 12 pt
       // system: 72.4 → 122.2, against the 161.6 that truncated), so the
       // badges' verdict is unchanged.
-      detail: catalog.current.map(summary),
-      spokenDetail: catalog.current.map(spokenSummary),
+      // `onScreen`, never the raw readback: while a size this app renders is
+      // engaged the readback names the display's native geometry, and this row
+      // is the only place in the menu bar that states what is running.
+      detail: catalog.onScreen.map(summary),
+      spokenDetail: catalog.onScreen.map(spokenSummary),
       accessibilityName: displayName,
       accessibilityRole: "resolution",
       isExpanded: isExpanded
@@ -208,6 +217,34 @@ struct PanelResolutionSection: View {
     }
   }
 
+  /// A synthesized size that did not engage, or a teardown that did not finish
+  /// (SS9, and `SynthesisFailure.unwindIncomplete`).
+  ///
+  /// The panel can pick a synthesized stop: `badgedSize` marks it and the rows
+  /// above apply it like any other size. So the refusal has to be answerable
+  /// here as well as in the settings window, or a stop refused from the menu
+  /// bar would change nothing and say nothing.
+  ///
+  /// Same dismissal as everywhere else, against the coordinator's one refusal
+  /// slot: OK here clears the settings banner too, which is right, because it
+  /// is one answer to one request rather than one notice per surface.
+  @ViewBuilder private var synthesisRefusal: some View {
+    if let refusal, let synthesis = coordinator.synthesis {
+      PanelReportRow(text: Text(SynthesisCopy.refusal(refusal.reason))) {
+        synthesis.dismissRefusal()
+      }
+      .padding(.horizontal, 4)
+    }
+  }
+
+  /// This display's refusal, or nil. One reading for the builder above and for
+  /// the branch that renders it with no list.
+  private var refusal: SynthesisCoordinator.Refusal? {
+    guard let refusal = coordinator.synthesis?.refusal, refusal.displayID == displayID
+    else { return nil }
+    return refusal
+  }
+
   /// What reapply could not do on this display, at launch or when it
   /// reconnected. Nobody was watching then, so this is the first moment the
   /// user can be told — it stays until they dismiss it or pick a resolution
@@ -230,7 +267,7 @@ struct PanelResolutionSection: View {
   private func apply(_ mode: DisplayMode, in catalog: DisplayModeCoordinator.Catalog) {
     // Picking the size already on screen would apply a no-op and then demand
     // "Keep this resolution?" for a change nobody made.
-    guard mode.ioModeID != catalog.current?.ioModeID else { return }
+    guard mode.ioModeID != catalog.alreadyOnScreenModeID else { return }
     // No `Task` here — `select` is fire-and-forget into the coordinator's
     // queue, which is what serialises two fast clicks.
     //

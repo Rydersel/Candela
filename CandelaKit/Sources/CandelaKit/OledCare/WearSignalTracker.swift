@@ -158,18 +158,22 @@ public final class WearSignalTracker {
     Self.stateOrder.map { ($0, seconds(inState: $0)) }
   }
 
-  /// **OC17's effect-size gate, as one number.** The share of panel-on time
-  /// spent in a state the wear mask would apply to.
+  /// **OC17's effect-size gate, as one number.** The share of
+  /// MASK-COULD-APPLY time spent in a state the wear mask would apply to.
   ///
-  /// Suspended time is excluded from the denominator. **This is defensive, not
-  /// load-bearing, and the comment used to claim otherwise.** It said the
-  /// exclusion stopped "a projector plugged in for a day" from diluting the
-  /// ratio; it cannot, because the coordinator books wear only under
-  /// `awake && !isMirrored` and `.suspended` is produced only by mirroring, so
-  /// that slot is structurally always zero. The subtraction stays because the
-  /// gate lives in a different file from this arithmetic and a later caller
-  /// that does book suspended time should get the right answer, but nobody
-  /// should read it as evidence the case is handled today.
+  /// That denominator is the RULED definition (2026-08-18), not an artifact of
+  /// the arithmetic: suspended seconds are excluded because the mask cannot
+  /// apply during them, so counting them would be measuring the gate against
+  /// time it was never eligible to act in. The behaviour is exactly as
+  /// shipped; what changed is that the exclusion is now the semantics rather
+  /// than a defensive subtraction.
+  ///
+  /// Suspended time is real, and under synthesis it is common (SS8): a
+  /// synthesized size mirrors the panel onto a virtual display, and OLED care
+  /// keeps booking that panel's time as `.suspended` rather than stopping the
+  /// clock. It belongs in the histogram, which covers every state, and not in
+  /// this ratio, which is about the states the mask can reach. The two surfaces
+  /// say so out loud rather than being reconciled.
   ///
   /// Nil rather than zero when nothing has accumulated, because "0% of no time"
   /// is not an answer and reads as a verdict.

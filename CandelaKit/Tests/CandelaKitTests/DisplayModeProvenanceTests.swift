@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 
@@ -31,6 +32,97 @@ struct DisplayModeProvenanceTests {
     #expect(
       mode(provenance: .coreGraphics).descriptor
         == mode(provenance: .coreGraphicsServices).descriptor)
+  }
+
+  /// SS5. A synthesized row comes from neither enumeration: it is a size we
+  /// render through a virtual display, so it is not "revealed" and its
+  /// `ioModeID` is a sentinel that must never reach CoreGraphics.
+  @Test func synthesizedIsNeitherRevealedNorCoreGraphics() {
+    let m = DisplayMode(
+      ioModeID: DisplayMode.syntheticIoModeID(stopIndex: 2),
+      logicalWidth: 2580, logicalHeight: 1080,
+      pixelWidth: 5160, pixelHeight: 2160,
+      refreshHz: 0, isNative: false, provenance: .synthesized)
+    #expect(m.isSynthesized)
+    #expect(!m.isRevealed)
+    #expect(m.ioModeID == -1002)
+    #expect(m.isHiDPI)
+  }
+}
+
+/// SS5's routing half, against the REAL configurator: a synthesized mode is
+/// refused by the CoreGraphics apply path rather than routed anywhere in it.
+///
+/// Safe on this machine, and the safety is structural rather than lucky: the
+/// `.synthesized` arm throws before `beginDisplayConfiguration`, so no
+/// transaction is opened. It stays safe under a mutation that routes to the
+/// PUBLISHED path, because a sentinel `ioModeID` is negative, resolves to no
+/// `CGDisplayMode` on any display, and that lookup throws before opening a
+/// transaction too.
+///
+/// **A mutation routing to the REVEALED path is not covered by that argument**,
+/// and nothing here tests it: `applyRevealedMode` opens a transaction and hands
+/// the sentinel to `CGSConfigureDisplayMode`. What that private call does with a
+/// negative mode number is an expectation (it refuses, and the transaction is
+/// cancelled), not a measurement.
+///
+/// The expected error is spelled exactly, not merely `DisplayConfigError.self`.
+/// A wrong routing throws SOMETHING, so a type-only expectation would pass
+/// against a configurator that had stopped refusing entirely.
+@Suite("Synthesized apply refusal (SS5)")
+struct SynthesizedApplyRefusalTests {
+  private let refusal = DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue)
+
+  private func synthesizedMode() -> DisplayMode {
+    DisplayMode(
+      ioModeID: DisplayMode.syntheticIoModeID(stopIndex: 2),
+      logicalWidth: 2580, logicalHeight: 1080,
+      pixelWidth: 5160, pixelHeight: 2160,
+      refreshHz: 0, isNative: false, provenance: .synthesized
+    )
+  }
+
+  /// A real, attached display: the refusal is keyed on provenance, not on the
+  /// display being bogus. This is the one that would catch a caller wiring a
+  /// synthesized row into the ordinary apply path.
+  @Test func applyRefusesASynthesizedModeOnAnAttachedDisplay() {
+    let configurator = CoreGraphicsDisplayConfigurator()
+    #expect(throws: refusal) {
+      try configurator.apply(synthesizedMode(), to: CGMainDisplayID(), scope: .preview)
+    }
+  }
+
+  @Test func applyRefusesASynthesizedModeForANonexistentDisplayToo() {
+    let configurator = CoreGraphicsDisplayConfigurator()
+    #expect(throws: refusal) {
+      try configurator.apply(synthesizedMode(), to: 0xDEAD_BEEF, scope: .preview)
+    }
+  }
+
+  /// The refusal code must stay distinguishable from the published path's
+  /// stale-ID failure, which is the only reason the expectations above can tell
+  /// a refusal from a wrong routing that happened to fail.
+  ///
+  /// Read from what `apply` ACTUALLY throws for a published mode it cannot
+  /// resolve, rather than from a second literal: comparing two constants is a
+  /// statement about the test file, and either code could move without it
+  /// noticing. Safe on an attached display for the suite's own reason: the
+  /// lookup throws before `beginDisplayConfiguration`.
+  @Test func theRefusalCodeIsNotTheCodeAStaleIDProduces() {
+    let configurator = CoreGraphicsDisplayConfigurator()
+    let unresolvable = DisplayMode(
+      ioModeID: .max, logicalWidth: 2580, logicalHeight: 1080,
+      pixelWidth: 5160, pixelHeight: 2160, refreshHz: 60,
+      isNative: false, provenance: .coreGraphics
+    )
+    var staleCode: Int32?
+    do {
+      try configurator.apply(unresolvable, to: CGMainDisplayID(), scope: .preview)
+    } catch let error as DisplayConfigError {
+      staleCode = error.cgErrorCode
+    } catch {}
+    #expect(staleCode != nil, "an unresolvable published mode must still throw")
+    #expect(staleCode != refusal.cgErrorCode)
   }
 }
 

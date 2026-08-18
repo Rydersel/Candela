@@ -192,22 +192,35 @@ struct OledCareMeasurementPage: View {
 
   /// The wear signal's first reader (OC20 built it; nothing displayed it):
   /// how long this display has run at each brightness, and the share of
-  /// tracked time spent in a protective dim, which is OC17's own gate number.
-  /// Both are counts of seconds; neither is a model.
+  /// MASK-COULD-APPLY time spent in a protective dim, which is OC17's own gate
+  /// number. Both are counts of seconds; neither is a model.
+  ///
+  /// The two do NOT share a denominator, ruled 2026-08-18: the bars cover every
+  /// state, the percentage covers only the time the mask could act in. That is
+  /// what the caption below is for, and it is the reason the percentage is not
+  /// rewritten to match the bars.
   private func usageHistogram(tracker: WearSignalTracker, buckets: [Double]) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
+    let fraction = tracker.wearWeightableFraction
+    return VStack(alignment: .leading, spacing: 6) {
       HStack(alignment: .firstTextBaseline) {
         Text("Time at brightness")
           .font(.caption)
           .foregroundStyle(.secondary)
         Spacer(minLength: 8)
-        if let fraction = tracker.wearWeightableFraction, fraction > 0 {
+        if let fraction, fraction > 0 {
           Text(verbatim: "\(Int((fraction * 100).rounded()))% of tracked time in a protective dim")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
       }
       OledBrightnessHistogram(secondsByBucket: buckets)
+      // Only where both numbers are on screen: with no percentage beside the
+      // bars there are not two readings to tell apart.
+      if let fraction, fraction > 0 {
+        Text(verbatim: OledCareCopy.wearFractionScope)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
     }
     .padding(.vertical, 2)
   }

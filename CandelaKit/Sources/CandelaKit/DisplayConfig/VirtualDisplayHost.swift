@@ -12,11 +12,15 @@ import os
 /// the online list and pump the calling thread's run loop); callers hop off
 /// the main actor first.
 public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Sendable {
-  // Confinement: every access to `slots`, `reserved` and `stranded` is under
-  // `lock`; the C tokens are owned by this instance alone and released
-  // exactly once in destroy paths.
+  // Confinement: every access to `slots`, `reserved`, `stranded` and
+  // `achievedModes` is under `lock`; the C tokens are owned by this instance
+  // alone and released exactly once in destroy paths.
   private let lock = NSLock()
   private var slots: [Int: (token: UnsafeMutableRawPointer, handle: VirtualDisplayHandle)] = [:]
+  /// What each live slot's display ACHIEVED, established while it was created
+  /// and never re-derived after. `achievedMode(slot:)` carries the reason a
+  /// live read cannot answer this question in the creating process.
+  private var achievedModes: [Int: (width: Int, height: Int, hiDPI: Bool)] = [:]
   /// Slots with a create in flight. Reserved UNDER THE LOCK before the C call
   /// so two concurrent creates cannot both pass the occupancy check and the
   /// second overwrite the first's token (a leaked display with no destroy
@@ -129,6 +133,10 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
     )
     lock.lock()
     slots[slot] = (token, handle)
+    // Provisional, and deliberately pessimistic: a display is 1x until the
+    // engage below proves otherwise, so a slot read during the seconds that
+    // engage takes reports what it currently is rather than what was asked for.
+    achievedModes[slot] = (normalized.logicalWidth, normalized.logicalHeight, false)
     reserved.remove(slot)
     lock.unlock()
 
@@ -159,6 +167,14 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
           logicalWidth: normalized.logicalWidth, logicalHeight: normalized.logicalHeight
         )
       }
+      // THE VERDICT IS KEPT, not just logged. It is the only evidence this
+      // process will ever have that the 2x variant engaged: the helper ran the
+      // readback in a process that could perform it, and nothing here can
+      // repeat that. Discarding it into a log was what left every consumer to
+      // re-derive it from a read that returns nil.
+      lock.lock()
+      achievedModes[slot] = (normalized.logicalWidth, normalized.logicalHeight, engaged)
+      lock.unlock()
       if !engaged {
         log.error("vd.create slot=\(slot) id=\(displayID): 2x mode \(fitsCeiling ? "did not engage" : "cannot exist under the pixel ceiling"); display stays 1x")
       }
@@ -177,9 +193,18 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
   @discardableResult
   public func destroy(slot: Int, departureTimeout: TimeInterval) -> Bool {
     lock.lock()
+    achievedModes.removeValue(forKey: slot)
     guard let entry = slots.removeValue(forKey: slot) else {
+      // A slot this host no longer holds is normally nothing to destroy, and
+      // saying so is right. A STRANDED slot is the exception and it is the one
+      // that matters: the token was released while the display stayed online,
+      // so there is no entry left and the display is still there. Answering
+      // true would report a clean revert over it, and `ModeSynthesisEngine`'s
+      // unwind takes this return as its departure check (SS10), so a retried
+      // disengage would drop a pairing whose virtual display is still standing.
+      let stillStranded = stranded.contains(slot)
       lock.unlock()
-      return true
+      return !stillStranded
     }
     lock.unlock()
     breakMasteredMirrors(of: entry.handle.displayID)
@@ -299,13 +324,33 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
   }
 
   /// The achieved mode of a live slot, for surfaces that must state what IS
-  /// rather than what was asked (nil when the display is gone).
+  /// rather than what was asked (nil when the slot holds nothing).
+  ///
+  /// **The verdict RECORDED AT CREATION, never a live read.** The creating
+  /// process USUALLY cannot read its own virtual display back:
+  /// `CGDisplayCopyDisplayMode` on it returned nil whenever it mattered
+  /// (measured 2026-08-17), which is why `spawnEngageHelper` exists. Not
+  /// "never", and the difference is why `create` still tries in-process FIRST:
+  /// when that read works it is free, and a helper process is not. Do not read
+  /// this paragraph as saying the in-process leg is dead code.
+  ///
+  /// What follows from "usually" is that a caller may not gate on a read of its
+  /// own: the helper exits 0 only after checking `pixelWidth >= width * 2` in a
+  /// process that can always read the display, so its exit status is the
+  /// evidence, and it is kept when it lands rather than re-derived here from a
+  /// call that may answer nil. The earlier in-process-only read failed OPEN in
+  /// the one process that asks.
+  ///
+  /// The `slots[slot] != nil` guard is load-bearing, not defensive tidiness: a
+  /// destroyed slot's verdict must not resurrect. `destroy` clears both maps,
+  /// but a slot recreated after a failed engage would otherwise be able to
+  /// answer with a verdict about a display that no longer exists, and the
+  /// synthesis engine gates its whole sequence on this answer.
   public func achievedMode(slot: Int) -> (width: Int, height: Int, hiDPI: Bool)? {
     lock.lock()
-    let displayID = slots[slot]?.handle.displayID
-    lock.unlock()
-    guard let displayID, let mode = CGDisplayCopyDisplayMode(displayID) else { return nil }
-    return (mode.width, mode.height, mode.pixelWidth >= mode.width * 2)
+    defer { lock.unlock() }
+    guard slots[slot] != nil else { return nil }
+    return achievedModes[slot]
   }
 
   /// A display that MASTERS a mirror set must stop mastering it before

@@ -150,12 +150,18 @@ public enum ArrangementReapplyPolicy {
   ///     display and the wake as three arrivals.
   ///   - current: the layout on screen, as `ArrangementSnapshot` read it.
   ///     Compared against `attached` rather than trusted — see the guard below.
+  ///   - substituting: SS12's map, a synthesis virtual display's ID to the
+  ///     identity key of the panel it is standing in for. The same one the
+  ///     layout was saved under, so a layout saved for the panel is matched
+  ///     against the pair that is showing its picture rather than reported as a
+  ///     display set the user has never seen.
   public static func decide(
     isEnabled: Bool,
     arrivals: Set<CGDirectDisplayID>,
     stored: SavedArrangement?,
     attached: [ConfiguredDisplay],
-    current: DisplayArrangement
+    current: DisplayArrangement,
+    substituting: [CGDirectDisplayID: String] = [:]
   ) -> ArrangementReapplyDecision {
     guard isEnabled else { return .doNothing }
     // Before the deferral gates, and deliberately: with nothing having arrived
@@ -179,7 +185,7 @@ public enum ArrangementReapplyPolicy {
 
     guard let stored else { return .doNothing }
 
-    switch ArrangementPersistence.resolve(stored, against: current) {
+    switch ArrangementPersistence.resolve(stored, against: current, substituting: substituting) {
     case let .exact(layout):
       // The skip is not an optimisation. Applying the layout the machine is
       // already in still triggers a full CoreGraphics reconfiguration — which
@@ -284,8 +290,17 @@ public struct TopologyArrivalTracker: Sendable, Equatable {
   /// layout but not from the machine. A reset over that transient would make the
   /// whole set read as newly arrived and re-assert a saved layout over a change
   /// the user had just made by hand.
-  public mutating func claimArrivals(online: [ConfiguredDisplay]) -> Set<CGDirectDisplayID> {
-    let signature = TopologySignature(online: online)
+  ///
+  /// **SS12**: `substituting` names each synthesis virtual display by the panel
+  /// it is standing in for, so engaging or dropping a synthesized size is not a
+  /// change of display SET. Without it every display on the machine reads as
+  /// newly arrived the moment a size engages, which re-asserts the saved layout
+  /// over whatever the user last did by hand. Runtime IDs, handed in with the
+  /// sample; nothing here stores one.
+  public mutating func claimArrivals(
+    online: [ConfiguredDisplay], substituting: [CGDirectDisplayID: String] = [:]
+  ) -> Set<CGDirectDisplayID> {
+    let signature = TopologySignature(online: online, substituting: substituting)
     if signature != self.signature {
       self.signature = signature
       // The SET changed, so every display in it is part of an arrangement that

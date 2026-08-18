@@ -83,6 +83,19 @@ final class ArrangementCoordinator {
   /// unwired coordinator looks unfinished in testing rather than plausibly right.
   @ObservationIgnored var displayName: (CGDirectDisplayID) -> String = { _ in "" }
 
+  /// The synthesis pairings as of now (SS1), so a layout is saved, looked up and
+  /// arrival-gated under the PANEL a synthesized size is standing in for rather
+  /// than under the virtual display that owns its picture. Without it, engaging
+  /// a size orphans every saved layout for that display set and reports the
+  /// panel as missing from a machine it is plugged into.
+  ///
+  /// A closure rather than a snapshot, for two reasons that both bite: the
+  /// pairing changes while this object lives, and its display IDs are RUNTIME
+  /// ids, reassigned across a replug. Read at the moment of use and stored
+  /// nowhere. Empty by default, which is exactly a machine with no synthesized
+  /// size engaged.
+  @ObservationIgnored var synthesisPairings: () -> [SynthesisPairing] = { [] }
+
   @ObservationIgnored private let configurator: any DisplayArrangementConfiguring
   /// AR12. Held from just before the layout applies until nothing is
   /// outstanding. Not defaulted — a per-coordinator default would compile, run,
@@ -204,6 +217,18 @@ final class ArrangementCoordinator {
   }
 
   // MARK: - Sampling
+
+  /// The pairing in the spelling the persistence layer speaks (SS12): a
+  /// synthesis virtual display's ID against the identity key of the panel it is
+  /// standing in for. Built per use from the live pairing, never held.
+  ///
+  /// The panel itself is left filtered as the mirror slave it is: the pair
+  /// contributes one identity, under the panel's name. Signing both would file
+  /// the layout under a set that exists only while the size does, which is the
+  /// orphaned layout this exists to prevent.
+  private var synthesisSubstitutions: [CGDirectDisplayID: String] {
+    synthesisPairings().reduce(into: [:]) { $0[$1.virtualDisplayID] = $1.physicalIdentityKey }
+  }
 
   /// Re-reads the layout on screen. Called at launch, on every screen-parameters
   /// change, and after anything this app applies.
@@ -426,7 +451,13 @@ final class ArrangementCoordinator {
     let topology = configurator.currentTopology()
     arrangement = topology.arrangement
 
-    let claimed = arrivals.claimArrivals(online: topology.displays)
+    // ONE read of the pairing for the whole pass, for the reason there is one
+    // enumeration: the gate, the lookup and the match have to be talking about
+    // the same machine, and an engage landing between them would have the layout
+    // looked up under one set and matched against another.
+    let substituting = synthesisSubstitutions
+
+    let claimed = arrivals.claimArrivals(online: topology.displays, substituting: substituting)
     guard !claimed.isEmpty else { return }
 
     // An outstanding preview outranks a saved layout: a person is looking at a
@@ -458,9 +489,17 @@ final class ArrangementCoordinator {
     let decision = ArrangementReapplyPolicy.decide(
       isEnabled: persistence.isRestoreEnabled,
       arrivals: claimed,
-      stored: persistence.savedArrangement(for: TopologySignature(topology.arrangement)),
+      stored: persistence.savedArrangement(
+        // The ONLINE spelling of the signature, which is the one the arrival
+        // gate above signs; the two agree by construction and by test. They can
+        // diverge on one input, a display whose bounds are unreadable, which the
+        // layout spelling drops and this one keeps: inert here, because `decide`
+        // defers on exactly that discrepancy before it consults `stored`.
+        for: TopologySignature(online: topology.displays, substituting: substituting)
+      ),
       attached: topology.displays,
-      current: topology.arrangement
+      current: topology.arrangement,
+      substituting: substituting
     )
 
     if decision.isDeferred {
@@ -580,7 +619,11 @@ final class ArrangementCoordinator {
   /// arrangement the machine was never in.
   private func saveIfRestoring() {
     guard persistence.isRestoreEnabled else { return }
-    persistence.save(arrangement)
+    // SS12: filed under the panel, never under the virtual display standing in
+    // for it. A layout saved while a synthesized size stands has to be the same
+    // layout when the size is dropped, and the virtual display does not survive
+    // it.
+    persistence.save(arrangement, substituting: synthesisSubstitutions)
     didSaveArrangement()
   }
 
