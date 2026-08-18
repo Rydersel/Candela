@@ -150,6 +150,19 @@ let ownPID = ProcessInfo.processInfo.processIdentifier
   }
 }
 
+/// Whether the login session's screen is locked.
+///
+/// A locked or sleeping display still answers a capture, and what comes back is
+/// black. Black is a luminance the accumulator cannot tell from a dark panel,
+/// so an unattended overnight run would book hours of "this panel was dark" at
+/// the same weight as real use and drown the informative samples. This is the
+/// same defect shape as the letterbox padding: a plausible measurement of
+/// something that was never on screen.
+@MainActor func screenIsLocked() -> Bool {
+  guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else { return false }
+  return (session["CGSSessionScreenIsLocked"] as? Int) == 1
+}
+
 let appearanceIsDark =
   UserDefaults.standard.string(forKey: "AppleInterfaceStyle")?.lowercased() == "dark"
 
@@ -175,6 +188,9 @@ for entry in discovered {
 }
 
 var taken = 0
+var skippedLocked = 0
+var skippedAsleep = 0
+var skippedBlack = 0
 while taken < options.maxSamples {
   let content: SCShareableContent
   do {
@@ -186,8 +202,19 @@ while taken < options.maxSamples {
     continue
   }
 
+  if screenIsLocked() {
+    skippedLocked += 1
+    try await Task.sleep(for: .seconds(options.interval))
+    continue
+  }
+
   for scDisplay in content.displays {
     if let wanted = options.displayFilter, scDisplay.displayID != wanted { continue }
+    // A sleeping display captures as black. Never book that as content.
+    if CGDisplayIsAsleep(scDisplay.displayID) != 0 {
+      skippedAsleep += 1
+      continue
+    }
     guard let entry = discovered.first(where: { $0.display.id == scDisplay.displayID }) else {
       continue
     }
@@ -230,6 +257,14 @@ while taken < options.maxSamples {
       let captured = LuminanceReduction.meanLuminance(of: image, cols: cols, rows: rows)
     else { continue }
 
+    // Belt and braces: an awake, unlocked display that captures pure black is
+    // more likely a state we failed to detect than a panel genuinely showing
+    // nothing. Dropping it costs one sample; booking it costs the run.
+    if captured.allSatisfy({ $0 <= 0 }) {
+      skippedBlack += 1
+      continue
+    }
+
     let measuredPanel = transform.panelNativeGrid(
       fromDisplayGrid: captured, cols: cols, rows: rows)
     let paperURL = wallpaperURL(for: scDisplay.displayID)
@@ -261,6 +296,9 @@ while taken < options.maxSamples {
   }
 
   taken += 1
-  if taken % 10 == 0 { print("samples: \(taken)") }
+  if taken % 10 == 0 {
+    print(
+      "samples: \(taken)  skipped: locked \(skippedLocked), asleep \(skippedAsleep), black \(skippedBlack)")
+  }
   try await Task.sleep(for: .seconds(options.interval))
 }

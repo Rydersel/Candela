@@ -332,6 +332,30 @@ func refine(
   return best
 }
 
+/// How much the objective moves when a parameter is pushed either way.
+///
+/// A parameter the objective is FLAT in is unidentifiable from this data: the
+/// optimiser will leave it wherever it started, and printing that value implies
+/// a finding the data does not contain. The smoke run reported Claude at 0.857
+/// and Sublime Text at 0.714, which were simply their spread starting values;
+/// both apps live on a panel that is not in this log, so no coverage of theirs
+/// exists to fit against.
+func sensitivity(
+  _ groups: [[Prepared]], _ parameters: ExposureModelParameters,
+  get: (ExposureModelParameters) -> Double,
+  set: (inout ExposureModelParameters, Double) -> Void,
+  includeChrome: Bool = false
+) -> Double {
+  let base = scoreJointly(groups, parameters, includeChrome: includeChrome)
+  var moved = 0.0
+  for delta in [-0.25, 0.25] {
+    var candidate = parameters
+    set(&candidate, min(1, max(0, get(parameters) + delta)))
+    moved = max(moved, abs(scoreJointly(groups, candidate, includeChrome: includeChrome) - base))
+  }
+  return moved
+}
+
 func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelParameters,
   freeParameters: Int, includeChrome: Bool = false)
 {
@@ -398,11 +422,21 @@ for run in runs {
   }
 }
 let layers = layerWeight.filter { $0.key != 0 }.sorted { $0.value > $1.value }.prefix(3).map(\.key)
-let apps = appWeight.sorted { $0.value > $1.value }.prefix(topApps).map(\.key)
+// Apps with no coverage on these panels cannot be fitted, however often they
+// appear in the window list. `coverage` is already clipped to the display, so
+// an app living on another panel scores ~0 here.
+let heaviest = appWeight.values.max() ?? 0
+let apps = appWeight.filter { $0.value > heaviest * 0.01 }
+  .sorted { $0.value > $1.value }.prefix(topApps).map(\.key)
+let excluded = appWeight.filter { $0.value <= heaviest * 0.01 }
+  .sorted { $0.value > $1.value }.map(\.key)
 
 print("\n=== joint fit across \(runs.count) panels")
 print("  layers: \(layers)")
 print("  apps:   \(apps)")
+if !excluded.isEmpty {
+  print("  excluded (no coverage on these panels): \(excluded)")
+}
 
 var v1 = ExposureModelParameters.baseline
 v1.compositing = .topmostWins
@@ -458,11 +492,25 @@ for run in runs {
   }
 }
 
-print("\nfitted parameters (joint):")
-print("  light \(String(format: "%.3f", v5.lightAppearancePrior))  dark \(String(format: "%.3f", v5.darkAppearancePrior))")
+print("\nfitted parameters (joint), with objective sensitivity:")
+func line(_ name: String, _ value: Double, _ moved: Double) {
+  let verdict = moved < 1e-6 ? "  UNIDENTIFIABLE from this data" : ""
+  print(String(format: "    %-28@ %.3f   sensitivity %.5f%@",
+    name as NSString, value, moved, verdict as NSString))
+}
+line("light appearance", v5.lightAppearancePrior,
+  sensitivity(fitGroups, v5, get: { $0.lightAppearancePrior },
+    set: { $0.lightAppearancePrior = $1 }, includeChrome: true))
+line("dark appearance", v5.darkAppearancePrior,
+  sensitivity(fitGroups, v5, get: { $0.darkAppearancePrior },
+    set: { $0.darkAppearancePrior = $1 }, includeChrome: true))
 for (app, value) in v5.appPriors.sorted(by: { $0.value > $1.value }) {
-  print("    app \(app): \(String(format: "%.3f", value))")
+  line("app \(app)", value,
+    sensitivity(fitGroups, v5, get: { $0.appPriors[app] ?? 0 },
+      set: { $0.appPriors[app] = $1 }, includeChrome: true))
 }
 for (layer, value) in v5.layerPriors.sorted(by: { $0.key < $1.key }) {
-  print("    layer \(layer): \(String(format: "%.3f", value))")
+  line("layer \(layer)", value,
+    sensitivity(fitGroups, v5, get: { $0.layerPriors[layer] ?? 0 },
+      set: { $0.layerPriors[layer] = $1 }, includeChrome: true))
 }
