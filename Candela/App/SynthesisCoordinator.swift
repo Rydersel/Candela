@@ -394,7 +394,14 @@ final class SynthesisCoordinator {
       alreadyMirrored: isInUserMirrorSet(display),
       freeSlots: freeSlots
     )
-    guard case let .engage(size) = decision else { return decision }
+    guard case let .engage(size) = decision else {
+      // Unattended and otherwise invisible: without this line, a skipped
+      // launch restore is indistinguishable from a pass that never ran.
+      log.info(
+        "synthesis reapply skipped on display \(display.id): \(String(describing: decision), privacy: .public)"
+      )
+      return decision
+    }
     switch await engage(size, on: display) {
     case .success:
       log.info("synthesis reapply engaged \(size.logicalWidth)x\(size.logicalHeight) on display \(display.id)")

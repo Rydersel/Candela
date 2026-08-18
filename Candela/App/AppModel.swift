@@ -99,7 +99,17 @@ final class AppModel {
     // is a different key space and reading one while writing the other is a
     // silent opt-in that saves and reads back false.
     coordinator.persistenceKey = { [weak self] displayID in
-      self?.allControlledStates.first { $0.id == displayID }?.display.persistenceKey
+      guard let self else { return nil }
+      if let key = allControlledStates.first(where: { $0.id == displayID })?
+        .display.persistenceKey {
+        return key
+      }
+      // Launch ordering: the unattended reapply pass can run before the first
+      // controller build populates the list above. A nil here reads as "not
+      // opted in" and silently drops the relaunch restore, so ask discovery
+      // directly rather than defaulting. Rare, and the walk is synchronous.
+      return discoverDisplays(virtualDisplays.ownedDisplayIDs)
+        .first { $0.display.id == displayID }?.display.persistenceKey
     }
     // SS9. The achieved state first, and the stored intent as well: at launch
     // the controllers may not exist yet, and refusing on either answer is the
