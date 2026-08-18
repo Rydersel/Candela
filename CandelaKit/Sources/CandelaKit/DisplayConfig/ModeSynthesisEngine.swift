@@ -466,7 +466,18 @@ public actor ModeSynthesisEngine {
       && panel.pixelWidth == pairing.size.pixelWidth
       && panel.pixelHeight == pairing.size.pixelHeight
     guard !isTheRenderedSize else { return .wrong }
-    let publishes = configurator.modes(for: pairing.physicalDisplayID).contains {
+    // The enumeration gets the same patience as the readback: an empty list
+    // is CoreGraphics failing to enumerate, the ordinary mid-reconfiguration
+    // shape, and judging it would classify "the display would not list its
+    // modes" as a positive wrong answer and retain the pairing forever.
+    var modes: [DisplayMode] = []
+    for attempt in 1...3 {
+      modes = configurator.modes(for: pairing.physicalDisplayID)
+      if !modes.isEmpty { break }
+      if attempt < 3, readbackRetryDelay > 0 { Thread.sleep(forTimeInterval: readbackRetryDelay) }
+    }
+    guard !modes.isEmpty else { return .unreadable }
+    let publishes = modes.contains {
       $0.logicalWidth == panel.logicalWidth
         && $0.logicalHeight == panel.logicalHeight
         && $0.pixelWidth == panel.pixelWidth

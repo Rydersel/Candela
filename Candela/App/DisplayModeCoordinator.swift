@@ -1118,12 +1118,12 @@ final class DisplayModeCoordinator {
   /// property of the type, and demotes queue ordering to an optimisation.
   @discardableResult
   func confirm(_ answered: Preview) async -> PreviewOutcome {
-    await queue.enqueueReturning { await self.performResolve(answered, keeping: true) }
+    await queue.enqueueReturning { await self.performResolve(answered, keeping: true, intent: .answered) }
   }
 
   @discardableResult
   func revert(_ answered: Preview) async -> PreviewOutcome {
-    await queue.enqueueReturning { await self.performResolve(answered, keeping: false) }
+    await queue.enqueueReturning { await self.performResolve(answered, keeping: false, intent: .answered) }
   }
 
   /// Ends any outstanding MODE preview and reports whether the display is back
@@ -1204,7 +1204,7 @@ final class DisplayModeCoordinator {
       synthesized: outstanding,
       synthesisFailure: nil
     )
-    return await performResolve(answered, keeping: false) == .reverted
+    return await performResolve(answered, keeping: false, intent: .standDown) == .reverted
   }
 
   /// Reconciles both preview sessions and gives the AR12 claim back if nothing
@@ -1590,6 +1590,10 @@ final class DisplayModeCoordinator {
       log.info(
         "Not putting the synthesized size back on display \(displayID): \(String(describing: reason), privacy: .public)"
       )
+      // The stop vanishes here the same as on the other two consume routes,
+      // so it gets the same sentence: silence on one of three roads was the
+      // review's finding.
+      synthesis.note(reason, for: displayID)
       synthesis.clearStoredSize(displayID: displayID)
       return
     }
@@ -1653,7 +1657,7 @@ final class DisplayModeCoordinator {
   }
 
   private func performResolve(
-    _ answered: Preview, keeping: Bool, intent: ResolveIntent = .answered
+    _ answered: Preview, keeping: Bool, intent: ResolveIntent
   ) async -> PreviewOutcome {
     if let previewed = answered.synthesized {
       return await performSynthesisResolve(previewed, keeping: keeping)
