@@ -42,9 +42,11 @@ import os
 ///   a synthesized size is engaged. That leaves ages that describe a span
 ///   nobody watched, which is the staleness a departure forgets for
 ///   (`reconcileEnrollment` into `dropState`); what bounds it here is that
-///   engaging a size changes desktop geometry, so most windows re-key on the
-///   way in and start ageing from scratch anyway. The pause itself stays for
-///   v1; the pane says which mirror it is.
+///   engaging a size changes desktop geometry, so most windows MOVE and their
+///   `since` stamps reset on the way in, starting the ages from scratch anyway.
+///   Not a re-keying: `WindowObservation` keys on `windowID` and a size change
+///   does not touch that; it is the bounds comparison that restarts the clock.
+///   The pause itself stays for v1; the pane says which mirror it is.
 /// - **Safe Mode builds `chrome` and nothing else** (spec §7): chrome toggles
 ///   are explicit user actions on system settings, not automatic behavior, so
 ///   they stay functional; the driver loop — overlays, sampling, hours — never

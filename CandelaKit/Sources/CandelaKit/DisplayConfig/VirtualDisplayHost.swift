@@ -319,15 +319,25 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
   /// rather than what was asked (nil when the slot holds nothing).
   ///
   /// **The verdict RECORDED AT CREATION, never a live read.** The creating
-  /// process cannot read its own virtual display back: `CGDisplayCopyDisplayMode`
-  /// on it returns nil (measured 2026-08-17), which is the whole reason
-  /// `spawnEngageHelper` exists. The helper exits 0 only after checking
-  /// `pixelWidth >= width * 2` in a process that CAN read the display, so its
-  /// exit status is the evidence, and it is kept when it lands rather than
-  /// re-derived here from a call that answers nil.
+  /// process USUALLY cannot read its own virtual display back:
+  /// `CGDisplayCopyDisplayMode` on it returned nil whenever it mattered
+  /// (measured 2026-08-17), which is why `spawnEngageHelper` exists. Not
+  /// "never", and the difference is why `create` still tries in-process FIRST:
+  /// when that read works it is free, and a helper process is not. Do not read
+  /// this paragraph as saying the in-process leg is dead code.
   ///
-  /// This is what makes the answer usable by a caller that must gate on it. The
-  /// earlier in-process read failed open in the one process that asks.
+  /// What follows from "usually" is that a caller may not gate on a read of its
+  /// own: the helper exits 0 only after checking `pixelWidth >= width * 2` in a
+  /// process that can always read the display, so its exit status is the
+  /// evidence, and it is kept when it lands rather than re-derived here from a
+  /// call that may answer nil. The earlier in-process-only read failed OPEN in
+  /// the one process that asks.
+  ///
+  /// The `slots[slot] != nil` guard is load-bearing, not defensive tidiness: a
+  /// destroyed slot's verdict must not resurrect. `destroy` clears both maps,
+  /// but a slot recreated after a failed engage would otherwise be able to
+  /// answer with a verdict about a display that no longer exists, and the
+  /// synthesis engine gates its whole sequence on this answer.
   public func achievedMode(slot: Int) -> (width: Int, height: Int, hiDPI: Bool)? {
     lock.lock()
     defer { lock.unlock() }

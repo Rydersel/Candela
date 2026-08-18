@@ -23,8 +23,12 @@ private func fixtureRow(
   static let ceiling = (width: 8192, height: 4320)
 
   @Test func magLadderFillsTheEmptyBand() {
-    // native 3440x1440; existing HiDPI rows at 2048x858 and 1920x804
-    // (revealed) and 1720x720 (exact 2x)
+    // Native 3440x1440, with three HiDPI rows already present. NOT a transcript
+    // of the MAG's revealed list: it is a deliberately STRICTER stand-in, three
+    // rows packed into the top of the band so SS2 precedence has the most it
+    // can possibly take over. The rig's own panel offers fewer, so a ladder that
+    // survives this survives the hardware.
+    // 1720x720 is the exact-2x rung the panel really does top out at.
     let existing = [
       fixtureRow(2048, 858, hidpi: true), fixtureRow(1920, 804, hidpi: true),
       fixtureRow(1720, 720, hidpi: true), fixtureRow(3440, 1440, hidpi: false, native: true),

@@ -55,15 +55,20 @@ struct DisplayModeProvenanceTests {
 ///
 /// Safe on this machine, and the safety is structural rather than lucky: the
 /// `.synthesized` arm throws before `beginDisplayConfiguration`, so no
-/// transaction is opened. It stays safe under the mutation these tests exist to
-/// catch, because a sentinel `ioModeID` is negative and therefore resolves to no
-/// `CGDisplayMode` on any display, and the published path's lookup also throws
-/// before opening a transaction.
+/// transaction is opened. It stays safe under a mutation that routes to the
+/// PUBLISHED path, because a sentinel `ioModeID` is negative, resolves to no
+/// `CGDisplayMode` on any display, and that lookup throws before opening a
+/// transaction too.
+///
+/// **A mutation routing to the REVEALED path is not covered by that argument**,
+/// and nothing here tests it: `applyRevealedMode` opens a transaction and hands
+/// the sentinel to `CGSConfigureDisplayMode`. What that private call does with a
+/// negative mode number is an expectation (it refuses, and the transaction is
+/// cancelled), not a measurement.
 ///
 /// The expected error is spelled exactly, not merely `DisplayConfigError.self`.
-/// Both wrong routings throw SOMETHING (the published path fails to resolve the
-/// sentinel; the revealed path stages it and fails), so a type-only expectation
-/// would pass against a configurator that had stopped refusing entirely.
+/// A wrong routing throws SOMETHING, so a type-only expectation would pass
+/// against a configurator that had stopped refusing entirely.
 @Suite("Synthesized apply refusal (SS5)")
 struct SynthesizedApplyRefusalTests {
   private let refusal = DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue)
@@ -97,8 +102,27 @@ struct SynthesizedApplyRefusalTests {
   /// The refusal code must stay distinguishable from the published path's
   /// stale-ID failure, which is the only reason the expectations above can tell
   /// a refusal from a wrong routing that happened to fail.
-  @Test func theRefusalCodeIsNotTheStaleIDCode() {
-    #expect(refusal.cgErrorCode != CGError.illegalArgument.rawValue)
+  ///
+  /// Read from what `apply` ACTUALLY throws for a published mode it cannot
+  /// resolve, rather than from a second literal: comparing two constants is a
+  /// statement about the test file, and either code could move without it
+  /// noticing. Safe on an attached display for the suite's own reason: the
+  /// lookup throws before `beginDisplayConfiguration`.
+  @Test func theRefusalCodeIsNotTheCodeAStaleIDProduces() {
+    let configurator = CoreGraphicsDisplayConfigurator()
+    let unresolvable = DisplayMode(
+      ioModeID: .max, logicalWidth: 2580, logicalHeight: 1080,
+      pixelWidth: 5160, pixelHeight: 2160, refreshHz: 60,
+      isNative: false, provenance: .coreGraphics
+    )
+    var staleCode: Int32?
+    do {
+      try configurator.apply(unresolvable, to: CGMainDisplayID(), scope: .preview)
+    } catch let error as DisplayConfigError {
+      staleCode = error.cgErrorCode
+    } catch {}
+    #expect(staleCode != nil, "an unresolvable published mode must still throw")
+    #expect(staleCode != refusal.cgErrorCode)
   }
 }
 

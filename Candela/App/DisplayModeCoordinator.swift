@@ -790,7 +790,7 @@ final class DisplayModeCoordinator {
     let stored = persistence.storedMode(for: identity)
     // Enumerated for every arrival, including displays that never opted in:
     // the opt-in gate lives inside the tested policy, so the cost of asking
-    // is one `CGDisplayCopyAllDisplayModes` per arrival — the same call
+    // is one `CGDisplayCopyAllDisplayModes` per arrival: the same call
     // `warmModeCatalogs` already makes on every menu close.
     let decision = ModeReapplyPolicy.decide(
       isEnabled: persistence.isEnabled(for: identity),
@@ -802,7 +802,7 @@ final class DisplayModeCoordinator {
       available: configurator.modes(for: display.id),
       current: configurator.currentMode(for: display.id)
     )
-    // "Not now" — a mirror slave, or a display that cannot say what mode it is
+    // "Not now": a mirror slave, or a display that cannot say what mode it is
     // running. The claim goes back for the same reason it does above: the
     // arrival has not been dealt with, and keeping it would mean "never", since
     // only an observed ABSENCE re-arms one. Mirroring ends and a display wakes
@@ -823,7 +823,7 @@ final class DisplayModeCoordinator {
       } catch {
         // `apply` throws when staging or completion fails AND when the
         // resolved `CGDisplayMode`'s descriptor does not match the one asked
-        // for — a reassigned `ioModeID` now denoting a different mode. On the
+        // for, i.e. a reassigned `ioModeID` now denoting a different mode. On the
         // unattended path that is precisely the failure that must not be
         // swallowed: `try?` here would leave the display on some third mode
         // with the app reporting a successful restore.
@@ -841,8 +841,8 @@ final class DisplayModeCoordinator {
       return .done
     }
     // A display can leave across the queue wait or across the apply itself.
-    // Not because a report about an absent display is now unshowable — SO8
-    // keeps those — but because this one describes an attempt that never
+    // Not because a report about an absent display is now unshowable (SO8
+    // keeps those), but because this one describes an attempt that never
     // finished. The claim goes back with it: the arrival was never
     // completed, so its return is an arrival again, and that pass writes a
     // fresh outcome for the same identity in place of this half-answer.
@@ -1128,8 +1128,8 @@ final class DisplayModeCoordinator {
   /// `adopt` is the only releaser (see its comment), which is what keeps a
   /// claim from outliving the thing it protects AND what keeps a claim
   /// protecting a preview from being freed by unrelated work. A claimant that
-  /// takes the gate outside a preview — `SynthesisCoordinator`'s opt-out and
-  /// its reset paths — therefore gives it back HERE rather than calling
+  /// takes the gate outside a preview (`SynthesisCoordinator`'s opt-out and
+  /// its reset paths) therefore gives it back HERE rather than calling
   /// `release` itself: a select granted during their multi-second disengage
   /// (granted because it names the same claimant) would otherwise have its
   /// claim freed underneath it.

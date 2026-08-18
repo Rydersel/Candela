@@ -48,9 +48,13 @@ import CoreGraphics
   ///   call's. Ordinarily it is the raw panel ID; under an engaged synthesis
   ///   pairing the engine issues TWO legs (SS15), the panel here and the
   ///   drawable ID through `applyGammaScale(assumingLinearBaseline:on:
-  ///   enforcerOn:)` below. Whether either write reaches the glass on a mirror
-  ///   slave is not decidable from software, which is why both are issued and
-  ///   why nothing here claims an outcome beyond "the call was accepted".
+  ///   enforcerOn:)` below. What Phase 0 measured, exactly: a mirror slave's
+  ///   table STORES and reads back changed, and whether it reaches the GLASS is
+  ///   undecidable from software, because scanout comes from the master's
+  ///   framebuffer and no reachable layer distinguishes a dimmed panel from an
+  ///   undimmed one. That is why both are issued, why nothing here claims an
+  ///   outcome beyond "the call was accepted", and why the hardware pass carries
+  ///   an eyes item (still pending) to settle the final single routing.
   /// - `drawableDisplayID` is where the 1x1 activity-enforcer window goes. Only
   ///   a drawable display has a compositor, and the enforcer's whole job is to
   ///   force a composite pass.
@@ -70,6 +74,13 @@ import CoreGraphics
   ///
   /// The default forwards to `applyGammaScale`, so a backend that captures no
   /// baseline of its own behaves exactly as it did.
+  ///
+  /// **Which is also the trap.** A future conformance that DOES hold baselines
+  /// and does not implement this gets the forwarding default, i.e. the leg that
+  /// refuses a display it never captured, and the companion write is issued and
+  /// never made. There is no compiler signal for that: a protocol default is a
+  /// satisfied requirement. Implement it, or say in the conformance why the
+  /// forward is right for it.
   @discardableResult
   func applyGammaScale(
     assumingLinearBaseline scale: Double, on displayID: CGDirectDisplayID,

@@ -462,8 +462,9 @@ struct ArrangementPersistenceTests {
 
   /// The v1 outcome for the case a user meets first, and it is intended rather
   /// than a gap: a synthesized size changes the desktop's footprint, so the
-  /// layout is FOUND under the panel and then declined, because its origins were
-  /// measured on a screen that is not the shape this one is now (#180).
+  /// layout is FOUND under the panel and then declined by
+  /// `savedForDifferentGeometry`, because its origins were measured on a screen
+  /// that is not the shape this one is now.
   @Test func aSizeThatChangesTheFootprintIsFoundAndThenDeclinedOnGeometry() throws {
     let store = ArrangementPersistence(defaults: InMemoryDefaults())
     store.save(deskLayout)

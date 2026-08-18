@@ -25,12 +25,12 @@ struct SynthesisGateTests {
     let persistenceKey: String
   }
 
-  /// One opted-in ultrawide, its ladder generated from a native-flagged mode.
+  /// One ultrawide, its ladder generated from a native-flagged mode.
   ///
   /// The opt-in is a real pref write because `SynthesisCoordinator` reads
   /// `DisplayPrefs` directly; the key is unique per call and removed at the end
   /// of the test, so nothing survives the process or collides with a sibling.
-  private func fixture() -> Fixture {
+  private func fixture(optedIn: Bool = true) -> Fixture {
     let world = FakeDisplayWorld()
     let native = DisplayMode(
       ioModeID: 1, logicalWidth: Self.nativeWidth, logicalHeight: Self.nativeHeight,
@@ -59,7 +59,7 @@ struct SynthesisGateTests {
     )
     let key = "app-tests-synthesis-\(UUID().uuidString)"
     synthesis.persistenceKey = { _ in key }
-    DisplayPrefs(persistenceKey: key).setOfferSyntheticSizes(true)
+    DisplayPrefs(persistenceKey: key).setOfferSyntheticSizes(optedIn)
 
     let modes = DisplayModeCoordinator(gate: gate, configurator: configurator)
     modes.synthesis = synthesis
@@ -80,6 +80,19 @@ struct SynthesisGateTests {
     let stops = fixture.modes.catalogs[Self.panelID]?.syntheticStops ?? []
     #expect(!stops.isEmpty)
     #expect(stops.allSatisfy { $0.logicalWidth <= Self.nativeWidth })
+    #expect(fixture.modes.catalogs[Self.panelID]?.rows.contains { $0.mode.isSynthesized } == true)
+    await tearDown(fixture)
+  }
+
+  /// SS4: opted out, the picker holds no synthesized row at all. The ladder is
+  /// still arithmetically generable from this panel, so this is the opt-in
+  /// doing the work rather than a panel with nothing to offer.
+  @Test func anOptedOutPanelOffersNoSynthesizedRowAtAll() async {
+    let fixture = fixture(optedIn: false)
+    let catalog = fixture.modes.catalogs[Self.panelID]
+    #expect(catalog?.syntheticStops.isEmpty == true)
+    #expect(catalog?.rows.contains { $0.mode.isSynthesized } == false)
+    #expect(catalog?.rows.isEmpty == false, "the published rows must still be there")
     await tearDown(fixture)
   }
 

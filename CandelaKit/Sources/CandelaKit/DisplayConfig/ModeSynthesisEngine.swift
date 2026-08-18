@@ -12,12 +12,16 @@ import os
 /// different question, and only synthesis has to ask it.
 ///
 /// **Not a live read, and a conformance must not implement it as one.** The
-/// creating process cannot read its own virtual display back at all
-/// (measured 2026-08-17): even `CGDisplayCopyDisplayMode` returns nil for it.
-/// A conformance that read live would fail every engage on hardware while
-/// passing against every fake. `VirtualDisplayHost` answers with the verdict
-/// its re-exec helper established at creation, which is the only evidence the
-/// creating process can hold.
+/// creating process usually cannot read its own virtual display back:
+/// `CGDisplayCopyDisplayMode` on it returned nil whenever it mattered (measured
+/// 2026-08-17). "Usually" rather than "never" on purpose, because
+/// `VirtualDisplayHost.create` still tries in-process before spawning its
+/// helper and that leg is not dead code; what "usually" costs is the ability to
+/// GATE on such a read, since a nil answer is indistinguishable from a display
+/// that never reached 2x. A conformance that read live would therefore fail
+/// engages on hardware while passing against every fake. `VirtualDisplayHost`
+/// answers with the verdict established at creation instead, which is the only
+/// evidence the creating process can hold.
 public protocol VirtualDisplayAchievedModeReporting: VirtualDisplayProviding {
   /// The achieved geometry of a live slot, or nil when the slot holds nothing.
   func achievedMode(slot: Int) -> (width: Int, height: Int, hiDPI: Bool)?
@@ -209,8 +213,8 @@ public actor ModeSynthesisEngine {
 
     // The virtual display's 2x variant is ENGAGED by the host rather than
     // promised by the spec, so what it achieved is what decides. Asked through
-    // the host's recorded verdict, never a read: this process cannot read the
-    // display it just created.
+    // the host's recorded verdict, never a read: a read from this process
+    // answers nil often enough that nothing may gate on it.
     guard let achieved = virtualDisplays.achievedMode(slot: slot),
           achieved.width == size.logicalWidth,
           achieved.height == size.logicalHeight,
@@ -266,7 +270,10 @@ public actor ModeSynthesisEngine {
   private func createOnFirstUsableSlot(
     _ spec: VirtualDisplaySpec, from free: [Int]
   ) -> Result<(slot: Int, handle: VirtualDisplayHandle), VirtualDisplayFailure> {
-    var lastRefusal = VirtualDisplayFailure.capExceeded
+    // Optional rather than seeded with a refusal nobody made: `engage` guards on
+    // a non-empty `free`, so the loop always records one before the return
+    // below, and the seed only ever read as a real answer to somebody skimming.
+    var lastRefusal: VirtualDisplayFailure?
     for slot in free {
       switch virtualDisplays.create(
         spec, slot: slot, uuid: UUID(), appearanceTimeout: appearanceTimeout
@@ -281,7 +288,9 @@ public actor ModeSynthesisEngine {
         log.error("synthesis.engage slot=\(slot): unusable (\(String(describing: failure))); trying the next")
       }
     }
-    return .failure(lastRefusal)
+    // The `??` arm is unreachable and is here only because the compiler cannot
+    // see `engage`'s non-empty guard.
+    return .failure(lastRefusal ?? .capExceeded)
   }
 
   /// Both halves of the achieved-state check for a landed engage.

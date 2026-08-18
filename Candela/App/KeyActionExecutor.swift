@@ -409,10 +409,12 @@ final class KeyActionExecutor {
   ///
   /// These are STEP targets, so they stay RAW: what comes back is fed to
   /// `model.stepBrightness(displayIDs:)` and to the volume/contrast
-  /// controllers, which write DDC to the panel the user asked for. Nothing on
-  /// this path resolves to a master — D29 leaves it UNVERIFIED whether a
-  /// slave's DDC is suppressed, and treating it as unavailable would put VCP
-  /// 0x8D out of reach and strand a hardware-muted panel with no way back.
+  /// controllers, which write DDC to the panel the user asked for. No master is
+  /// ever SUBSTITUTED for that panel: an engaged synthesis set expands from
+  /// either end, so its virtual master joins the list, and the physical panel
+  /// stays in it. D29 leaves it UNVERIFIED whether a slave's DDC is suppressed,
+  /// and dropping the panel as unavailable would put VCP 0x8D out of reach and
+  /// strand a hardware-muted display with no way back.
   private func keyTargets(anchoredOn anchor: CGDirectDisplayID? = nil) -> [CGDirectDisplayID] {
     guard let target = anchor ?? Self.pointerDisplayID() else { return [] }
     return model.mirrorTopology.topology().expand(target)

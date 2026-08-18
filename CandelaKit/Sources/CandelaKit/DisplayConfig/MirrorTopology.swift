@@ -109,8 +109,12 @@ public struct MirrorTopology: Sendable, Equatable {
   }
 
   /// The synthesis master of the set `displayID` belongs to, or nil when it
-  /// belongs to no synthesis set. THE ONE PLACE the pairing is read (SS7): every
-  /// predicate below answers from this, so no site reimplements it.
+  /// belongs to no synthesis set. Where the pairing is read for a PER-DISPLAY
+  /// question (SS7): every such predicate below answers from this, so no site
+  /// reimplements the walk. `userVisibleMirrorSets` reads `synthesisMasters`
+  /// directly instead, because it filters a list of masters rather than asking
+  /// about one display, and going through here would be the same set membership
+  /// test wearing a lookup.
   ///
   /// Flag-free by construction. It asks the injected pairing about the display
   /// itself, then about the master the display NAMES, and consults neither
@@ -122,9 +126,16 @@ public struct MirrorTopology: Sendable, Equatable {
   /// for: the pairing describes the machine, and refusing to call a VD a
   /// synthesis master because a sample is stale would put it back in front of
   /// the user as a mirror set they built.
+  /// The null-display guard is `slaves(of:)`'s, for the same reason: every
+  /// standalone display NAMES `kCGNullDirectDisplay` as its master, so a set
+  /// that somehow contained it would make every unmirrored display in the sample
+  /// read as a synthesis slave. Garbage-in only, since the pairing table never
+  /// produces it, and one line beats a bug nothing on screen could explain.
   private func synthesisMaster(of displayID: CGDirectDisplayID) -> CGDirectDisplayID? {
+    guard displayID != kCGNullDirectDisplay else { return nil }
     if synthesisMasters.contains(displayID) { return displayID }
     guard let entry = displays.first(where: { $0.id == displayID }),
+          entry.mirrorsDisplay != kCGNullDirectDisplay,
           synthesisMasters.contains(entry.mirrorsDisplay)
     else { return nil }
     return entry.mirrorsDisplay
@@ -159,10 +170,10 @@ public struct MirrorTopology: Sendable, Equatable {
 
   /// `displayID` plus, when it is a master, every display mirroring it.
   ///
-  /// The exact replacement for `KeyActionExecutor.expandToMirrorSet`: the
-  /// master's ID is what the pointer resolves to, and the members need the same
-  /// step. A non-mirrored display expands to itself. Master first, then the
-  /// members `id`-ascending — the caller shows the master's HUD.
+  /// What the key path steps: the master's ID is what the pointer resolves to,
+  /// and the members need the same step. A non-mirrored display expands to
+  /// itself. Master first, then the members `id`-ascending: the caller shows the
+  /// master's HUD.
   ///
   /// **A SYNTHESIS SET EXPANDS FROM EITHER END**, and it is asked about before
   /// the CG flags are (SS1). An ordinary set expands only from its master,

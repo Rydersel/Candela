@@ -60,6 +60,10 @@ actor FakeHDR: HDRToggling {
   func repinFrames() {}
 }
 
+/// Holds no baselines, so SS15's `assumingLinearBaseline` leg deliberately
+/// takes the protocol's forwarding default: there is nothing here for it to do
+/// differently. A fake that DID hold baselines would have to implement it, and
+/// nothing would say so at compile time.
 @MainActor final class FakeGamma: GammaApplying {
   func applyGammaScale(
     _ scale: Double, on displayID: CGDirectDisplayID,

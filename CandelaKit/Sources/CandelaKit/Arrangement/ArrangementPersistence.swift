@@ -79,9 +79,13 @@ public struct TopologySignature: Sendable, Hashable {
   /// re-files itself under a virtual display that exists only while the size
   /// does.
   ///
-  /// It reads the mapping BEFORE the slave filter (SS1), so a VD master that
-  /// reported no mirror flags would sign the same way. A display the map does
-  /// not name is treated exactly as `init(online:)` treats it.
+  /// The mapping is read BEFORE the slave filter, and that order is NOT
+  /// load-bearing: swapping the two changes no answer, because the only display
+  /// the map names is the VD MASTER, and a master is not a mirror slave under
+  /// either reading. It is written this way because it reads as the rule it
+  /// implements (SS1: the pairing is asked first, the flags second), not
+  /// because the other order would be wrong. A display the map does not name is
+  /// treated exactly as `init(online:)` treats it.
   ///
   /// A map entry for a display that is not in `displays` contributes nothing:
   /// the signature names the displays that are attached, and a pairing can

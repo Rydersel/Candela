@@ -92,9 +92,8 @@ struct MirrorTopologyTests {
     #expect(topology.setMembers(containing: 2).isEmpty)
   }
 
-  /// The exact replacement for `KeyActionExecutor.expandToMirrorSet`: a master
-  /// expands to its set so every member gets the same brightness step, and
-  /// anything else expands to itself.
+  /// What the key path steps: a master expands to its set so every member gets
+  /// the same brightness step, and anything else expands to itself.
   @Test func expandingAMasterYieldsTheWholeSetAndAnythingElseYieldsItself() {
     let topology = MirrorFixtures.mirroredTrio
     #expect(topology.expand(2) == [2, 1, 3])
@@ -284,5 +283,20 @@ struct MirrorTopologyTests {
     #expect(!topology.isSynthesisSet(containing: 2))
     #expect(topology.isSynthesisSet(containing: 5))
     #expect(topology.userVisibleMirrorSets.isEmpty)
+  }
+
+  /// Garbage in, and the one shape of it that would be catastrophic: every
+  /// standalone display names `kCGNullDirectDisplay` as its master, so a pairing
+  /// set that contained it would make the whole rig read as synthesis slaves and
+  /// take every mirroring surface off screen. The pairing table never produces
+  /// it; the guard is `slaves(of:)`'s, held here too.
+  @Test func aNullMasterInThePairingMakesNothingASynthesisSet() {
+    let topology = MirrorTopology(
+      [MirrorFixtures.display(1), MirrorFixtures.display(2)],
+      synthesisMasters: [kCGNullDirectDisplay]
+    )
+    #expect(!topology.isSynthesisSet(containing: 1))
+    #expect(!topology.isSynthesisSet(containing: 2))
+    #expect(!topology.isSynthesisSet(containing: kCGNullDirectDisplay))
   }
 }

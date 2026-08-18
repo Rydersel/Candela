@@ -171,6 +171,16 @@ public final class WearSignalTracker {
   /// that does book suspended time should get the right answer, but nobody
   /// should read it as evidence the case is handled today.
   ///
+  /// **That "structurally always zero" is no longer true under synthesis
+  /// (SS8).** A synthesized size mirrors the panel onto a virtual display, and
+  /// OLED care keeps booking that panel's time as `.suspended` rather than
+  /// stopping the clock, so the slot is now live on a rig that has a size
+  /// engaged. Whether such time belongs in this denominator is UNRULED and is
+  /// Ryder's call; it is tracked on its own issue. The behaviour here is
+  /// deliberately unchanged in the meantime: excluding it keeps the gate
+  /// measuring the share of time the mask could act on, which is what OC17
+  /// asks for, and changing it would move a threshold nobody has re-measured.
+  ///
   /// Nil rather than zero when nothing has accumulated, because "0% of no time"
   /// is not an answer and reads as a verdict.
   ///

@@ -1,9 +1,9 @@
 import Foundation
 
-/// Where this mode came from, and therefore which call applies it.
+/// Where this mode came from.
 ///
-/// CoreGraphics and CGS share ONE mode-ID space — measured 2026-08-06 across
-/// three panels, 0 IDs absent (S6 §4) — so those two are not a second identity,
+/// CoreGraphics and CGS share ONE mode-ID space (measured 2026-08-06 across
+/// three panels, 0 IDs absent, S6 §4), so those two are not a second identity,
 /// only a routing tag. It deliberately does NOT reach `DisplayModeDescriptor`:
 /// the persisted form stays geometry-keyed so a mode that migrates between the
 /// two sources across an OS update still re-finds (CR3).
