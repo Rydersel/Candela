@@ -115,9 +115,8 @@ final class AppModel {
       else { return false }
       return DisplayPrefs(persistenceKey: key).hdrMode != .off
     }
-    coordinator.didWriteSynthesisPref = { [weak self] name, key in
-      self?.announceSynthesisPrefWrite(name, persistenceKey: key)
-    }
+    // `didWriteSynthesisPref` is wired in `StatusItemController`, where
+    // `SettingsActions` lives; see `didStoreMode` beside it.
     // The opt-in decides which rows the size picker holds, and the catalog is
     // enumerated on demand: a pref write alone re-renders the panes over the
     // rows they already had.
@@ -140,26 +139,6 @@ final class AppModel {
     }
     return coordinator
   }()
-
-  /// D27 for the two synthesis prefs, which are written by the coordinator
-  /// rather than by a pane.
-  ///
-  /// It reads the propagation table rather than repeating what is in it, so a
-  /// row that gains an effect cannot be silently missed here: anything this
-  /// object cannot perform itself is logged by name rather than dropped. The
-  /// full-fidelity path is `SettingsActions.prefDidChange`, which needs the
-  /// wiring `DisplayModeCoordinator.didStoreMode` gets in `StatusItemController`;
-  /// until that exists, both synthesis rows are `.refreshUI` alone and this
-  /// performs exactly that.
-  private func announceSynthesisPrefWrite(_ name: PrefName, persistenceKey _: String) {
-    let effects = PrefPropagation.effects(forChange: name)
-    if effects.contains(.refreshUI) || effects.contains(.rebuildPanel) { notePrefsChanged() }
-    let unhandled = effects.subtracting([.refreshUI, .rebuildPanel])
-    guard !unhandled.isEmpty else { return }
-    log.error(
-      "pref \(name.rawValue, privacy: .public) now carries effects this path cannot fan out (\(String(describing: unhandled), privacy: .public)); route it through SettingsActions"
-    )
-  }
 
   /// PD7: the app-side half of the density join. The Kit is handed a value and
   /// performs no lookup of its own.

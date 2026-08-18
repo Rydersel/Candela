@@ -174,21 +174,50 @@ struct SynthesisGammaRoutingTests {
   private static let panelID: CGDirectDisplayID = 2
   private static let virtualID: CGDirectDisplayID = 5
 
-  private func controller(
-    displayID: CGDirectDisplayID, gamma: any GammaApplying, store: MirrorTopologyStore
-  ) -> BrightnessController {
+  /// Software path, gamma leg: the state every test here starts from.
+  private func softwarePrefs() -> DisplayPrefs {
     let prefs = DisplayPrefs(defaults: InMemoryDefaults(), persistenceKey: "synthesis")
     prefs.forceSoftware = true
     prefs.avoidGamma = false
+    return prefs
+  }
+
+  private func controller(
+    displayID: CGDirectDisplayID, gamma: any GammaApplying, store: MirrorTopologyStore,
+    hdr: (any HDRToggling)? = nil, prefs: DisplayPrefs? = nil
+  ) -> BrightnessController {
+    let prefs = prefs ?? softwarePrefs()
     return BrightnessController(
       writer: FakeDDC(readResult: nil),
       backends: BrightnessBackends(
-        applierNative: FakeNativeApplier(), hdr: nil, shade: RecordingShade(), gamma: gamma
+        applierNative: FakeNativeApplier(), hdr: hdr, shade: RecordingShade(), gamma: gamma
       ),
       prefs: prefs,
       displayID: displayID,
       mirrorTopology: store,
       wireSiblings: []
+    )
+  }
+
+  /// Every restore to 1.0 has to reach both legs, or the companion is a virtual
+  /// display left holding a dark framebuffer that nothing else hands back. Three
+  /// doors reach it, and each is pinned below.
+  /// Counted in PAIRS rather than pinned to exactly one: an HDR entry clears the
+  /// leg twice by design (the stale-cache fall-through re-runs it), and what
+  /// matters is that no restore is ever a lone panel write.
+  private func expectBothLegsRestored(
+    _ gamma: SelectiveGamma, sourceLocation: SourceLocation = #_sourceLocation
+  ) {
+    let restores = gamma.writes.filter { $0.scale == 1.0 }
+    #expect(!restores.isEmpty, "nothing was handed back at all", sourceLocation: sourceLocation)
+    let pairs = restores.count / 2
+    #expect(
+      restores.map(\.target) == (0 ..< pairs).flatMap { _ in [Self.panelID, Self.virtualID] },
+      sourceLocation: sourceLocation
+    )
+    #expect(
+      restores.map(\.assumesLinearBaseline) == (0 ..< pairs).flatMap { _ in [false, true] },
+      sourceLocation: sourceLocation
     )
   }
 
@@ -307,5 +336,51 @@ struct SynthesisGammaRoutingTests {
     controller.setBrightness(0.4)
     controller.setBrightness(0.4)
     #expect(gamma.writes.count == 4)
+  }
+
+  /// The interference-accept hand-back. The app's hook used to write the island
+  /// directly at the panel ID, so an engaged pairing kept its scaled companion
+  /// table after the display had switched to the shade for good: two dimmers on
+  /// one scanout chain, and no door left that hands the second one back.
+  @Test func theInterferenceHandBackRestoresBothTables() {
+    let gamma = SelectiveGamma()
+    let controller = controller(
+      displayID: Self.panelID, gamma: gamma,
+      store: MirrorTopologyStore(MirrorFixtures.synthesisPair())
+    )
+    controller.setBrightness(0.4)
+    controller.handBackGammaTables()
+    expectBothLegsRestored(gamma)
+  }
+
+  /// `applySoftwareSideOfPrefChange`: turning the shade on abandons gamma, so
+  /// both tables it scaled go back.
+  @Test func abandoningGammaForTheShadeRestoresBothTables() {
+    let gamma = SelectiveGamma()
+    let prefs = softwarePrefs()
+    let controller = controller(
+      displayID: Self.panelID, gamma: gamma,
+      store: MirrorTopologyStore(MirrorFixtures.synthesisPair()), prefs: prefs
+    )
+    controller.setBrightness(0.4)
+    prefs.avoidGamma = true
+    controller.reapplyAfterPrefChange()
+    expectBothLegsRestored(gamma)
+  }
+
+  /// `clearSoftwareLeg`: entering the native path (C1) takes the software leg
+  /// down, and gamma is broken under HDR, so a companion left scaled would
+  /// survive with nothing able to clear it.
+  @Test func enteringTheNativePathRestoresBothTables() async {
+    let gamma = SelectiveGamma()
+    let controller = controller(
+      displayID: Self.panelID, gamma: gamma,
+      store: MirrorTopologyStore(MirrorFixtures.synthesisPair()),
+      hdr: FakeHDR(supports: true)
+    )
+    controller.settleDelay = .milliseconds(1)
+    controller.setBrightness(0.4)
+    await controller.setHDRMode(.alwaysOn)
+    expectBothLegsRestored(gamma)
   }
 }

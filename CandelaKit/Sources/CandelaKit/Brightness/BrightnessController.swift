@@ -825,6 +825,23 @@ public final class BrightnessController: PendingWireDraining {
     return landed
   }
 
+  /// Hands this display's gamma tables back at scale 1.0, on every leg the dim
+  /// wrote to.
+  ///
+  /// The interference-accept path abandons gamma for the shade for good and has
+  /// to restore what it scaled. It cannot write the island directly: under an
+  /// engaged synthesis pairing the dim wrote TWO tables (SS15), and a companion
+  /// left scaled is a virtual display holding a dark framebuffer that no other
+  /// door hands back, on a display the shade is now dimming as well. Public
+  /// because the accept hook lives in the app target.
+  ///
+  /// Deliberately does NOT clear `lastAppliedSw`: the caller follows with
+  /// `handleReconfigure`, which owns that and the re-apply through the shade.
+  public func handBackGammaTables() {
+    guard let gamma = backends.gamma else { return }
+    writeGammaScale(1.0, using: gamma, enforcerOn: drawableDisplayID)
+  }
+
   /// The software leg, inline and synchronous on the main actor. `sw` is the
   /// raw 0…1 software value; the backend receives the transformed physical
   /// multiplier (dossier §3: the transform applies before any gamma/shade
