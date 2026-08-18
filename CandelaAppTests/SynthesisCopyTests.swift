@@ -167,10 +167,28 @@ struct SynthesisCopyTests {
   /// The loudest case in the failure enum says what may still be standing and
   /// what clears it. Silence here leaves a virtual display up with no account
   /// of it anywhere a person can read.
+  ///
+  /// It must not promise that quitting is enough. S1 5A measured the exception:
+  /// while the virtual display is the only ACTIVE display, macOS keeps it, and
+  /// it outlived both the owning object's release and a SIGKILL of its owner.
+  /// So the hedge and the second route are pinned, not just the first sentence.
   @Test func anIncompleteUnwindSaysWhatIsStillStanding() {
     let text = render(SynthesisCopy.engineFailure(.unwindIncomplete))
     #expect(text.contains("virtual display may still be in place"))
-    #expect(text.contains("quitting"))
+    #expect(text.contains("usually removes it"))
+    #expect(text.contains("waking the screen or connecting another display"))
+    // The unhedged claim, spelled out so a revert to it fails here rather than
+    // in a review.
+    #expect(!text.contains("quitting Candela removes it"))
+  }
+
+  /// SS7's refusal in the direction nothing consulted before. It names no
+  /// mechanism the app made up and picks no side of the set: the reason fires
+  /// for the display showing another one and for the one being shown.
+  @Test func theMirrorRefusalNamesTheSetAndTheOneThingToDo() {
+    let text = render(SynthesisCopy.refusal(.alreadyMirrored))
+    #expect(text.contains("This display is part of a mirror set."))
+    #expect(text.contains("Turn mirroring off"))
   }
 
   private func everyString() -> [(site: String, text: String)] {
@@ -204,7 +222,7 @@ struct SynthesisCopyTests {
   /// values and cannot be `CaseIterable`, and a scan that silently skipped a
   /// reason is exactly what these tests exist to prevent.
   private static let everyReason: [SynthesisCoordinator.Refusal.Reason] =
-    [.builtIn, .hdrEngaged, .notOffered, .sizeNoLongerOffered, .busy]
+    [.builtIn, .hdrEngaged, .alreadyMirrored, .notOffered, .sizeNoLongerOffered, .busy]
       + ReconfigurationClaimant.allCases.map { .blocked(by: $0) }
       + everyFailure.map { .engine($0) }
 

@@ -83,7 +83,7 @@ struct GammaControllerTests {
   /// The fallback is a last resort, not a shortcut: a display that DOES report
   /// its table is scaled against that table on both legs, so a real profile
   /// curve survives the companion write as well as the panel write.
-  @Test func acapturedBaselineIsUsedByBothLegs() {
+  @Test func aCapturedBaselineIsUsedByBothLegs() {
     let driver = StubGammaDriver()
     driver.screens = [Self.panelID]
     driver.tables[Self.panelID] = Self.profileTable()
