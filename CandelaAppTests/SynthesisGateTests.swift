@@ -86,7 +86,7 @@ struct SynthesisGateTests {
     let host = FakeSynthesisVirtualDisplayHost(world)
     let synthesis = SynthesisCoordinator(
       virtualDisplays: host, configurator: configurator, gate: gate,
-      topologyStore: MirrorTopologyStore()
+      topologyStore: MirrorTopologyStore(), hdr: FakeNoHDR()
     )
     let key = "app-tests-synthesis-\(UUID().uuidString)"
     synthesis.persistenceKey = { _ in key }

@@ -244,3 +244,14 @@ final class FakeSynthesisVirtualDisplayHost: VirtualDisplayAchievedModeReporting
     return (width: handle.spec.logicalWidth, height: handle.spec.logicalHeight, hiDPI: true)
   }
 }
+
+/// HDR that is not there: the link bounce becomes a structural no-op, which
+/// is the right fixture for tests that are not about the bounce.
+struct FakeNoHDR: HDRToggling {
+  func supportsHDR(displayID: CGDirectDisplayID) async -> Bool { false }
+  func isHDREnabled(displayID: CGDirectDisplayID) async -> Bool { false }
+  func measuredHDREnabled(displayID: CGDirectDisplayID) async -> Bool { false }
+  @discardableResult
+  func setHDR(displayID: CGDirectDisplayID, enabled: Bool) async -> Bool { false }
+  func displaysReconfigured() async {}
+}

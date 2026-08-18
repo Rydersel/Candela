@@ -92,7 +92,8 @@ final class AppModel {
       virtualDisplays: virtualDisplays,
       configurator: CoreGraphicsDisplayConfigurator(),
       gate: reconfigurationGate,
-      topologyStore: mirrorTopology
+      topologyStore: mirrorTopology,
+      hdr: hdrToggling
     )
     // The prefs join. Built from the DISPLAY PREFS persistence key, which is
     // what every per-display accessor suffixes on; `DisplayConfigIdentity.key`

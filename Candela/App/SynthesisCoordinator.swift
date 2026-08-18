@@ -111,6 +111,8 @@ final class SynthesisCoordinator {
   @ObservationIgnored nonisolated let session: SynthesisPreviewSession
 
   @ObservationIgnored private let engine: ModeSynthesisEngine
+  /// The engage funnel: the engine plus the post-engage link bounce.
+  @ObservationIgnored private let driver: BouncingSynthesisDriver
   @ObservationIgnored private let gate: DisplayReconfigurationGate
   /// The same configurator the engine drives, kept for ONE question this object
   /// has to answer for itself: which displays are attached right now. See
@@ -183,7 +185,8 @@ final class SynthesisCoordinator {
     virtualDisplays: any VirtualDisplayAchievedModeReporting,
     configurator: any DisplayConfiguring,
     gate: DisplayReconfigurationGate,
-    topologyStore: MirrorTopologyStore
+    topologyStore: MirrorTopologyStore,
+    hdr: any HDRToggling
   ) {
     // The synthesis pairing enters the published topology HERE, before the
     // mirror it describes, and not at `refreshSnapshot` alone.
@@ -214,7 +217,12 @@ final class SynthesisCoordinator {
         )
       }
     )
-    session = SynthesisPreviewSession(driver: engine)
+    // Both engage entry points route through the bouncing driver, so the
+    // post-engage link bounce runs for a picked size and an unattended
+    // restore alike. Disengage and the pairing read forward untouched.
+    let driver = BouncingSynthesisDriver(engine: engine, hdr: hdr)
+    self.driver = driver
+    session = SynthesisPreviewSession(driver: driver)
     self.gate = gate
     self.configurator = configurator
     self.topologyStore = topologyStore
@@ -420,7 +428,7 @@ final class SynthesisCoordinator {
     _ size: SyntheticSize, on display: ConfiguredDisplay
   ) async -> Result<SynthesisPairing, SynthesisFailure> {
     await engaging {
-      await self.engine.engage(
+      await self.driver.engage(
         size, onPhysical: display.id, identityKey: display.identity.key
       )
     }
