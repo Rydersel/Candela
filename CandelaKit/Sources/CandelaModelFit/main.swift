@@ -141,11 +141,17 @@ struct Prepared {
   let recordedBaseline: [Double]
   let key: String
 
-  func modelled(_ parameters: ExposureModelParameters, includeChrome: Bool = false) -> [Double] {
+  func modelled(_ parameters: ExposureModelParameters) -> [Double] {
     let prior = dark ? parameters.darkAppearancePrior : parameters.lightAppearancePrior
+    // Chrome admission is driven by the PARAMETERS, never by a separate flag.
+    // A parallel boolean was its own divergence source: `.baseline` carries no
+    // chrome limit, so the shipped model admitted none while this path appended
+    // it anyway, and the equivalence control caught exactly one mismatch per
+    // record. One switch, one meaning.
+    //
     // Chrome is BEHIND every app window: it is what a window occludes, never
     // the reverse, so it goes last in a front-to-back walk.
-    let all = includeChrome ? windows + chrome : windows
+    let all = parameters.chromeCoverageLimit == nil ? windows : windows + chrome
     switch parameters.compositing {
     case .summedCoverage:
       var coverage = [Double](repeating: 0, count: PanelGrid.cellCount)
@@ -203,13 +209,14 @@ func prepare(_ record: ModelReplayRecord) -> Prepared {
     }
     .map { pair -> WindowSnapshot in pair.0 }
     .map {
-      // Owner is deliberately per-LAYER, not a single "chrome" bucket. Four
-      // distinct chrome layers survive the area filter on this rig (menu bar
-      // -2147483602, Dock -2147483624, Wallpaper -2147483625, WindowServer
-      // -2147483626), and collapsing them into one prior is what made MP4's
-      // "layer-aware chrome priors" look untestable when it is not.
+      // The REAL owner name, not a synthesised "chrome<layer>" one. Renaming
+      // made this path diverge from `ExposureModel`, which resolves luminance
+      // by the window's actual owner, so the equivalence control could never
+      // pass. Per-layer separation is already what `layerPriors` provides, and
+      // chrome windows carry distinct layers, so the rename bought nothing and
+      // cost the control.
       PreparedWindow(
-        owner: "chrome\($0.layer)", layer: $0.layer,
+        owner: $0.ownerName, layer: $0.layer,
         coverage: transform.coverage(ofDisplayRect: $0.bounds))
     }
   return Prepared(
@@ -221,12 +228,12 @@ func prepare(_ record: ModelReplayRecord) -> Prepared {
 /// Accumulated (measured, modelled) maps over a set of records, in the same
 /// exposure unit the shipped comparison uses.
 func accumulate(
-  _ records: [Prepared], _ parameters: ExposureModelParameters, includeChrome: Bool = false
+  _ records: [Prepared], _ parameters: ExposureModelParameters
 ) -> ([Double], [Double]) {
   var measured = [Double](repeating: 0, count: PanelGrid.cellCount)
   var modelled = [Double](repeating: 0, count: PanelGrid.cellCount)
   for record in records {
-    let grid = record.modelled(parameters, includeChrome: includeChrome)
+    let grid = record.modelled(parameters)
     for cell in 0..<PanelGrid.cellCount {
       measured[cell] += record.measured[cell] * record.elapsed
       modelled[cell] += grid[cell] * record.elapsed
@@ -250,10 +257,10 @@ func accumulate(
 /// between them is meaningful as it stands. RMSE is normalised by the measured
 /// mean only so the number reads comparably across panels.
 func score(
-  _ records: [Prepared], _ parameters: ExposureModelParameters, includeChrome: Bool = false
+  _ records: [Prepared], _ parameters: ExposureModelParameters
 ) -> Double {
   if objective == "pearson" {
-    let (measured, modelled) = accumulate(records, parameters, includeChrome: includeChrome)
+    let (measured, modelled) = accumulate(records, parameters)
     return pearson(measured, modelled) ?? -.infinity
   }
   // Fit on PER-RECORD residuals, not on the accumulated map.
@@ -269,7 +276,7 @@ func score(
   var total = 0.0
   var count = 0
   for record in records {
-    let grid = record.modelled(parameters, includeChrome: includeChrome)
+    let grid = record.modelled(parameters)
     for cell in 0..<PanelGrid.cellCount {
       let delta = record.measured[cell] - grid[cell]
       squared += delta * delta
@@ -293,7 +300,7 @@ func score(
 /// The maps themselves are never pooled. Summing two panels' exposure into one
 /// 240-cell grid would invent a display that does not exist.
 func scoreJointly(
-  _ groups: [[Prepared]], _ parameters: ExposureModelParameters, includeChrome: Bool = false
+  _ groups: [[Prepared]], _ parameters: ExposureModelParameters
 ) -> Double {
   var total = 0.0
   var counted = 0
@@ -304,7 +311,7 @@ func scoreJointly(
   // across 2 panels" while one panel contributed nothing, ever, and the
   // objective rewarded a candidate for breaking a group out of the average.
   for group in groups where !group.isEmpty {
-    let value = score(group, parameters, includeChrome: includeChrome)
+    let value = score(group, parameters)
     if value.isFinite {
       total += value
       counted += 1
@@ -379,11 +386,28 @@ func runControls(_ raw: [ModelReplayRecord]) -> Bool {
 /// The prepared fast path must agree with the shipped model, or the harness is
 /// fitting something other than what ships.
 func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
+  // Restored after being deleted by accident. A rewrite of the order check
+  // below removed this loop and left its declaration, its print and its return
+  // in place, so the control reported `yes` unconditionally: a claim whose
+  // failure mode is silence, sitting on the verdict artifact. The compiler said
+  // so ("variable 'mismatches' was never mutated", "will never be executed")
+  // and nobody read the warning.
   var mismatches = 0
-  var params = ExposureModelParameters.baseline
-  params.compositing = .topmostWins
-  params.appPriors = ["Ghostty": 0.11, "Zed": 0.9]
-  params.layerPriors = [24: 0.8]
+  var probes: [ExposureModelParameters] = [.baseline]
+  for compositing in [ExposureModelParameters.Compositing.summedCoverage, .topmostWins] {
+    var probe = ExposureModelParameters.baseline
+    probe.compositing = compositing
+    probe.chromeCoverageLimit = 0.5
+    // Priors drawn from the log's own owners and layers, so the probe cannot
+    // miss for want of an app that happens not to be on this panel.
+    for (index, owner) in Set(raw.flatMap { $0.windows.map(\.owner) }).sorted().enumerated() {
+      probe.appPriors[owner] = Double(index % 5) / 4.0
+    }
+    for (index, layer) in Set(raw.flatMap { $0.chrome.map(\.layer) }).sorted().enumerated() {
+      probe.layerPriors[layer] = Double(index % 4) / 3.0
+    }
+    probes.append(probe)
+  }
   // Order sensitivity is a property of the CODE, not of a log: two windows that
   // do not overlap are legitimately order-invariant, and a desktop of tiled
   // windows is entirely so. An earlier version of this control probed with
@@ -396,6 +420,24 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
   // does contain overlapping covered windows, reversing them must change the
   // result. Where it contains none, the answer is "not applicable", never
   // "failed". `ExposureModelCompositingTests` pins the code property itself.
+  for record in raw.prefix(40) {
+    let prepared = prepare(record)
+    for candidate in probes {
+      // Both chrome settings: V2 onward all composite with chrome admitted, and
+      // that path previously had no control and no test anywhere.
+      // Kit is handed the chrome-bearing input whenever the candidate admits
+      // chrome, so both sides see the same window list under the same rule.
+      let fast = prepared.modelled(candidate)
+      let reference = ExposureModel.modelledGrid(
+        inputs: candidate.chromeCoverageLimit == nil
+          ? record.inputs : record.inputsIncludingChrome,
+        through: record.transform, parameters: candidate)
+      if (0..<PanelGrid.cellCount).contains(where: { abs(fast[$0] - reference[$0]) > 1e-9 }) {
+        mismatches += 1
+      }
+    }
+  }
+
   var orderTested = 0
   var orderBlind = 0
   for record in raw.prefix(40) {
@@ -420,8 +462,11 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
     // miss for want of an app that happens not to be on this panel.
     var probe = ExposureModelParameters.baseline
     probe.compositing = .topmostWins
-    for (index, window) in covering.enumerated() {
-      probe.appPriors[window.owner] = index.isMultiple(of: 2) ? 0.05 : 0.95
+    // Per distinct OWNER, not per window: assigning by window index let
+    // `[A, A, B, B]` give A and B the same value, which reads as order-blind on
+    // an ordinary desktop.
+    for (index, owner) in Set(covering.map(\.owner)).sorted().enumerated() {
+      probe.appPriors[owner] = index.isMultiple(of: 2) ? 0.05 : 0.95
     }
     var reversed = record
     reversed.windows.reverse()
@@ -458,10 +503,10 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
 func refine(
   _ start: ExposureModelParameters, keys: [(get: (ExposureModelParameters) -> Double,
     set: (inout ExposureModelParameters, Double) -> Void)],
-  on groups: [[Prepared]], includeChrome: Bool = false, passes: Int = 3
+  on groups: [[Prepared]], passes: Int = 3
 ) -> ExposureModelParameters {
   var best = start
-  var bestScore = scoreJointly(groups, best, includeChrome: includeChrome)
+  var bestScore = scoreJointly(groups, best)
   guard !keys.isEmpty else { return best }
   for pass in 0..<passes {
     let step = 0.1 / pow(2.0, Double(pass))
@@ -473,7 +518,7 @@ func refine(
         let candidateValue = min(1, max(0, centre + offset * step))
         var candidate = best
         key.set(&candidate, candidateValue)
-        let candidateScore = scoreJointly(groups, candidate, includeChrome: includeChrome)
+        let candidateScore = scoreJointly(groups, candidate)
         if candidateScore > localScore {
           localScore = candidateScore
           localBest = candidateValue
@@ -497,15 +542,14 @@ func refine(
 func sensitivity(
   _ groups: [[Prepared]], _ parameters: ExposureModelParameters,
   get: (ExposureModelParameters) -> Double,
-  set: (inout ExposureModelParameters, Double) -> Void,
-  includeChrome: Bool = false
+  set: (inout ExposureModelParameters, Double) -> Void
 ) -> Double {
-  let base = scoreJointly(groups, parameters, includeChrome: includeChrome)
+  let base = scoreJointly(groups, parameters)
   var moved = 0.0
   for delta in [-0.25, 0.25] {
     var candidate = parameters
     set(&candidate, min(1, max(0, get(parameters) + delta)))
-    moved = max(moved, abs(scoreJointly(groups, candidate, includeChrome: includeChrome) - base))
+    moved = max(moved, abs(scoreJointly(groups, candidate) - base))
   }
   return moved
 }
@@ -529,8 +573,40 @@ func sensitivity(
 /// Consequence, verified: three rungs printed PASS on an 8-record holdout from a
 /// log the readiness gate refuses, including V3, which contains no per-window
 /// luminance term at all and cleared the bar by driving the dark prior to 0.000.
+/// The best decile any parameterisation in this family can reach, found by
+/// fitting every prior DIRECTLY ON THE HOLDOUT.
+///
+/// Deliberate cheating, and it is the point: it is an upper bound on the rung
+/// scores, so it separates "the model failed" from "the bar was unreachable".
+/// Without it a threshold is asserted against a target nobody measured, which
+/// is how a bar that could not fail was replaced by one that could not pass.
+func ceilingDecile(_ hold: [Prepared], apps: [String], layers: [Int]) -> Int {
+  var cheat = ExposureModelParameters.baseline
+  cheat.compositing = .topmostWins
+  cheat.chromeCoverageLimit = 0.5
+  for layer in layers { cheat.layerPriors[layer] = 0.5 }
+  for (offset, app) in apps.enumerated() {
+    cheat.appPriors[app] = Double(offset + 1) / Double(apps.count + 1)
+  }
+  var keys: [(get: (ExposureModelParameters) -> Double,
+    set: (inout ExposureModelParameters, Double) -> Void)] = [
+    (get: { $0.lightAppearancePrior }, set: { $0.lightAppearancePrior = $1 }),
+    (get: { $0.darkAppearancePrior }, set: { $0.darkAppearancePrior = $1 }),
+  ]
+  keys += layers.map { layer in
+    (get: { $0.layerPriors[layer] ?? 0.5 }, set: { $0.layerPriors[layer] = $1 })
+  }
+  keys += apps.map { app in
+    (get: { $0.appPriors[app] ?? 0.5 }, set: { $0.appPriors[app] = $1 })
+  }
+  let fitted = refine(cheat, keys: keys, on: [hold], passes: 4)
+  let (measured, modelled) = accumulate(hold, fitted)
+  return agreement(measured, modelled, 24)
+}
+
 func passes(
-  modelledPeak: Double, measuredPeak: Double, decile: Int, baselineDecile: Int, holdout: Int
+  modelledPeak: Double, measuredPeak: Double, decile: Int, baselineDecile: Int,
+  ceiling: Int, holdout: Int
 ) -> (ok: Bool, why: String) {
   guard holdout >= ExposureAccumulator.minimumSamplesForAnalysis else {
     return (false, "n<\(ExposureAccumulator.minimumSamplesForAnalysis)")
@@ -538,22 +614,30 @@ func passes(
   guard measuredPeak > 0 else { return (false, "flat") }
   let ratio = modelledPeak / measuredPeak
   guard ratio >= 0.85, ratio <= 1.18 else {
-    return (false, String(format: "peak %.2f", ratio))
+    return (false, String(format: "peak %.3f", ratio))
+  }
+  // If cheat-fitting on the holdout itself cannot gain 3 decile cells, no
+  // honest rung can either, and a fail would be a statement about the bar
+  // rather than about the model. Measured on the 69-minute session: the whole
+  // ladder spans +1 and the ceiling reaches +1, so a +3 threshold could only
+  // ever print fail. That is the same defect as a bar that cannot fail.
+  guard ceiling - baselineDecile >= 3 else {
+    return (false, "ranking UNREACHABLE (ceiling +\(ceiling - baselineDecile))")
   }
   guard decile - baselineDecile >= 3 else {
-    return (false, "decile +\(decile - baselineDecile)")
+    return (false, "decile +\(decile - baselineDecile) of ceiling +\(ceiling - baselineDecile)")
   }
   return (true, "PASS")
 }
 
-/// Returns this rung's top-10 agreement so the next rung can be judged against
-/// the baseline rather than against an absolute number.
+/// Returns this rung's hottest-DECILE agreement so the next rung can be judged
+/// against the baseline rather than against an absolute number.
 @discardableResult
 func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelParameters,
-  freeParameters: Int, includeChrome: Bool = false, baselineTop10: Int? = nil,
+  freeParameters: Int, baselineDecile: Int? = nil, ceiling: Int = 0,
   fitGroups: [[Prepared]] = []) -> Int
 {
-  let (measured, modelled) = accumulate(records, parameters, includeChrome: includeChrome)
+  let (measured, modelled) = accumulate(records, parameters)
   let p = pearson(measured, modelled) ?? .nan
   let s = pearson(averageRanks(measured), averageRanks(modelled)) ?? .nan
   let multiple = hottestMultiple(modelled)
@@ -575,23 +659,24 @@ func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelP
     var live = 0
     for app in parameters.appPriors.keys
     where sensitivity(fitGroups, parameters, get: { $0.appPriors[app] ?? 0 },
-      set: { $0.appPriors[app] = $1 }, includeChrome: includeChrome) > 1e-6 { live += 1 }
+      set: { $0.appPriors[app] = $1 }) > 1e-6 { live += 1 }
     for layer in parameters.layerPriors.keys
     where sensitivity(fitGroups, parameters, get: { $0.layerPriors[layer] ?? 0 },
-      set: { $0.layerPriors[layer] = $1 }, includeChrome: includeChrome) > 1e-6 { live += 1 }
+      set: { $0.layerPriors[layer] = $1 }) > 1e-6 { live += 1 }
     for probe in [
       (get: { (p: ExposureModelParameters) in p.lightAppearancePrior },
        set: { (p: inout ExposureModelParameters, v: Double) in p.lightAppearancePrior = v }),
       (get: { (p: ExposureModelParameters) in p.darkAppearancePrior },
        set: { (p: inout ExposureModelParameters, v: Double) in p.darkAppearancePrior = v }),
-    ] where sensitivity(fitGroups, parameters, get: probe.get, set: probe.set,
-      includeChrome: includeChrome) > 1e-6 { live += 1 }
+    ] where sensitivity(fitGroups, parameters, get: probe.get, set: probe.set) > 1e-6 {
+      live += 1
+    }
     effective = live
   }
 
-  let verdict = baselineTop10.map {
+  let verdict = baselineDecile.map {
     passes(modelledPeak: multiple, measuredPeak: measuredMultiple, decile: top24,
-      baselineDecile: $0, holdout: records.count)
+      baselineDecile: $0, ceiling: ceiling, holdout: records.count)
   }
   // A prior resting on a clamp is a misspecification signal, not a fit.
   // Every fitted family, not just apps: V2 fits nothing BUT layer priors, so
@@ -673,7 +758,9 @@ for group in fitGroups {
     }
     // Chrome layers count toward the LAYER table only. Every ordinary window is
     // layer 0, so without these the table is always empty and V2 is byte
-    // identical to V1 while printing as a rung that ran.
+    // identical to V1 while printing as a rung that ran. On this rig exactly
+    // ONE chrome layer survives the coverage filter (the menu-bar strips); the
+    // Dock, Wallpaper and WindowServer backdrops are full-display and refused.
     for window in record.chrome {
       layerWeight[window.layer, default: 0] += window.coverage.reduce(0, +) * record.elapsed
     }
@@ -693,7 +780,7 @@ print("\n=== joint fit across \(runs.count) panels")
 print("  layers: \(layers)")
 print("  apps:   \(apps)")
 if !excluded.isEmpty {
-  print("  excluded (no coverage on these panels): \(excluded)")
+  print("  excluded (no coverage on the FITTED panels): \(excluded)")
 }
 
 var v1 = ExposureModelParameters.baseline
@@ -703,19 +790,20 @@ v1.compositing = .topmostWins
 // own luminance. Chrome enters here rather than at the end of the ladder,
 // because the layer table has nothing else to fit on an ordinary desktop.
 var v2 = v1
+v2.chromeCoverageLimit = 0.5
 for layer in layers { v2.layerPriors[layer] = 0.5 }
 v2 = refine(
   v2,
   keys: layers.map { layer in
     (get: { $0.layerPriors[layer] ?? 0.5 }, set: { $0.layerPriors[layer] = $1 })
-  }, on: fitGroups, includeChrome: true)
+  }, on: fitGroups)
 
 let v3 = refine(
   v2,
   keys: [
     (get: { $0.lightAppearancePrior }, set: { $0.lightAppearancePrior = $1 }),
     (get: { $0.darkAppearancePrior }, set: { $0.darkAppearancePrior = $1 }),
-  ], on: fitGroups, includeChrome: true)
+  ], on: fitGroups)
 
 // Spread the starting values rather than sharing one. Coordinate descent from a
 // single shared start can sit still in a flat region and report "no app
@@ -728,15 +816,19 @@ v4 = refine(
   v4,
   keys: apps.map { app in
     (get: { $0.appPriors[app] ?? 0.5 }, set: { $0.appPriors[app] = $1 })
-  }, on: fitGroups, includeChrome: true, passes: 4)
+  }, on: fitGroups, passes: 4)
 
 let ladder:
-  [(String, ExposureModelParameters, Int, Bool)] = [
-    ("V0 baseline", .baseline, 0, false),
-    ("V1 z-order only", v1, 0, false),
-    ("V2 + chrome, per-layer priors", v2, layers.count, true),
-    ("V3 + refitted appearance", v3, layers.count + 2, true),
-    ("V4 + app priors", v4, layers.count + 2 + apps.count, true),
+  [(String, ExposureModelParameters, Int)] = [
+    // Declared counts include the appearance priors on every rung, because the
+    // identifiable count probes them on every rung. Comparing a numerator over
+    // {apps, layers, light, dark} against a denominator that omitted the
+    // appearance pair printed "1/0" for the shipped model.
+    ("V0 baseline", .baseline, 2),
+    ("V1 z-order only", v1, 2),
+    ("V2 + chrome, per-layer priors", v2, layers.count + 2),
+    ("V3 + refitted appearance", v3, layers.count + 2),
+    ("V4 + app priors", v4, layers.count + 2 + apps.count),
   ]
 
 for run in runs {
@@ -747,11 +839,17 @@ for run in runs {
   // V0 is the control and sets the ranking baseline. If V0 ever passes, the
   // instrument is reporting rather than measuring.
   var baseline: Int?
-  for (label, parameters, free, chrome) in ladder {
+  let ceiling = ceilingDecile(run.hold, apps: apps, layers: layers)
+  for (label, parameters, free) in ladder {
     let top10 = report(
-      label, run.hold, parameters, freeParameters: free, includeChrome: chrome,
-      baselineTop10: baseline, fitGroups: fitGroups)
-    if baseline == nil { baseline = top10 }
+      label, run.hold, parameters, freeParameters: free,
+      baselineDecile: baseline, ceiling: ceiling, fitGroups: fitGroups)
+    if baseline == nil {
+      baseline = top10
+      print(
+        "  ceiling: \(ceiling)/24 decile by fitting every prior ON THE HOLDOUT "
+          + "(+\(ceiling - top10) over baseline; the bar needs +3)")
+    }
   }
 }
 
@@ -764,17 +862,17 @@ func line(_ name: String, _ value: Double, _ moved: Double) {
 }
 line("light appearance", final.lightAppearancePrior,
   sensitivity(fitGroups, final, get: { $0.lightAppearancePrior },
-    set: { $0.lightAppearancePrior = $1 }, includeChrome: true))
+    set: { $0.lightAppearancePrior = $1 }))
 line("dark appearance", final.darkAppearancePrior,
   sensitivity(fitGroups, final, get: { $0.darkAppearancePrior },
-    set: { $0.darkAppearancePrior = $1 }, includeChrome: true))
+    set: { $0.darkAppearancePrior = $1 }))
 for (app, value) in final.appPriors.sorted(by: { $0.value > $1.value }) {
   line("app \(app)", value,
     sensitivity(fitGroups, final, get: { $0.appPriors[app] ?? 0 },
-      set: { $0.appPriors[app] = $1 }, includeChrome: true))
+      set: { $0.appPriors[app] = $1 }))
 }
 for (layer, value) in final.layerPriors.sorted(by: { $0.key < $1.key }) {
   line("layer \(layer)", value,
     sensitivity(fitGroups, final, get: { $0.layerPriors[layer] ?? 0 },
-      set: { $0.layerPriors[layer] = $1 }, includeChrome: true))
+      set: { $0.layerPriors[layer] = $1 }))
 }

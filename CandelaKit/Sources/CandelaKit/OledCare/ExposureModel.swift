@@ -61,16 +61,32 @@ public struct ExposureModelParameters: Equatable, Sendable {
   /// a bad model look alike; only held-out validation makes it mean anything.
   public var appPriors: [String: Double]
   public var compositing: Compositing
+  /// Admit system chrome (the Dock, the menu bar) that `includedLayers`
+  /// excludes, when it covers less than this fraction of the panel.
+  ///
+  /// **Nil is the shipped behaviour and the default.** The layer range excludes
+  /// everything below zero because the desktop backdrop fills the screen, and
+  /// counting it would read the wallpaper as full-screen window coverage. That
+  /// reasoning is about AREA, not about layer, so a coverage bound expresses the
+  /// intent directly while still admitting the menu-bar strips the measured
+  /// capture contains and the model has never seen.
+  ///
+  /// Exists so a candidate model can be expressed HERE rather than only in the
+  /// offline harness: a rung the shipped type cannot represent is a rung whose
+  /// pass could not be implemented.
+  public var chromeCoverageLimit: Double?
 
   public init(
     lightAppearancePrior: Double, darkAppearancePrior: Double,
-    layerPriors: [Int: Double], appPriors: [String: Double], compositing: Compositing
+    layerPriors: [Int: Double], appPriors: [String: Double], compositing: Compositing,
+    chromeCoverageLimit: Double? = nil
   ) {
     self.lightAppearancePrior = lightAppearancePrior
     self.darkAppearancePrior = darkAppearancePrior
     self.layerPriors = layerPriors
     self.appPriors = appPriors
     self.compositing = compositing
+    self.chromeCoverageLimit = chromeCoverageLimit
   }
 
   public static let baseline = ExposureModelParameters(
@@ -157,12 +173,36 @@ public enum ExposureModel {
       ? parameters.darkAppearancePrior : parameters.lightAppearancePrior
     let backdrop = usableWallpaper(inputs.wallpaperCells)
 
+    /// Coverage for an admitted window, or nil when the window is excluded.
+    ///
+    /// Chrome is admitted by COVERAGE, never by layer: chrome windows in a
+    /// window list belong to every display, so an area test against this
+    /// display admits another panel's full-screen backdrop. Coverage is
+    /// display-local by construction, so a foreign window is exactly 0 and a
+    /// full-display backdrop is exactly 1, and both are refused.
+    func admitted(_ window: WindowSnapshot) -> [Double]? {
+      let contribution = transform.coverage(ofDisplayRect: window.bounds)
+      guard contribution.count == PanelGrid.cellCount else { return nil }
+      if includedLayers.contains(window.layer) { return contribution }
+      // BELOW the range only. The two exclusions are not symmetric: below is
+      // the desktop backdrop and system chrome, which a coverage bound can
+      // separate; above are transient pop-up menus, drag images and cursor
+      // layers, which are on screen for an instant and would book a whole
+      // sampling interval. A coverage bound cannot tell those apart, because
+      // they are small too.
+      guard window.layer < includedLayers.lowerBound,
+        let limit = parameters.chromeCoverageLimit
+      else { return nil }
+      let fraction = contribution.reduce(0, +) / Double(PanelGrid.cellCount)
+      guard fraction > 0, fraction < limit else { return nil }
+      return contribution
+    }
+
     switch parameters.compositing {
     case .summedCoverage:
       var coverage = [Double](repeating: 0, count: PanelGrid.cellCount)
-      for window in inputs.windows where includedLayers.contains(window.layer) {
-        let contribution = transform.coverage(ofDisplayRect: window.bounds)
-        guard contribution.count == coverage.count else { continue }
+      for window in inputs.windows {
+        guard let contribution = admitted(window) else { continue }
         for cell in coverage.indices {
           coverage[cell] += contribution[cell]
         }
@@ -182,9 +222,8 @@ public enum ExposureModel {
       // above rather than a different model.
       var remaining = [Double](repeating: 1, count: PanelGrid.cellCount)
       var accumulated = [Double](repeating: 0, count: PanelGrid.cellCount)
-      for window in inputs.windows where includedLayers.contains(window.layer) {
-        let contribution = transform.coverage(ofDisplayRect: window.bounds)
-        guard contribution.count == PanelGrid.cellCount else { continue }
+      for window in inputs.windows {
+        guard let contribution = admitted(window) else { continue }
         let luminance = parameters.luminance(for: window, appearancePrior: prior)
         for cell in 0..<PanelGrid.cellCount {
           let claim = min(contribution[cell], remaining[cell])
