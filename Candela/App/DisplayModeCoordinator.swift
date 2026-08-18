@@ -1121,6 +1121,25 @@ final class DisplayModeCoordinator {
     return await performResolve(answered, keeping: false) == .reverted
   }
 
+  /// Reconciles both preview sessions and gives the AR12 claim back if nothing
+  /// is outstanding.
+  ///
+  /// **THE release funnel for `.displayModes`, and the reason it is exposed.**
+  /// `adopt` is the only releaser (see its comment), which is what keeps a
+  /// claim from outliving the thing it protects AND what keeps a claim
+  /// protecting a preview from being freed by unrelated work. A claimant that
+  /// takes the gate outside a preview — `SynthesisCoordinator`'s opt-out and
+  /// its reset paths — therefore gives it back HERE rather than calling
+  /// `release` itself: a select granted during their multi-second disengage
+  /// (granted because it names the same claimant) would otherwise have its
+  /// claim freed underneath it.
+  ///
+  /// Enters the queue, so it must not be called from inside one of its
+  /// operations.
+  func releaseReconfigurationClaimIfIdle() async {
+    await queue.enqueueReturning { await self.adopt(.keep, synthesis: .keep) }
+  }
+
   /// THE only place `startFailure` is cleared, for the same reason `store` is
   /// the only place a mode is written: the standalone window RENDERS this, so
   /// clearing it and syncing the window are one operation, not two that a
@@ -1169,6 +1188,30 @@ final class DisplayModeCoordinator {
     // would have it contradict the choice they just made. A dismissal, so it
     // goes through the one dismissal path.
     if let key = identity(for: displayID)?.key { dismissReport(forKey: key) }
+    // One preview at a time across both size paths (SO6's single answerable
+    // surface). `ModePreviewSession.begin` ends an outstanding preview of its
+    // OWN on another display; it has never heard of the synthesis session, so
+    // this is where the other half is ended. Refused on a failed disengage for
+    // `MirroringCoordinator`'s reason: reporting success would leave a panel
+    // mirrored onto a virtual display nobody approved.
+    //
+    // **BEFORE the claim, and the order is the whole point.** Ending a preview
+    // runs `adopt`, and `adopt` is the AR12 RELEASER: standing the other
+    // preview down after claiming would hand back the claim this operation just
+    // took, and the apply below would then run unguarded with nothing left to
+    // re-take it. Standing down first costs nothing extra, because a select was
+    // going to end the other preview either way, and the claim taken afterwards
+    // is then held continuously from here through the countdown's resolution.
+    //
+    // The refusal is REPORTED by the synthesis coordinator, which recorded the
+    // engine's own failure on the way out, rather than as a `StartFailure`
+    // here: that surface renders "CoreGraphics error <n>", and the thing that
+    // just went wrong was a virtual display refusing to come down.
+    guard await endOutstandingSynthesisPreview() else {
+      log.error("Refused a mode change on display \(displayID): an outstanding synthesized size could not be disengaged")
+      await adopt(.keep)
+      return
+    }
     // AR12, asked BEFORE `begin()` because that is what makes a refusal cost
     // nothing: no transaction has been opened and no display has moved, so there
     // is a sentence to say and nothing to undo. Granted when WE are already the
@@ -1179,22 +1222,6 @@ final class DisplayModeCoordinator {
       // Synced by this `adopt`, which must stay immediately after the write —
       // same adjacency rule as the failure branch below.
       await adopt(.clear)
-      return
-    }
-    // One preview at a time across both size paths (SO6's single answerable
-    // surface). `ModePreviewSession.begin` ends an outstanding preview of its
-    // OWN on another display; it has never heard of the synthesis session, so
-    // this is where the other half is ended. Refused on a failed disengage for
-    // `MirroringCoordinator`'s reason: reporting success would leave a panel
-    // mirrored onto a virtual display nobody approved.
-    //
-    // The refusal is REPORTED by the synthesis coordinator, which recorded the
-    // engine's own failure on the way out, rather than as a `StartFailure`
-    // here: that surface renders "CoreGraphics error <n>", and the thing that
-    // just went wrong was a virtual display refusing to come down.
-    guard await endOutstandingSynthesisPreview() else {
-      log.error("Refused a mode change on display \(displayID): an outstanding synthesized size could not be disengaged")
-      await adopt(.keep)
       return
     }
     switch await session.begin(mode: mode, on: displayID) {
@@ -1273,6 +1300,22 @@ final class DisplayModeCoordinator {
     // of seconds of reconfiguration to arrive back where it started.
     guard synthesis.engagedSize(displayID: displayID) != size else { return }
 
+    // The mode side stands down FIRST, and a failure refuses: an engage would
+    // otherwise mirror a panel whose previewed mode nobody has answered yet,
+    // and the fallback that preview holds describes a display it no longer
+    // owns. The synthesis session ends its OWN outstanding preview inside
+    // `begin`, including a cross-display one.
+    //
+    // **Before the claim**, for the reason `performSelect` states at the same
+    // step: ending a preview runs `adopt`, which is the AR12 releaser, so a
+    // stand-down after the claim would give back the claim this operation just
+    // took. The engine's engage runs for tens of seconds and the preview stands
+    // for thirty more, and every second of that has to be guarded.
+    guard await endOutstandingModePreview() else {
+      log.error("Refused a synthesized size on display \(displayID): an outstanding mode preview could not be reverted")
+      await adopt(.keep, synthesis: .keep)
+      return
+    }
     // AR12, before anything is created, for `performSelect`'s reason: a refusal
     // has to cost nothing.
     if let holder = await gate.claim(.displayModes).refusedBy {
@@ -1280,16 +1323,6 @@ final class DisplayModeCoordinator {
       // `.keep` for the mode side: this refusal is about a synthesized size on
       // THIS display and says nothing about a preview standing on another one.
       await adopt(.keep, synthesis: .clear)
-      return
-    }
-    // The mode side stands down first, and a failure refuses: an engage would
-    // otherwise mirror a panel whose previewed mode nobody has answered yet,
-    // and the fallback that preview holds describes a display it no longer
-    // owns. The synthesis session ends its OWN outstanding preview inside
-    // `begin`, including a cross-display one.
-    guard await endOutstandingModePreview() else {
-      log.error("Refused a synthesized size on display \(displayID): an outstanding mode preview could not be reverted")
-      await adopt(.keep, synthesis: .keep)
       return
     }
     switch await synthesis.beginPreview(

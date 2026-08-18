@@ -140,6 +140,19 @@ final class SynthesisCoordinator {
   /// settings surface or the app reset, which are outside it.
   @ObservationIgnored var endOutstandingPreview: () async -> Bool = { true }
 
+  /// Gives the AR12 claim back THROUGH the coordinator's funnel, which releases
+  /// only when nothing is outstanding.
+  ///
+  /// Never `gate.release(.displayModes)` from here, and the difference is not
+  /// tidiness. The gate's contract is one releasing funnel per claimant, and
+  /// synthesis shares `.displayModes` with the mode picker: a select granted
+  /// during the multi-second disengage below (granted precisely BECAUSE it
+  /// names the same claimant) would have its claim freed the moment this
+  /// finished, leaving its preview standing unguarded for the rest of its
+  /// countdown. Wired by `AppModel` to
+  /// `DisplayModeCoordinator.releaseReconfigurationClaimIfIdle`.
+  @ObservationIgnored var releaseClaimIfIdle: () async -> Void = {}
+
   @ObservationIgnored private let log = Logger(
     subsystem: "com.rydersel.Candela", category: "synthesis"
   )
@@ -413,6 +426,14 @@ final class SynthesisCoordinator {
   /// first, keys after.
   func disengageAllForReset() async {
     guard !pairings.isEmpty else { return }
+    // The result is DISCARDED, deliberately, and this is the one path where
+    // that is right. Everywhere else a preview that would not stand down
+    // refuses the operation; here the operation is the whole-app reset, which
+    // is about to wipe the domain, drop every controller and rebuild. A
+    // synthesis set left standing because a preview refused to revert would
+    // outlive all of that with nothing left that knows about it, so the reset
+    // proceeds and the engine's own disengage below is the teardown that
+    // matters.
     _ = await endOutstandingPreview()
     let claimed = await gate.claim(.displayModes).refusedBy == nil
     let engaged = pairings
@@ -424,7 +445,10 @@ final class SynthesisCoordinator {
         }
       }
     }
-    if claimed { await gate.release(.displayModes) }
+    // Through the funnel, never `gate.release` from here: see
+    // `releaseClaimIfIdle`. Guarded on having been granted so a claim held by
+    // another feature is not reconciled away by this pass.
+    if claimed { await releaseClaimIfIdle() }
   }
 
   /// The verified disengage both opt-out paths share.
@@ -444,10 +468,11 @@ final class SynthesisCoordinator {
     let result = await performing { [engine] in
       await engine.disengage(fromPhysical: display.id)
     }
-    // Released unconditionally: the gate refuses a release from a claimant that
-    // is not holding it, and every preview was ended above, so nothing this
-    // release could free is still outstanding.
-    await gate.release(.displayModes)
+    // Through the funnel, never `gate.release` from here: every preview was
+    // ended before the claim, but the disengage above takes seconds, and a
+    // select landing inside that window is GRANTED the gate because it names
+    // the same claimant. See `releaseClaimIfIdle`.
+    await releaseClaimIfIdle()
     switch result {
     case .success:
       return true

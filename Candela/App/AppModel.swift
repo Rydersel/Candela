@@ -131,6 +131,13 @@ final class AppModel {
       guard let self else { return true }
       return await displayModes.endOutstandingPreview()
     }
+    // AR12's release funnel. Synthesis shares the `.displayModes` claimant with
+    // the mode picker, so it must never release the gate itself: the
+    // coordinator decides, from BOTH sessions, whether anything is still
+    // outstanding that the claim is protecting.
+    coordinator.releaseClaimIfIdle = { [weak self] in
+      await self?.displayModes.releaseReconfigurationClaimIfIdle()
+    }
     return coordinator
   }()
 
