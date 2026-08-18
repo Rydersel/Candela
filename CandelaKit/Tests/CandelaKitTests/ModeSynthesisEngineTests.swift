@@ -434,6 +434,91 @@ struct ModeSynthesisEngineTests {
     ])
   }
 
+  /// The half of SS10's last step the rendered-size comparison alone cannot
+  /// see, and the reason that comparison stopped being enough: the engage tail
+  /// re-times the slave onto its own mode, so from two seconds after an engage
+  /// the panel already reports its own geometry and a check that only asked
+  /// "is this still the rendered size" could no longer be entered by any input.
+  ///
+  /// Here the break returns success, the panel is off the rendered size, and it
+  /// is reporting a descriptor that appears in no enumeration of its own. That
+  /// is a display that did not come back, and the teardown has to say so.
+  @Test func aPanelReportingAModeItDoesNotPublishLeavesTheDisengageIncomplete() async {
+    let world = world()
+    let engine = engine(world)
+    _ = await engage(engine, world, size, on: Self.physical)
+    world.panelReportsAnUnlistedModeAfterUnmirror = true
+
+    let result = await engine.disengage(fromPhysical: Self.physical)
+
+    #expect(result.failureValue == .unwindIncomplete)
+    #expect(await engine.pairing(forPhysical: Self.physical)?.slot == 4)
+    // The control: the descriptor it reports is NOT the rendered size, so the
+    // old comparison would have passed this teardown.
+    let reported = FakeSynthesisConfigurator(world).currentMode(for: Self.physical)
+    #expect(reported?.logicalWidth != size.logicalWidth)
+    #expect(world.mirrors.isEmpty)
+    #expect(world.liveSlots.isEmpty)
+  }
+
+  /// The positive control for both failure tests above: with the panel back on
+  /// a mode it publishes, the same last step passes and the pairing goes.
+  @Test func aPanelBackOnAModeItPublishesCompletesTheDisengage() async {
+    let world = world()
+    let engine = engine(world)
+    _ = await engage(engine, world, size, on: Self.physical)
+
+    let result = await engine.disengage(fromPhysical: Self.physical)
+
+    #expect(result.failureValue == nil)
+    #expect(await engine.pairing(forPhysical: Self.physical) == nil)
+  }
+
+  /// A departed panel is not a failed teardown. The last step has no glass to
+  /// ask about, and answering "incomplete" would RETAIN the pairing for
+  /// hardware that is not attached, holding one of two slots for the rest of
+  /// the session.
+  @Test func aDepartedPanelStillCompletesItsDisengage() async {
+    let world = world()
+    let engine = engine(world)
+    _ = await engage(engine, world, size, on: Self.physical)
+    world.removePhysical(Self.physical)
+
+    let result = await engine.disengage(fromPhysical: Self.physical)
+
+    #expect(result.failureValue == nil)
+    #expect(await engine.pairings().isEmpty)
+  }
+
+  /// The virtual display is minted at the PANEL's rate, so the master paces
+  /// frames at the rate the glass runs (and the engage tail then re-times the
+  /// slave onto that same mode).
+  @Test func theVirtualDisplayIsCreatedAtThePanelsOwnRefresh() async throws {
+    let world = world()
+    let engine = engine(world)
+
+    let pairing = try #require(try? await engage(engine, world, size, on: Self.physical).get())
+
+    let handle = try #require(world.liveHandles().first { $0.slot == pairing.slot })
+    #expect(handle.spec.refreshHz == 100)
+  }
+
+  /// And the fallback when the panel reports no usable rate: a spec carrying
+  /// zero hertz is a spec macOS has no reason to honour.
+  @Test func aPanelWithNoUsableRateMintsTheVirtualDisplayAtTheFallbackRate() async throws {
+    let world = FakeSynthesisWorld()
+    world.addPhysical(
+      id: Self.physical, vendor: 0x1462, model: 1, serial: 0,
+      logicalWidth: 3440, logicalHeight: 1440, refreshHz: 0
+    )
+    let engine = engine(world)
+
+    let pairing = try #require(try? await engage(engine, world, size, on: Self.physical).get())
+
+    let handle = try #require(world.liveHandles().first { $0.slot == pairing.slot })
+    #expect(handle.spec.refreshHz == 60)
+  }
+
   /// A break that fails still destroys, because a virtual display nothing can
   /// reach is worse than a set that outlived its master; the result says the
   /// unwind did not complete either way.

@@ -71,6 +71,7 @@ final class FakeSynthesisWorld: @unchecked Sendable {
   private var _physicalKeepsOwnModeWhileMirrored = false
   private var _displaysHidesTheMirror = false
   private var _panelStaysOnMasterGeometryAfterUnmirror = false
+  private var _panelReportsAnUnlistedModeAfterUnmirror = false
 
   // MARK: - Wiring
 
@@ -94,6 +95,17 @@ final class FakeSynthesisWorld: @unchecked Sendable {
         )
       )
       if !_order.contains(id) { _order.append(id) }
+    }
+  }
+
+  /// The panel is unplugged. Everything about it goes, including its place in
+  /// `displays()`, which is what a teardown for a departed display sees.
+  func removePhysical(_ id: CGDirectDisplayID) {
+    lock.withLock {
+      _panels.removeValue(forKey: id)
+      _order.removeAll { $0 == id }
+      _mirrors.removeValue(forKey: id)
+      _lastMasterMode.removeValue(forKey: id)
     }
   }
 
@@ -188,6 +200,16 @@ final class FakeSynthesisWorld: @unchecked Sendable {
   var panelStaysOnMasterGeometryAfterUnmirror: Bool {
     get { lock.withLock { _panelStaysOnMasterGeometryAfterUnmirror } }
     set { lock.withLock { _panelStaysOnMasterGeometryAfterUnmirror = newValue } }
+  }
+
+  /// The mirror comes off and the panel reports a descriptor that appears in
+  /// NO enumeration of its own: Phase 0's fabricated-mode shape, surviving the
+  /// break. Its geometry is not the rendered size either, so the only half of
+  /// SS10's last step that can catch it is "the panel reports a mode it
+  /// publishes".
+  var panelReportsAnUnlistedModeAfterUnmirror: Bool {
+    get { lock.withLock { _panelReportsAnUnlistedModeAfterUnmirror } }
+    set { lock.withLock { _panelReportsAnUnlistedModeAfterUnmirror = newValue } }
   }
 
   // MARK: - Virtual displays
@@ -297,6 +319,16 @@ final class FakeSynthesisWorld: @unchecked Sendable {
     lock.withLock {
       guard let panel = _panels[id] else { return nil }
       guard !_physicalKeepsOwnModeWhileMirrored else { return panel.ownMode }
+      if _panelReportsAnUnlistedModeAfterUnmirror, _mirrors[id] == nil {
+        return DisplayMode(
+          ioModeID: 166,
+          logicalWidth: panel.ownMode.logicalWidth - 8,
+          logicalHeight: panel.ownMode.logicalHeight - 8,
+          pixelWidth: panel.ownMode.pixelWidth - 8,
+          pixelHeight: panel.ownMode.pixelHeight - 8,
+          refreshHz: panel.ownMode.refreshHz, isNative: false
+        )
+      }
       let masterMode: DisplayMode? = if let master = _mirrors[id] {
         _panels[master]?.ownMode
       } else if _panelStaysOnMasterGeometryAfterUnmirror {
@@ -313,6 +345,14 @@ final class FakeSynthesisWorld: @unchecked Sendable {
         isNative: false
       )
     }
+  }
+
+  /// What a display PUBLISHES, which is a different question from what it is
+  /// reporting right now: the list does not change under a mirror. SS10's last
+  /// disengage step asks it whether the panel came back to a mode of its own,
+  /// so a fake that answered nothing would report every unwind incomplete.
+  func modes(for id: CGDirectDisplayID) -> [DisplayMode] {
+    lock.withLock { _panels[id].map { [$0.ownMode] } ?? [] }
   }
 
   func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws {
@@ -384,7 +424,8 @@ final class FakeSynthesisVirtualDisplays: VirtualDisplayAchievedModeReporting, @
 
 /// `DisplayConfiguring` over the shared world. Everything the synthesis engine
 /// does not use records `.unexpected` rather than answering quietly, so a test
-/// can assert the engine never applied a mode or rotated anything.
+/// can assert the engine never applied a mode or rotated anything. `modes(for:)`
+/// left that set when SS10's last disengage step began reading it.
 final class FakeSynthesisConfigurator: DisplayConfiguring, @unchecked Sendable {
   let world: FakeSynthesisWorld
 
@@ -392,9 +433,10 @@ final class FakeSynthesisConfigurator: DisplayConfiguring, @unchecked Sendable {
 
   func displays() -> [ConfiguredDisplay] { world.configuredDisplays() }
 
-  func modes(for _: CGDirectDisplayID) -> [DisplayMode] {
-    world.record(.unexpected("modes(for:)"))
-    return []
+  /// Answered rather than recorded as unexpected: the engine reads the panel's
+  /// own list to decide whether a teardown put it back on a mode it publishes.
+  func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] {
+    world.modes(for: displayID)
   }
 
   func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {

@@ -196,8 +196,9 @@ public actor ModeSynthesisEngine {
     guard !free.isEmpty else { return .failure(.noFreeSlot) }
 
     // The panel's rate at the moment of engage, so the master paces frames
-    // at the rate the glass runs. Read before the mirror stands: an engaged
-    // panel's descriptor is synthetic and answers for the master.
+    // at the rate the glass runs. Read before the mirror stands: once it does,
+    // the panel's descriptor answers for the master until the engage tail
+    // re-times it.
     let panelHz = configurator.currentMode(for: displayID)
       .map { DisplayMode.quantizedRefresh($0.refreshHz) }
     let spec = VirtualDisplaySpec(
@@ -310,11 +311,13 @@ public actor ModeSynthesisEngine {
   /// Neither alone is enough: a commit can return success over a topology it
   /// never moved, and a topology that moved does not prove the panel followed.
   ///
-  /// **Refresh is deliberately not compared.** While mirrored the physical
-  /// reports the master's geometry at its OWN rate (Phase 0), which is the
-  /// point of the whole feature: the panel keeps its refresh. Nothing here may
-  /// persist or descriptor-round-trip this readback either; it is a synthetic
-  /// descriptor under a fabricated mode ID that appears in no enumeration.
+  /// **Refresh is deliberately not compared.** At the instant this runs the
+  /// physical reports the master's geometry at its OWN rate (Phase 0). That
+  /// state lasts about two seconds: the engage TAIL, outside this actor,
+  /// re-times the slave onto its own mode, and keeping the display's refresh is
+  /// that step's job rather than the mirror's. Nothing may persist or
+  /// descriptor-round-trip this readback either way, and after the re-time the
+  /// reason is sharper: it names a real mode that is not the size on the glass.
   private func engageLanded(_ pairing: SynthesisPairing) -> Bool {
     let mirrored = configurator.displays()
       .first { $0.id == pairing.physicalDisplayID }?
@@ -385,16 +388,12 @@ public actor ModeSynthesisEngine {
       complete = false
     }
 
-    // SS10's last step. A panel still reporting the master's logical and pixel
-    // geometry is still showing the synthesized size, whatever the topology
-    // says about who mirrors whom. The panel's own native size cannot collide
-    // with this: SS2 drops any stop an existing row already serves, and every
-    // stop is strictly smaller than native.
-    if let panel = configurator.currentMode(for: pairing.physicalDisplayID),
-       panel.logicalWidth == pairing.size.logicalWidth,
-       panel.logicalHeight == pairing.size.logicalHeight,
-       panel.pixelWidth == pairing.size.pixelWidth,
-       panel.pixelHeight == pairing.size.pixelHeight {
+    // SS10's last step, and the only one that is about the GLASS rather than
+    // the topology. Skipped when the display is no longer attached: a departure
+    // teardown has no panel to ask, and answering "incomplete" there would
+    // retain a pairing for hardware that has gone.
+    let attached = configurator.displays().contains { $0.id == pairing.physicalDisplayID }
+    if attached, !panelIsBackOnItsOwnMode(pairing) {
       complete = false
     }
 
@@ -402,6 +401,36 @@ public actor ModeSynthesisEngine {
       log.error("synthesis.unwind slot=\(pairing.slot) physical=\(pairing.physicalDisplayID) did NOT complete")
     }
     return complete
+  }
+
+  /// Whether the panel came all the way back: it reports a mode its OWN
+  /// enumeration holds, and that mode is not the size the set was rendering.
+  ///
+  /// Both halves are needed, and the first is what makes this able to fail at
+  /// all. The engage tail re-times the slave onto its own mode, so from two
+  /// seconds after an engage the panel already reports its own geometry: a
+  /// check that only asked "is this still the stop's geometry" was inert by the
+  /// time any teardown ran, which reads identically to a check that works.
+  /// Membership in the panel's own list is the question a broken break can
+  /// still answer wrongly, because a display scanning out somebody else's
+  /// framebuffer reports geometry that is not in its enumeration.
+  ///
+  /// Geometry only, never `ioModeID`: mode IDs are positional and a
+  /// reconfiguration reassigns them, so an ID comparison would fail for a panel
+  /// that came back perfectly.
+  private func panelIsBackOnItsOwnMode(_ pairing: SynthesisPairing) -> Bool {
+    guard let panel = configurator.currentMode(for: pairing.physicalDisplayID) else { return false }
+    let isTheRenderedSize = panel.logicalWidth == pairing.size.logicalWidth
+      && panel.logicalHeight == pairing.size.logicalHeight
+      && panel.pixelWidth == pairing.size.pixelWidth
+      && panel.pixelHeight == pairing.size.pixelHeight
+    guard !isTheRenderedSize else { return false }
+    return configurator.modes(for: pairing.physicalDisplayID).contains {
+      $0.logicalWidth == panel.logicalWidth
+        && $0.logicalHeight == panel.logicalHeight
+        && $0.pixelWidth == panel.pixelWidth
+        && $0.pixelHeight == panel.pixelHeight
+    }
   }
 
   private func mirrorStands(_ pairing: SynthesisPairing) -> Bool {

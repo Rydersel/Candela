@@ -234,6 +234,37 @@ private func fixtureRow(
     #expect(resolved == nil)
   }
 
+  /// The regression that made the launch restore report a stale descriptor
+  /// forever, pinned at the seam that fixed it.
+  ///
+  /// A panel flags MORE than one mode native: the 1x row at its pixel size and
+  /// the HiDPI twin whose FRAMEBUFFER is that same size both carry the flag.
+  /// `first(where: \.isNative)` over the RAW list therefore answers whichever
+  /// the platform happened to enumerate first, and when that is the HiDPI twin
+  /// the ladder computes from a logical size less than half the real one: every
+  /// stop lands under the minor-axis floor, so the stored stop resolves nil and
+  /// the relaunch restore reports a stale descriptor forever.
+  /// `DisplayModeCatalog.full` sorts by logical area descending, so the same
+  /// lookup over its output is the panel's real native size.
+  @Test func theNativeRowIsTakenFromTheSortedListRatherThanTheRawOne() {
+    let hiDPITwin = fixtureRow(1720, 720, hidpi: true, native: true)
+    let onePointOne = fixtureRow(3440, 1440, hidpi: false, native: true)
+    let raw = [hiDPITwin, onePointOne]
+
+    #expect(raw.first(where: \.isNative)?.logicalWidth == 1720)
+    #expect(DisplayModeCatalog.full(raw).first(where: \.isNative)?.logicalWidth == 3440)
+
+    let fromRawNative = SyntheticSizeCatalog.stops(
+      nativeLogicalWidth: 1720, nativeLogicalHeight: 720, existingRows: raw,
+      ceilingPixelWidth: Self.ceiling.width, ceilingPixelHeight: Self.ceiling.height)
+    let fromSortedNative = SyntheticSizeCatalog.stops(
+      nativeLogicalWidth: 3440, nativeLogicalHeight: 1440, existingRows: raw,
+      ceilingPixelWidth: Self.ceiling.width, ceilingPixelHeight: Self.ceiling.height)
+
+    #expect(fromRawNative.isEmpty, "every stop falls under the minor-axis floor")
+    #expect(!fromSortedNative.isEmpty)
+  }
+
   @Test func degenerateNativeGeometryProducesNoStops() {
     #expect(SyntheticSizeCatalog.stops(
       nativeLogicalWidth: 0, nativeLogicalHeight: 0, existingRows: [],
