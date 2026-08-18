@@ -119,6 +119,16 @@ final class DisplayModeCoordinator {
     var engagedSyntheticSize: SyntheticSize?
 
     var nativeKnown: Bool { nativePixels != nil }
+
+    /// What the already-on-screen no-op guards compare against. While a stop
+    /// is engaged the answer is nil: the stop is what is on screen (SS1), and
+    /// since the engage tail re-times the slave onto its own mode, the
+    /// panel's descriptor equals the NATIVE mode exactly. Comparing against
+    /// it made picking the native size a silent no-op, which is the one pick
+    /// that disengages [MEASURED 2026-08-18: a real mouse click did nothing].
+    var alreadyOnScreenModeID: Int32? {
+      engagedSyntheticSize == nil ? current?.ioModeID : nil
+    }
   }
 
   /// The panel-derived values a catalog is built from, cached per

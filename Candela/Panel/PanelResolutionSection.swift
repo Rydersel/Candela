@@ -264,7 +264,7 @@ struct PanelResolutionSection: View {
   private func apply(_ mode: DisplayMode, in catalog: DisplayModeCoordinator.Catalog) {
     // Picking the size already on screen would apply a no-op and then demand
     // "Keep this resolution?" for a change nobody made.
-    guard mode.ioModeID != catalog.current?.ioModeID else { return }
+    guard mode.ioModeID != catalog.alreadyOnScreenModeID else { return }
     // No `Task` here — `select` is fire-and-forget into the coordinator's
     // queue, which is what serialises two fast clicks.
     //

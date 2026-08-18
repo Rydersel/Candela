@@ -619,7 +619,7 @@ struct DisplayHubView: View {
     coordinator.selectFromList(
       mode, on: displayID, from: .settings,
       surface: controlActiveState == .key ? .settingsBanner : .floatingPanel,
-      currentModeID: catalog.current?.ioModeID
+      currentModeID: catalog.alreadyOnScreenModeID
     )
   }
 
