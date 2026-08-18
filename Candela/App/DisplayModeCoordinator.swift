@@ -492,6 +492,9 @@ final class DisplayModeCoordinator {
     let stops = synthesis?.offersSyntheticSizes(displayID: displayID) == true && !display.isBuiltIn
       ? baseline.stops
       : []
+    log.debug(
+      "catalog refresh display=\(displayID) engaged=\(engagedSize.map { "\($0.logicalWidth)x\($0.logicalHeight)" } ?? "none", privacy: .public) stops=\(stops.count) published=\(published.count)"
+    )
     catalogs[displayID] = Catalog(
       display: display,
       rows: SyntheticSizeCatalog.merged(
@@ -551,8 +554,14 @@ final class DisplayModeCoordinator {
       stops: stops
     )
     // A pass that could not read the panel's own geometry is not evidence about
-    // it, so it does not replace a baseline that could.
-    if native != nil || baselines[key] == nil { baselines[key] = baseline }
+    // it, so it does not replace a baseline that could. Neither is a pass that
+    // ran while the display sat in a mirror set or an engage was in flight:
+    // the engage window reads as not-engaged (the pairing snapshot is empty
+    // throughout it) while the OS list already carries the mirror-published
+    // twins, and one such pass overwrote the cached ladder with the
+    // suppressed one, hiding the engaged stop from every surface.
+    let unstable = synthesis?.baselineUnstable(displayID: display.id) ?? false
+    if (native != nil && !unstable) || baselines[key] == nil { baselines[key] = baseline }
     return baselines[key] ?? baseline
   }
 

@@ -243,6 +243,17 @@ final class SynthesisCoordinator {
     pairing(forPhysical: displayID) != nil
   }
 
+  /// True while a "not engaged" answer about this display cannot be trusted:
+  /// an engage or disengage is in flight (the snapshot is empty for its whole
+  /// duration), or the display sits in a mirror set right now. The panel
+  /// baseline's overwrite guard reads this: a catalog refresh landing inside
+  /// the engage window read as not-engaged while the OS list already carried
+  /// the mirror-published twins, and the poisoned ladder then suppressed the
+  /// engaged stop everywhere [MEASURED 2026-08-18].
+  func baselineUnstable(displayID: CGDirectDisplayID) -> Bool {
+    isWorking || !topologyStore.topology().setMembers(containing: displayID).isEmpty
+  }
+
   func engagedSize(displayID: CGDirectDisplayID) -> SyntheticSize? {
     pairing(forPhysical: displayID)?.size
   }
