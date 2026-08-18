@@ -802,6 +802,59 @@ public final class DisplayPrefs: @unchecked Sendable {
     }
   }
 
+  // MARK: - Synthesized sizes (SS4)
+
+  // Per-display, composed by `key(_:)` like every other per-display pref here,
+  // so both keys end `".<persistenceKey>"`. Written through the D27 path
+  // (`PrefName.offerSyntheticSizes` / `.storedSyntheticSize`).
+  //
+  // Read-only properties plus named write methods, the `ModePersistence` shape
+  // rather than the settable properties above. SS11 requires a verified engine
+  // disengage BEFORE the opt-in is persisted false, so these accessors do
+  // nothing but read and write their key: no engage, no disengage, no clearing
+  // of each other. The ordering is the caller's to get right, and an accessor
+  // with a side effect would take that choice away from it.
+
+  /// Whether synthesized stops are offered for this display (SS4). Off until
+  /// someone opts in: synthesis costs a virtual display and a mirror.
+  public var offerSyntheticSizes: Bool {
+    // `bool(forKey:)`, never `object(forKey:) as? Bool`: `defaults write …
+    // offerSyntheticSizes YES` stores the STRING "YES", which the cast rejects
+    // while this accessor coerces it (the trap measured on `wireTimingGuard`).
+    // No presence check, unlike that one: absent and stored-false mean the same
+    // thing here, so there is nothing for presence to tell apart.
+    defaults.bool(forKey: key("offerSyntheticSizes"))
+  }
+
+  public func setOfferSyntheticSizes(_ enabled: Bool) {
+    defaults.set(enabled, forKey: key("offerSyntheticSizes"))
+  }
+
+  /// The synthesized stop this display is set to, or nil when none is stored.
+  ///
+  /// A descriptor, never a mode ID: synthesized rows carry sentinel negative
+  /// `ioModeID`s that mean nothing across a relaunch, and the ladder is
+  /// regenerated on read anyway (`SyntheticSizeCatalog.size(matching:…)`).
+  /// Undecodable stored data reads as nil, so a corrupted value degrades to
+  /// "no stored choice" rather than trapping.
+  public var storedSyntheticSize: SyntheticSizeDescriptor? {
+    guard let data = defaults.data(forKey: key("storedSyntheticSize")) else { return nil }
+    return try? JSONDecoder().decode(SyntheticSizeDescriptor.self, from: data)
+  }
+
+  /// nil REMOVES the key rather than writing an empty value: absence is what
+  /// the read above reports as "no stored choice". The opt-in is untouched
+  /// either way, the same split `ModePersistence.clear` draws: forgetting the
+  /// size and opting the display out are separate answers.
+  public func setStoredSyntheticSize(_ descriptor: SyntheticSizeDescriptor?) {
+    guard let descriptor else {
+      defaults.removeObject(forKey: key("storedSyntheticSize"))
+      return
+    }
+    guard let data = try? JSONEncoder().encode(descriptor) else { return }
+    defaults.set(data, forKey: key("storedSyntheticSize"))
+  }
+
   /// SO22: whether ANYTHING has ever been stored for this display — prefs,
   /// saved levels, tuning. Every per-display key ends `".<persistenceKey>"`
   /// (this type's `key`/`commandKey`, the brightness/volume/contrast stores'

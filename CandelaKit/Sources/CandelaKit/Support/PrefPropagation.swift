@@ -48,6 +48,10 @@ public enum PrefName: String, Sendable, CaseIterable {
   case pollingMode, pollingCount
   // Per-display — display configuration (W2 SP1)
   case rememberDisplayMode, storedDisplayMode
+  // Per-display: synthesized sizes (SS4). The opt-in that makes synthesized
+  // rows visible in the existing picker, and the stop the display is set to,
+  // stored as a JSON descriptor the way `storedDisplayMode` is.
+  case offerSyntheticSizes, storedSyntheticSize
   // Per-display: the density model's hub suggestion, closed by its own button.
   // A dismissal with a button is a setting; the OLED standby note's dismissal,
   // written by the hours tracker, is engine state and stays out (above).
@@ -149,6 +153,15 @@ public enum PrefPropagation {
       // Reapply happens at launch and reconnect only, never on the pref write
       // itself (DM7) — writing the pref must not yank the user's screen.
       // `.refreshUI` is unioned in below and is the whole row.
+      []
+
+    case .offerSyntheticSizes, .storedSyntheticSize:
+      // No display work on the write, the same answer the mode rows give.
+      // SS11 puts a VERIFIED engine disengage before the opt-in is written
+      // false, and the engage before the stop is stored, so the sequencing is
+      // the caller's and a row here would re-run it out of order. `.refreshUI`
+      // is unioned in below and is the whole row: the opt-in decides which
+      // rows the size picker shows (SS4), which is a re-render.
       []
 
     case .restoreArrangement, .savedArrangements:

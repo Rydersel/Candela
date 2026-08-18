@@ -819,4 +819,92 @@ struct DisplayPrefsTests {
       #expect(b.oledCareEnrolled == true)
     }
   }
+
+  // MARK: - Synthesized sizes (SS4)
+
+  @Test func synthesisIsOffWithNothingStoredUntilItIsAskedFor() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      #expect(prefs.offerSyntheticSizes == false)
+      #expect(prefs.storedSyntheticSize == nil)
+      // Nothing was written by the reads: a display nobody has opted in stays
+      // absent from the domain, which is what `hasAnyStoredValue` reads.
+      #expect(DisplayPrefs.hasAnyStoredValue(forKey: "pk", defaults: defaults) == false)
+    }
+  }
+
+  @Test func synthesisPrefsRoundTripUnderTheSuffixedKeys() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "AAAA-BBBB")
+      prefs.setOfferSyntheticSizes(true)
+      prefs.setStoredSyntheticSize(SyntheticSizeDescriptor(logicalWidth: 3096, logicalHeight: 1296))
+
+      #expect(prefs.offerSyntheticSizes)
+      #expect(prefs.storedSyntheticSize
+        == SyntheticSizeDescriptor(logicalWidth: 3096, logicalHeight: 1296))
+      // The exact key strings: shipped schema, same `<name>.<pk>` composition
+      // every other per-display pref uses.
+      #expect(defaults.object(forKey: "offerSyntheticSizes.AAAA-BBBB") as? Bool == true)
+      let stored = try? JSONDecoder().decode(
+        SyntheticSizeDescriptor.self,
+        from: defaults.data(forKey: "storedSyntheticSize.AAAA-BBBB") ?? Data()
+      )
+      #expect(stored == SyntheticSizeDescriptor(logicalWidth: 3096, logicalHeight: 1296))
+    }
+  }
+
+  @Test func clearingTheStoredSyntheticSizeRemovesTheKeyAndLeavesTheOptInAlone() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      prefs.setOfferSyntheticSizes(true)
+      prefs.setStoredSyntheticSize(SyntheticSizeDescriptor(logicalWidth: 2752, logicalHeight: 1152))
+
+      prefs.setStoredSyntheticSize(nil)
+      #expect(prefs.storedSyntheticSize == nil)
+      // REMOVED, not written as an empty value: an absent key is what the
+      // resolver reads as "no stored choice".
+      #expect(defaults.object(forKey: "storedSyntheticSize.pk") == nil)
+      // Two separate answers, as with the remembered display mode: forgetting
+      // the size must not opt the display back out.
+      #expect(prefs.offerSyntheticSizes)
+    }
+  }
+
+  @Test func anUndecodableStoredSyntheticSizeReadsAsNone() {
+    withSuite { defaults in
+      defaults.set(Data([0x7B, 0x7B]), forKey: "storedSyntheticSize.pk")
+      #expect(DisplayPrefs(defaults: defaults, persistenceKey: "pk").storedSyntheticSize == nil)
+    }
+  }
+
+  /// The opt-in reads through the COERCING accessor, so the shell spelling of a
+  /// bool reaches it. `defaults write … offerSyntheticSizes YES` stores the
+  /// STRING "YES", which `object(forKey:) as? Bool` rejects silently.
+  @Test func theSynthesisOptInAcceptsTheSpellingsDefaultsWriteProduces() {
+    for stored in ["YES", "yes", "true", "1"] as [Any] + [1, true] {
+      withSuite { defaults in
+        defaults.set(stored, forKey: "offerSyntheticSizes.pk")
+        #expect(
+          DisplayPrefs(defaults: defaults, persistenceKey: "pk").offerSyntheticSizes,
+          "stored \(stored) should read as opted in"
+        )
+      }
+    }
+  }
+
+  @Test func synthesisPrefsArePerDisplay() {
+    withSuite { defaults in
+      let a = DisplayPrefs(defaults: defaults, persistenceKey: "a")
+      let b = DisplayPrefs(defaults: defaults, persistenceKey: "b")
+      a.setOfferSyntheticSizes(true)
+      a.setStoredSyntheticSize(SyntheticSizeDescriptor(logicalWidth: 3096, logicalHeight: 1296))
+      #expect(b.offerSyntheticSizes == false)
+      #expect(b.storedSyntheticSize == nil)
+    }
+  }
+
+  @Test func synthesisKeyStringsNeverDrift() {
+    #expect(PrefName.offerSyntheticSizes.rawValue == "offerSyntheticSizes")
+    #expect(PrefName.storedSyntheticSize.rawValue == "storedSyntheticSize")
+  }
 }

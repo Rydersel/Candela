@@ -63,6 +63,12 @@ public enum DiagnosticsPrefSummary {
     // this display": a closed suggestion is invisible everywhere else in a
     // report, and the alternative reading is that the density model abstained.
     if prefs.sizeRecommendationDismissed { note(.sizeRecommendationDismissed, "true") }
+    // SS4's opt-in, reported for the same reason `rememberDisplayMode` is: it
+    // explains a size list nobody else can account for, and a report about
+    // sizes the panel does not advertise is unreadable without it. The stored
+    // stop is deliberately absent, exactly as `storedDisplayMode` is: the size
+    // in force belongs in the report's mode line, not in a settings list.
+    if prefs.offerSyntheticSizes { note(.offerSyntheticSizes, "true") }
 
     // OLED care (W3a). The comparison values ARE the accessor defaults — the
     // Recommended preset, pinned by `oledDefaultsAreTheRecommendedPreset` — so
