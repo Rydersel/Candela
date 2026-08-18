@@ -238,7 +238,7 @@ func score(
 ) -> Double {
   if objective == "pearson" {
     let (measured, modelled) = accumulate(records, parameters, includeChrome: includeChrome)
-    return pearson(measured, modelled) ?? -1
+    return pearson(measured, modelled) ?? -.infinity
   }
   // Fit on PER-RECORD residuals, not on the accumulated map.
   //
@@ -261,7 +261,7 @@ func score(
       count += 1
     }
   }
-  guard count > 0, total > 0 else { return -1 }
+  guard count > 0, total > 0 else { return -.infinity }
   let mean = total / Double(count)
   return -((squared / Double(count)).squareRoot() / mean)
 }
@@ -281,14 +281,20 @@ func scoreJointly(
 ) -> Double {
   var total = 0.0
   var counted = 0
+  // `.isFinite`, never a magic number. `-1` was previously both the "no data"
+  // sentinel and the score of a normalised RMSE of 1.0. Measured baseline nRMSE
+  // on this rig is 1.13 to 1.29, so EVERY real group was silently discarded and
+  // the joint objective sat on a sentinel plateau: the header printed "joint fit
+  // across 2 panels" while one panel contributed nothing, ever, and the
+  // objective rewarded a candidate for breaking a group out of the average.
   for group in groups where !group.isEmpty {
     let value = score(group, parameters, includeChrome: includeChrome)
-    if value > -1 {
+    if value.isFinite {
       total += value
       counted += 1
     }
   }
-  return counted > 0 ? total / Double(counted) : -1
+  return counted > 0 ? total / Double(counted) : -.infinity
 }
 
 // MARK: - Load
@@ -337,6 +343,7 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
   params.compositing = .topmostWins
   params.appPriors = ["Ghostty": 0.11, "Zed": 0.9]
   params.layerPriors = [24: 0.8]
+  var orderBlind = 0
   for record in raw.prefix(40) {
     let prepared = prepare(record)
     for candidate in [ExposureModelParameters.baseline, params] {
@@ -347,7 +354,25 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
         mismatches += 1
       }
     }
+    // MP10 says re-sorting the window array destroys every result without
+    // failing anything. That was literally true: both controls ran `.baseline`,
+    // which is `.summedCoverage` and order-invariant, so a shuffled log passed
+    // them 19/19 and scored variants normally. This is the guard that closes it.
+    if record.windows.count > 1 {
+      var reversed = record
+      reversed.windows.reverse()
+      let forward = prepared.modelled(params)
+      let backward = prepare(reversed).modelled(params)
+      if (0..<PanelGrid.cellCount).allSatisfy({ abs(forward[$0] - backward[$0]) < 1e-12 }) {
+        orderBlind += 1
+      }
+    }
   }
+  if orderBlind == min(raw.count, 40) && orderBlind > 0 {
+    print("  control: window ORDER changes the model               NO (order-blind)")
+    return false
+  }
+  print("  control: window ORDER changes the model               yes")
   print("  control: prepared path matches ExposureModel \(mismatches == 0 ? "yes" : "NO (\(mismatches))")")
   return mismatches == 0
 }
@@ -411,8 +436,46 @@ func sensitivity(
   return moved
 }
 
+/// MP2 as amended 2026-08-18. Three conditions, all required.
+///
+/// The previous predicate was `multiple >= 2.7 && top10 >= 5`, and it was broken
+/// three ways, each measured on this rig before any real verdict was read:
+///
+/// - **One-sided.** A model that OVERSHOOTS passed. The MP3 amendment's own
+///   documented-as-defective fit, 5.78x modelled against 2.99x measured, would
+///   have printed PASS.
+/// - **An absolute threshold against a moving target.** 2.7 was 85% of a
+///   measured 3.17x. Measured on tomorrow-shaped data is 4.48x, so the same
+///   constant demanded 60%. The bar loosened and nobody chose that.
+/// - **A ranking half that is free at this accumulation length.** V0, the
+///   shipped model, already scores 5/10 here, where over #120's four days it
+///   scored 1/10. Top-10 overlap is not portable across accumulation length, so
+///   the bar collapsed to the peak criterion alone.
+///
+/// Consequence, verified: three rungs printed PASS on an 8-record holdout from a
+/// log the readiness gate refuses, including V3, which contains no per-window
+/// luminance term at all and cleared the bar by driving the dark prior to 0.000.
+func passes(
+  modelledPeak: Double, measuredPeak: Double, top10: Int, baselineTop10: Int, holdout: Int
+) -> (ok: Bool, why: String) {
+  guard holdout >= ExposureAccumulator.minimumSamplesForAnalysis else {
+    return (false, "n<\(ExposureAccumulator.minimumSamplesForAnalysis)")
+  }
+  guard measuredPeak > 0 else { return (false, "flat") }
+  let ratio = modelledPeak / measuredPeak
+  guard ratio >= 0.85, ratio <= 1.18 else {
+    return (false, String(format: "peak %.2f", ratio))
+  }
+  guard top10 - baselineTop10 >= 3 else { return (false, "top10 +\(top10 - baselineTop10)") }
+  return (true, "PASS")
+}
+
+/// Returns this rung's top-10 agreement so the next rung can be judged against
+/// the baseline rather than against an absolute number.
+@discardableResult
 func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelParameters,
-  freeParameters: Int, includeChrome: Bool = false)
+  freeParameters: Int, includeChrome: Bool = false, baselineTop10: Int? = nil,
+  fitGroups: [[Prepared]] = []) -> Int
 {
   let (measured, modelled) = accumulate(records, parameters, includeChrome: includeChrome)
   let p = pearson(measured, modelled) ?? .nan
@@ -423,12 +486,45 @@ func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelP
   let top5 = agreement(measured, modelled, 5)
   let top10 = agreement(measured, modelled, 10)
   let top24 = agreement(measured, modelled, 24)
-  let passes = multiple >= 2.7 && top10 >= 5
+
+  // Free parameters are counted as those the objective can actually move.
+  // The printed count is what a reader uses to judge overfitting, and a prior
+  // the data cannot constrain is not a degree of freedom that was spent.
+  var effective = freeParameters
+  if !fitGroups.isEmpty {
+    var live = 0
+    for app in parameters.appPriors.keys
+    where sensitivity(fitGroups, parameters, get: { $0.appPriors[app] ?? 0 },
+      set: { $0.appPriors[app] = $1 }, includeChrome: includeChrome) > 1e-6 { live += 1 }
+    for layer in parameters.layerPriors.keys
+    where sensitivity(fitGroups, parameters, get: { $0.layerPriors[layer] ?? 0 },
+      set: { $0.layerPriors[layer] = $1 }, includeChrome: includeChrome) > 1e-6 { live += 1 }
+    for probe in [
+      (get: { (p: ExposureModelParameters) in p.lightAppearancePrior },
+       set: { (p: inout ExposureModelParameters, v: Double) in p.lightAppearancePrior = v }),
+      (get: { (p: ExposureModelParameters) in p.darkAppearancePrior },
+       set: { (p: inout ExposureModelParameters, v: Double) in p.darkAppearancePrior = v }),
+    ] where sensitivity(fitGroups, parameters, get: probe.get, set: probe.set,
+      includeChrome: includeChrome) > 1e-6 { live += 1 }
+    effective = live
+  }
+
+  let verdict = baselineTop10.map {
+    passes(modelledPeak: multiple, measuredPeak: measuredMultiple, top10: top10,
+      baselineTop10: $0, holdout: records.count)
+  }
+  // A prior resting on a clamp is a misspecification signal, not a fit.
+  let pinned = parameters.appPriors.values.contains { $0 <= 0 || $0 >= 1 }
+    || parameters.darkAppearancePrior <= 0 || parameters.darkAppearancePrior >= 1
   print(
     String(
-      format: "  %-34@ params %2d  r %.3f  rho %.3f  peak %.2fx (measured %.2fx)  top1 %d/1  top5 %d/5  top10 %d/10  top24 %2d/24  %@",
-      label as NSString, freeParameters, p, s, multiple, measuredMultiple, top1, top5, top10,
-      top24, (passes ? "PASS" : "fail") as NSString))
+      format: "  %-30@ params %2d  r %6.3f  rho %6.3f  peak %.2fx/%.2fx = %.2f  top10 %2d/10  top24 %2d/24  %@%@",
+      label as NSString, effective, p, s, multiple, measuredMultiple,
+      measuredMultiple > 0 ? multiple / measuredMultiple : .nan, top10, top24,
+      (verdict.map { $0.ok ? "PASS" : "fail (\($0.why))" } ?? "baseline") as NSString,
+      (pinned ? "  [prior pinned at a clamp]" : "") as NSString))
+  _ = (top1, top5)
+  return top10
 }
 
 // MARK: - Run
@@ -479,8 +575,12 @@ guard !fitGroups.isEmpty else {
 // Which layers and apps are worth a parameter, measured over every panel.
 var layerWeight: [Int: Double] = [:]
 var appWeight: [String: Double] = [:]
-for run in runs {
-  for record in run.fit + run.hold {
+// Selected from the FIT SPLIT of the FITTED panels only. Reading the holdout to
+// decide which apps get free parameters is a softer form of the failure MP14
+// exists to prevent, and reading panels that --fit-displays removed lets an app
+// that never appears in the fit earn a parameter applied to the holdout.
+for group in fitGroups {
+  for record in group {
     for window in record.windows {
       let mass = window.coverage.reduce(0, +) * record.elapsed
       layerWeight[window.layer, default: 0] += mass
@@ -553,9 +653,18 @@ let ladder:
   ]
 
 for run in runs {
-  print("\n--- holdout scores: \(run.key.prefix(8))  (\(run.hold.count) records) ---")
+  let fitted = fitDisplays.isEmpty || fitDisplays.contains { run.key.hasPrefix($0) }
+  print(
+    "\n--- holdout scores: \(run.key.prefix(8))  (\(run.hold.count) records)"
+      + (fitted ? "" : "  [NOT FITTED: scored for information only]") + " ---")
+  // V0 is the control and sets the ranking baseline. If V0 ever passes, the
+  // instrument is reporting rather than measuring.
+  var baseline: Int?
   for (label, parameters, free, chrome) in ladder {
-    report(label, run.hold, parameters, freeParameters: free, includeChrome: chrome)
+    let top10 = report(
+      label, run.hold, parameters, freeParameters: free, includeChrome: chrome,
+      baselineTop10: baseline, fitGroups: fitGroups)
+    if baseline == nil { baseline = top10 }
   }
 }
 

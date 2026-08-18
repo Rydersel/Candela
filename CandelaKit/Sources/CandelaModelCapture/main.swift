@@ -45,9 +45,9 @@ func usage() -> Never {
     --out <dir>           log directory (default ~/Library/Application Support/Candela/model-replay)
     --max-samples <n>     stop after this many samples per display
 
-  The wallpaper cannot be re-read mid-run, so restart the tool after changing it.
-  Current path:
-    osascript -e 'tell application "Finder" to get POSIX path of (desktop picture as alias)'
+  The wallpaper is re-read per sample, per display. Point --out at a FRESH
+  directory: this tool appends to whatever is already there, and the fit reads
+  every file in the directory.
   """)
   exit(2)
 }
@@ -141,7 +141,12 @@ let ownPID = ProcessInfo.processInfo.processIdentifier
       let bounds = entry[kCGWindowBounds as String] as? [String: Any],
       let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary)
     else { return nil }
-    let owner = entry[kCGWindowOwnerName as String] as? String ?? ""
+    // Dropped when nameless, exactly as CGWindowListSource does. Admitting one
+    // as "" would let it earn a fitted prior the shipped model can never
+    // produce, and would slip past the Candela exclusion below.
+    guard let owner = entry[kCGWindowOwnerName as String] as? String, !owner.isEmpty else {
+      return nil
+    }
     guard pid != ownPID, owner != "Candela" else { return nil }
     return ModelReplayRecord.Window(
       id: number, pid: pid, owner: owner,
@@ -163,45 +168,76 @@ let ownPID = ProcessInfo.processInfo.processIdentifier
   return (session["CGSSessionScreenIsLocked"] as? Int) == 1
 }
 
-let appearanceIsDark =
-  UserDefaults.standard.string(forKey: "AppleInterfaceStyle")?.lowercased() == "dark"
+/// Read PER SAMPLE, never once at launch.
+///
+/// A run that spans a light/dark switch would otherwise label every later
+/// record with the appearance it started in. The measured side sees the real
+/// appearance and the modelled side uses the stale flag, and BOTH replay
+/// controls still pass, because the log stays self-consistent with its own
+/// wrong label. Exercising the light prior is a thing this probe actively wants
+/// the operator to do, so freezing it made the advice self-defeating.
+@MainActor func currentAppearanceIsDark() -> Bool {
+  UserDefaults.standard.removeVolatileDomain(forName: UserDefaults.globalDomain)
+  return UserDefaults.standard.string(forKey: "AppleInterfaceStyle")?.lowercased() == "dark"
+}
 
-let discovered = DisplayDiscovery.discover()
 let log = try ModelReplayLog(directory: options.out)
 
-// A run header, so a log can always be traced back to what produced it.
+// A run header per RUN, not per directory. A single fixed name was overwritten
+// on every restart, and restarting is something this tool asks for, so the
+// provenance of everything already in the directory was being destroyed.
+let startedAt = Date().timeIntervalSinceReferenceDate
 let header: [String: Any] = [
-  "startedAt": Date().timeIntervalSinceReferenceDate,
+  "startedAt": startedAt,
   "interval": options.interval,
-  "wallpaper": options.wallpaper?.path ?? "",
-  "wallpaperBytes": (try? Data(contentsOf: options.wallpaper ?? URL(fileURLWithPath: "/dev/null")))?
-    .count ?? 0,
-  "appearanceIsDark": appearanceIsDark,
+  "maxSamples": options.maxSamples,
+  "out": options.out.path,
+  "displayFilter": options.displayFilter.map(String.init) ?? "all",
+  "wallpaperOverride": options.wallpaper?.path ?? "(per display via NSWorkspace)",
+  "appearanceIsDarkAtStart": currentAppearanceIsDark(),
 ]
 try? JSONSerialization.data(withJSONObject: header, options: [.prettyPrinted])
-  .write(to: options.out.appendingPathComponent("run.json"))
+  .write(to: options.out.appendingPathComponent(String(format: "run-%.0f.json", startedAt)))
 
 print("candela-model-capture: interval \(options.interval)s, out \(options.out.path)")
-for entry in discovered {
+for entry in DisplayDiscovery.discover() {
   let resolved = wallpaperURL(for: entry.display.id)?.lastPathComponent ?? "(unreadable)"
-  print("  display \(entry.display.id): wallpaper \(resolved)")
+  print("  display \(entry.display.id) \(entry.display.persistenceKey.prefix(8)): wallpaper \(resolved)")
 }
+if let filter = options.displayFilter { print("  restricted to display \(filter)") }
 fflush(stdout)
 
 var taken = 0
+var written = 0
 var skippedLocked = 0
 var skippedAsleep = 0
 var skippedBlack = 0
+var captureFailures = 0
+var writeFailures = 0
+var contentFailures = 0
 while taken < options.maxSamples {
   let content: SCShareableContent
   do {
     content = try await SCShareableContent.excludingDesktopWindows(
       false, onScreenWindowsOnly: true)
   } catch {
+    // `taken` still advances: otherwise a permanently failing fetch spins past
+    // --max-samples forever, writing nothing.
+    contentFailures += 1
+    taken += 1
     FileHandle.standardError.write(Data("shareable content failed: \(error)\n".utf8))
     try await Task.sleep(for: .seconds(options.interval))
     continue
   }
+
+  let appearanceIsDark = currentAppearanceIsDark()
+  // Re-resolved EVERY tick. The ID-to-EDID-key map is what moves: CLAUDE.md
+  // records the MAG going 3->2 and the Dell 2->3 across one dock cycle. Frozen
+  // at launch, a swap silently writes one panel's records under the other
+  // panel's key, and the fit then merges a landscape panel and a rotated one
+  // into a single 240-cell map. Every control still passes. Discovery is IOKit
+  // iteration only, no DDC traffic, so per-tick costs nothing.
+  let discovered = DisplayDiscovery.discover()
 
   if screenIsLocked() {
     skippedLocked += 1
@@ -251,6 +287,7 @@ while taken < options.maxSamples {
       image = try await SCScreenshotManager.captureImage(
         contentFilter: filter, configuration: config)
     } catch {
+      captureFailures += 1
       FileHandle.standardError.write(
         Data("capture failed on \(scDisplay.displayID): \(error)\n".utf8))
       continue
@@ -290,22 +327,38 @@ while taken < options.maxSamples {
     let modelled = ExposureModel.modelledGrid(
       inputs: inputs, through: transform, parameters: .baseline)
 
-    try log.append(
-      ModelReplayRecord(
-        t: Date().timeIntervalSinceReferenceDate, elapsed: options.interval,
-        display: .init(
-          persistenceKey: persistenceKey, displayID: scDisplay.displayID,
-          pixelWidth: scDisplay.width, pixelHeight: scDisplay.height, rotation: rotation),
-        capture: .init(cols: cols, rows: rows, grid: captured),
-        measuredPanel: measuredPanel, modelledBaseline: modelled,
-        wallpaper: paper, wallpaperPath: paperURL?.path ?? "",
-        appearanceIsDark: appearanceIsDark, windows: observed, chrome: chrome))
+    let record = ModelReplayRecord(
+      t: Date().timeIntervalSinceReferenceDate, elapsed: options.interval,
+      display: .init(
+        persistenceKey: persistenceKey, displayID: scDisplay.displayID,
+        pixelWidth: scDisplay.width, pixelHeight: scDisplay.height, rotation: rotation),
+      capture: .init(cols: cols, rows: rows, grid: captured),
+      measuredPanel: measuredPanel, modelledBaseline: modelled,
+      wallpaper: paper, wallpaperPath: paperURL?.path ?? "",
+      appearanceIsDark: appearanceIsDark, windows: observed, chrome: chrome)
+
+    // Never an unguarded `try` in this loop: a full disk, a removed output
+    // directory or a non-finite window rect would otherwise end a multi-hour
+    // run at whatever point it happened.
+    do {
+      try log.append(record)
+      written += 1
+    } catch {
+      writeFailures += 1
+      FileHandle.standardError.write(Data("append failed: \(error)\n".utf8))
+    }
   }
 
   taken += 1
   if taken % 10 == 0 {
+    // `written` first, deliberately. Counting ticks made a run whose grant had
+    // been revoked look identical to a healthy one: the number climbed while
+    // nothing reached disk.
     print(
-      "samples: \(taken)  skipped: locked \(skippedLocked), asleep \(skippedAsleep), black \(skippedBlack)")
+      "written \(written) records over \(taken) ticks  "
+        + "skipped: locked \(skippedLocked), asleep \(skippedAsleep), black \(skippedBlack)  "
+        + "failures: content \(contentFailures), capture \(captureFailures), write \(writeFailures)")
+    fflush(stdout)
   }
   try await Task.sleep(for: .seconds(options.interval))
 }
