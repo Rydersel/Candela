@@ -21,6 +21,13 @@ var topApps = 8
 // Read from nonisolated scoring helpers; written once during argument parsing,
 // before any of them run.
 nonisolated(unsafe) var objective = "rmse"
+/// Key prefixes of the displays whose records drive the FIT. Empty means all.
+///
+/// A panel showing static content is near-degenerate for fitting: its records
+/// are all the same picture, so it constrains little while still pulling the
+/// joint objective. It stays in the reporting either way, and on this rig it is
+/// still the only rotated panel and therefore the only transform check.
+var fitDisplays: [String] = []
 
 var index = 0
 while index < arguments.count {
@@ -39,6 +46,8 @@ while index < arguments.count {
   case "--fit-fraction": fitFraction = Double(value()) ?? 0.6
   case "--top-apps": topApps = Int(value()) ?? 8
   case "--objective": objective = value()
+  case "--fit-displays":
+    fitDisplays = value().split(separator: ",").map(String.init)
   default:
     print("""
       candela-model-fit: score candidate exposure models against a recorded log
@@ -47,6 +56,7 @@ while index < arguments.count {
         --fit-fraction <f>     temporal split; leading fraction fits, rest scores (default 0.6)
         --top-apps <n>         how many apps get a fitted prior (default 8)
         --objective <name>     rmse (default) or pearson
+        --fit-displays <k,..>  key prefixes whose records drive the fit (default: all)
       """)
     exit(2)
   }
@@ -452,7 +462,19 @@ guard !runs.isEmpty else {
   exit(1)
 }
 
-let fitGroups = runs.map(\.fit)
+let fitGroups =
+  fitDisplays.isEmpty
+  ? runs.map(\.fit)
+  : runs.filter { run in fitDisplays.contains { run.key.hasPrefix($0) } }.map(\.fit)
+if !fitDisplays.isEmpty {
+  let fitting = runs.filter { run in fitDisplays.contains { run.key.hasPrefix($0) } }
+  print("\nfitting on \(fitting.count) of \(runs.count) panels: \(fitting.map { String($0.key.prefix(8)) })")
+  print("all panels are still scored and reported below.")
+}
+guard !fitGroups.isEmpty else {
+  print("--fit-displays matched no panel in this log")
+  exit(1)
+}
 
 // Which layers and apps are worth a parameter, measured over every panel.
 var layerWeight: [Int: Double] = [:]
