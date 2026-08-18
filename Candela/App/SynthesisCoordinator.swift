@@ -558,13 +558,16 @@ final class SynthesisCoordinator {
   /// which is otherwise a mirror slave the apply would land on invisibly.
   /// Returns false without touching anything when it refuses; the caller
   /// refuses the mode change in turn.
-  /// `endingPreviews: false` because the select path runs INSIDE the preview
-  /// queue and has already stood both previews down: `endOutstandingPreview`
-  /// re-enters the queue, which waits on the operation doing the waiting.
-  /// Measured 2026-08-18: the first pick hung and every later pick enqueued
-  /// behind it, with nothing logged.
+  /// `fromQueueContext: true` because the select path runs INSIDE the preview
+  /// queue: BOTH `endOutstandingPreview` and `releaseClaimIfIdle` re-enter the
+  /// queue, which waits on the operation doing the waiting. Measured twice on
+  /// 2026-08-18: the select hung at the release with the gate claim held, so
+  /// every later pick enqueued forever and arrangements were refused with
+  /// "displayModes is reconfiguring displays". The caller has already stood
+  /// the previews down, and its own `adopt` is the AR12 releaser for the
+  /// claim this leaves held.
   func disengageForModeChange(_ display: ConfiguredDisplay) async -> Bool {
-    await disengageForOptOut(display, endingPreviews: false)
+    await disengageForOptOut(display, fromQueueContext: true)
   }
 
   /// Clears the stored stop without touching the opt-in or the machine.
@@ -585,7 +588,7 @@ final class SynthesisCoordinator {
   /// keeps SS11's ordering honest: both callers write prefs only after this
   /// says the machine is clean.
   private func disengageForOptOut(
-    _ display: ConfiguredDisplay, endingPreviews: Bool = true
+    _ display: ConfiguredDisplay, fromQueueContext: Bool = false
   ) async -> Bool {
     // BEFORE the `isEngaged` question, not after. `isEngaged` reads the
     // snapshot, which is empty for the whole of an engage, so an in-flight
@@ -597,7 +600,7 @@ final class SynthesisCoordinator {
       return false
     }
     guard isEngaged(displayID: display.id) else { return true }
-    if endingPreviews {
+    if !fromQueueContext {
       guard await endOutstandingPreview() else {
         note(.busy, for: display.id)
         return false
@@ -616,8 +619,10 @@ final class SynthesisCoordinator {
     // Through the funnel, never `gate.release` from here: every preview was
     // ended before the claim, but the disengage above takes seconds, and a
     // select landing inside that window is GRANTED the gate because it names
-    // the same claimant. See `releaseClaimIfIdle`.
-    await releaseClaimIfIdle()
+    // the same claimant. See `releaseClaimIfIdle`. From the queue context the
+    // funnel would re-enter the queue and hang with the claim held; the
+    // calling select's own `adopt` releases instead.
+    if !fromQueueContext { await releaseClaimIfIdle() }
     switch result {
     case .success:
       return true
