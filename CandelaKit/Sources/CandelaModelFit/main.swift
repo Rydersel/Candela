@@ -151,7 +151,16 @@ struct Prepared {
     //
     // Chrome is BEHIND every app window: it is what a window occludes, never
     // the reverse, so it goes last in a front-to-back walk.
-    let all = parameters.chromeCoverageLimit == nil ? windows : windows + chrome
+    let admittedChrome: [PreparedWindow]
+    if let limit = parameters.chromeCoverageLimit {
+      admittedChrome = chrome.filter { window in
+        let fraction = window.coverage.reduce(0, +) / Double(PanelGrid.cellCount)
+        return fraction > 0 && fraction < limit
+      }
+    } else {
+      admittedChrome = []
+    }
+    let all = windows + admittedChrome
     switch parameters.compositing {
     case .summedCoverage:
       var coverage = [Double](repeating: 0, count: PanelGrid.cellCount)
@@ -200,14 +209,11 @@ func prepare(_ record: ModelReplayRecord) -> Prepared {
   // construction, and the upper bound still keeps a full-display backdrop from
   // blanketing every cell and deleting the wallpaper term.
   let chrome = record.chrome.map(\.snapshot)
-    .compactMap { snapshot -> (WindowSnapshot, [Double])? in
-      let coverage = transform.coverage(ofDisplayRect: snapshot.bounds)
-      guard coverage.count == PanelGrid.cellCount else { return nil }
-      let fraction = coverage.reduce(0, +) / Double(PanelGrid.cellCount)
-      guard fraction > 0, fraction < 0.5 else { return nil }
-      return (snapshot, coverage)
-    }
-    .map { pair -> WindowSnapshot in pair.0 }
+    // NOT filtered here. The limit is a parameter, and applying it at prepare
+    // time made the harness treat it as a boolean: changing a rung's limit to
+    // 0.02 left the scores byte-identical to 0.5 and the equivalence control
+    // still printed yes, because its probe hardcoded the same literal. One
+    // switch, one meaning, means the value has to be read where it is used.
     .map {
       // The REAL owner name, not a synthesised "chrome<layer>" one. Renaming
       // made this path diverge from `ExposureModel`, which resolves luminance
@@ -397,7 +403,7 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
   for compositing in [ExposureModelParameters.Compositing.summedCoverage, .topmostWins] {
     var probe = ExposureModelParameters.baseline
     probe.compositing = compositing
-    probe.chromeCoverageLimit = 0.5
+    probe.chromeCoverageLimit = compositing == .topmostWins ? 0.5 : 0.08
     // Priors drawn from the log's own owners and layers, so the probe cannot
     // miss for want of an app that happens not to be on this panel.
     for (index, owner) in Set(raw.flatMap { $0.windows.map(\.owner) }).sorted().enumerated() {
@@ -492,7 +498,10 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
     print(
       "  control: window ORDER changes the model               yes (\(orderTested - orderBlind)/\(orderTested))")
   }
-  print("  control: prepared path matches ExposureModel \(mismatches == 0 ? "yes" : "NO (\(mismatches))")")
+  let chromeSeen = raw.prefix(40).contains { !$0.chrome.isEmpty }
+  print(
+    "  control: prepared path matches ExposureModel \(mismatches == 0 ? "yes" : "NO (\(mismatches))")"
+      + " (\(probes.count) parameterisations, chrome \(chromeSeen ? "present" : "ABSENT from this log"))")
   return mismatches == 0
 }
 
@@ -573,13 +582,15 @@ func sensitivity(
 /// Consequence, verified: three rungs printed PASS on an 8-record holdout from a
 /// log the readiness gate refuses, including V3, which contains no per-window
 /// luminance term at all and cleared the bar by driving the dark prior to 0.000.
-/// The best decile any parameterisation in this family can reach, found by
-/// fitting every prior DIRECTLY ON THE HOLDOUT.
+/// The decile reached by fitting every prior DIRECTLY ON THE HOLDOUT.
 ///
-/// Deliberate cheating, and it is the point: it is an upper bound on the rung
-/// scores, so it separates "the model failed" from "the bar was unreachable".
-/// Without it a threshold is asserted against a target nobody measured, which
-/// is how a bar that could not fail was replaced by one that could not pass.
+/// Deliberate cheating, to give a failing rung a reference point: if the best
+/// fit this family can produce also gains nothing, the threshold may simply be
+/// unreachable on this data, which is a different finding from "the model lost".
+///
+/// **Not an upper bound, and must never gate a pass.** `refine` maximises the
+/// objective (normalised RMSE); this counts hottest-decile overlap. They are
+/// different quantities, so an honestly fitted rung can and does exceed it.
 func ceilingDecile(_ hold: [Prepared], apps: [String], layers: [Int]) -> Int {
   var cheat = ExposureModelParameters.baseline
   cheat.compositing = .topmostWins
@@ -616,25 +627,31 @@ func passes(
   guard ratio >= 0.85, ratio <= 1.18 else {
     return (false, String(format: "peak %.3f", ratio))
   }
-  // If cheat-fitting on the holdout itself cannot gain 3 decile cells, no
-  // honest rung can either, and a fail would be a statement about the bar
-  // rather than about the model. Measured on the 69-minute session: the whole
-  // ladder spans +1 and the ceiling reaches +1, so a +3 threshold could only
-  // ever print fail. That is the same defect as a bar that cannot fail.
-  guard ceiling - baselineDecile >= 3 else {
-    return (false, "ranking UNREACHABLE (ceiling +\(ceiling - baselineDecile))")
+  // The decile gate is decided FIRST, and the reference only ever explains a
+  // failure. It can never veto a rung that cleared the bar.
+  //
+  // This ordering is not cosmetic. `ceilingDecile` fits on the OBJECTIVE
+  // (normalised RMSE), while this compares DECILE overlap, and those are
+  // different quantities: measured on the archived Dell holdout the reference
+  // came out at 0/24 while an honestly fitted rung reached 6/24. Gated first,
+  // that printed a rung which beat the bar by six cells as
+  // "fail (ranking UNREACHABLE)" — and the run card tells the reader to trust
+  // that line above the others.
+  if decile - baselineDecile >= 3 { return (true, "PASS") }
+  if ceiling - baselineDecile < 3 {
+    return (
+      false,
+      "decile +\(decile - baselineDecile); best objective-optimal fit on the holdout also "
+        + "reached only +\(ceiling - baselineDecile), so the bar may be unreachable here")
   }
-  guard decile - baselineDecile >= 3 else {
-    return (false, "decile +\(decile - baselineDecile) of ceiling +\(ceiling - baselineDecile)")
-  }
-  return (true, "PASS")
+  return (false, "decile +\(decile - baselineDecile), reference +\(ceiling - baselineDecile)")
 }
 
 /// Returns this rung's hottest-DECILE agreement so the next rung can be judged
 /// against the baseline rather than against an absolute number.
 @discardableResult
 func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelParameters,
-  freeParameters: Int, baselineDecile: Int? = nil, ceiling: Int = 0,
+  freeParameters: Int, baselineDecile: Int?, ceiling: Int,
   fitGroups: [[Prepared]] = []) -> Int
 {
   let (measured, modelled) = accumulate(records, parameters)
@@ -647,8 +664,6 @@ func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelP
   // to be right. No rung has ever scored above 0/1 on that, so hottestOwner
   // stays blocked whatever the gate says about the peak.
   let top1 = agreement(measured, modelled, 1)
-  let top5 = agreement(measured, modelled, 5)
-  let top10 = agreement(measured, modelled, 10)
   let top24 = agreement(measured, modelled, 24)
 
   // Free parameters are counted as those the objective can actually move.
@@ -681,10 +696,24 @@ func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelP
   // A prior resting on a clamp is a misspecification signal, not a fit.
   // Every fitted family, not just apps: V2 fits nothing BUT layer priors, so
   // omitting them meant the flag could not fire on the rung that needed it most.
-  let pinned = parameters.appPriors.values.contains { $0 <= 0 || $0 >= 1 }
-    || parameters.layerPriors.values.contains { $0 <= 0 || $0 >= 1 }
-    || parameters.darkAppearancePrior <= 0 || parameters.darkAppearancePrior >= 1
-    || parameters.lightAppearancePrior <= 0 || parameters.lightAppearancePrior >= 1
+  // Only priors the objective can actually move. A marker that fires on every
+  // rung because an unidentifiable prior sits at its start value discriminates
+  // nothing, and the row never said WHICH prior it meant.
+  var pinnedNames: [String] = []
+  if !fitGroups.isEmpty {
+    for (app, value) in parameters.appPriors where value <= 0 || value >= 1 {
+      if sensitivity(fitGroups, parameters, get: { $0.appPriors[app] ?? 0 },
+        set: { $0.appPriors[app] = $1 }) > 1e-6 { pinnedNames.append(app) }
+    }
+    for (layer, value) in parameters.layerPriors where value <= 0 || value >= 1 {
+      if sensitivity(fitGroups, parameters, get: { $0.layerPriors[layer] ?? 0 },
+        set: { $0.layerPriors[layer] = $1 }) > 1e-6 { pinnedNames.append("layer \(layer)") }
+    }
+    if parameters.darkAppearancePrior <= 0 || parameters.darkAppearancePrior >= 1,
+      sensitivity(fitGroups, parameters, get: { $0.darkAppearancePrior },
+        set: { $0.darkAppearancePrior = $1 }) > 1e-6 { pinnedNames.append("dark") }
+  }
+  let pinned = !pinnedNames.isEmpty
   print(
     String(
       format: "  %-30@ params %2d/%-2d r %6.3f  rho %6.3f  peak %.2fx/%.2fx = %.2f  top1 %d/1  decile %2d/24  %@%@",
@@ -692,8 +721,8 @@ func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelP
       p, s, multiple, measuredMultiple,
       measuredMultiple > 0 ? multiple / measuredMultiple : .nan, top1, top24,
       (verdict.map { $0.ok ? "PASS" : "fail (\($0.why))" } ?? "baseline") as NSString,
-      (pinned ? "  [prior pinned at a clamp]" : "") as NSString))
-  _ = top5
+      (pinned ? "  [pinned at a clamp: \(pinnedNames.joined(separator: ", "))]" : "")
+        as NSString))
   return top24
 }
 
@@ -759,8 +788,11 @@ for group in fitGroups {
     // Chrome layers count toward the LAYER table only. Every ordinary window is
     // layer 0, so without these the table is always empty and V2 is byte
     // identical to V1 while printing as a rung that ran. On this rig exactly
-    // ONE chrome layer survives the coverage filter (the menu-bar strips); the
-    // Dock, Wallpaper and WindowServer backdrops are full-display and refused.
+    // one chrome layer survives the coverage filter (the menu-bar strips, at
+    // fraction ~0.085); the Dock, Wallpaper and WindowServer backdrops sit at
+    // exactly 1.0 and are refused. The table can also pick up ordinary
+    // non-zero app layers such as 3 when any are present, which is why the
+    // rung is not purely about chrome.
     for window in record.chrome {
       layerWeight[window.layer, default: 0] += window.coverage.reduce(0, +) * record.elapsed
     }
@@ -841,14 +873,15 @@ for run in runs {
   var baseline: Int?
   let ceiling = ceilingDecile(run.hold, apps: apps, layers: layers)
   for (label, parameters, free) in ladder {
-    let top10 = report(
+    let decile = report(
       label, run.hold, parameters, freeParameters: free,
       baselineDecile: baseline, ceiling: ceiling, fitGroups: fitGroups)
     if baseline == nil {
-      baseline = top10
+      baseline = decile
       print(
-        "  ceiling: \(ceiling)/24 decile by fitting every prior ON THE HOLDOUT "
-          + "(+\(ceiling - top10) over baseline; the bar needs +3)")
+        "  reference: \(ceiling)/24 decile from an objective-optimal fit ON THE HOLDOUT "
+          + "(\(ceiling - decile >= 0 ? "+" : "")\(ceiling - decile) vs baseline; the bar needs +3). "
+          + "Fitted on RMSE, not on the decile, so it is a reference and NOT an upper bound.")
     }
   }
 }
