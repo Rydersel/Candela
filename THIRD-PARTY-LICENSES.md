@@ -20,26 +20,39 @@ Silicon and Intel, its media-key handling, its software-dimming approach and its
 HDR toggle were transplanted or adapted here, and its behaviour is the baseline
 this app is measured against.
 
-Source files carrying MonitorControl attribution:
+Source files carrying MonitorControl's copyright header, because they contain
+its code:
 
 | File | What came from upstream |
 |---|---|
 | `CandelaKit/Sources/CandelaKit/DDC/Arm64DDC.swift` | the Apple Silicon DDC/CI transport |
 | `CandelaKit/Sources/CandelaKit/DDC/IntelDDC.swift` | the Intel DDC/CI transport (see the note below) |
 | `CandelaKit/Sources/CandelaKit/HDR/MonitorPanelService.swift` | the MonitorPanel HDR toggle (`HDRControl`) |
-| `CandelaKit/Sources/CandelaKit/Brightness/DisplayServicesShim.swift` | the private DisplayServices signatures |
 | `CandelaKit/Sources/CandelaKit/Brightness/BrightnessController.swift` | the combined-dimming split (attributed inline, at the function) |
-| `CandelaKit/Sources/CandelaKit/Brightness/BrightnessSync.swift` | brightness fan-out across displays |
 | `CandelaKit/Sources/CandelaKit/Brightness/DimmingMath.swift` | the dimming curve |
-| `CandelaKit/Sources/CandelaKit/Commands/DDCCommandApplier.swift` | per-command min/max/curve application |
-| `CandelaKit/Sources/CandelaKit/Audio/AudioRoutingPolicy.swift` | volume-key routing decisions |
 | `CandelaKit/Sources/CandelaKit/Input/KeyRouter.swift` | the modifier semantics of `MediaKeyTapManager.handle` |
 | `Candela/AppKitIslands/GammaController.swift` | the gamma activity enforcer and per-channel scaling |
-| `Candela/AppKitIslands/ShadeOverlay.swift` | the shade-window lifecycle |
+| `Candela/AppKitIslands/ShadeOverlay.swift` | the per-display shade lifecycle (its window construction is Candela's `OverlayWindow`) |
 | `Candela/AppKitIslands/BrightnessHUD.swift` | the custom HUD |
 | `Candela/AppKitIslands/MediaKeyEventTap.swift` | the event tap (and MediaKeyTap below) |
-| `Candela/AppKitIslands/VolumeFeedbackSound.swift` | the volume feedback sound |
-| `Candela/OledCare/OledOverlay.swift` | the overlay window setup, via `ShadeOverlay` |
+
+Source files that CREDIT MonitorControl without carrying its copyright header.
+These do not contain upstream code. Each either implements a rule or behaviour
+that MonitorControl describes, or declares an Apple private API whose form is
+dictated by that API and can only be written one way. They are listed because
+the debt is real even where the copyright is not, and because a reader
+comparing the two projects should be able to find them:
+
+| File | What Candela took from it |
+|---|---|
+| `CandelaKit/Sources/CandelaKit/Audio/AudioRoutingPolicy.swift` | the volume-key routing rules |
+| `CandelaKit/Sources/CandelaKit/Brightness/BrightnessSync.swift` | the cross-display fan-out behaviour |
+| `CandelaKit/Sources/CandelaKit/Brightness/DisplayServicesShim.swift` | two private DisplayServices signatures |
+| `CandelaKit/Sources/CandelaKit/Commands/DDCCommandApplier.swift` | the control-code remap semantics |
+| `CandelaKit/Sources/CandelaPrivateAPIs/include/MonitorPanel.h` | the MonitorPanel protocol declarations |
+| `Candela/AppKitIslands/OverlayWindow.swift` | the overlay window recipe (the property values, which AppKit dictates) |
+| `Candela/AppKitIslands/VolumeFeedbackSound.swift` | the feedback sound's system path and pref key |
+| `Candela/OledCare/OledOverlay.swift` | the overlay technique, via `ShadeOverlay` |
 
 ```
 MIT License

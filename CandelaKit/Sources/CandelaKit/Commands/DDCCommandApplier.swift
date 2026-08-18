@@ -1,4 +1,5 @@
-//  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
+//  The control-code remap SEMANTICS follow MonitorControl's `getRemapControlCodes`
+//  (MIT); the code is Candela's own.
 
 import os
 

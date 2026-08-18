@@ -1,4 +1,5 @@
-//  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
+//  The cross-display sync BEHAVIOUR follows MonitorControl's `AppDelegate.job`
+//  (MIT); the code, and the deadband that makes it usable, are Candela's own.
 
 import os
 

@@ -1,6 +1,10 @@
 //  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
-//  Transplanted from the MonitorControl project (MIT), from Support/DisplayManager.swift
-//  (`createShadeOnDisplay` / `getShade` / `updateShade` / `destroyShade`).
+//  The per-display shade lifecycle here still follows the MonitorControl
+//  project (MIT), Support/DisplayManager.swift: `getShade` is `shade(for:)`,
+//  `createShadeOnDisplay` is `createShade`, `updateShade` is `setShadeAlpha`,
+//  `destroyShade` is `removeShade`. The window construction those methods used
+//  to inline is no longer here: it is Candela's `OverlayWindow`, and the three
+//  DIVERGENCE notes below are Candela's fixes to fork bugs.
 
 import AppKit
 import CandelaKit
@@ -13,10 +17,12 @@ import os
 /// or after a gamma-interference fallback). AppKit island behind
 /// `ShadeRendering` so the engine never touches `NSWindow`/`NSScreen`.
 ///
-/// The dimming control point is the **content view's** alpha, not the window's:
-/// the window stays fully opaque with a clear background and only its black
-/// content layer fades in. (Fork behavior — an alpha-faded *window* gets
-/// different compositor treatment and reads washed out at low dim levels.)
+/// The dimming control point is the **content view's** alpha, not the window's;
+/// `OverlayWindow` carries the recipe and the reason.
+///
+/// These windows are this class's alone. OLED care runs its own overlays over
+/// the same displays and the two must never share instances: `removeAllShades`
+/// fires on a topology change, which would erase care's work.
 @MainActor
 final class ShadeOverlay: ShadeRendering {
   private static let log = Logger(subsystem: "com.rydersel.Candela", category: "shade")
@@ -34,7 +40,7 @@ final class ShadeOverlay: ShadeRendering {
     guard let shade = self.shade(for: displayID) else {
       return false
     }
-    shade.contentView?.alphaValue = CGFloat(min(max(alpha, 0), 1))
+    shade.contentView?.alphaValue = CGFloat(OverlayWindow.clampedAlpha(alpha))
     return true
   }
 
@@ -62,7 +68,7 @@ final class ShadeOverlay: ShadeRendering {
 
   func repinFrames() {
     for (displayID, shade) in self.shades {
-      guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
+      guard let screen = OverlayWindow.screen(for: displayID) else {
         // The display is gone (or not yet back). Leave the window alone rather
         // than guessing a frame; whoever owns reconfiguration decides whether
         // this shade should survive at all.
@@ -94,35 +100,26 @@ final class ShadeOverlay: ShadeRendering {
     // shades under the raw ID but set alpha under the mirror-resolved one, so a
     // mirrored slave grew a shade nothing ever dimmed.) A lookup that still
     // fails is a genuine failure and is reported, not swallowed.
-    guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
+    guard let screen = OverlayWindow.screen(for: displayID) else {
       Self.log.info("No screen matches display \(displayID, privacy: .public); shade not created")
       return nil
     }
-    // The initial content rect is a throwaway — the real frame is applied below.
-    let shade = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 10, height: 1), styleMask: [], backing: .buffered, defer: false)
-    shade.title = "Candela Window Shade for Display \(displayID)"
-    shade.isReleasedWhenClosed = false
-    shade.isMovableByWindowBackground = false
-    // The window is clear; the black lives in the content view's layer.
-    shade.backgroundColor = .clear
-    shade.ignoresMouseEvents = true
-    // Above the screen saver and above the HUD — a shade that anything can
-    // paint over would let that thing escape the dimming.
-    shade.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
-    shade.orderFrontRegardless()
-    // DIVERGENCE (deliberate): the fork uses
-    // `[.stationary, .canJoinAllSpaces, .ignoresCycle]`. `.fullScreenAuxiliary`
-    // is added so the shade keeps dimming over full-screen apps instead of
-    // being dropped when a space goes full-screen.
-    shade.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-    shade.setFrame(screen.frame, display: true)
-    shade.contentView?.wantsLayer = true
-    shade.contentView?.alphaValue = 0
-    shade.contentView?.layer?.backgroundColor = .black
+    let shade = NSWindow(
+      contentRect: OverlayWindow.seedRect, styleMask: OverlayWindow.styleMask,
+      backing: .buffered, defer: false)
+    // DIVERGENCE (deliberate): the fork's collection behaviour is
+    // `[.stationary, .canJoinAllSpaces, .ignoresCycle]`. `OverlayWindow`
+    // adds `.fullScreenAuxiliary` so the shade keeps dimming over full-screen
+    // apps instead of being dropped when a space goes full-screen.
+    OverlayWindow.configure(
+      shade, title: "Candela Window Shade for Display \(displayID)", covering: screen.frame)
     // DIVERGENCE (fork bug, cosmetic): the fork passes the *window* frame
     // (screen coordinates) as a *view* dirty rect. The view's own bounds are
     // the correct space.
     shade.contentView?.setNeedsDisplay(shade.contentView?.bounds ?? .zero)
+    // Last, not first: the shade is fully configured and already sitting on the
+    // display's frame by the time it reaches the screen.
+    shade.orderFrontRegardless()
     Self.log.info("Shade created for display \(displayID, privacy: .public)")
     return shade
   }
