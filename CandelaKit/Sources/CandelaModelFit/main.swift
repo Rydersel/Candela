@@ -323,8 +323,33 @@ guard !records.isEmpty else {
   exit(1)
 }
 
+// Grouped by identity AND GEOMETRY, not identity alone.
+//
+// A panel's pixel dimensions can change mid-session: a synthesised size, a
+// resolution change, a dock cycle. The capture request shape follows the
+// dimensions, so the measurement bins into panel-native cells differently
+// either side of it. Grouping on the EDID key alone would merge two different
+// geometries into one 240-cell accumulated map, and every control would still
+// pass, because each control recomputes from each record's OWN recorded
+// metadata. Splitting preserves the data and makes the split visible; merging
+// would have destroyed it silently.
 var byDisplay: [String: [ModelReplayRecord]] = [:]
-for record in records { byDisplay[record.display.persistenceKey, default: []].append(record) }
+for record in records {
+  let shape = record.display
+  byDisplay[
+    "\(shape.persistenceKey)|\(shape.pixelWidth)x\(shape.pixelHeight)@\(shape.rotation.rawValue)",
+    default: []
+  ].append(record)
+}
+let identities = Set(records.map(\.display.persistenceKey))
+if byDisplay.count > identities.count {
+  print(
+    "\nNOTE: \(identities.count) panel identities produced \(byDisplay.count) geometry groups.")
+  print("A panel changed size or rotation mid-log; its records are scored separately.")
+  for (key, group) in byDisplay.sorted(by: { $0.value.count > $1.value.count }) {
+    print("  \(key.prefix(8))  \(key.split(separator: "|").last ?? "")  \(group.count) records")
+  }
+}
 
 // MARK: - Controls (MP8)
 
@@ -599,7 +624,7 @@ struct DisplayRun {
 var runs: [DisplayRun] = []
 for (key, raw) in byDisplay.sorted(by: { $0.value.count > $1.value.count }) {
   let shape = raw[0].display
-  print("\n=== \(key)  \(shape.pixelWidth)x\(shape.pixelHeight) rot \(shape.rotation.rawValue)  \(raw.count) records")
+  print("\n=== \(shape.persistenceKey)  \(shape.pixelWidth)x\(shape.pixelHeight) rot \(shape.rotation.rawValue)  \(raw.count) records")
   guard runControls(raw), verifyPrepared(raw) else {
     print("  controls failed; refusing to score variants on this log")
     continue
