@@ -35,9 +35,16 @@ import os
 /// - **SS8 carves synthesis out of the two counters, not out of the pause.** A
 ///   mirror set Candela engaged to render a synthesized size is not mirroring
 ///   the user asked for (`MirrorTopology.isSynthesisSet`, the one predicate),
-///   and the panel behind it is lit and being worn, so panel hours, the wear
-///   signal and the window observer's ages all keep running. The pause itself
-///   stays for v1; the pane says which mirror it is.
+///   and the panel behind it is lit and being worn, so panel hours and the wear
+///   signal keep accruing and the window observer's ages are PRESERVED across
+///   the span. Preserved, not running: `samplingQualifies` still demands
+///   `.active`, and the pause holds `.suspended`, so nothing is observed while
+///   a synthesized size is engaged. That leaves ages that describe a span
+///   nobody watched, which is the staleness a departure forgets for
+///   (`reconcileEnrollment` into `dropState`); what bounds it here is that
+///   engaging a size changes desktop geometry, so most windows re-key on the
+///   way in and start ageing from scratch anyway. The pause itself stays for
+///   v1; the pane says which mirror it is.
 /// - **Safe Mode builds `chrome` and nothing else** (spec §7): chrome toggles
 ///   are explicit user actions on system settings, not automatic behavior, so
 ///   they stay functional; the driver loop — overlays, sampling, hours — never
@@ -933,9 +940,10 @@ final class OledCareCoordinator {
 
       // OC13's mirror-entry edge: drop the ageing state once, on the way in.
       // Synthesis never crosses it (SS8). The panel keeps showing the windows
-      // those ages describe, only at a different size, so firing here would
-      // cost the observer its whole history on every engage and again on every
-      // disengage.
+      // those ages describe, only at a different size, so keying the edge on
+      // raw membership would cost the observer its whole history on every
+      // engage. The edge is entry-only, so a disengage never fired it and
+      // still does not.
       if isUserMirrored, !state.wasMirrored { forgetWindowObservation(for: key) }
       state.wasMirrored = isUserMirrored
       // Telemetry rides this loop at its own cadence; `newState` is the

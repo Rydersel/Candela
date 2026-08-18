@@ -38,6 +38,27 @@ enum OledCareCopy {
       : "Paused while this display is mirrored"
   }
 
+  /// The summary tile's short form of the same pause. Shorter than the status
+  /// row and, unlike the lock-dim preview, still carrying its reason: the tile
+  /// has room for four words, and "Paused" alone would leave the only surface
+  /// on the overview page saying nothing about a mirror the user never made.
+  static func suspendedPreview(synthesized: Bool) -> String {
+    synthesized ? "Paused for a synthesized size" : "Paused while mirrored"
+  }
+
+  /// The hub's spoken preview of the pause, which carries the reason its
+  /// two-word sighted neighbour leaves to the pane.
+  ///
+  /// No terminal period, matching every other spoken preview here; the status
+  /// row keeps the sentence it was written with. Whether that period stays at
+  /// all is a separate call, so these two are deliberately not derived from
+  /// each other.
+  static func suspendedSpokenPreview(synthesized: Bool) -> String {
+    synthesized
+      ? "Paused while a synthesized size is active"
+      : "Paused while this display is mirrored"
+  }
+
   /// The hub's SO3 value preview: two words, and it defers the reason to the
   /// pane exactly as "Paused" already does.
   static func lockDimPreview(_ skip: LockDimSkip?) -> String {
