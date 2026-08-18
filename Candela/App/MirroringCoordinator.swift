@@ -45,8 +45,39 @@ final class MirroringCoordinator {
     var isCountingDown: Bool
   }
 
-  /// The latest sample. Read by both UI surfaces; never re-derived in a view.
-  private(set) var topology = MirrorTopology([])
+  /// The latest sample AS ADOPTED, carrying whatever pairing the store had
+  /// stamped at that instant. Never read outside `topology`, which is the value
+  /// this object publishes.
+  private var sample = MirrorTopology([])
+
+  /// The latest sample, stamped with the synthesis pairing (SS1). Read by both
+  /// UI surfaces, by the hero badge and by every command in this file; never
+  /// re-derived in a view.
+  ///
+  /// **Computed, and that is the close on a race with teeth.** The store's
+  /// masters are noted when `SynthesisCoordinator` refreshes its snapshot, while
+  /// this object re-adopts only when a topology sample arrives. An engage whose
+  /// screen-parameters notification lands BEFORE the pairing note would leave a
+  /// stored value un-stamped for the whole life of the engagement, and all three
+  /// surfaces would then present the synthesis set as mirroring the user did,
+  /// with nothing left to correct them. Reading the snapshot here also makes it
+  /// an observation dependency of every view that reads this, so a pairing that
+  /// lands late redraws them instead of being missed.
+  ///
+  /// The UNION of the two, not one replacing the other: they are the same table
+  /// read at two moments, and a stamp can reach the store before the engine
+  /// returns the pairing (or after, when a sample is older than the snapshot).
+  /// Whichever knows first wins, and ambiguity resolves towards "this is
+  /// synthesis", because a synthesis set rendered as user mirroring is the
+  /// failure the SS7 carve-outs exist to prevent. A stale positive lasts until
+  /// the next adopt, which any teardown produces: it destroys a virtual display,
+  /// and that is a screen-parameters change.
+  var topology: MirrorTopology {
+    let masters = sample.synthesisMasters.union(synthesis?.masterIDs ?? [])
+    guard masters != sample.synthesisMasters else { return sample }
+    return MirrorTopology(sample.displays, synthesisMasters: masters)
+  }
+
   private(set) var preview: Preview?
   /// The last refusal, with its reason. `.onlyOneDisplay` never lands here —
   /// the key path handles it by falling through to a brightness step.
@@ -243,7 +274,7 @@ final class MirroringCoordinator {
     return topology
   }
 
-  private func adoptTopology(_ sample: MirrorTopology) {
+  private func adoptTopology(_ arrived: MirrorTopology) {
     // The store's SECOND writer (`MirrorTopologySampler` is the first). Both
     // write a whole sample from the same source, so this is last-write-wins over
     // two values of the same shape, never a field at a time. Worth doing because
@@ -255,10 +286,10 @@ final class MirroringCoordinator {
     // synthesis pairing the store stamps on (SS1). The three UI readers of
     // `topology` are the SS7 carve-out sites, and on an un-stamped sample every
     // one of their predicates answers "ordinary mirror set".
-    store.update(sample)
+    store.update(arrived)
     let stamped = store.topology()
-    let changed = stamped != topology
-    topology = stamped
+    let changed = stamped != sample
+    sample = stamped
     // Ordered AFTER the store write, and only when the topology actually moved.
     // The rebuild resolves drawable ids through the store, so a rebuild ahead of
     // the write would re-create the shade under the key it is trying to retire.
@@ -283,7 +314,7 @@ final class MirroringCoordinator {
     // screen-parameters notification brings the next sample in on its own.
     queue.enqueue {
       guard let outstanding = await self.session.previewedTopology else { return }
-      let live = Set(sample.displays.map(\.id))
+      let live = Set(arrived.displays.map(\.id))
       let members = Set([outstanding.confirmationDisplayID] + outstanding.applied.map(\.display))
       guard let departed = members.subtracting(live).min() else { return }
       switch await self.session.revertOnDeparture(displayID: departed) {
@@ -317,9 +348,13 @@ final class MirroringCoordinator {
   /// `MirrorTopologyPolicy.toggle` would happily take a synthesis set apart with
   /// a null-master change: that leaves the virtual display standing with nothing
   /// showing on it, one of only two synthesis slots held, and the engine's
-  /// pairing table describing a set that no longer exists. What the remaining
-  /// sets get afterwards is unchanged: every one of them is broken, which is this
-  /// key's measured behaviour and not something this task reopens.
+  /// pairing table describing a set that no longer exists.
+  ///
+  /// What is LEFT is then treated exactly as today, with one carve-out that
+  /// `panicDecisionAfterUnwind` states in full: the press can break a user set
+  /// but can never BUILD one. A press that took a synthesized size down and
+  /// answered by mirroring the built-in onto the panel, with a thirty-second
+  /// countdown, would be the opposite of a panic button.
   ///
   /// It still returns true in that case. There IS something to do, so the key
   /// must not fall through to a brightness step, even on the rig where the
@@ -328,21 +363,62 @@ final class MirroringCoordinator {
   func toggleUnlessSingleDisplay() -> Bool {
     let sample = resampleAndPublish()
     guard sample.synthesisMasters.isEmpty else {
-      unwindingSynthesis { fresh in
-        let decision = MirrorTopologyPolicy.toggle(fresh)
-        // A rig that is a single panel once its synthesized size is down has
-        // nothing left to toggle, and taking the size down is what the press
-        // achieved. Reporting a refusal over it would put a card on screen about
-        // a machine state the press itself produced.
-        if case .refused(.onlyOneDisplay) = decision { return }
-        self.perform(decision, capturedFrom: fresh)
-      }
+      unwindingSynthesis(
+        then: { fresh in
+          guard let decision = Self.panicDecisionAfterUnwind(fresh) else { return }
+          self.perform(decision, capturedFrom: fresh)
+        },
+        ifStuck: { fresh in
+          // The engine could not take a synthesis set down, and the user's OWN
+          // set must not be held hostage to that: a panic press stalling over
+          // mirroring the person built is the failure this arm exists to avoid.
+          //
+          // `userVisibleMirrorSets` is what keeps a raw null-master change off
+          // the set that is still standing, which was the sound half of simply
+          // refusing here. One transaction per set: the policy's machine-wide
+          // break is `toggle`, and `toggle` would stage the synthesis set too.
+          for members in fresh.userVisibleMirrorSets {
+            guard let member = members.first else { continue }
+            self.perform(
+              MirrorTopologyPolicy.disengage(fresh, containing: member), capturedFrom: fresh
+            )
+          }
+        }
+      )
       return true
     }
     let decision = MirrorTopologyPolicy.toggle(sample)
     if case .refused(.onlyOneDisplay) = decision { return false }
     perform(decision, capturedFrom: sample)
     return true
+  }
+
+  /// What a panic press does with what is left once every synthesis set has come
+  /// down, or nil for "the press's work is done".
+  ///
+  /// Pure and separately nameable so the one rule it carries can be pinned: the
+  /// post-unwind press acts ONLY on a break. `MirrorTopologyPolicy.toggle`
+  /// evaluates break-else-build, so on the common rig (one panel, one synthesized
+  /// size, no user mirroring) the unwind removes the only set on the machine and
+  /// the very same call then answers `.engage`: the press would take the size
+  /// down and immediately mirror the built-in onto the panel behind a
+  /// thirty-second countdown. `.refused(.onlyOneDisplay)` and
+  /// `.refused(.noEligibleMaster)` are the same answer wearing different words:
+  /// each is the build branch reporting it found nothing to build with, over a
+  /// machine state the press itself produced.
+  ///
+  /// `.refused(.setCannotBeBroken)` DOES come back, and it is not a second
+  /// action: a refusal stages nothing and reconfigures nothing, it only names
+  /// the set macOS would not release. Swallowing it would leave someone looking
+  /// at mirroring that survived a panic press with nothing on screen about it.
+  static func panicDecisionAfterUnwind(_ topology: MirrorTopology) -> MirrorToggleDecision? {
+    let decision = MirrorTopologyPolicy.toggle(topology)
+    switch decision {
+    case .disengage: return decision
+    case .engage: return nil
+    case .refused(.setCannotBeBroken): return decision
+    case .refused: return nil
+    }
   }
 
   /// **Also unwinds synthesis first**, and for a sharper reason than the toggle:
@@ -418,8 +494,14 @@ final class MirroringCoordinator {
   ///
   /// `body` is not run when anything is still engaged: staging a raw mirror
   /// change over a set the engine could not take down is the exact outcome this
-  /// ruling exists to prevent.
-  private func unwindingSynthesis(then body: @escaping (MirrorTopology) -> Void) {
+  /// ruling exists to prevent. `ifStuck` is what that caller does instead, and
+  /// it is the caller's business rather than this helper's: the hotkey breaks
+  /// the user's own sets anyway, while an engage refuses outright (breaking sets
+  /// nobody asked about is not a failure mode of "start mirroring").
+  private func unwindingSynthesis(
+    then body: @escaping (MirrorTopology) -> Void,
+    ifStuck stuck: ((MirrorTopology) -> Void)? = nil
+  ) {
     guard let synthesis else { return }
     // Raised synchronously, before any await, for `perform`'s reason: a control
     // that queues work and only then disables itself is a control two clicks get
@@ -432,23 +514,34 @@ final class MirroringCoordinator {
         self.inFlight -= 1
         if self.inFlight == 0 { self.isApplying = false }
       }
-      let engaged = synthesis.pairings.count
       await synthesis.disengageAllForReset()
       let remaining = synthesis.pairings
       guard remaining.isEmpty else {
-        self.log.error("Synthesis did not come down, so no mirror change was staged; \(remaining.count, privacy: .public) still engaged")
-        if let stuck = remaining.first {
+        self.log.error("Synthesis did not come down; \(remaining.count, privacy: .public) still engaged")
+        if let held = remaining.first {
           // The engine's own word for it, on the surface that renders synthesis
           // refusals: no `MirrorRefusal` case describes a synthesized size that
           // would not come down, and inventing one would put a sentence about
-          // mirroring in front of a person who never asked for mirroring.
-          synthesis.note(.engine(.unwindIncomplete), for: stuck.physicalDisplayID)
+          // mirroring in front of a person who never asked for mirroring. That
+          // surface is the settings hub, though, which is why the report below
+          // is raised as well: the hotkey has no other surface at all.
+          synthesis.note(.engine(.unwindIncomplete), for: held.physicalDisplayID)
         }
-        // Reported as a mirroring failure ONLY when nothing came down. The
-        // sentence `lastFailure` renders ends "and nothing was altered", which a
-        // partial teardown falsifies; the partial case is the one the user can
-        // already see, since a panel came back to its own size.
-        if remaining.count == engaged {
+        // Whatever this caller does instead, FIRST: both it and the report land
+        // through the same serial queue, and a `perform` runs `dismissReport()`
+        // as its first act, so a failure raised ahead of it would be wiped by
+        // the very break it is reporting alongside.
+        stuck?(self.resampleAndPublish())
+        self.queue.enqueue {
+          // Raised on EVERY stuck unwind, partial ones included. The sentence it
+          // renders ("The mirroring change did not take effect, and nothing was
+          // altered") is then not the whole truth on two shapes: a partial
+          // teardown did alter something, and the hotkey's `ifStuck` may have
+          // broken a user set beside it. Reported anyway, because the hotkey's
+          // only surface is this card and silence there reads as a dead key, and
+          // an over-narrow claim is the lesser fault next to an unexplained
+          // synthesized size that would not come down. The honest sentence needs
+          // a `MirroringCopy` string this file does not own.
           self.lastFailure = DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
           self.syncConfirmation()
         }
