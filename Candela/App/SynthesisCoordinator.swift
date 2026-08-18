@@ -163,7 +163,35 @@ final class SynthesisCoordinator {
     gate: DisplayReconfigurationGate,
     topologyStore: MirrorTopologyStore
   ) {
-    engine = ModeSynthesisEngine(virtualDisplays: virtualDisplays, configurator: configurator)
+    // The synthesis pairing enters the published topology HERE, before the
+    // mirror it describes, and not at `refreshSnapshot` alone.
+    //
+    // The engine's engage runs for seconds and the mirror lands in the middle
+    // of it. `MirrorTopologySampler` writes the store synchronously at
+    // `didChangeScreenParameters`, deliberately un-debounced, so a stamp that
+    // waited for the sequence to return would leave a window in which the store
+    // answers `isInMirrorSet` true and `isSynthesisSet` false for the engaging
+    // panel. Every SS7 carve-out reads user mirroring in that window, and OLED
+    // care's forget edge wipes static-region history irreversibly on it: one
+    // wrong answer, no second chance.
+    //
+    // Over-stamping is harmless in the other direction: a display nobody is
+    // mirroring is in no set, so no predicate changes. The correction is
+    // `refreshSnapshot`, which republishes the AUTHORITATIVE table after every
+    // engage, successful or not, and is therefore also the un-stamp for a
+    // failed one.
+    //
+    // Read-modify-write over two lock acquisitions, and safe: the only other
+    // writer is `refreshSnapshot`, which asks the engine for its table and so
+    // queues behind the very engage this fires inside.
+    engine = ModeSynthesisEngine(
+      virtualDisplays: virtualDisplays, configurator: configurator,
+      willMirrorOntoVirtualDisplay: { [topologyStore] virtualDisplayID in
+        topologyStore.noteSynthesisMasters(
+          topologyStore.topology().synthesisMasters.union([virtualDisplayID])
+        )
+      }
+    )
     session = SynthesisPreviewSession(driver: engine)
     self.gate = gate
     self.topologyStore = topologyStore
@@ -527,6 +555,13 @@ final class SynthesisCoordinator {
     pairings = await engine.pairings()
     // The pairing is the authority on synthesis topology (SS1), and the store
     // is where the app publishes topology, so this is where the two meet.
+    //
+    // It is also the UN-STAMP. The engine announces a virtual display before it
+    // mirrors onto it (see the hook wired in `init`), which deliberately
+    // over-stamps; this republishes the authoritative table, so a failed engage
+    // takes its announcement back on the same path a successful one confirms
+    // its own. A pairing the engine RETAINED after an incomplete unwind stays
+    // stamped, which is correct: something is still standing.
     topologyStore.noteSynthesisMasters(masterIDs)
   }
 

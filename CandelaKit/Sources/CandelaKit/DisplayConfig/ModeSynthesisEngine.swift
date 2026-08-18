@@ -120,6 +120,29 @@ public actor ModeSynthesisEngine {
   private let configurator: any DisplayConfiguring
   private let appearanceTimeout: TimeInterval
   private let departureTimeout: TimeInterval
+  /// Called with the virtual display's ID at the one instant that closes a
+  /// window nothing outside this actor can see: after the display exists and
+  /// before the mirror that makes it a master.
+  ///
+  /// The pairing table is the authority on synthesis topology (SS1), and it is
+  /// written only once the whole sequence has passed its checks. That is right
+  /// for the table and wrong for everything watching the machine: the mirror
+  /// engages in the MIDDLE of this call, and `didChangeScreenParameters` is
+  /// posted and sampled synchronously, so between the mirror landing and this
+  /// method returning, every carve-out keyed on the pairing reads a synthesis
+  /// set as user mirroring. OLED care's static-region history is wiped
+  /// irreversibly on that edge, and the mirroring surfaces are exposed to it.
+  ///
+  /// So the consumer stamps EARLY, from here, and its post-sequence refresh
+  /// from the authoritative table is what corrects an over-stamp. Over-stamping
+  /// is the safe direction on purpose: calling a display a synthesis master
+  /// while nobody is mirroring it changes no predicate, because every one of
+  /// them asks about a SET.
+  ///
+  /// Synchronous and `@Sendable` because it runs on this actor's executor
+  /// between two steps of SS10's ordering: it may only touch something
+  /// lock-backed and nonisolated, and it must never be given work that blocks.
+  private let willMirrorOntoVirtualDisplay: (@Sendable (CGDirectDisplayID) -> Void)?
   private let log = Logger(subsystem: "com.rydersel.Candela", category: "synthesis")
 
   private var table: [CGDirectDisplayID: SynthesisPairing] = [:]
@@ -128,12 +151,14 @@ public actor ModeSynthesisEngine {
     virtualDisplays: any VirtualDisplayAchievedModeReporting,
     configurator: any DisplayConfiguring,
     appearanceTimeout: TimeInterval = 10,
-    departureTimeout: TimeInterval = 5
+    departureTimeout: TimeInterval = 5,
+    willMirrorOntoVirtualDisplay: (@Sendable (CGDirectDisplayID) -> Void)? = nil
   ) {
     self.virtualDisplays = virtualDisplays
     self.configurator = configurator
     self.appearanceTimeout = appearanceTimeout
     self.departureTimeout = departureTimeout
+    self.willMirrorOntoVirtualDisplay = willMirrorOntoVirtualDisplay
   }
 
   public func pairings() -> [SynthesisPairing] {
@@ -194,6 +219,17 @@ public actor ModeSynthesisEngine {
       log.error("synthesis.engage slot=\(slot): the virtual display did not reach 2x")
       return .failure(fail(.virtualModeNotAchieved, unwinding: pairing))
     }
+
+    // The LAST thing before the mirror, and the position is the whole point:
+    // the mirror lands inside the call below, is reported by a synchronous
+    // notification, and is sampled by a store that has no way to know this set
+    // is ours. See `willMirrorOntoVirtualDisplay`.
+    //
+    // After the 2x check rather than straight after the create, so a virtual
+    // display that is about to be destroyed for never reaching 2x is not
+    // announced as a master. Both positions satisfy the rule; this one
+    // announces less.
+    willMirrorOntoVirtualDisplay?(handle.displayID)
 
     // The PHYSICAL becomes the slave of the virtual master: the direction
     // `VirtualDisplayHost.breakMasteredMirrors` already unwinds when a virtual
