@@ -157,6 +157,65 @@ end tell
 EOF
 }
 
+# title: the settings window's own name. Read it back after every `nav`: the
+# sidebar index table is a property of the current build, and index 8 is an
+# inert header that leaves the title on the PREVIOUS pane rather than erroring,
+# so a script that trusts the table reads the wrong pane's controls while every
+# call reports success.
+title() {
+  osascript <<EOF 2>&1
+tell application "System Events"
+  tell process "Candela"
+    $BIND
+    return name of w
+  end tell
+end tell
+EOF
+}
+
+# items <popup name>: the pop-up's menu item names, one per line, choosing
+# nothing. The items do not exist in the tree until the menu is open, so this
+# opens it and closes it with Escape. Needed because a size item's label carries
+# whatever marks apply to it ("Recommended", "Rendered by Candela"), and a
+# hard-coded label is a selector that silently matches nothing the day a mark
+# changes.
+items() {
+  osascript <<EOF 2>&1
+tell application "System Events"
+  tell process "Candela"
+    $BIND
+    set dg to $DETAIL
+    repeat with t in (UI elements of dg)
+      try
+        repeat with u in (UI elements of t)
+          set nm to ""
+          try
+            set nm to name of u as text
+          end try
+          if (class of u as text) is "pop up button" and nm is "$1" then
+            click u
+            delay 0.6
+            set out to ""
+            repeat with mi in (menu items of menu 1 of u)
+              set mn to ""
+              try
+                set mn to name of mi as text
+              end try
+              set out to out & mn & linefeed
+            end repeat
+            key code 53
+            delay 0.3
+            return out
+          end if
+        end repeat
+      end try
+    end repeat
+    return "NOT FOUND: $1"
+  end tell
+end tell
+EOF
+}
+
 # statusicon — is the menu-bar status item present?
 statusicon() {
   osascript -e 'tell application "System Events" to tell process "Candela" to get count of menu bar items of menu bar 2' 2>&1

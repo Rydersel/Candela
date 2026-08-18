@@ -92,8 +92,15 @@ guard AXUIElementCopyAttributeValue(
 // its current pane, but it was measured reporting "Candela Settings" (the scene
 // default, before the configurator re-asserts the pane name), and a prefix rule
 // throws it away exactly then.
+//
+// The role check is not decoration. Measured 2026-08-18 with the settings
+// window closed: AXWindows answers with two elements whose AXRole is
+// AXApplication, both titled "Candela". They survive any title-based exclusion,
+// and walking one walks the whole application tree, so every line printed would
+// come from somewhere other than the window this claims to be reading.
 let decoys = ["Candela Gamma Activity Enforcer", "Candela OLED Care Overlay"]
 let settings = windows.first { window in
+  guard string(window, kAXRoleAttribute as String) == "AXWindow" else { return false }
   let name = string(window, kAXTitleAttribute as String)
   return !decoys.contains { name.hasPrefix($0) }
 }
