@@ -86,10 +86,10 @@ final class WallpaperLuminanceSource {
     // The sampler's own orientation rule and EOTF math, on purpose: the model
     // and the measurement must disagree only about content, never about how
     // pixels become luminance.
-    let (cols, rows) = LuminanceSampler.requestedSize(
+    let (cols, rows) = LuminanceReduction.requestedSize(
       displayWidth: Int(transform.displaySize.width),
       displayHeight: Int(transform.displaySize.height))
-    guard let grid = LuminanceSampler.meanLuminance(of: image, cols: cols, rows: rows) else {
+    guard let grid = LuminanceReduction.meanLuminance(of: image, cols: cols, rows: rows) else {
       return nil
     }
     return transform.panelNativeGrid(fromDisplayGrid: grid, cols: cols, rows: rows)
