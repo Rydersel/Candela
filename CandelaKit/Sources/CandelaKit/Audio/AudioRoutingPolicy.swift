@@ -1,5 +1,3 @@
-//  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
-
 /// Pure volume-key routing decisions (D4/D8) — no CoreAudio here, so every
 /// branch is unit-testable.
 public enum AudioRoutingPolicy {

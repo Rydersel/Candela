@@ -1,5 +1,3 @@
-//  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
-
 import os
 
 /// Command-generic DDC applier (D1): carries the VCP byte the write targets,

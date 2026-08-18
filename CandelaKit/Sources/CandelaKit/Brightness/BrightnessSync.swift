@@ -1,5 +1,3 @@
-//  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
-
 import os
 
 /// Cross-display brightness sync (fork `AppDelegate.job`,
