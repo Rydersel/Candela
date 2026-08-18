@@ -639,9 +639,6 @@ struct CopyBuilderTests {
   /// anything must not be told they did. The three synthesis strings reached
   /// only the scans below, which would pass just as happily if all three fell
   /// back to their mirrored neighbours' words.
-  ///
-  /// The trailing period on the status row is asymmetric and deliberate; it is
-  /// pinned as it stands rather than tidied.
   @Test func theSynthesisPauseSaysWhichMirrorItIsAbout() {
     // No terminal period on either arm (ruled 2026-08-18): a status row reads
     // like its neighbours, and every one of those is period-free.

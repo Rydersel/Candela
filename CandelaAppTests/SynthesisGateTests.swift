@@ -42,9 +42,12 @@ struct SynthesisGateTests {
   /// what the departure sweep needs: it takes a SECOND engage to reach the
   /// sweep that catches the first display's departure.
   /// `mirroring` gives the first panel a master, which is CoreGraphics' shape
-  /// for a mirror slave (the flag and the master id both).
+  /// for a mirror slave (the flag and the master id both). `mirrorMaster` is
+  /// the other end of that set: the flag with no master id, which is all a
+  /// master ever reports about its own mirroring.
   private func fixture(
-    optedIn: Bool = true, secondPanel: Bool = false, mirroring: CGDirectDisplayID? = nil
+    optedIn: Bool = true, secondPanel: Bool = false, mirroring: CGDirectDisplayID? = nil,
+    mirrorMaster: Bool = false
   ) -> Fixture {
     let world = FakeDisplayWorld()
     let native = DisplayMode(
@@ -61,7 +64,7 @@ struct SynthesisGateTests {
         identity: DisplayConfigIdentity(vendor: 0x3669, model: 1, serial: 1, isBuiltIn: false),
         name: "MAG341C", isBuiltIn: false,
         mirrorsDisplay: mirroring ?? kCGNullDirectDisplay,
-        isInMirrorSet: mirroring != nil
+        isInMirrorSet: mirroring != nil || mirrorMaster
       ),
       modes: [native, smaller], current: native,
       nativePixels: (width: Self.nativeWidth, height: Self.nativeHeight)
@@ -324,6 +327,27 @@ struct SynthesisGateTests {
     let fixture = fixture(mirroring: Self.secondPanelID)
     defer { forgetPrefs(fixture.persistenceKey) }
     let display = try configured(fixture, Self.panelID)
+
+    #expect(fixture.synthesis.refusalReason(for: display) == .alreadyMirrored)
+  }
+
+  /// The MASTER of the user's mirror set, which the test above cannot reach:
+  /// CoreGraphics reports the flag on both ends of a set but names a master
+  /// only on the slave, so the master carries `isInMirrorSet` with no
+  /// `mirrorsDisplay` at all. A predicate written over the master id instead of
+  /// the flag reads that display as standalone and lets a synthesis engage
+  /// straight into the user's own mirror.
+  @Test func aUserMirrorMasterRefusesASynthesizedSize() throws {
+    let fixture = fixture(mirrorMaster: true)
+    defer { forgetPrefs(fixture.persistenceKey) }
+    let display = try configured(fixture, Self.panelID)
+
+    // The state under test, spelled out: no master id, and neither of the two
+    // exclusions that make a mirrored display OURS applies.
+    #expect(display.isInMirrorSet)
+    #expect(display.mirrorsDisplay == kCGNullDirectDisplay)
+    #expect(!fixture.synthesis.isEngaged(displayID: Self.panelID))
+    #expect(!fixture.synthesis.masterIDs.contains(Self.panelID))
 
     #expect(fixture.synthesis.refusalReason(for: display) == .alreadyMirrored)
   }
