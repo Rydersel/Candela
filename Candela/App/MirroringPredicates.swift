@@ -40,6 +40,12 @@ enum MirroringPredicates {
   /// force belongs to the size picker to describe, and "Showing <virtual
   /// display>" would name a display nobody has, beside a control offering to
   /// start mirroring.
+  ///
+  /// It therefore disagrees with the diagnostics report, which says "Showing a
+  /// synthesized size" about the same display (`DiagnosticsCopy.mirroring`).
+  /// **Ruled 2026-08-18: both ship as they are.** This row answers what the
+  /// USER mirrored; the report is a technical account of the machine. They are
+  /// not to be reconciled.
   static func statusLine(
     _ topology: MirrorTopology, displayID: CGDirectDisplayID,
     name: (CGDirectDisplayID) -> String

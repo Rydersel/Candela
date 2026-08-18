@@ -32,9 +32,12 @@ enum OledCareCopy {
   /// since SS8: mirroring the user set up, and the mirror Candela engages to
   /// render a synthesized size. v1 pauses under both, so the row has to name
   /// which one rather than telling a user they mirrored something they did not.
+  ///
+  /// Neither arm ends in a period, ruled 2026-08-18: it now matches every
+  /// neighbouring status string, which is what a status row reads as.
   static func suspendedStatus(synthesized: Bool) -> LocalizedStringKey {
     synthesized
-      ? "Paused while a synthesized size is active."
+      ? "Paused while a synthesized size is active"
       : "Paused while this display is mirrored"
   }
 
@@ -49,14 +52,26 @@ enum OledCareCopy {
   /// The hub's spoken preview of the pause, which carries the reason its
   /// two-word sighted neighbour leaves to the pane.
   ///
-  /// No terminal period, matching every other spoken preview here; the status
-  /// row keeps the sentence it was written with. Whether that period stays at
-  /// all is a separate call, so these two are deliberately not derived from
-  /// each other.
+  /// It now reads word for word like the status row above, and the two stay
+  /// SEPARATE builders anyway: one is a sentence on a pane and the other is an
+  /// accessibility label on a hub row, and deriving either from the other would
+  /// make the next edit to one silently an edit to both.
   static func suspendedSpokenPreview(synthesized: Bool) -> String {
     synthesized
       ? "Paused while a synthesized size is active"
       : "Paused while this display is mirrored"
+  }
+
+  /// What the two halves of the usage histogram actually count, said out loud
+  /// because they do not count the same thing and nothing on the page said so.
+  ///
+  /// OC17's denominator is MASK-COULD-APPLY time (ruled 2026-08-18): suspended
+  /// seconds are excluded from the percentage because a protective dim cannot
+  /// apply during them. The bars are the whole histogram and exclude nothing.
+  /// Both readings are right; a reader comparing them without this sentence
+  /// would take the percentage for a share of the bars.
+  static var wearFractionScope: String {
+    "The bars cover every state this display was tracked in. The percentage covers only the time a protective dim could apply."
   }
 
   /// The hub's SO3 value preview: two words, and it defers the reason to the
