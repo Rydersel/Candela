@@ -40,6 +40,20 @@ enum MirrorFixtures {
       display(3, mirrors: 2),
     ])
   }
+
+  /// What a synthesis engage leaves behind: physical panel 2 showing virtual
+  /// display 5's framebuffer, with the engine's pairing naming 5 as a synthesis
+  /// master.
+  ///
+  /// `masterReportsFlags` is the Phase 0 (c) measurement: the rig's VD master
+  /// DOES report `CGDisplayIsInMirrorSet`. SS1 requires the pairing to be the
+  /// authority anyway, so `false` is the case that has to work too.
+  static func synthesisPair(masterReportsFlags: Bool = true) -> MirrorTopology {
+    MirrorTopology(
+      [display(1, builtIn: true), display(2, mirrors: 5), display(5, inSet: masterReportsFlags)],
+      synthesisMasters: [5]
+    )
+  }
 }
 
 /// `Result<Void, _>` is not `Equatable` — `Void` isn't — so the failures of the
@@ -189,5 +203,86 @@ struct MirrorTopologyTests {
     let topology = MirrorFixtures.mirroredTrio
     let targets = Set(topology.expand(2).map(topology.drawableDisplayID(for:)))
     #expect(targets == [2])
+  }
+
+  // MARK: - Synthesis sets (SS1, SS7)
+
+  /// SS7: a synthesis set is not user mirroring. It stays a mirror set in every
+  /// CoreGraphics sense; the carve-out is about what the app OFFERS, so the raw
+  /// accessors are deliberately unchanged.
+  @Test func aSetWhosePairingNamesItsMasterIsASynthesisSetAndNotUserMirroring() {
+    let topology = MirrorFixtures.synthesisPair()
+    #expect(topology.isSynthesisSet(containing: 5))
+    #expect(topology.isSynthesisSet(containing: 2))
+    #expect(!topology.isSynthesisSet(containing: 1))
+    #expect(topology.userVisibleMirrorSets.isEmpty)
+
+    #expect(topology.masters == [5])
+    #expect(topology.setMembers(containing: 2) == [2, 5])
+  }
+
+  /// The other half of SS7: the predicate answers about ONE set, so a set the
+  /// user built is untouched even on a machine that also has a synthesis set.
+  @Test func aGenuineMirrorSetIsUntouchedByTheSynthesisCarveOut() {
+    let user = MirrorFixtures.mirroredTrio
+    #expect(!user.isSynthesisSet(containing: 2))
+    #expect(!user.isSynthesisSet(containing: 3))
+    #expect(user.userVisibleMirrorSets == [[2, 1, 3]])
+
+    let mixed = MirrorTopology(
+      [
+        MirrorFixtures.display(1, mirrors: 2, builtIn: true),
+        MirrorFixtures.display(2, inSet: true),
+        MirrorFixtures.display(3, mirrors: 2),
+        MirrorFixtures.display(4, mirrors: 5),
+        MirrorFixtures.display(5, inSet: true),
+      ],
+      synthesisMasters: [5]
+    )
+    #expect(mixed.userVisibleMirrorSets == [[2, 1, 3]])
+    #expect(mixed.isSynthesisSet(containing: 4))
+    #expect(!mixed.isSynthesisSet(containing: 1))
+  }
+
+  /// SS1, stated as an assertion: the injected pairing is consulted BEFORE the
+  /// CG flags, so the pair expands together whether or not the VD master
+  /// reports `CGDisplayIsInMirrorSet`. Phase 0 measured that it does; nothing
+  /// here depends on that measurement holding.
+  @Test func eitherMemberOfASynthesisSetExpandsToThePairWithoutTheCGMirrorFlags() {
+    for reported in [true, false] {
+      let topology = MirrorFixtures.synthesisPair(masterReportsFlags: reported)
+      #expect(topology.expand(5) == [5, 2])
+      #expect(topology.expand(2) == [5, 2])
+      #expect(topology.isSynthesisSet(containing: 2))
+      #expect(Set(topology.expand(2).map(topology.drawableDisplayID(for:))) == [5])
+      #expect(topology.expand(1) == [1])
+    }
+  }
+
+  /// The control for the assertion above. The same flagless sample WITHOUT the
+  /// pairing links nothing, which is what makes that test about the injected
+  /// masters rather than about the fixture.
+  @Test func withoutThePairingAFlaglessMasterExpandsToItself() {
+    let unpaired = MirrorTopology([
+      MirrorFixtures.display(2, mirrors: 5), MirrorFixtures.display(5),
+    ])
+    #expect(unpaired.expand(5) == [5])
+    #expect(unpaired.expand(2) == [2])
+    #expect(!unpaired.isSynthesisSet(containing: 2))
+    #expect(unpaired.userVisibleMirrorSets.isEmpty)
+  }
+
+  /// The pairing names displays by runtime ID and IDs are reassigned across a
+  /// replug, so a pairing can name a display this sample does not contain.
+  /// `expand` never invents a target from it (the same intersection
+  /// `setMembers(containing:)` follows), while the predicate still refuses to
+  /// call the VD user mirroring.
+  @Test func aPairingNamingADisplayThisSampleDoesNotContainInventsNoTarget() {
+    let topology = MirrorTopology([MirrorFixtures.display(2)], synthesisMasters: [5])
+    #expect(topology.expand(2) == [2])
+    #expect(topology.expand(5) == [5])
+    #expect(!topology.isSynthesisSet(containing: 2))
+    #expect(topology.isSynthesisSet(containing: 5))
+    #expect(topology.userVisibleMirrorSets.isEmpty)
   }
 }

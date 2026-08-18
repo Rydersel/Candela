@@ -31,8 +31,27 @@ import Foundation
 public struct MirrorTopology: Sendable, Equatable {
   public let displays: [ConfiguredDisplay]
 
-  public init(_ displays: [ConfiguredDisplay]) {
+  /// The virtual displays a synthesized size is currently mirrored ONTO, as the
+  /// mode-synthesis engine's pairing table names them (SS1).
+  ///
+  /// Injected, never derived: nothing in a CoreGraphics sample says whether a
+  /// mirror set is a size the app engaged or a mirror the user asked for, and
+  /// the two need opposite treatment everywhere the app speaks about mirroring.
+  /// Phase 0 measured that a VD mirror master does report the CG mirror flags,
+  /// and this type still consults the pairing first, so nothing here breaks if
+  /// that stops being true.
+  ///
+  /// These are RUNTIME IDs, valid for the sample they arrived with. IDs are
+  /// reassigned across a replug (measured: the MAG went 3 to 2 across one dock
+  /// cycle), so this is supplied fresh at every construction and nothing
+  /// persists it.
+  public let synthesisMasters: Set<CGDirectDisplayID>
+
+  public init(
+    _ displays: [ConfiguredDisplay], synthesisMasters: Set<CGDirectDisplayID> = []
+  ) {
     self.displays = displays.sorted { $0.id < $1.id }
+    self.synthesisMasters = synthesisMasters
   }
 
   /// Every display that owns a framebuffer some other display is showing.
@@ -89,13 +108,80 @@ public struct MirrorTopology: Sendable, Equatable {
     return ([master] + slaves(of: master)).filter { sampled.contains($0) }.sorted()
   }
 
+  /// The synthesis master of the set `displayID` belongs to, or nil when it
+  /// belongs to no synthesis set. THE ONE PLACE the pairing is read (SS7): every
+  /// predicate below answers from this, so no site reimplements it.
+  ///
+  /// Flag-free by construction. It asks the injected pairing about the display
+  /// itself, then about the master the display NAMES, and consults neither
+  /// `isInMirrorSet` nor `isMirrorMaster`: SS1 makes the pairing the authority,
+  /// and a VD master that reported no mirror flag would otherwise be invisible
+  /// to every carve-out that depends on this.
+  ///
+  /// A pairing that names a display absent from the sample is still answered
+  /// for: the pairing describes the machine, and refusing to call a VD a
+  /// synthesis master because a sample is stale would put it back in front of
+  /// the user as a mirror set they built.
+  private func synthesisMaster(of displayID: CGDirectDisplayID) -> CGDirectDisplayID? {
+    if synthesisMasters.contains(displayID) { return displayID }
+    guard let entry = displays.first(where: { $0.id == displayID }),
+          synthesisMasters.contains(entry.mirrorsDisplay)
+    else { return nil }
+    return entry.mirrorsDisplay
+  }
+
+  /// True when `displayID` is in a mirror set the APP engaged to serve a
+  /// synthesized size, rather than one the user asked for (SS7).
+  ///
+  /// The single predicate behind every `isMirrorSlave`-keyed carve-out. The raw
+  /// accessors stay honest about CoreGraphics: a synthesis set really is a
+  /// mirror set, it is `masters`, it is `setMembers(containing:)`, and this is
+  /// how a caller tells the two kinds apart without a second definition of
+  /// "mirrored" appearing in the app.
+  public func isSynthesisSet(containing displayID: CGDirectDisplayID) -> Bool {
+    synthesisMaster(of: displayID) != nil
+  }
+
+  /// The mirror sets the app may present, list, or offer to break: every set on
+  /// the machine except the ones synthesis engaged (SS7).
+  ///
+  /// One entry per set, master first and then its slaves `id`-ascending, which
+  /// is `expand`'s shape; the sets themselves are ordered by master ID. Slaves
+  /// are intersected with the sample, since `slaves(of:)` reads the sample.
+  ///
+  /// A synthesis set is not listed at all rather than listed and greyed: the
+  /// user did not build it, and there is nothing about it to decide.
+  public var userVisibleMirrorSets: [[CGDirectDisplayID]] {
+    masters
+      .filter { !synthesisMasters.contains($0) }
+      .map { [$0] + slaves(of: $0) }
+  }
+
   /// `displayID` plus, when it is a master, every display mirroring it.
   ///
   /// The exact replacement for `KeyActionExecutor.expandToMirrorSet`: the
   /// master's ID is what the pointer resolves to, and the members need the same
   /// step. A non-mirrored display expands to itself. Master first, then the
   /// members `id`-ascending — the caller shows the master's HUD.
+  ///
+  /// **A SYNTHESIS SET EXPANDS FROM EITHER END**, and it is asked about before
+  /// the CG flags are (SS1). An ordinary set expands only from its master,
+  /// because that is the display a pointer can be over; the physical panel of an
+  /// engaged synthesis set is exactly the display a person points at, and it
+  /// carries the DDC the step is written over, so expanding it to itself alone
+  /// would step the panel while leaving the VD that owns its pixels behind.
+  /// Master first here too: the VD owns the framebuffer, so it is where the one
+  /// pill for the set is drawn (`HUDGrouping.pills`).
+  ///
+  /// Intersected with the sample for `setMembers(containing:)`'s reason, and it
+  /// falls back to the input when the intersection empties, so nothing here
+  /// hands back a display the caller cannot act on.
   public func expand(_ displayID: CGDirectDisplayID) -> [CGDirectDisplayID] {
+    if let master = synthesisMaster(of: displayID) {
+      let sampled = Set(displays.map(\.id))
+      let members = ([master] + slaves(of: master)).filter { sampled.contains($0) }
+      return members.isEmpty ? [displayID] : members
+    }
     guard let entry = displays.first(where: { $0.id == displayID }), entry.isMirrorMaster
     else { return [displayID] }
     return [displayID] + slaves(of: displayID)

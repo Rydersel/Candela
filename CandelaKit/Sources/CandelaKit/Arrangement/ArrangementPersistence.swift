@@ -49,6 +49,40 @@ public struct TopologySignature: Sendable, Hashable {
       .joined(separator: "+")
   }
 
+  /// The same read, with each synthesis virtual display signing as the PHYSICAL
+  /// panel it is standing in for (SS12).
+  ///
+  /// `substituting` maps a synthesis VD's display ID to the identity key of the
+  /// panel it was engaged for, as the mode-synthesis engine's pairing table
+  /// names them. IDs are reassigned across a replug, so the map is handed in
+  /// fresh with the sample it describes and nothing stores it.
+  ///
+  /// The pair contributes EXACTLY ONCE, under the panel's identity: the VD
+  /// contributes the mapped key, and the panel is filtered as the mirror slave
+  /// it is. That is what makes engaging a synthesized size invisible to this
+  /// key, which is the whole of SS12: a layout saved before the size was
+  /// engaged is still found while it is engaged, and the arrangement never
+  /// re-files itself under a virtual display that exists only while the size
+  /// does.
+  ///
+  /// It reads the mapping BEFORE the slave filter (SS1), so a VD master that
+  /// reported no mirror flags would sign the same way. A display the map does
+  /// not name is treated exactly as `init(online:)` treats it.
+  ///
+  /// A map entry for a display that is not in `displays` contributes nothing:
+  /// the signature names the displays that are attached, and a pairing can
+  /// outlive a sample.
+  public init(online displays: [ConfiguredDisplay], substituting: [CGDirectDisplayID: String]) {
+    key = displays
+      .compactMap { display -> String? in
+        if let physical = substituting[display.id] { return physical }
+        guard !display.isMirrorSlave else { return nil } // AR6, as above
+        return display.identity.key
+      }
+      .sorted()
+      .joined(separator: "+")
+  }
+
   /// No display can hold a position, so there is no set for a layout to be
   /// about. Persisting under it would file every empty read under one key.
   public var isEmpty: Bool { key.isEmpty }

@@ -26,6 +26,25 @@ struct ArrangementPersistenceTests {
     )
   }
 
+  /// The ONLINE-list spelling of the same displays: `TopologySignature(online:)`
+  /// reads `ConfiguredDisplay`s straight off the enumeration, before anything
+  /// turns them into tiles.
+  private func online(
+    id: CGDirectDisplayID, identity: String, mirrors: CGDirectDisplayID = kCGNullDirectDisplay,
+    inSet: Bool = false
+  ) -> ConfiguredDisplay {
+    ConfiguredDisplay(
+      id: id,
+      identity: identity == "builtIn"
+        ? DisplayConfigIdentity(vendor: 0, model: 0, serial: 0, isBuiltIn: true)
+        : Self.identity(named: identity),
+      name: "Display \(id)",
+      isBuiltIn: identity == "builtIn",
+      mirrorsDisplay: mirrors,
+      isInMirrorSet: inSet
+    )
+  }
+
   /// Two panels whose `DisplayConfigIdentity` differs, named by hand so a test
   /// can hand the same identity to two different display IDs.
   private static func identity(named name: String) -> DisplayConfigIdentity {
@@ -288,6 +307,94 @@ struct ArrangementPersistenceTests {
       tile(id: 2, identity: "dell", right),
     ])
     #expect(TopologySignature(mirrored) == TopologySignature(deskLayout))
+  }
+
+  // MARK: - Synthesis substitution (SS12)
+
+  /// SS12: engaging a synthesized size must not orphan the saved layout. The
+  /// synthesis VD signs as the panel it is standing in for, so the machine
+  /// signs identically with the set engaged and without it.
+  @Test func anEngagedSynthesisSetSignsAsThePhysicalPanel() {
+    let unmirrored = [online(id: 1, identity: "builtIn"), online(id: 2, identity: "mag")]
+    let engaged = [
+      online(id: 1, identity: "builtIn"),
+      online(id: 2, identity: "mag", mirrors: 5),
+      online(id: 5, identity: "vd", inSet: true),
+    ]
+    let signature = TopologySignature(online: engaged, substituting: [5: Self.magKey])
+    #expect(signature.key == TopologySignature(online: unmirrored).key)
+    #expect(!signature.isEmpty)
+    // One contribution for the pair, not two: the panel is named once.
+    #expect(signature.key.components(separatedBy: "+").count == 2)
+  }
+
+  /// The control. Without the substitution the same sample signs under the
+  /// virtual display, which is the orphaned layout SS12 exists to prevent, so
+  /// the assertion above is about the mapping rather than about the fixture.
+  @Test func withoutTheSubstitutionAnEngagedSetSignsUnderTheVirtualDisplay() {
+    let engaged = [
+      online(id: 2, identity: "mag", mirrors: 5),
+      online(id: 5, identity: "vd", inSet: true),
+    ]
+    let plain = TopologySignature(online: engaged)
+    #expect(plain.key != TopologySignature(online: [online(id: 2, identity: "mag")]).key)
+    #expect(plain.key == Self.identity(named: "vd").key)
+  }
+
+  /// SS1 on the signature: the substitution is keyed on the pairing the engine
+  /// publishes, so it does not depend on the VD master reporting the CG mirror
+  /// flags. A slave the pairing says nothing about is still filtered (AR6).
+  @Test func theSubstitutedSignatureDoesNotDependOnTheMirrorFlags() {
+    let flagless = [
+      online(id: 2, identity: "mag", mirrors: 5),
+      online(id: 5, identity: "vd"),
+    ]
+    let reported = [
+      online(id: 2, identity: "mag", mirrors: 5),
+      online(id: 5, identity: "vd", inSet: true),
+    ]
+    #expect(
+      TopologySignature(online: flagless, substituting: [5: Self.magKey])
+        == TopologySignature(online: reported, substituting: [5: Self.magKey])
+    )
+
+    let userMirror = [
+      online(id: 2, identity: "mag"),
+      online(id: 3, identity: "dell", mirrors: 2),
+    ]
+    #expect(
+      TopologySignature(online: userMirror, substituting: [5: Self.magKey]).key
+        == Self.magKey
+    )
+  }
+
+  /// The property SS12 is actually about, through the store: a layout saved
+  /// before synthesis is engaged is still FOUND while it is engaged.
+  @Test func aLayoutSavedBeforeSynthesisIsFoundWhileItIsEngaged() {
+    let store = ArrangementPersistence(defaults: InMemoryDefaults())
+    store.save(deskLayout)
+
+    let engaged = [
+      online(id: 3, identity: "mag", mirrors: 7),
+      online(id: 7, identity: "vd", inSet: true),
+      online(id: 2, identity: "dell"),
+    ]
+    let signature = TopologySignature(online: engaged, substituting: [7: Self.magKey])
+    #expect(store.savedArrangement(for: signature)?.entries.count == 2)
+  }
+
+  /// Display IDs are reassigned across a replug, so a pairing can name an ID
+  /// that is not attached now. It contributes nothing, and an empty map is the
+  /// plain signature exactly.
+  @Test func aSubstitutionNamingADisplayThatIsNotAttachedChangesNothing() {
+    let attached = [online(id: 1, identity: "builtIn"), online(id: 2, identity: "mag")]
+    #expect(
+      TopologySignature(online: attached, substituting: [9: Self.dellKey])
+        == TopologySignature(online: attached)
+    )
+    #expect(
+      TopologySignature(online: attached, substituting: [:]) == TopologySignature(online: attached)
+    )
   }
 
   // MARK: - Geometry
