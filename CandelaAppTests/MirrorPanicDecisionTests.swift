@@ -73,4 +73,27 @@ struct MirrorPanicDecisionTests {
     let alone = MirrorTopology([display(1, builtIn: true)])
     #expect(MirroringCoordinator.panicDecisionAfterUnwind(alone) == nil)
   }
+
+  /// The second reading, and the reason it exists. The caller verifies the
+  /// unwind from the PAIRING TABLE, which is empty for the whole of an engage:
+  /// an unwind refused because one was in flight leaves an empty table over a
+  /// machine that is about to have a synthesis set on it, and the table read on
+  /// its own answers "everything came down". This sample is what the decision
+  /// would be made from, so it is the one that gets the last word, and SS13's
+  /// rule is that no raw mirror change is ever staged over a standing synthesis
+  /// set.
+  ///
+  /// The fixture is the one that makes the rule bite: without the synthesis
+  /// master the very same topology answers with a break.
+  @Test func aStandingSynthesisMasterStopsThePressDeciding() {
+    let displays = [display(1, builtIn: true), display(2, mirrors: 1)]
+    let withoutSynthesis = MirrorTopology(displays)
+    guard case .disengage = MirroringCoordinator.panicDecisionAfterUnwind(withoutSynthesis) else {
+      Issue.record("the fixture must be one the press would otherwise act on")
+      return
+    }
+
+    let standing = MirrorTopology(displays, synthesisMasters: [90])
+    #expect(MirroringCoordinator.panicDecisionAfterUnwind(standing) == nil)
+  }
 }

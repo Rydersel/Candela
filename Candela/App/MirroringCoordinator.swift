@@ -365,6 +365,17 @@ final class MirroringCoordinator {
     guard sample.synthesisMasters.isEmpty else {
       unwindingSynthesis(
         then: { fresh in
+          guard fresh.synthesisMasters.isEmpty else {
+            // `panicDecisionAfterUnwind` answers nothing over this sample, and
+            // the reason has to reach a surface: the hotkey has none of its
+            // own, so silence here reads as a dead key. Set directly rather
+            // than through a `perform`, whose first act is to clear the report
+            // this is the report of.
+            self.log.error("A synthesis master is still standing after the unwind; the press staged nothing")
+            self.lastFailure = DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
+            self.syncConfirmation()
+            return
+          }
           guard let decision = Self.panicDecisionAfterUnwind(fresh) else { return }
           self.perform(decision, capturedFrom: fresh)
         },
@@ -411,7 +422,16 @@ final class MirroringCoordinator {
   /// action: a refusal stages nothing and reconfigures nothing, it only names
   /// the set macOS would not release. Swallowing it would leave someone looking
   /// at mirroring that survived a panic press with nothing on screen about it.
+  ///
+  /// **A sample that still shows a synthesis master answers nothing at all.**
+  /// The caller's own verification is the pairing table, and the table is empty
+  /// for the whole of an engage, so it can read "everything came down" over a
+  /// machine that has a synthesis set on it. This is the second reading, taken
+  /// from the topology the decision would be made from: SS13's rule is that no
+  /// raw mirror change is ever staged over a standing synthesis set, and a
+  /// decision made here is exactly such a change. The caller reports it.
   static func panicDecisionAfterUnwind(_ topology: MirrorTopology) -> MirrorToggleDecision? {
+    guard topology.synthesisMasters.isEmpty else { return nil }
     let decision = MirrorTopologyPolicy.toggle(topology)
     switch decision {
     case .disengage: return decision
@@ -485,6 +505,14 @@ final class MirroringCoordinator {
   /// after every operation it performs, so an empty table is the engine's answer
   /// about what is still standing rather than a report about what it attempted.
   ///
+  /// **The table is only evidence once the teardown has actually run**, and that
+  /// is what the return value below says. The snapshot is EMPTY for the whole of
+  /// an engage, so an unwind refused because one is in flight leaves an empty
+  /// table describing a machine that is about to have a synthesis set on it: an
+  /// empty table read on its own would answer "everything came down" and let a
+  /// raw mirror change be staged over it. A refusal is therefore stuck, not
+  /// clean.
+  ///
   /// `disengageAllForReset()` is the whole-app reset's method and its name says
   /// so, but it is also the only pref-free teardown the coordinator exposes: it
   /// ends outstanding previews, claims the gate, disengages each pairing through
@@ -514,10 +542,10 @@ final class MirroringCoordinator {
         self.inFlight -= 1
         if self.inFlight == 0 { self.isApplying = false }
       }
-      await synthesis.disengageAllForReset()
+      let cameDown = await synthesis.disengageAllForReset()
       let remaining = synthesis.pairings
-      guard remaining.isEmpty else {
-        self.log.error("Synthesis did not come down; \(remaining.count, privacy: .public) still engaged")
+      guard cameDown, remaining.isEmpty else {
+        self.log.error("Synthesis did not come down; refused=\(cameDown ? 0 : 1, privacy: .public), \(remaining.count, privacy: .public) still engaged")
         if let held = remaining.first {
           // The engine's own word for it, on the surface that renders synthesis
           // refusals: no `MirrorRefusal` case describes a synthesized size that

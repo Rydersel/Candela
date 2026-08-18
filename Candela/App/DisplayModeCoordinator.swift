@@ -1298,7 +1298,18 @@ final class DisplayModeCoordinator {
     // Already on the glass. Re-engaging would tear the pairing down and build a
     // fresh virtual display for the size that is already showing, which is tens
     // of seconds of reconfiguration to arrive back where it started.
-    guard synthesis.engagedSize(displayID: displayID) != size else { return }
+    //
+    // Through the funnel like every other exit here, even though this one
+    // refuses nothing: the view state above has already been rewritten
+    // (`origins`, `surfaces`, the sampled rate, the size-change flag) and three
+    // failures have been dismissed, and `adopt` is the only thing that
+    // republishes the preview and syncs the window afterwards. `.keep` on both
+    // sides because nothing was refused and a preview standing on another
+    // display is none of this exit's business.
+    guard synthesis.engagedSize(displayID: displayID) != size else {
+      await adopt(.keep, synthesis: .keep)
+      return
+    }
 
     // The mode side stands down FIRST, and a failure refuses: an engage would
     // otherwise mirror a panel whose previewed mode nobody has answered yet,
@@ -1330,7 +1341,13 @@ final class DisplayModeCoordinator {
     ) {
     case .success:
       await adopt(.clear, synthesis: .clear)
-      startSynthesisCountdown()
+      // Guarded on a preview actually standing, which a successful engage no
+      // longer guarantees: the engage runs its own departure sweep when it
+      // lands, and the panel that just left can be this one. `adopt` is the
+      // sole writer of `preview`, so it is what reports that, and a countdown
+      // started over nothing would tick for the rest of the session with no
+      // preview any tick can resolve.
+      if preview != nil { startSynthesisCountdown() }
     case .failure:
       // The refusal was recorded by `beginPreview`, which is the one place both
       // busy shapes collapse into one. Nothing is outstanding on a refusal that
@@ -1930,6 +1947,10 @@ extension DisplayModeCoordinator.Catalog {
   /// hides on every abstention. False whenever there is no verdict or nothing
   /// applicable reached the band. Three offering surfaces ask this question,
   /// and one helper is the only way they keep answering it the same way.
+  ///
+  /// A synthesized stop whose logical size equals the recommended one inherits
+  /// the mark. **Ruled 2026-08-18: that ships as it is**; the suppression was
+  /// declined, so do not add a guard for it here or at a call site.
   func isRecommendedSize(_ mode: DisplayMode) -> Bool {
     guard let recommendation = density?.bestInBand else { return false }
     return recommendation.logicalWidth == mode.logicalWidth
