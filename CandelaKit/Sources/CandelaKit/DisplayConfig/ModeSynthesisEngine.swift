@@ -108,10 +108,14 @@ public actor ModeSynthesisEngine {
   /// hardware everywhere a person can see them.
   public static let virtualDisplayName = "Candela Scaled Size"
 
-  /// The virtual display's own refresh. The mirror preserves the PHYSICAL
-  /// panel's rate (measured at 100 Hz: 100 before, during and after), so this
-  /// is not the rate anything scans out at.
-  private static let virtualRefreshHz: Double = 60
+  /// The fallback for the virtual display's refresh when the panel's own
+  /// rate cannot be read. The master's rate is NOT cosmetic: the wire runs
+  /// the panel's timing, but frame delivery to a mirror is paced by the
+  /// master, and a 60 Hz master pacing a faster panel produced visible
+  /// flashing that tracked content updates on the MAG 341C
+  /// [MEASURED 2026-08-18, from both 175 and 100 Hz]. The spec therefore
+  /// carries the panel's current refresh whenever it is known.
+  private static let fallbackVirtualRefreshHz: Double = 60
 
   /// Session scope, never permanent: a stored configuration naming a virtual
   /// display that will not exist at the next login is one nothing can honour.
@@ -191,10 +195,16 @@ public actor ModeSynthesisEngine {
     let free = VirtualDisplayIdentity.synthesisSlotRange.filter { !occupied.contains($0) }
     guard !free.isEmpty else { return .failure(.noFreeSlot) }
 
+    // The panel's rate at the moment of engage, so the master paces frames
+    // at the rate the glass runs. Read before the mirror stands: an engaged
+    // panel's descriptor is synthetic and answers for the master.
+    let panelHz = configurator.currentMode(for: displayID)
+      .map { DisplayMode.quantizedRefresh($0.refreshHz) }
     let spec = VirtualDisplaySpec(
       name: Self.virtualDisplayName,
       logicalWidth: size.logicalWidth, logicalHeight: size.logicalHeight,
-      hiDPI: true, refreshHz: Self.virtualRefreshHz
+      hiDPI: true,
+      refreshHz: (panelHz ?? 0) > 0 ? panelHz! : Self.fallbackVirtualRefreshHz
     )
     let slot: Int
     let handle: VirtualDisplayHandle
