@@ -72,6 +72,7 @@ final class FakeSynthesisWorld: @unchecked Sendable {
   private var _displaysHidesTheMirror = false
   private var _panelStaysOnMasterGeometryAfterUnmirror = false
   private var _panelReportsAnUnlistedModeAfterUnmirror = false
+  private var _panelReadbackIsUnreadable = false
 
   // MARK: - Wiring
 
@@ -212,6 +213,14 @@ final class FakeSynthesisWorld: @unchecked Sendable {
     set { lock.withLock { _panelReportsAnUnlistedModeAfterUnmirror = newValue } }
   }
 
+  /// `currentMode` answers nil for a display that is still online: the ordinary
+  /// shape of a panel mid-reconfiguration, which is where the teardown's last
+  /// check runs. Evidence of nothing, and the engine has to treat it that way.
+  var panelReadbackIsUnreadable: Bool {
+    get { lock.withLock { _panelReadbackIsUnreadable } }
+    set { lock.withLock { _panelReadbackIsUnreadable = newValue } }
+  }
+
   // MARK: - Virtual displays
 
   func record(_ call: SynthesisCall) { lock.withLock { _calls.append(call) } }
@@ -318,6 +327,7 @@ final class FakeSynthesisWorld: @unchecked Sendable {
   func currentMode(for id: CGDirectDisplayID) -> DisplayMode? {
     lock.withLock {
       guard let panel = _panels[id] else { return nil }
+      if _panelReadbackIsUnreadable, _mirrors[id] == nil { return nil }
       guard !_physicalKeepsOwnModeWhileMirrored else { return panel.ownMode }
       if _panelReportsAnUnlistedModeAfterUnmirror, _mirrors[id] == nil {
         return DisplayMode(

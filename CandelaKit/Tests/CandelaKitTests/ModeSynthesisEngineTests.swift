@@ -41,7 +41,10 @@ struct ModeSynthesisEngineTests {
   private func engine(_ world: FakeSynthesisWorld) -> ModeSynthesisEngine {
     ModeSynthesisEngine(
       virtualDisplays: FakeSynthesisVirtualDisplays(world),
-      configurator: FakeSynthesisConfigurator(world)
+      configurator: FakeSynthesisConfigurator(world),
+      // Zero, so the nil-readback retry costs no wall clock here. Production's
+      // default is a settling allowance, not a poll for an event.
+      readbackRetryDelay: 0
     )
   }
 
@@ -459,6 +462,30 @@ struct ModeSynthesisEngineTests {
     #expect(reported?.logicalWidth != size.logicalWidth)
     #expect(world.mirrors.isEmpty)
     #expect(world.liveSlots.isEmpty)
+  }
+
+  /// A panel that will not say what it is running is NOT a failed teardown.
+  ///
+  /// This runs immediately after breaking a mirror and destroying the display
+  /// the panel was scanning, so a nil readback is the ordinary shape of a
+  /// display mid-reconfiguration rather than evidence about the glass. Judged
+  /// as a failure it would retain the pairing: one of two slots held for the
+  /// session, the opt-out refusing, and an engine failure shown to somebody
+  /// whose teardown worked.
+  @Test func aPanelThatWillNotReportItsModeStillCompletesTheDisengage() async {
+    let world = world()
+    let engine = engine(world)
+    _ = await engage(engine, world, size, on: Self.physical)
+    world.panelReadbackIsUnreadable = true
+
+    let result = await engine.disengage(fromPhysical: Self.physical)
+
+    // The control: the display really is still attached, so this is not the
+    // departed-panel case one test above.
+    #expect(world.configuredDisplays().contains { $0.id == Self.physical })
+    #expect(result.failureValue == nil)
+    #expect(await engine.pairing(forPhysical: Self.physical) == nil)
+    #expect(world.liveSlots.isEmpty, "and the slot goes back")
   }
 
   /// The positive control for both failure tests above: with the panel back on

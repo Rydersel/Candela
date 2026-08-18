@@ -132,6 +132,10 @@ public actor ModeSynthesisEngine {
   private let configurator: any DisplayConfiguring
   private let appearanceTimeout: TimeInterval
   private let departureTimeout: TimeInterval
+  /// How long to wait between re-asking a panel what mode it is running, when
+  /// the first ask came back nil. Short and bounded: this is a settling
+  /// allowance, not a poll for an event.
+  private let readbackRetryDelay: TimeInterval
   /// Called with the virtual display's ID at the one instant that closes a
   /// window nothing outside this actor can see: after the display exists and
   /// before the mirror that makes it a master.
@@ -164,12 +168,14 @@ public actor ModeSynthesisEngine {
     configurator: any DisplayConfiguring,
     appearanceTimeout: TimeInterval = 10,
     departureTimeout: TimeInterval = 5,
+    readbackRetryDelay: TimeInterval = 0.15,
     willMirrorOntoVirtualDisplay: (@Sendable (CGDirectDisplayID) -> Void)? = nil
   ) {
     self.virtualDisplays = virtualDisplays
     self.configurator = configurator
     self.appearanceTimeout = appearanceTimeout
     self.departureTimeout = departureTimeout
+    self.readbackRetryDelay = readbackRetryDelay
     self.willMirrorOntoVirtualDisplay = willMirrorOntoVirtualDisplay
   }
 
@@ -390,8 +396,23 @@ public actor ModeSynthesisEngine {
     // teardown has no panel to ask, and answering "incomplete" there would
     // retain a pairing for hardware that has gone.
     let attached = configurator.displays().contains { $0.id == pairing.physicalDisplayID }
-    if attached, !panelIsBackOnItsOwnMode(pairing) {
-      complete = false
+    if attached {
+      switch panelRestoreVerdict(pairing) {
+      case .backOnItsOwnMode:
+        break
+      case .wrong:
+        complete = false
+      case .unreadable:
+        // NOT a failure, and the asymmetry is deliberate. This code runs
+        // immediately after breaking a mirror and destroying the display the
+        // panel was scanning, which is the middle of a reconfiguration, and a
+        // panel's reported state during one is evidence of nothing. Calling it
+        // incomplete would RETAIN the pairing: one of two slots held for the
+        // session, the opt-out refusing, and an engine failure shown for a
+        // teardown that worked. The topology checks above still have to pass,
+        // so this gives up one guard rather than all of them.
+        log.error("synthesis.unwind slot=\(pairing.slot) physical=\(pairing.physicalDisplayID): the panel would not say what it is running, so the teardown stands on the topology's evidence alone")
+      }
     }
 
     if !complete {
@@ -400,34 +421,58 @@ public actor ModeSynthesisEngine {
     return complete
   }
 
-  /// Whether the panel came all the way back: it reports a mode its OWN
-  /// enumeration holds, and that mode is not the size the set was rendering.
+  /// What the panel's post-teardown readback says about the glass.
   ///
-  /// Both halves are needed, and the first is what makes this able to fail at
-  /// all. The engage tail re-times the slave onto its own mode, so from two
-  /// seconds after an engage the panel already reports its own geometry: a
-  /// check that only asked "is this still the stop's geometry" was inert by the
-  /// time any teardown ran, which reads identically to a check that works.
-  /// Membership in the panel's own list is the question a broken break can
-  /// still answer wrongly, because a display scanning out somebody else's
-  /// framebuffer reports geometry that is not in its enumeration.
+  /// Three cases, not two, and the third is the point: "the panel would not
+  /// answer" is a different fact from "the panel answered wrongly", and only
+  /// the second is evidence a teardown failed.
+  private enum PanelRestoreVerdict {
+    /// It reports a mode its OWN enumeration holds, and that mode is not the
+    /// size the set was rendering.
+    case backOnItsOwnMode
+    /// A POSITIVE wrong answer: still the rendered size, or a descriptor this
+    /// display does not publish, which is what a display scanning out somebody
+    /// else's framebuffer reports.
+    case wrong
+    /// No readback at all, after retries.
+    case unreadable
+  }
+
+  /// SS10's last step, asked of the glass rather than of the topology.
   ///
-  /// Geometry only, never `ioModeID`: mode IDs are positional and a
-  /// reconfiguration reassigns them, so an ID comparison would fail for a panel
+  /// The enumeration-membership half is what makes this able to fail at all.
+  /// The engage tail re-times the slave onto its own mode, so from two seconds
+  /// after an engage the panel already reports its own geometry: a check that
+  /// only asked "is this still the rendered size" was inert by the time any
+  /// teardown ran, which reads identically to a check that works.
+  ///
+  /// Geometry only, never `ioModeID`: mode ids are positional and a
+  /// reconfiguration reassigns them, so an id comparison would fail for a panel
   /// that came back perfectly.
-  private func panelIsBackOnItsOwnMode(_ pairing: SynthesisPairing) -> Bool {
-    guard let panel = configurator.currentMode(for: pairing.physicalDisplayID) else { return false }
+  ///
+  /// The nil readback is RETRIED rather than judged. It is the ordinary shape
+  /// of a display mid-reconfiguration, which is exactly where this runs, and a
+  /// single sample of it is not evidence of anything.
+  private func panelRestoreVerdict(_ pairing: SynthesisPairing) -> PanelRestoreVerdict {
+    var panel: DisplayMode?
+    for attempt in 1...3 {
+      panel = configurator.currentMode(for: pairing.physicalDisplayID)
+      if panel != nil { break }
+      if attempt < 3, readbackRetryDelay > 0 { Thread.sleep(forTimeInterval: readbackRetryDelay) }
+    }
+    guard let panel else { return .unreadable }
     let isTheRenderedSize = panel.logicalWidth == pairing.size.logicalWidth
       && panel.logicalHeight == pairing.size.logicalHeight
       && panel.pixelWidth == pairing.size.pixelWidth
       && panel.pixelHeight == pairing.size.pixelHeight
-    guard !isTheRenderedSize else { return false }
-    return configurator.modes(for: pairing.physicalDisplayID).contains {
+    guard !isTheRenderedSize else { return .wrong }
+    let publishes = configurator.modes(for: pairing.physicalDisplayID).contains {
       $0.logicalWidth == panel.logicalWidth
         && $0.logicalHeight == panel.logicalHeight
         && $0.pixelWidth == panel.pixelWidth
         && $0.pixelHeight == panel.pixelHeight
     }
+    return publishes ? .backOnItsOwnMode : .wrong
   }
 
   private func mirrorStands(_ pairing: SynthesisPairing) -> Bool {
