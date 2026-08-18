@@ -40,6 +40,19 @@ struct VirtualDisplayReconcilerTests {
     #expect(actions == [.destroy(slot: 2)])
   }
 
+  /// SS6: synthesis slots are stood by the engine and have no stored
+  /// definition, so a full-family sweep would read one as
+  /// unconfigured-but-live and destroy the engine's display on the next sync.
+  /// This pins the `userSlotRange` bound; on `slotRange` it draws a
+  /// `.destroy`.
+  @Test func aLiveSynthesisSlotDrawsNoActionAtAll() {
+    let slot = VirtualDisplayIdentity.synthesisSlotRange.lowerBound
+    let actions = VirtualDisplayReconciler.actions(
+      definitions: [:], live: [handle(slot: slot, of: definition())], isAvailable: true
+    )
+    #expect(actions.isEmpty)
+  }
+
   @Test func aLiveDisplayMatchingItsDefinitionIsLeftAlone() {
     let def = definition()
     let actions = VirtualDisplayReconciler.actions(

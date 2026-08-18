@@ -46,7 +46,7 @@ usage: candela-probe [--display <id>] <subcommand>
   gamma reset                             CGDisplayRestoreColorSyncSettings
   watch [seconds=10]                      100 ms native-brightness delta log
   topology                                online displays: kind, identity, virtual verdict, DDC pool
-  vd create <slot> <w> <h> [--hidpi] [--hold <s>]  create a virtual display, hold, destroy
+  vd create <slot 1-3> <w> <h> [--hidpi] [--hold <s>]  create a virtual display, hold, destroy
 """
 
 /// The DDC subcommands need a DDC-capable external display. The private-API
