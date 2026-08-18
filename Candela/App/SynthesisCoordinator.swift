@@ -558,8 +558,13 @@ final class SynthesisCoordinator {
   /// which is otherwise a mirror slave the apply would land on invisibly.
   /// Returns false without touching anything when it refuses; the caller
   /// refuses the mode change in turn.
+  /// `endingPreviews: false` because the select path runs INSIDE the preview
+  /// queue and has already stood both previews down: `endOutstandingPreview`
+  /// re-enters the queue, which waits on the operation doing the waiting.
+  /// Measured 2026-08-18: the first pick hung and every later pick enqueued
+  /// behind it, with nothing logged.
   func disengageForModeChange(_ display: ConfiguredDisplay) async -> Bool {
-    await disengageForOptOut(display)
+    await disengageForOptOut(display, endingPreviews: false)
   }
 
   /// Clears the stored stop without touching the opt-in or the machine.
@@ -579,7 +584,9 @@ final class SynthesisCoordinator {
   /// Returns false without touching anything when it refuses, which is what
   /// keeps SS11's ordering honest: both callers write prefs only after this
   /// says the machine is clean.
-  private func disengageForOptOut(_ display: ConfiguredDisplay) async -> Bool {
+  private func disengageForOptOut(
+    _ display: ConfiguredDisplay, endingPreviews: Bool = true
+  ) async -> Bool {
     // BEFORE the `isEngaged` question, not after. `isEngaged` reads the
     // snapshot, which is empty for the whole of an engage, so an in-flight
     // engage would otherwise answer "nothing to take down", let the prefs be
@@ -590,9 +597,11 @@ final class SynthesisCoordinator {
       return false
     }
     guard isEngaged(displayID: display.id) else { return true }
-    guard await endOutstandingPreview() else {
-      note(.busy, for: display.id)
-      return false
+    if endingPreviews {
+      guard await endOutstandingPreview() else {
+        note(.busy, for: display.id)
+        return false
+      }
     }
     // AR12, asked before the reconfiguration for the reason every other
     // claimant asks before its apply: a refusal has to cost nothing, and a
