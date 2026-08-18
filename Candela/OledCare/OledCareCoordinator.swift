@@ -36,25 +36,24 @@ import os
 ///   mirror set Candela engaged to render a synthesized size is not mirroring
 ///   the user asked for (`MirrorTopology.isSynthesisSet`, the one predicate),
 ///   and the panel behind it is lit and being worn, so panel hours and the wear
-///   signal keep accruing and the window observer's ages are PRESERVED across
-///   the span. Preserved, not running: `samplingQualifies` still demands
-///   `.active`, and the pause holds `.suspended`, so nothing is observed while
-///   a synthesized size is engaged. That leaves ages that describe a span
-///   nobody watched, which is the staleness a departure forgets for
-///   (`reconcileEnrollment` into `dropState`); what bounds it here is that
-///   engaging a size changes desktop geometry, so most windows MOVE and their
-///   `since` stamps reset on the way in, starting the ages from scratch anyway.
-///   Not a re-keying: `WindowObservation` keys on `windowID` and a size change
-///   does not touch that; it is the bounds comparison that restarts the clock.
-///   The pause itself stays for v1; the pane says which mirror it is.
+///   signal keep accruing across the span. TELEMETRY CARVES OUT THE SAME WAY:
+///   sampling is measurement, not intervention, and `OledTelemetryTarget` is
+///   what lets exposure capture and window observation keep running through a
+///   suspension that is specifically a synthesis mirror. A user mirror stays
+///   out, and so does the virtual master. The pause itself, and every
+///   intervention under it, stays for v1; the pane says which mirror it is.
 /// - **Safe Mode builds `chrome` and nothing else** (spec §7): chrome toggles
 ///   are explicit user actions on system settings, not automatic behavior, so
 ///   they stay functional; the driver loop — overlays, sampling, hours — never
 ///   starts.
 /// - **W3b-1 telemetry rides the same loop at its own 60 s cadence**, and takes
 ///   its suspension verdict from the dimming engine's published state rather
-///   than re-deriving one. `samplingQualifies(dimState:on:)` is the whole of
-///   that decision.
+///   than re-deriving one. `samplingQualifies(dimState:on:)` over
+///   `OledTelemetryTarget` is the whole of that decision, and the same target
+///   carries the display it reads from: while a synthesized size is engaged
+///   that is the virtual display the panel mirrors, because ScreenCaptureKit
+///   does not list a mirrored display and the window rectangles live in the
+///   surface's space. Identity stays the panel's throughout.
 @MainActor
 @Observable
 final class OledCareCoordinator {
@@ -949,8 +948,12 @@ final class OledCareCoordinator {
       if isUserMirrored, !state.wasMirrored { forgetWindowObservation(for: key) }
       state.wasMirrored = isUserMirrored
       // Telemetry rides this loop at its own cadence; `newState` is the
-      // suspension authority, not a second reading of the same signals.
-      updateTelemetry(for: key, state: &state, dimState: newState, on: id, at: now)
+      // suspension authority, not a second reading of the same signals. The
+      // target is built from THIS tick's topology sample, so the surface it
+      // resolves and the `isSynthesis` verdict above describe one instant.
+      updateTelemetry(
+        for: key, state: &state, dimState: newState,
+        on: OledTelemetryTarget(panel: id, topology: topology), at: now)
 
       // OC12 ordering: last tick's mutation is verified BEFORE this tick's
       // render, so the check always runs a full tick after the change it is
@@ -1153,8 +1156,10 @@ final class OledCareCoordinator {
     //   `.blackout`: OC17's rule, and there is no luminance left to spend.
     //   `.suspended`: OC13. Produced ONLY by mirroring, and suspended means
     //     suspended. Without it a mirror-set participant keeps an overlay up
-    //     carrying a nomination computed before mirroring, which `renominate`
-    //     can never refresh because `samplingQualifies` requires `.active`.
+    //     over a panel whose care is paused. Under a synthesized size
+    //     `renominate` does keep refreshing the mask (telemetry runs through
+    //     that suspension), so the nomination is current rather than frozen;
+    //     it is still not rendered, because the pause is the ruling.
     //   `.lockDim`: delivered on the wire, not by the overlay (A-16 measured
     //     that a shielding window does not render above the lock screen), so a
     //     mask here would be an overlay nobody could see.
@@ -1311,10 +1316,10 @@ final class OledCareCoordinator {
   /// therefore handed to a ONE-SHOT task; the loop itself stays synchronous.
   private func updateTelemetry(
     for key: String, state: inout PerDisplay, dimState: OledDimState,
-    on id: CGDirectDisplayID, at now: SuspendingClock.Instant
+    on target: OledTelemetryTarget, at now: SuspendingClock.Instant
   ) {
     guard state.telemetryEnabled || state.windowObservationEnabled else { return }
-    guard samplingQualifies(dimState: dimState, on: id) else { return }
+    guard samplingQualifies(dimState: dimState, on: target) else { return }
     if let last = state.lastSampleAt, now - last < Self.samplingInterval { return }
     state.lastSampleAt = now
 
@@ -1322,16 +1327,37 @@ final class OledCareCoordinator {
     // `panelNativeGrid` re-bins on rotation alone and never looks at
     // `displaySize` — so a mid-reconfiguration display has to be gated here or
     // it accumulates normally into cells that mean nothing.
-    guard let transform = Self.transform(for: id) else { return }
+    guard let transform = Self.transform(target) else { return }
 
+    // Both halves read the SURFACE. While a synthesized size is engaged the
+    // desktop lives on the virtual display, so that is where the window
+    // rectangles are as well as the pixels; pairing the panel's own bounds with
+    // those rectangles would compute coverage against a space no window is in
+    // and book the result as fact.
     if state.windowObservationEnabled {
-      observeWindows(for: key, on: id, through: transform)
+      observeWindows(for: key, on: target.surface, through: transform)
     }
     if state.telemetryEnabled, !state.sampleInFlight {
       state.sampleInFlight = true
-      captureExposure(for: key, on: id, through: transform)
+      captureExposure(for: key, on: target, through: transform)
     }
     persistExposureHistoryIfDue(at: now)
+  }
+
+  /// The panel-to-surface resolution against the topology AS IT STANDS NOW.
+  ///
+  /// Read fresh rather than carried: this is the re-check side, called after the
+  /// capture's ~70 ms suspension, and its whole job is to notice that the world
+  /// moved. The tick's own resolution comes from the sample the tick already
+  /// took, so one tick never mixes two instants.
+  ///
+  /// No model means no topology, which resolves every panel to itself: the same
+  /// degradation to the pre-seam behaviour `MirrorTopologyStore` documents, and
+  /// the safe direction here, since a target that has stopped matching drops the
+  /// sample.
+  private func telemetryTarget(for id: CGDirectDisplayID) -> OledTelemetryTarget {
+    OledTelemetryTarget(
+      panel: id, topology: model?.mirrorTopology.topology() ?? MirrorTopology([]))
   }
 
   /// THE suspension verdict for telemetry, in one place and derived from the
@@ -1339,6 +1365,11 @@ final class OledCareCoordinator {
   /// dim state is a panel that is not showing what a capture would measure.
   /// Nothing here re-reads a signal the overlay path already turned into a
   /// verdict.
+  ///
+  /// The one exception is a panel showing a synthesized size, and it is decided
+  /// by `OledTelemetryTarget` rather than here: telemetry is measurement, the
+  /// panel is lit with no overlay over it, and its hours and wear signal already
+  /// keep running through that suspension (SS8). A user mirror stays out.
   ///
   /// The lock is checked separately because lock dim is a PREF — a locked
   /// display with `oledLockDim` off sits at `.active`, and spec §4 skips it
@@ -1360,11 +1391,18 @@ final class OledCareCoordinator {
   /// HID idle time: with nobody typing, the engine leaves `.active` at the idle
   /// threshold and sampling stops. **The uncovered case is a second display**,
   /// where the user works on one panel while the other sits blanked, holding
-  /// idle at zero and this one at `.active` indefinitely. Do not "fix" this
-  /// with a readback or a DPMS probe; see #94 and §2.
-  private func samplingQualifies(dimState: OledDimState, on id: CGDirectDisplayID) -> Bool {
-    guard !resetting, dimState == .active, !lockObserver.isLocked else { return false }
-    guard CGDisplayIsAsleep(id) == 0 else { return false }
+  /// idle at zero and this one at `.active` indefinitely. **A synthesized size
+  /// widens that hole knowingly**: the engine's mirror input holds `.suspended`
+  /// whatever the idle counter says, so the idle bound does not apply for as
+  /// long as one is engaged. The alternative was to keep measuring nothing at
+  /// all while it is engaged, which is the defect this carve-out exists to fix.
+  /// Do not "fix" this with a readback or a DPMS probe; see #94 and §2.
+  private func samplingQualifies(dimState: OledDimState, on target: OledTelemetryTarget) -> Bool {
+    guard !resetting, target.samplingMayRun(dimState: dimState), !lockObserver.isLocked
+    else { return false }
+    // The panel's own sleep, never the surface's: a virtual display has no
+    // panel to sleep, and the wear being measured is the glass's.
+    guard CGDisplayIsAsleep(target.panel) == 0 else { return false }
     return !OledCareSignalSources.onLowBattery()
   }
 
@@ -1381,9 +1419,30 @@ final class OledCareCoordinator {
   // through the same transform the accumulation paths use, one construction
   // for one convention.
   static func transform(for id: CGDirectDisplayID) -> PanelSpaceTransform? {
-    let size = CGDisplayBounds(id).size
+    transform(OledTelemetryTarget(panel: id, topology: MirrorTopology([])))
+  }
+
+  /// The telemetry path's transform: **geometry from the surface, rotation from
+  /// the panel**. They differ only while a synthesized size is engaged, where
+  /// the desktop is drawn on a virtual display and shown on the panel's glass.
+  ///
+  /// Size from the surface, because it normalizes coordinates and every
+  /// coordinate this pass sees (window rectangles, the captured image) is in the
+  /// surface's space. Rotation from the panel, because the wear space is the
+  /// glass's manufactured orientation and only the panel has one.
+  ///
+  /// The mapping stays sound across the size change: `panelNativeGrid` re-bins
+  /// proportionally and never reads `displaySize`, and the synthesized ladder
+  /// holds each rung's aspect within 2 percent of native, so the re-bin carries
+  /// at most that much skew into the grid. It TOLERATES the skew rather than
+  /// correcting it. A future rung that breaks aspect deliberately needs its own
+  /// ruling here, not a silent fall-through into cells that no longer line up
+  /// with the glass.
+  static func transform(_ target: OledTelemetryTarget) -> PanelSpaceTransform? {
+    let size = CGDisplayBounds(target.surface).size
     guard size.width > 0, size.height > 0 else { return nil }
-    guard let rotation = DisplayRotation(degrees: CGDisplayRotation(id)) else { return nil }
+    guard let rotation = DisplayRotation(degrees: CGDisplayRotation(target.panel))
+    else { return nil }
     return PanelSpaceTransform(displaySize: size, rotation: rotation)
   }
 
@@ -1393,9 +1452,9 @@ final class OledCareCoordinator {
   /// this cannot go stale, because the ID it gets is the one this tick
   /// resolved.
   private func observeWindows(
-    for key: String, on id: CGDirectDisplayID, through transform: PanelSpaceTransform
+    for key: String, on surface: CGDirectDisplayID, through transform: PanelSpaceTransform
   ) {
-    let windows = CGWindowListSource(displayID: id).onScreenWindows()
+    let windows = CGWindowListSource(displayID: surface).onScreenWindows()
     // Mutated IN PLACE: `observe` is mutating on a value type, and a local copy
     // would discard every window's age on return — the 5-minute stationary
     // threshold could then never be reached.
@@ -1424,7 +1483,7 @@ final class OledCareCoordinator {
     // grant is absent. The cache makes a stable wallpaper free.
     let appearanceIsDark =
       NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    _ = wallpaper.panelGrid(for: id, appearanceIsDark: appearanceIsDark, through: transform)
+    _ = wallpaper.panelGrid(for: surface, appearanceIsDark: appearanceIsDark, through: transform)
     // Only a booked observation dirties the store: an all-uncovered panel adds
     // nothing, and marking it dirty would re-encode an unchanged value.
     if owners.hours.totalSeconds > before { unsavedExposureKeys.insert(key) }
@@ -1436,18 +1495,33 @@ final class OledCareCoordinator {
     latestWindows.removeValue(forKey: key)
   }
 
+  /// **The capture reads the SURFACE, the result is booked to the PANEL.**
+  /// ScreenCaptureKit does not list a mirrored display at all (measured: the
+  /// panel is online, awake and reporting its native descriptor, and simply
+  /// absent from `SCShareableContent.displays`), so asking for the panel while a
+  /// synthesized size is engaged returns nil on every tick, forever, and the
+  /// exposure map stops growing with nothing to say so.
+  ///
+  /// Attribution never rides the surface's own `persistenceKey`: a virtual
+  /// display has no EDID, so its key is derived from a display ID that changes
+  /// every time the display is recreated. The panel's key is the only stable
+  /// identity in the pair, and booking to it once is also what keeps one desktop
+  /// from being counted twice.
   private func captureExposure(
-    for key: String, on id: CGDirectDisplayID, through transform: PanelSpaceTransform
+    for key: String, on target: OledTelemetryTarget, through transform: PanelSpaceTransform
   ) {
     let epoch = exposureEpoch
-    log.debug("OLED care: exposure capture issued for display \(id, privacy: .public)")
+    log.debug("""
+    OLED care: exposure capture issued for display \(target.panel, privacy: .public) \
+    (surface \(target.surface, privacy: .public))
+    """)
     // One shot, not a loop. `self` is deliberately not held across the await —
     // the driver loop's rule, for its reason: the sampler is a separate object,
     // so awaiting through it retains the sampler and not this coordinator.
     Task { @MainActor [weak self] in
       guard let sampler = self?.sampler else { return }
-      let sample = await sampler.sample(displayID: id)
-      self?.finishExposureCapture(sample, for: key, on: id, through: transform, epoch: epoch)
+      let sample = await sampler.sample(displayID: target.surface)
+      self?.finishExposureCapture(sample, for: key, on: target, through: transform, epoch: epoch)
     }
   }
 
@@ -1456,18 +1530,26 @@ final class OledCareCoordinator {
   /// reconfigured, be un-enrolled, or have its history deleted, and a sample
   /// taken before any of those is exposure the panel did not emit.
   private func finishExposureCapture(
-    _ sample: LuminanceSampler.Sample?, for key: String, on id: CGDirectDisplayID,
+    _ sample: LuminanceSampler.Sample?, for key: String, on target: OledTelemetryTarget,
     through transform: PanelSpaceTransform, epoch: Int
   ) {
     states[key]?.sampleInFlight = false
     guard let sample, epoch == exposureEpoch else { return }
+    // Re-resolved, never re-used: a synthesized size can be disengaged inside
+    // the suspension, which moves the desktop back onto the panel and changes
+    // both the surface the sample came from and the qualification that let it
+    // run. An unequal target describes a machine the sample was not taken of,
+    // so it is dropped rather than attributed.
+    let current = telemetryTarget(for: target.panel)
+    guard current == target else { return }
+    let id = target.panel
     guard let state = states[key], state.telemetryEnabled, state.lastDisplayID == id,
-      let dimState = dimStates[key], samplingQualifies(dimState: dimState, on: id)
+      let dimState = dimStates[key], samplingQualifies(dimState: dimState, on: current)
     else { return }
     // Geometry can change under a capture without the display departing (a
     // rotation, a mode switch). The grid was reduced through the OLD geometry,
     // so it is binned rather than re-mapped through geometry it never saw.
-    guard Self.transform(for: id) == transform else { return }
+    guard Self.transform(current) == transform else { return }
 
     var accumulator = exposureAccumulator(for: key)
     let before = accumulator.map.sampleCount
@@ -1493,7 +1575,7 @@ final class OledCareCoordinator {
     let panelGrid = transform.panelNativeGrid(
       fromDisplayGrid: sample.grid, cols: sample.cols, rows: sample.rows)
     latestSamples[key] = (panelGrid, Date())
-    bookComparisonPair(for: key, on: id, measured: panelGrid, through: transform)
+    bookComparisonPair(for: key, on: current, measured: panelGrid, through: transform)
     // #20 nominates off the sampling clock, not the 10 Hz tick: the grid it
     // reads changes once a minute, so re-nominating per tick would burn CPU to
     // reach the same answer 600 times.
@@ -1510,18 +1592,24 @@ final class OledCareCoordinator {
   /// outage stops them together. Runs inside the accepted branch, so the
   /// epoch, pref, ID, transform and qualification re-checks have all passed.
   private func bookComparisonPair(
-    for key: String, on id: CGDirectDisplayID,
+    for key: String, on target: OledTelemetryTarget,
     measured: [Double], through transform: PanelSpaceTransform
   ) {
     // A fresh list, not `latestObservations`: observation is a separate pref
     // and its last snapshot can be minutes old, while the model's claim is
     // about this instant. The call is the same sub-millisecond one the
     // observation path makes.
-    let windows = CGWindowListSource(displayID: id).onScreenWindows()
+    //
+    // Both inputs come off the SURFACE, like the measured side they are
+    // compared against: the window rectangles are in its space, and a mirrored
+    // panel has no `NSScreen` for the wallpaper lookup to match at all, so
+    // asking about the panel here would compare a measured desktop against a
+    // model that fell back to the appearance prior.
+    let windows = CGWindowListSource(displayID: target.surface).onScreenWindows()
     let appearanceIsDark =
       NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     let wallpaperCells = wallpaper.panelGrid(
-      for: id, appearanceIsDark: appearanceIsDark, through: transform)
+      for: target.surface, appearanceIsDark: appearanceIsDark, through: transform)
     let modelled = ExposureModel.modelledGrid(
       inputs: ExposureModelInputs(
         windows: windows, wallpaperCells: wallpaperCells, appearanceIsDark: appearanceIsDark),
@@ -1535,7 +1623,9 @@ final class OledCareCoordinator {
       measured: measured, modelled: modelled,
       elapsed: Self.seconds(Self.samplingInterval), at: Date())
     guard comparison.pairCount > before else {
-      log.debug("OLED care: comparison pair refused for display \(id, privacy: .public)")
+      log.debug("""
+      OLED care: comparison pair refused for display \(target.panel, privacy: .public)
+      """)
       return
     }
     comparisons[key] = comparison
