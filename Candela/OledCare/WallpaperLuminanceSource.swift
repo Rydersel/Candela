@@ -86,10 +86,15 @@ final class WallpaperLuminanceSource {
     // The sampler's own orientation rule and EOTF math, on purpose: the model
     // and the measurement must disagree only about content, never about how
     // pixels become luminance.
-    let (cols, rows) = LuminanceSampler.requestedSize(
+    let (cols, rows) = LuminanceReduction.requestedSize(
       displayWidth: Int(transform.displaySize.width),
       displayHeight: Int(transform.displaySize.height))
-    guard let grid = LuminanceSampler.meanLuminance(of: image, cols: cols, rows: rows) else {
+    // macOS fills the display with the wallpaper and crops the overflow;
+    // `meanLuminance` stretches. Without this the model reads a squashed
+    // wallpaper, worst on a rotated panel where the aspects differ most.
+    let filled = LuminanceReduction.cropToFill(
+      image, aspect: transform.displaySize.width / transform.displaySize.height)
+    guard let grid = LuminanceReduction.meanLuminance(of: filled, cols: cols, rows: rows) else {
       return nil
     }
     return transform.panelNativeGrid(fromDisplayGrid: grid, cols: cols, rows: rows)

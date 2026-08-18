@@ -1,4 +1,4 @@
-import CandelaKit
+@testable import CandelaKit
 import CoreGraphics
 import Testing
 
@@ -16,8 +16,8 @@ import Testing
 //
 // Nothing downstream can see this: the delivered size matches the request, and
 // `panelNativeGrid` re-bins a padded grid as faithfully as a full one.
-@Suite("Luminance capture geometry") @MainActor
-struct LuminanceSamplerGeometryTests {
+@Suite("Luminance capture geometry")
+struct LuminanceReductionGeometryTests {
 
   // MARK: - The property that matters
 
@@ -59,7 +59,7 @@ struct LuminanceSamplerGeometryTests {
   @Test("No panel is padded by a whole cell, so no row or column can go blank")
   func theRequestNeverLeavesAFullCellOfPadding() {
     for display in Self.displays {
-      let request = LuminanceSampler.requestedSize(
+      let request = LuminanceReduction.requestedSize(
         displayWidth: display.width, displayHeight: display.height)
       let pad = padding(
         displayWidth: display.width, displayHeight: display.height, request: request)
@@ -90,15 +90,15 @@ struct LuminanceSamplerGeometryTests {
 
   @Test("The rig's panels request the sizes measured on the hardware")
   func theRequestsMatchWhatWasMeasured() {
-    #expect(LuminanceSampler.requestedSize(displayWidth: 3440, displayHeight: 1440) == (24, 10))
-    #expect(LuminanceSampler.requestedSize(displayWidth: 1440, displayHeight: 2560) == (14, 24))
-    #expect(LuminanceSampler.requestedSize(displayWidth: 1800, displayHeight: 1169) == (24, 16))
+    #expect(LuminanceReduction.requestedSize(displayWidth: 3440, displayHeight: 1440) == (24, 10))
+    #expect(LuminanceReduction.requestedSize(displayWidth: 1440, displayHeight: 2560) == (14, 24))
+    #expect(LuminanceReduction.requestedSize(displayWidth: 1800, displayHeight: 1169) == (24, 16))
   }
 
   @Test("The long edge stays at grid resolution, so the sample size does not grow")
   func theLongEdgeIsAlwaysTwentyFour() {
     for display in Self.displays {
-      let (w, h) = LuminanceSampler.requestedSize(
+      let (w, h) = LuminanceReduction.requestedSize(
         displayWidth: display.width, displayHeight: display.height)
       #expect(max(w, h) == max(PanelGrid.cols, PanelGrid.rows), "\(display.name) requested \(w)x\(h)")
     }
@@ -109,15 +109,15 @@ struct LuminanceSamplerGeometryTests {
   @Test("A zero-sized reading falls back to a square request rather than an uncapturable one")
   func aZeroSizedDisplayFallsBackToASquare() {
     let long = max(PanelGrid.cols, PanelGrid.rows)
-    #expect(LuminanceSampler.requestedSize(displayWidth: 0, displayHeight: 1440) == (long, long))
-    #expect(LuminanceSampler.requestedSize(displayWidth: 3440, displayHeight: 0) == (long, long))
-    #expect(LuminanceSampler.requestedSize(displayWidth: -1, displayHeight: -1) == (long, long))
+    #expect(LuminanceReduction.requestedSize(displayWidth: 0, displayHeight: 1440) == (long, long))
+    #expect(LuminanceReduction.requestedSize(displayWidth: 3440, displayHeight: 0) == (long, long))
+    #expect(LuminanceReduction.requestedSize(displayWidth: -1, displayHeight: -1) == (long, long))
   }
 
   @Test("An extreme aspect never rounds an edge to zero")
   func neitherEdgeCanRoundToZero() {
     for (w, h) in [(10_000, 1), (1, 10_000), (100_000, 3), (3, 100_000)] {
-      let (rw, rh) = LuminanceSampler.requestedSize(displayWidth: w, displayHeight: h)
+      let (rw, rh) = LuminanceReduction.requestedSize(displayWidth: w, displayHeight: h)
       #expect(rw >= 1 && rh >= 1, "\(w)x\(h) requested \(rw)x\(rh)")
     }
   }
@@ -131,7 +131,7 @@ struct LuminanceSamplerGeometryTests {
     let transform = PanelSpaceTransform(
       displaySize: CGSize(width: 1440, height: 2560), rotation: .twoSeventy)
 
-    let (fixedCols, fixedRows) = LuminanceSampler.requestedSize(
+    let (fixedCols, fixedRows) = LuminanceReduction.requestedSize(
       displayWidth: 1440, displayHeight: 2560)
     let lit = [Double](repeating: 1.0, count: fixedCols * fixedRows)
     let fixed = transform.panelNativeGrid(
@@ -147,5 +147,53 @@ struct LuminanceSamplerGeometryTests {
       (0..<PanelGrid.rows).allSatisfy { damaged[$0 * PanelGrid.cols + col] == 0 }
     }
     #expect(deadColumns == [0, 1, 2, 3, 4, 5], "the stored signature was 6 dead panel columns")
+  }
+}
+
+// The wallpaper is scaled to FILL a display and its overflow cropped; the
+// reduction stretches whatever it is handed. On the rotated Dell that
+// difference measured 0.186 against 0.584 correlation with the panel's own
+// capture, taken while it showed nothing but wallpaper.
+@Suite("Wallpaper crop to fill")
+struct WallpaperCropTests {
+
+  private func image(width: Int, height: Int) -> CGImage {
+    let space = CGColorSpace(name: CGColorSpace.sRGB)!
+    let context = CGContext(
+      data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+      space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+    return context.makeImage()!
+  }
+
+  @Test("a wide image loses width, not height")
+  func landscapeIntoPortrait() {
+    let cropped = LuminanceReduction.cropToFill(image(width: 3840, height: 2160), aspect: 14.0 / 24)
+    #expect(cropped.height == 2160)
+    // `CGRect.integral` expands outward, so a pixel either way is expected.
+    #expect(abs(cropped.width - Int((2160.0 * 14 / 24).rounded())) <= 1)
+  }
+
+  @Test("a tall image loses height, not width")
+  func portraitIntoLandscape() {
+    let cropped = LuminanceReduction.cropToFill(image(width: 1000, height: 4000), aspect: 24.0 / 10)
+    #expect(cropped.width == 1000)
+    #expect(abs(cropped.height - Int((1000.0 / 2.4).rounded())) <= 1)
+  }
+
+  @Test("a matching aspect is left alone")
+  func matchingAspectIsUntouched() {
+    let source = image(width: 2400, height: 1000)
+    let cropped = LuminanceReduction.cropToFill(source, aspect: 2.4)
+    #expect(cropped.width == 2400)
+    #expect(cropped.height == 1000)
+  }
+
+  @Test("a nonsense aspect degrades to the original rather than to nothing")
+  func degenerateAspectIsSafe() {
+    let source = image(width: 100, height: 100)
+    for aspect in [0.0, -1.0, Double.nan, Double.infinity] {
+      let cropped = LuminanceReduction.cropToFill(source, aspect: aspect)
+      #expect(cropped.width == 100 && cropped.height == 100)
+    }
   }
 }
