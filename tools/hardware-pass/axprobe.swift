@@ -158,7 +158,12 @@ func walk(_ element: AXUIElement, depth: Int) {
   default:
     let ownMatch = labels(element).contains(where: { $0.localizedCaseInsensitiveContains(argument!) })
     let adoptedMatch = adopted.localizedCaseInsensitiveContains(argument!)
-    if actions(element).contains("AXPress"), ownMatch || adoptedMatch {
+    // AXValue too: a row button can share its AXDescription with a sibling
+    // (the OLED care hero and its row both say the panel's name) while the
+    // value text is unique. Only pressable elements reach this, and the
+    // uniqueness guard still refuses any ambiguous match.
+    let valueMatch = value != "(absent)" && value.localizedCaseInsensitiveContains(argument!)
+    if actions(element).contains("AXPress"), ownMatch || adoptedMatch || valueMatch {
       pressable.append(element)
       print("candidate:\(line)")
     }
