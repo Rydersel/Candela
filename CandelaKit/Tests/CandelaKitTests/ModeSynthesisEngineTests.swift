@@ -490,21 +490,23 @@ struct ModeSynthesisEngineTests {
     #expect(await engine.pairings().isEmpty)
   }
 
-  /// The virtual display is minted at the PANEL's rate, so the master paces
-  /// frames at the rate the glass runs (and the engage tail then re-times the
-  /// slave onto that same mode).
-  @Test func theVirtualDisplayIsCreatedAtThePanelsOwnRefresh() async throws {
+  /// The virtual display is minted at the fixed LOW rate no matter what the
+  /// panel runs: the glass rate belongs to the engage tail's retime, and a
+  /// master minted at the panel's 175 Hz drove WindowServer to composite the
+  /// 2x surface at that rate, with a lagging cursor and stalls on other
+  /// displays [MEASURED 2026-08-18].
+  @Test func theVirtualDisplayIsCreatedAtTheFixedLowRefresh() async throws {
     let world = world()
     let engine = engine(world)
 
     let pairing = try #require(try? await engage(engine, world, size, on: Self.physical).get())
 
     let handle = try #require(world.liveHandles().first { $0.slot == pairing.slot })
-    #expect(handle.spec.refreshHz == 100)
+    #expect(handle.spec.refreshHz == 60)
   }
 
-  /// And the fallback when the panel reports no usable rate: a spec carrying
-  /// zero hertz is a spec macOS has no reason to honour.
+  /// The same fixed rate when the panel reports no usable rate: a spec
+  /// carrying zero hertz is a spec macOS has no reason to honour.
   @Test func aPanelWithNoUsableRateMintsTheVirtualDisplayAtTheFallbackRate() async throws {
     let world = FakeSynthesisWorld()
     world.addPhysical(
