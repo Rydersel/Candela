@@ -1,0 +1,324 @@
+import CoreGraphics
+import Foundation
+import os
+
+/// `VirtualDisplayProviding` plus the one readback the synthesis sequence
+/// verifies its virtual display against.
+///
+/// A refinement rather than a member of the base protocol because the achieved
+/// mode is not part of a virtual display's LIFETIME: everything else on that
+/// seam creates, destroys or enumerates, and `VirtualDisplaySpec` is
+/// deliberately the source of truth for what a display IS (VD5). This asks a
+/// different question, and only synthesis has to ask it.
+///
+/// The creating process cannot enumerate its own virtual display's modes
+/// (measured 2026-08-17), so the live conformance answers through
+/// `VirtualDisplayHost`, whose re-exec helper is the only path that works.
+public protocol VirtualDisplayAchievedModeReporting: VirtualDisplayProviding {
+  /// The achieved geometry of a live slot, or nil when the display is gone.
+  func achievedMode(slot: Int) -> (width: Int, height: Int, hiDPI: Bool)?
+}
+
+extension VirtualDisplayHost: VirtualDisplayAchievedModeReporting {}
+
+/// One physical display currently showing a synthesized size, and the virtual
+/// display it is mirroring to get it.
+///
+/// The AUTHORITY on synthesis topology (SS1). Nothing derives it from CG mirror
+/// flags: Phase 0 measured that a virtual master does report them, and the
+/// pairing is still what every carve-out consults, so a driver that stopped
+/// reporting them would change nothing here.
+public struct SynthesisPairing: Sendable, Equatable {
+  public let physicalDisplayID: CGDirectDisplayID
+  /// `DisplayConfigIdentity.key`, carried for the reapply bookkeeping that has
+  /// to survive the runtime IDs being reassigned across a replug.
+  public let physicalIdentityKey: String
+  public let virtualDisplayID: CGDirectDisplayID
+  public let slot: Int
+  public let size: SyntheticSize
+
+  public init(
+    physicalDisplayID: CGDirectDisplayID,
+    physicalIdentityKey: String,
+    virtualDisplayID: CGDirectDisplayID,
+    slot: Int,
+    size: SyntheticSize
+  ) {
+    self.physicalDisplayID = physicalDisplayID
+    self.physicalIdentityKey = physicalIdentityKey
+    self.virtualDisplayID = virtualDisplayID
+    self.slot = slot
+    self.size = size
+  }
+}
+
+/// Why a synthesis request produced no engaged size. Every case names a step,
+/// so a caller can say which one rather than "it did not work".
+public enum SynthesisFailure: Error, Sendable, Equatable {
+  /// The private virtual-display class family is absent (VD10). Nothing was
+  /// attempted.
+  case unavailable
+  /// Both synthesis slots are in use. The family is two wide (SS6).
+  case noFreeSlot
+  case createFailed(VirtualDisplayFailure)
+  /// The virtual display came up, and not at the requested size at 2x. The
+  /// measured shape of this is a display that stays 1x with its HiDPI variant
+  /// never engaged.
+  case virtualModeNotAchieved
+  /// The mirror transaction refused or diverged.
+  case mirrorRefused
+  /// The mirror stands and the panel did not follow it: the physical does not
+  /// report the master's geometry, so the size is not on the glass.
+  case engageNotAchieved
+  /// `disengage` was asked about a display that has no pairing.
+  case notEngaged
+  /// Something the unwind tried to take down is still standing. The loudest
+  /// answer in this enum: the caller has a virtual display, a mirror set, or
+  /// both that Candela could not remove.
+  case unwindIncomplete
+}
+
+/// The verified engage and disengage sequence for synthesized sizes (SS10), and
+/// the pairing table every other synthesis-aware surface reads (SS1).
+///
+/// **Non-reentrant by construction.** Its methods are not `async`, so they
+/// cannot contain a suspension point, so the actor runs one engage or disengage
+/// to completion before it starts another: no second sequence can pick a slot
+/// this one has claimed but not yet recorded. The cost is real and deliberate.
+/// `VirtualDisplayProviding.create` and `destroy` BLOCK while they poll the
+/// online list, so a sequence holds a cooperative-pool thread for as long as
+/// that takes. Callers stay off the main actor for free, because reaching an
+/// actor from outside suspends the caller rather than blocking it.
+///
+/// **Nothing here reads a CG mirror flag to decide what is paired.** The flags
+/// are read only to check what an apply ACHIEVED, which is a different question
+/// and the one thing a return code cannot answer.
+public actor ModeSynthesisEngine {
+  /// The same name for both slots, deliberately. The colour-profile leak keys
+  /// on vendor, product and physical size rather than on this, and a name that
+  /// varied per slot or per size would make the two displays read as different
+  /// hardware everywhere a person can see them.
+  public static let virtualDisplayName = "Candela Scaled Size"
+
+  /// The virtual display's own refresh. The mirror preserves the PHYSICAL
+  /// panel's rate (measured at 100 Hz: 100 before, during and after), so this
+  /// is not the rate anything scans out at.
+  private static let virtualRefreshHz: Double = 60
+
+  /// Session scope, never permanent: a stored configuration naming a virtual
+  /// display that will not exist at the next login is one nothing can honour.
+  /// Not `.preview` either, whose process-exit revert would be a second unwind
+  /// path nothing in the sequence can see; the preview layer above reverts by
+  /// calling `disengage`.
+  private static let scope: DisplayConfigScope = .session
+
+  private let virtualDisplays: any VirtualDisplayAchievedModeReporting
+  private let configurator: any DisplayConfiguring
+  private let appearanceTimeout: TimeInterval
+  private let departureTimeout: TimeInterval
+  private let log = Logger(subsystem: "com.rydersel.Candela", category: "synthesis")
+
+  private var table: [CGDirectDisplayID: SynthesisPairing] = [:]
+
+  public init(
+    virtualDisplays: any VirtualDisplayAchievedModeReporting,
+    configurator: any DisplayConfiguring,
+    appearanceTimeout: TimeInterval = 10,
+    departureTimeout: TimeInterval = 5
+  ) {
+    self.virtualDisplays = virtualDisplays
+    self.configurator = configurator
+    self.appearanceTimeout = appearanceTimeout
+    self.departureTimeout = departureTimeout
+  }
+
+  public func pairings() -> [SynthesisPairing] {
+    table.values.sorted { $0.physicalDisplayID < $1.physicalDisplayID }
+  }
+
+  public func pairing(forPhysical displayID: CGDirectDisplayID) -> SynthesisPairing? {
+    table[displayID]
+  }
+
+  // MARK: - Engage
+
+  public func engage(
+    _ size: SyntheticSize, onPhysical displayID: CGDirectDisplayID, identityKey: String
+  ) -> Result<SynthesisPairing, SynthesisFailure> {
+    guard virtualDisplays.isAvailable else { return .failure(.unavailable) }
+
+    // A display that is already paired is torn down first. Overwriting its
+    // entry instead would drop the old slot out of the table, and nothing else
+    // knows how to destroy the display standing in it.
+    if table[displayID] != nil, case let .failure(failure) = disengage(fromPhysical: displayID) {
+      return .failure(failure)
+    }
+
+    let occupied = Set(table.values.map(\.slot))
+    guard let slot = VirtualDisplayIdentity.synthesisSlotRange.first(where: {
+      !occupied.contains($0)
+    }) else { return .failure(.noFreeSlot) }
+
+    let spec = VirtualDisplaySpec(
+      name: Self.virtualDisplayName,
+      logicalWidth: size.logicalWidth, logicalHeight: size.logicalHeight,
+      hiDPI: true, refreshHz: Self.virtualRefreshHz
+    )
+    let handle: VirtualDisplayHandle
+    switch virtualDisplays.create(
+      spec, slot: slot, uuid: UUID(), appearanceTimeout: appearanceTimeout
+    ) {
+    case let .success(created):
+      handle = created
+    case let .failure(failure):
+      log.error("synthesis.engage slot=\(slot): create failed \(String(describing: failure))")
+      return .failure(.createFailed(failure))
+    }
+
+    let pairing = SynthesisPairing(
+      physicalDisplayID: displayID, physicalIdentityKey: identityKey,
+      virtualDisplayID: handle.displayID, slot: slot, size: size
+    )
+
+    // The virtual display's 2x variant is engaged by the host, not promised by
+    // the spec, so what it ACHIEVED is what decides. Read through the host's
+    // own surface: this process cannot enumerate the display it just created.
+    guard let achieved = virtualDisplays.achievedMode(slot: slot),
+          achieved.width == size.logicalWidth,
+          achieved.height == size.logicalHeight,
+          achieved.hiDPI
+    else {
+      log.error("synthesis.engage slot=\(slot): the virtual display did not reach 2x")
+      return .failure(fail(.virtualModeNotAchieved, unwinding: pairing))
+    }
+
+    // The PHYSICAL becomes the slave of the virtual master: the direction
+    // `VirtualDisplayHost.breakMasteredMirrors` already unwinds when a virtual
+    // display is released.
+    do {
+      try configurator.applyMirroring(
+        [MirrorChange(display: displayID, master: handle.displayID)], scope: Self.scope
+      )
+    } catch {
+      log.error("synthesis.engage slot=\(slot): the mirror was refused")
+      return .failure(fail(.mirrorRefused, unwinding: pairing))
+    }
+
+    guard engageLanded(pairing) else {
+      log.error("synthesis.engage slot=\(slot): the panel did not take the master's geometry")
+      return .failure(fail(.engageNotAchieved, unwinding: pairing))
+    }
+
+    table[displayID] = pairing
+    log.info("synthesis.engage slot=\(slot) physical=\(displayID) vd=\(handle.displayID) \(size.logicalWidth)x\(size.logicalHeight)")
+    return .success(pairing)
+  }
+
+  /// Both halves of the achieved-state check for a landed engage.
+  ///
+  /// The topology has to show the physical mirroring the virtual master, AND
+  /// the physical has to report the master's logical and pixel geometry.
+  /// Neither alone is enough: a commit can return success over a topology it
+  /// never moved, and a topology that moved does not prove the panel followed.
+  ///
+  /// **Refresh is deliberately not compared.** While mirrored the physical
+  /// reports the master's geometry at its OWN rate (Phase 0), which is the
+  /// point of the whole feature: the panel keeps its refresh. Nothing here may
+  /// persist or descriptor-round-trip this readback either; it is a synthetic
+  /// descriptor under a fabricated mode ID that appears in no enumeration.
+  private func engageLanded(_ pairing: SynthesisPairing) -> Bool {
+    let mirrored = configurator.displays()
+      .first { $0.id == pairing.physicalDisplayID }?
+      .mirrorsDisplay == pairing.virtualDisplayID
+    guard mirrored, let achieved = configurator.currentMode(for: pairing.physicalDisplayID)
+    else { return false }
+    return achieved.logicalWidth == pairing.size.logicalWidth
+      && achieved.logicalHeight == pairing.size.logicalHeight
+      && achieved.pixelWidth == pairing.size.pixelWidth
+      && achieved.pixelHeight == pairing.size.pixelHeight
+  }
+
+  // MARK: - Disengage
+
+  public func disengage(fromPhysical displayID: CGDirectDisplayID) -> Result<Void, SynthesisFailure> {
+    guard let pairing = table[displayID] else { return .failure(.notEngaged) }
+    guard unwind(pairing) else {
+      // RETAINED, not dropped: a pairing whose teardown did not finish still
+      // names the slot and the virtual display, so a later disengage can retry
+      // and every SS7 carve-out keeps reading the set as synthesis rather than
+      // as mirroring the user built.
+      return .failure(.unwindIncomplete)
+    }
+    table[displayID] = nil
+    log.info("synthesis.disengage slot=\(pairing.slot) physical=\(displayID)")
+    return .success(())
+  }
+
+  // MARK: - Unwind
+
+  /// Reverse the steps that have been taken, and say whether the machine came
+  /// all the way back.
+  ///
+  /// **Break the mirror, then destroy the virtual display.** That order is the
+  /// contract: releasing a master first leaves its slaves showing a framebuffer
+  /// that is going away, and the host's own release path breaks mastered
+  /// mirrors for exactly that reason.
+  ///
+  /// The break is staged only when the topology says the physical is actually
+  /// mirroring this master, rather than when our bookkeeping says it should be.
+  /// A transaction whose changes are all no-ops fails at the commit with 1001
+  /// after every stage succeeded (measured), so an unconditional break would
+  /// report an incomplete unwind for a machine that was already clean.
+  private func unwind(_ pairing: SynthesisPairing) -> Bool {
+    var complete = true
+    if mirrorStands(pairing) {
+      do {
+        try configurator.applyMirroring(
+          [MirrorChange(display: pairing.physicalDisplayID, master: kCGNullDirectDisplay)],
+          scope: Self.scope
+        )
+      } catch {
+        complete = false
+      }
+      if mirrorStands(pairing) { complete = false }
+    }
+
+    // Destroyed even when the break failed. The host releases a display whose
+    // mirror set it could not break for the same reason: a virtual display
+    // nothing can reach again is worse than a set that outlived its master.
+    if !virtualDisplays.destroy(slot: pairing.slot, departureTimeout: departureTimeout) {
+      complete = false
+    }
+    if virtualDisplays.live().contains(where: { $0.slot == pairing.slot }) { complete = false }
+
+    if !complete {
+      log.error("synthesis.unwind slot=\(pairing.slot) physical=\(pairing.physicalDisplayID) did NOT complete")
+    }
+    return complete
+  }
+
+  private func mirrorStands(_ pairing: SynthesisPairing) -> Bool {
+    configurator.displays()
+      .first { $0.id == pairing.physicalDisplayID }?
+      .mirrorsDisplay == pairing.virtualDisplayID
+  }
+
+  /// Unwind a half-built engage and decide what the caller hears: the step's
+  /// own failure when the machine came back, and `.unwindIncomplete` when it
+  /// did not.
+  ///
+  /// A failed unwind RECORDS the pairing rather than discarding it. The slot is
+  /// occupied by a display that is still standing, so leaving the table empty
+  /// would hand the next engage a slot it cannot have and leave the stranded
+  /// display invisible to every synthesis-aware carve-out. It means "something
+  /// may still be up", never "this is working".
+  private func fail(
+    _ failure: SynthesisFailure, unwinding pairing: SynthesisPairing
+  ) -> SynthesisFailure {
+    guard unwind(pairing) else {
+      table[pairing.physicalDisplayID] = pairing
+      return .unwindIncomplete
+    }
+    return failure
+  }
+}
