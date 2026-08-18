@@ -11,11 +11,15 @@ import os
 /// deliberately the source of truth for what a display IS (VD5). This asks a
 /// different question, and only synthesis has to ask it.
 ///
-/// The creating process cannot enumerate its own virtual display's modes
-/// (measured 2026-08-17), so the live conformance answers through
-/// `VirtualDisplayHost`, whose re-exec helper is the only path that works.
+/// **Not a live read, and a conformance must not implement it as one.** The
+/// creating process cannot read its own virtual display back at all
+/// (measured 2026-08-17): even `CGDisplayCopyDisplayMode` returns nil for it.
+/// A conformance that read live would fail every engage on hardware while
+/// passing against every fake. `VirtualDisplayHost` answers with the verdict
+/// its re-exec helper established at creation, which is the only evidence the
+/// creating process can hold.
 public protocol VirtualDisplayAchievedModeReporting: VirtualDisplayProviding {
-  /// The achieved geometry of a live slot, or nil when the display is gone.
+  /// The achieved geometry of a live slot, or nil when the slot holds nothing.
   func achievedMode(slot: Int) -> (width: Int, height: Int, hiDPI: Bool)?
 }
 
@@ -155,23 +159,21 @@ public actor ModeSynthesisEngine {
     }
 
     let occupied = Set(table.values.map(\.slot))
-    guard let slot = VirtualDisplayIdentity.synthesisSlotRange.first(where: {
-      !occupied.contains($0)
-    }) else { return .failure(.noFreeSlot) }
+    let free = VirtualDisplayIdentity.synthesisSlotRange.filter { !occupied.contains($0) }
+    guard !free.isEmpty else { return .failure(.noFreeSlot) }
 
     let spec = VirtualDisplaySpec(
       name: Self.virtualDisplayName,
       logicalWidth: size.logicalWidth, logicalHeight: size.logicalHeight,
       hiDPI: true, refreshHz: Self.virtualRefreshHz
     )
+    let slot: Int
     let handle: VirtualDisplayHandle
-    switch virtualDisplays.create(
-      spec, slot: slot, uuid: UUID(), appearanceTimeout: appearanceTimeout
-    ) {
+    switch createOnFirstUsableSlot(spec, from: free) {
     case let .success(created):
-      handle = created
+      (slot, handle) = created
     case let .failure(failure):
-      log.error("synthesis.engage slot=\(slot): create failed \(String(describing: failure))")
+      log.error("synthesis.engage: create failed \(String(describing: failure))")
       return .failure(.createFailed(failure))
     }
 
@@ -180,9 +182,10 @@ public actor ModeSynthesisEngine {
       virtualDisplayID: handle.displayID, slot: slot, size: size
     )
 
-    // The virtual display's 2x variant is engaged by the host, not promised by
-    // the spec, so what it ACHIEVED is what decides. Read through the host's
-    // own surface: this process cannot enumerate the display it just created.
+    // The virtual display's 2x variant is ENGAGED by the host rather than
+    // promised by the spec, so what it achieved is what decides. Asked through
+    // the host's recorded verdict, never a read: this process cannot read the
+    // display it just created.
     guard let achieved = virtualDisplays.achievedMode(slot: slot),
           achieved.width == size.logicalWidth,
           achieved.height == size.logicalHeight,
@@ -212,6 +215,37 @@ public actor ModeSynthesisEngine {
     table[displayID] = pairing
     log.info("synthesis.engage slot=\(slot) physical=\(displayID) vd=\(handle.displayID) \(size.logicalWidth)x\(size.logicalHeight)")
     return .success(pairing)
+  }
+
+  /// Try each free slot until one takes the spec, and fall through on the
+  /// refusals that are ABOUT THE SLOT rather than about the request.
+  ///
+  /// `identityInUse` and `capExceeded` are both conditions the pairing table
+  /// cannot see: a slot whose display did not depart is stranded for the whole
+  /// session, and one the host still holds is occupied by something this table
+  /// never recorded. Without the fall-through a single stranded slot 4 refuses
+  /// every synthesis request for the rest of the session while slot 5 sits
+  /// free. Every other refusal is about the SPEC, and would be refused the same
+  /// way by the next slot, so it is reported rather than retried.
+  private func createOnFirstUsableSlot(
+    _ spec: VirtualDisplaySpec, from free: [Int]
+  ) -> Result<(slot: Int, handle: VirtualDisplayHandle), VirtualDisplayFailure> {
+    var lastRefusal = VirtualDisplayFailure.capExceeded
+    for slot in free {
+      switch virtualDisplays.create(
+        spec, slot: slot, uuid: UUID(), appearanceTimeout: appearanceTimeout
+      ) {
+      case let .success(handle):
+        return .success((slot, handle))
+      case let .failure(failure):
+        lastRefusal = failure
+        guard failure == .identityInUse || failure == .capExceeded else {
+          return .failure(failure)
+        }
+        log.error("synthesis.engage slot=\(slot): unusable (\(String(describing: failure))); trying the next")
+      }
+    }
+    return .failure(lastRefusal)
   }
 
   /// Both halves of the achieved-state check for a landed engage.
@@ -259,10 +293,10 @@ public actor ModeSynthesisEngine {
   /// Reverse the steps that have been taken, and say whether the machine came
   /// all the way back.
   ///
-  /// **Break the mirror, then destroy the virtual display.** That order is the
-  /// contract: releasing a master first leaves its slaves showing a framebuffer
-  /// that is going away, and the host's own release path breaks mastered
-  /// mirrors for exactly that reason.
+  /// **Break the mirror, then destroy the virtual display, then check the
+  /// panel** (SS10). That order is the contract: releasing a master first
+  /// leaves its slaves showing a framebuffer that is going away, and the host's
+  /// own release path breaks mastered mirrors for exactly that reason.
   ///
   /// The break is staged only when the topology says the physical is actually
   /// mirroring this master, rather than when our bookkeeping says it should be.
@@ -286,10 +320,28 @@ public actor ModeSynthesisEngine {
     // Destroyed even when the break failed. The host releases a display whose
     // mirror set it could not break for the same reason: a virtual display
     // nothing can reach again is worse than a set that outlived its master.
+    //
+    // The RETURN VALUE is the departure check, and the only one available: the
+    // host drops the slot before it releases the token, so a stranded display
+    // leaves `live()` looking clean while the display is still online. This is
+    // not a bare success code being trusted; the host polls the online list and
+    // returns false when the display was still in it at the deadline.
     if !virtualDisplays.destroy(slot: pairing.slot, departureTimeout: departureTimeout) {
       complete = false
     }
-    if virtualDisplays.live().contains(where: { $0.slot == pairing.slot }) { complete = false }
+
+    // SS10's last step. A panel still reporting the master's logical and pixel
+    // geometry is still showing the synthesized size, whatever the topology
+    // says about who mirrors whom. The panel's own native size cannot collide
+    // with this: SS2 drops any stop an existing row already serves, and every
+    // stop is strictly smaller than native.
+    if let panel = configurator.currentMode(for: pairing.physicalDisplayID),
+       panel.logicalWidth == pairing.size.logicalWidth,
+       panel.logicalHeight == pairing.size.logicalHeight,
+       panel.pixelWidth == pairing.size.pixelWidth,
+       panel.pixelHeight == pairing.size.pixelHeight {
+      complete = false
+    }
 
     if !complete {
       log.error("synthesis.unwind slot=\(pairing.slot) physical=\(pairing.physicalDisplayID) did NOT complete")

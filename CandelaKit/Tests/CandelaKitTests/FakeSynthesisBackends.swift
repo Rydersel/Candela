@@ -46,15 +46,26 @@ final class FakeSynthesisWorld: @unchecked Sendable {
   /// stable order keeps the fixtures readable.
   private var _order: [CGDirectDisplayID] = []
   private var _mirrors: [CGDirectDisplayID: CGDirectDisplayID] = [:]
+  /// The geometry each display was LAST given by a master, kept after the
+  /// mirror comes off so `panelStaysOnMasterGeometryAfterUnmirror` has
+  /// something to keep reporting.
+  private var _lastMasterMode: [CGDirectDisplayID: DisplayMode] = [:]
   private var _liveSlots: [Int: VirtualDisplayHandle] = [:]
+  /// What each live slot ACHIEVED, recorded at creation the way
+  /// `VirtualDisplayHost` records its engage helper's verdict. Never derived
+  /// from a read: the creating process cannot read its own virtual display.
+  private var _achievedModes: [Int: (width: Int, height: Int, hiDPI: Bool)] = [:]
 
   private var _isAvailable = true
   private var _createFailure: VirtualDisplayFailure?
-  private var _virtualDisplayStaysNonHiDPI = false
+  private var _createFailureSlots: Set<Int>?
+  private var _hiDPIEngageVerdict = true
   private var _destroySucceeds = true
   private var _mirrorFailure: DisplayConfigError?
   private var _acceptMirrorButLeaveTopologyUnchanged = false
   private var _physicalKeepsOwnModeWhileMirrored = false
+  private var _displaysHidesTheMirror = false
+  private var _panelStaysOnMasterGeometryAfterUnmirror = false
 
   // MARK: - Wiring
 
@@ -89,28 +100,49 @@ final class FakeSynthesisWorld: @unchecked Sendable {
   var mirrors: [CGDirectDisplayID: CGDirectDisplayID] { lock.withLock { _mirrors } }
   var liveSlots: [Int] { lock.withLock { _liveSlots.keys.sorted() } }
 
+  /// Virtual displays that are still ONLINE, whether or not a slot still holds
+  /// them. A stranded slot leaves one of these behind with nothing able to
+  /// destroy it.
+  var onlineVirtualDisplayIDs: [CGDirectDisplayID] {
+    lock.withLock { _order.filter { $0 >= Self.virtualDisplayID(slot: 0) } }
+  }
+
   var isAvailable: Bool {
     get { lock.withLock { _isAvailable } }
     set { lock.withLock { _isAvailable = newValue } }
   }
 
-  /// Every create fails with this. The engine must surface it and destroy
-  /// nothing: a create that returned a failure never took a slot.
+  /// Fail creates with this. The engine must surface it and destroy nothing: a
+  /// create that returned a failure never took a slot.
   var createFailure: VirtualDisplayFailure? {
     get { lock.withLock { _createFailure } }
     set { lock.withLock { _createFailure = newValue } }
   }
 
-  /// The measured create-succeeded-but-stayed-1x case the host logs by name.
-  /// The display appears, the slot is live, and the achieved mode is not the
-  /// size that was asked for, so the engine has something real to catch.
-  var virtualDisplayStaysNonHiDPI: Bool {
-    get { lock.withLock { _virtualDisplayStaysNonHiDPI } }
-    set { lock.withLock { _virtualDisplayStaysNonHiDPI = newValue } }
+  /// Narrows `createFailure` to particular slots, so a refusal that is about
+  /// ONE slot can be told apart from one that is about the spec.
+  var createFailureSlots: Set<Int>? {
+    get { lock.withLock { _createFailureSlots } }
+    set { lock.withLock { _createFailureSlots = newValue } }
   }
 
-  /// Release the token, keep the display online. `VirtualDisplayHost` calls
-  /// this slot stranded: nothing can destroy it again from this process.
+  /// What the 2x engage helper reported for a create. False is the measured
+  /// create-succeeded-but-stayed-1x case the host logs by name: the display
+  /// appears, the slot is live, and the recorded achieved mode is not the size
+  /// that was asked for.
+  ///
+  /// A RECORDED verdict, not a derived read, because that is all the host has:
+  /// the creating process cannot read its own virtual display, so a fake that
+  /// derived this from a live mode would model a call that returns nil on
+  /// hardware.
+  var hiDPIEngageVerdict: Bool {
+    get { lock.withLock { _hiDPIEngageVerdict } }
+    set { lock.withLock { _hiDPIEngageVerdict = newValue } }
+  }
+
+  /// Release the token and keep the display online: `VirtualDisplayHost` calls
+  /// that slot stranded. The slot entry is dropped anyway, exactly as the host
+  /// drops it before releasing, so the RETURN VALUE is the only signal there is.
   var destroySucceeds: Bool {
     get { lock.withLock { _destroySucceeds } }
     set { lock.withLock { _destroySucceeds = newValue } }
@@ -121,9 +153,10 @@ final class FakeSynthesisWorld: @unchecked Sendable {
     set { lock.withLock { _mirrorFailure = newValue } }
   }
 
-  /// Accept the batch, report success, change nothing. This is #53's shape:
-  /// `CGCompleteDisplayConfiguration` returning `.success` over a topology it
-  /// did not honour.
+  /// Accept the batch and change nothing. This is #53's shape, and production
+  /// CATCHES it: `applyMirroring` runs `MirrorVerification.unhonoured` after
+  /// the commit and throws, so it surfaces as a refusal rather than as a
+  /// silently divergent topology.
   var acceptMirrorButLeaveTopologyUnchanged: Bool {
     get { lock.withLock { _acceptMirrorButLeaveTopologyUnchanged } }
     set { lock.withLock { _acceptMirrorButLeaveTopologyUnchanged = newValue } }
@@ -131,10 +164,25 @@ final class FakeSynthesisWorld: @unchecked Sendable {
 
   /// The mirror lands in the topology and the panel does not follow it: the
   /// flags say mirrored, `currentMode` still reports the panel's own geometry.
-  /// The half of the engage check that a topology snapshot alone cannot catch.
   var physicalKeepsOwnModeWhileMirrored: Bool {
     get { lock.withLock { _physicalKeepsOwnModeWhileMirrored } }
     set { lock.withLock { _physicalKeepsOwnModeWhileMirrored = newValue } }
+  }
+
+  /// The opposite half: `displays()` reports nobody mirroring anybody while
+  /// the mirror really stands, so `currentMode` still substitutes the master's
+  /// geometry. The apply itself IS honoured, so `MirrorVerification` passes and
+  /// only the caller's own snapshot check can catch it.
+  var displaysHidesTheMirror: Bool {
+    get { lock.withLock { _displaysHidesTheMirror } }
+    set { lock.withLock { _displaysHidesTheMirror = newValue } }
+  }
+
+  /// The mirror comes off and the panel stays on the master's geometry. SS10's
+  /// last disengage step is the only thing that looks at this.
+  var panelStaysOnMasterGeometryAfterUnmirror: Bool {
+    get { lock.withLock { _panelStaysOnMasterGeometryAfterUnmirror } }
+    set { lock.withLock { _panelStaysOnMasterGeometryAfterUnmirror = newValue } }
   }
 
   // MARK: - Virtual displays
@@ -149,17 +197,20 @@ final class FakeSynthesisWorld: @unchecked Sendable {
         slot: slot, name: spec.name, logicalWidth: spec.logicalWidth,
         logicalHeight: spec.logicalHeight, hiDPI: spec.hiDPI
       ))
-      if let _createFailure { return .failure(_createFailure) }
+      if let _createFailure, _createFailureSlots?.contains(slot) ?? true {
+        return .failure(_createFailure)
+      }
       guard _liveSlots[slot] == nil else { return .failure(.capExceeded) }
 
       let id = Self.virtualDisplayID(slot: slot)
-      let scale = spec.hiDPI && !_virtualDisplayStaysNonHiDPI ? 2 : 1
+      let engaged = spec.hiDPI && _hiDPIEngageVerdict
       _panels[id] = Panel(
         identity: VirtualDisplayIdentity.configIdentity(slot: slot),
         name: spec.name, isBuiltIn: false,
         ownMode: DisplayMode(
           ioModeID: Int32(id), logicalWidth: spec.logicalWidth, logicalHeight: spec.logicalHeight,
-          pixelWidth: spec.logicalWidth * scale, pixelHeight: spec.logicalHeight * scale,
+          pixelWidth: spec.logicalWidth * (engaged ? 2 : 1),
+          pixelHeight: spec.logicalHeight * (engaged ? 2 : 1),
           refreshHz: spec.refreshHz, isNative: false
         )
       )
@@ -169,16 +220,20 @@ final class FakeSynthesisWorld: @unchecked Sendable {
         identity: VirtualDisplayIdentity.configIdentity(slot: slot), spec: spec
       )
       _liveSlots[slot] = handle
+      _achievedModes[slot] = (spec.logicalWidth, spec.logicalHeight, engaged)
       return .success(handle)
     }
   }
 
+  /// The host's shape exactly: the slot entry is dropped BEFORE the release, so
+  /// a display that did not depart leaves the slot looking free while the
+  /// display is still online. Only the return value says what happened.
   func destroy(slot: Int) -> Bool {
     lock.withLock {
       _calls.append(.destroyVirtualDisplay(slot: slot))
-      guard let handle = _liveSlots[slot] else { return true }
+      _achievedModes.removeValue(forKey: slot)
+      guard let handle = _liveSlots.removeValue(forKey: slot) else { return true }
       guard _destroySucceeds else { return false }
-      _liveSlots.removeValue(forKey: slot)
       _panels.removeValue(forKey: handle.displayID)
       _order.removeAll { $0 == handle.displayID }
       // A departing master takes its set with it, the way the host's own
@@ -196,11 +251,8 @@ final class FakeSynthesisWorld: @unchecked Sendable {
 
   func achievedMode(slot: Int) -> (width: Int, height: Int, hiDPI: Bool)? {
     lock.withLock {
-      guard let handle = _liveSlots[slot], let panel = _panels[handle.displayID] else { return nil }
-      return (
-        panel.ownMode.logicalWidth, panel.ownMode.logicalHeight,
-        panel.ownMode.pixelWidth >= panel.ownMode.logicalWidth * 2
-      )
+      guard _liveSlots[slot] != nil else { return nil }
+      return _achievedModes[slot]
     }
   }
 
@@ -208,7 +260,7 @@ final class FakeSynthesisWorld: @unchecked Sendable {
 
   func configuredDisplays() -> [ConfiguredDisplay] {
     lock.withLock {
-      let mirrors = _mirrors
+      let mirrors = _displaysHidesTheMirror ? [:] : _mirrors
       return _order.compactMap { id -> ConfiguredDisplay? in
         guard let panel = _panels[id] else { return nil }
         return ConfiguredDisplay(
@@ -231,15 +283,19 @@ final class FakeSynthesisWorld: @unchecked Sendable {
   func currentMode(for id: CGDirectDisplayID) -> DisplayMode? {
     lock.withLock {
       guard let panel = _panels[id] else { return nil }
-      guard !_physicalKeepsOwnModeWhileMirrored,
-            let master = _mirrors[id], let masterPanel = _panels[master]
-      else { return panel.ownMode }
+      guard !_physicalKeepsOwnModeWhileMirrored else { return panel.ownMode }
+      let masterMode: DisplayMode? = if let master = _mirrors[id] {
+        _panels[master]?.ownMode
+      } else if _panelStaysOnMasterGeometryAfterUnmirror {
+        _lastMasterMode[id]
+      } else {
+        nil
+      }
+      guard let masterMode else { return panel.ownMode }
       return DisplayMode(
         ioModeID: 166,
-        logicalWidth: masterPanel.ownMode.logicalWidth,
-        logicalHeight: masterPanel.ownMode.logicalHeight,
-        pixelWidth: masterPanel.ownMode.pixelWidth,
-        pixelHeight: masterPanel.ownMode.pixelHeight,
+        logicalWidth: masterMode.logicalWidth, logicalHeight: masterMode.logicalHeight,
+        pixelWidth: masterMode.pixelWidth, pixelHeight: masterMode.pixelHeight,
         refreshHz: panel.ownMode.refreshHz,
         isNative: false
       )
@@ -254,13 +310,28 @@ final class FakeSynthesisWorld: @unchecked Sendable {
       guard !changes.isEmpty else { return }
       _calls.append(.applyMirroring(changes, scope: scope))
       if let _mirrorFailure { throw _mirrorFailure }
-      guard !_acceptMirrorButLeaveTopologyUnchanged else { return }
-      for change in changes {
-        if change.master == kCGNullDirectDisplay {
-          _mirrors.removeValue(forKey: change.display)
-        } else {
-          _mirrors[change.display] = change.master
+      if !_acceptMirrorButLeaveTopologyUnchanged {
+        for change in changes {
+          if change.master == kCGNullDirectDisplay {
+            _mirrors.removeValue(forKey: change.display)
+          } else {
+            _mirrors[change.display] = change.master
+            if let masterMode = _panels[change.master]?.ownMode {
+              _lastMasterMode[change.display] = masterMode
+            }
+          }
         }
+      }
+      // THE SAME post-commit check production runs, on the same rule, and
+      // deliberately LAST: the batch is recorded and the topology has already
+      // moved before this throws, because a commit that diverged still
+      // committed. Without it the fake accepts a topology CoreGraphics would
+      // have refused, and the caller's own snapshot check could be deleted with
+      // every test still green.
+      if MirrorVerification.unhonoured(in: changes, achievedParent: { id in
+        _mirrors[id] ?? kCGNullDirectDisplay
+      }) != nil {
+        throw DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
       }
     }
   }

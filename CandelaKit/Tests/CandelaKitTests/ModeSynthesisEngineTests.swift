@@ -129,6 +129,52 @@ struct ModeSynthesisEngineTests {
     #expect(await engine.pairing(forPhysical: 4) == nil)
   }
 
+  /// A slot the host refuses for a reason the pairing table cannot see: a
+  /// display that did not depart strands slot 4 for the whole session. Without
+  /// the fall-through that one stranding refuses every synthesis request from
+  /// then on while slot 5 sits free.
+  @Test func aSlotSpecificRefusalFallsThroughToTheNextSlot() async throws {
+    let world = world()
+    world.createFailure = .identityInUse
+    world.createFailureSlots = [4]
+    let engine = engine(world)
+
+    let result = await engage(engine, world, size, on: Self.physical)
+
+    #expect(try #require(try? result.get()).slot == 5)
+    #expect(world.calls.first == .createVirtualDisplay(
+      slot: 4, name: "Candela Scaled Size",
+      logicalWidth: 3268, logicalHeight: 1368, hiDPI: true
+    ))
+  }
+
+  /// A refusal about the SPEC rather than about the slot is reported at once.
+  /// Retrying it on the next slot would burn the second slot's create on a
+  /// request that is going to be refused the same way.
+  @Test func aSpecRefusalIsReportedWithoutTryingTheOtherSlot() async {
+    let world = world()
+    world.createFailure = .settingsRejected
+    let engine = engine(world)
+
+    let result = await engage(engine, world, size, on: Self.physical)
+
+    #expect(result == .failure(.createFailed(.settingsRejected)))
+    #expect(world.calls.count == 1)
+  }
+
+  /// Both slots stranded is not a free slot at all, and the last refusal is
+  /// what the caller is told: it is the only thing that says why.
+  @Test func aFamilyOfStrandedSlotsSurfacesTheHostsOwnRefusal() async {
+    let world = world()
+    world.createFailure = .identityInUse
+    let engine = engine(world)
+
+    let result = await engage(engine, world, size, on: Self.physical)
+
+    #expect(result == .failure(.createFailed(.identityInUse)))
+    #expect(world.calls.count == 2)
+  }
+
   @Test func anAbsentClassFamilyIsReportedRatherThanAttempted() async {
     let world = world()
     world.isAvailable = false
@@ -162,11 +208,14 @@ struct ModeSynthesisEngineTests {
     #expect(await engine.pairings().isEmpty)
   }
 
-  /// The measured create-succeeded-but-stayed-1x case. Nothing was mirrored
-  /// yet, so the unwind is a destroy alone.
-  @Test func aVirtualDisplayThatDidNotReachTwoTimesIsDestroyedAndReported() async {
+  /// The measured create-succeeded-but-stayed-1x case, reported the way the
+  /// host reports it: the ENGAGE HELPER's verdict, recorded at creation. The
+  /// creating process cannot read the display back, so a gate built on a live
+  /// read would fail every engage on hardware and pass here. Nothing was
+  /// mirrored yet, so the unwind is a destroy alone.
+  @Test func aVirtualDisplayWhoseEngageHelperReportedFailureIsDestroyedAndReported() async {
     let world = world()
-    world.virtualDisplayStaysNonHiDPI = true
+    world.hiDPIEngageVerdict = false
     let engine = engine(world)
 
     let result = await engage(engine, world, size, on: Self.physical)
@@ -182,7 +231,7 @@ struct ModeSynthesisEngineTests {
     #expect(world.liveSlots.isEmpty)
     #expect(await engine.pairings().isEmpty)
     // The slot is free again, so the next attempt takes 4 rather than 5.
-    world.virtualDisplayStaysNonHiDPI = false
+    world.hiDPIEngageVerdict = true
     #expect((try? await engage(engine, world, size, on: Self.physical).get())?.slot == 4)
   }
 
@@ -229,20 +278,38 @@ struct ModeSynthesisEngineTests {
     #expect(await engine.pairings().isEmpty)
   }
 
-  /// The other half of the engage check: a commit that reports success over a
-  /// topology it never moved. Nothing is mirroring, so no break is staged (a
-  /// transaction of only no-ops fails at the commit), and the destroy stands
-  /// alone.
-  @Test func aMirrorTheTopologyNeverTookIsCaughtByTheSnapshotCheck() async {
+  /// A commit that reports success over a topology it never moved is caught by
+  /// `MirrorVerification` inside the apply, exactly as production catches it,
+  /// so it reaches the engine as a REFUSAL rather than as a divergent topology.
+  /// Nothing is mirroring, so no break is staged (a transaction of only no-ops
+  /// fails at the commit) and the destroy stands alone.
+  @Test func aCommitThatDidNotHonourTheBatchIsRefusedByTheApplyItself() async {
     let world = world()
     world.acceptMirrorButLeaveTopologyUnchanged = true
     let engine = engine(world)
 
     let result = await engage(engine, world, size, on: Self.physical)
 
-    #expect(result == .failure(.engageNotAchieved))
+    #expect(result == .failure(.mirrorRefused))
     #expect(world.calls.last == .destroyVirtualDisplay(slot: 4))
     #expect(world.liveSlots.isEmpty)
+  }
+
+  /// The topology half of the engage check, isolated. The apply IS honoured, so
+  /// `MirrorVerification` passes and the panel really does report the master's
+  /// geometry; only the snapshot the engine takes afterwards disagrees. Deleting
+  /// the `mirrorsDisplay` half of `engageLanded` is what this test exists to
+  /// catch.
+  @Test func aTopologySnapshotThatDoesNotShowTheMirrorFailsTheEngage() async {
+    let world = world()
+    let engine = engine(world)
+    world.displaysHidesTheMirror = true
+
+    let result = await engage(engine, world, size, on: Self.physical)
+
+    #expect(result == .failure(.engageNotAchieved))
+    #expect(world.calls.last == .destroyVirtualDisplay(slot: 4))
+    #expect(await engine.pairings().isEmpty)
   }
 
   /// A destroy that leaves the display online strands the slot, and the engine
@@ -252,7 +319,7 @@ struct ModeSynthesisEngineTests {
   /// synthesis.
   @Test func anIncompleteUnwindOnEngageIsReportedAndThePairingRetained() async {
     let world = world()
-    world.virtualDisplayStaysNonHiDPI = true
+    world.hiDPIEngageVerdict = false
     world.destroySucceeds = false
     let engine = engine(world)
 
@@ -262,6 +329,12 @@ struct ModeSynthesisEngineTests {
     let retained = await engine.pairing(forPhysical: Self.physical)
     #expect(retained?.slot == 4)
     #expect(retained?.virtualDisplayID == FakeSynthesisWorld.virtualDisplayID(slot: 4))
+    // The host drops the slot before it releases, so the display is stranded
+    // ONLINE while the slot reads free. The destroy's return value is the only
+    // thing that could have told the engine, which is why discarding it would
+    // report a clean unwind over a display nothing can destroy again.
+    #expect(world.liveSlots.isEmpty)
+    #expect(world.onlineVirtualDisplayIDs == [FakeSynthesisWorld.virtualDisplayID(slot: 4)])
   }
 
   // MARK: - Disengage
@@ -308,6 +381,32 @@ struct ModeSynthesisEngineTests {
     // The mirror still came off first: an incomplete unwind is not a skipped
     // one.
     #expect(world.mirrors.isEmpty)
+  }
+
+  /// SS10's last disengage step. The mirror came off, the virtual display went
+  /// away, and the panel is still on the synthesized geometry: the size is
+  /// still on the glass, so the teardown did not finish whatever the topology
+  /// now says.
+  @Test func aPanelStillOnTheMasterGeometryAfterTheBreakLeavesTheDisengageIncomplete() async {
+    let world = world()
+    let engine = engine(world)
+    _ = await engage(engine, world, size, on: Self.physical)
+    world.panelStaysOnMasterGeometryAfterUnmirror = true
+
+    let result = await engine.disengage(fromPhysical: Self.physical)
+
+    #expect(result.failureValue == .unwindIncomplete)
+    #expect(await engine.pairing(forPhysical: Self.physical)?.slot == 4)
+    // The break and the destroy both ran and both landed: the panel is the only
+    // thing that did not come back.
+    #expect(world.mirrors.isEmpty)
+    #expect(world.liveSlots.isEmpty)
+    #expect(Array(world.calls.suffix(2)) == [
+      .applyMirroring(
+        [MirrorChange(display: Self.physical, master: kCGNullDirectDisplay)], scope: .session
+      ),
+      .destroyVirtualDisplay(slot: 4),
+    ])
   }
 
   /// A break that fails still destroys, because a virtual display nothing can
