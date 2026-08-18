@@ -1,7 +1,3 @@
-//  The feedback-sound behaviour (the system blip's path, the global "play
-//  feedback" pref) follows MonitorControl (MIT); both are facts about macOS.
-//  The code is Candela's own.
-
 import AVFoundation
 import Foundation
 

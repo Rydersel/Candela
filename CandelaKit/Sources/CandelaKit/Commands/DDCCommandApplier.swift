@@ -1,6 +1,3 @@
-//  The control-code remap SEMANTICS follow MonitorControl's `getRemapControlCodes`
-//  (MIT); the code is Candela's own.
-
 import os
 
 /// Command-generic DDC applier (D1): carries the VCP byte the write targets,

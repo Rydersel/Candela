@@ -1,6 +1,3 @@
-//  The volume-key routing RULES here follow MonitorControl (MIT); the code is
-//  Candela's own. Individual fork references are noted at the declarations below.
-
 /// Pure volume-key routing decisions (D4/D8) — no CoreAudio here, so every
 /// branch is unit-testable.
 public enum AudioRoutingPolicy {

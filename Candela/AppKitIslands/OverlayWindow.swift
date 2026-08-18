@@ -1,11 +1,8 @@
-//  Candela. The full-screen overlay window recipe, described once as a value
-//  and applied by a thin function, so both overlay owners agree on it and so
-//  the description can be checked without an NSWindow.
-//
-//  Credit: the property set below is the standard macOS recipe for a
-//  click-through, shielding-level overlay, and Candela first learned it from
-//  MonitorControl (MIT). The values are functionally dictated; their
-//  organisation here is Candela's own.
+//  The full-screen overlay window recipe, described once as a value and applied
+//  by a thin function, so both overlay owners agree on it and so the description
+//  can be checked without an NSWindow. The property values are the standard
+//  macOS recipe for a click-through, shielding-level overlay and are dictated by
+//  what AppKit will honour.
 
 import AppKit
 

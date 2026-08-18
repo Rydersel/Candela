@@ -1,8 +1,3 @@
-//  The DisplayServices symbol names and signatures were identified from
-//  MonitorControl's bridging header (MIT), Support/Bridging-Header.h:16-17.
-//  They declare Apple's private C API and are dictated by its ABI; the shim
-//  around them is Candela's own.
-//
 // dlsym-loaded shims for the private DisplayServices.framework C API
 // (spec §4: no linker flags against private frameworks, no unsafeFlags).
 

@@ -36,24 +36,6 @@ its code:
 | `Candela/AppKitIslands/BrightnessHUD.swift` | the custom HUD |
 | `Candela/AppKitIslands/MediaKeyEventTap.swift` | the event tap (and MediaKeyTap below) |
 
-Source files that CREDIT MonitorControl without carrying its copyright header.
-These do not contain upstream code. Each either implements a rule or behaviour
-that MonitorControl describes, or declares an Apple private API whose form is
-dictated by that API and can only be written one way. They are listed because
-the debt is real even where the copyright is not, and because a reader
-comparing the two projects should be able to find them:
-
-| File | What Candela took from it |
-|---|---|
-| `CandelaKit/Sources/CandelaKit/Audio/AudioRoutingPolicy.swift` | the volume-key routing rules |
-| `CandelaKit/Sources/CandelaKit/Brightness/BrightnessSync.swift` | the cross-display fan-out behaviour |
-| `CandelaKit/Sources/CandelaKit/Brightness/DisplayServicesShim.swift` | two private DisplayServices signatures |
-| `CandelaKit/Sources/CandelaKit/Commands/DDCCommandApplier.swift` | the control-code remap semantics |
-| `CandelaKit/Sources/CandelaPrivateAPIs/include/MonitorPanel.h` | the MonitorPanel protocol declarations |
-| `Candela/AppKitIslands/OverlayWindow.swift` | the overlay window recipe (the property values, which AppKit dictates) |
-| `Candela/AppKitIslands/VolumeFeedbackSound.swift` | the feedback sound's system path and pref key |
-| `Candela/OledCare/OledOverlay.swift` | the overlay technique, via `ShadeOverlay` |
-
 ```
 MIT License
 

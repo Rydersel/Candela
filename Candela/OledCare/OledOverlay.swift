@@ -1,8 +1,3 @@
-//  Candela. Credit: the overlay technique this uses (a shielding-level,
-//  every-space, click-through black window whose content-view alpha carries the
-//  dim) follows MonitorControl (MIT). The window recipe itself is Candela's
-//  `OverlayWindow`; no code in this file is transplanted.
-
 import AppKit
 import CandelaKit
 import os

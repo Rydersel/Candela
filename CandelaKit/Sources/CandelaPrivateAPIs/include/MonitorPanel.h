@@ -1,11 +1,6 @@
 // include/MonitorPanel.h — private MonitorPanel.framework interfaces.
 // Loaded via dlopen + NSClassFromString at runtime; never linked.
 //
-// The MonitorPanel protocol declarations were identified from MonitorControl's
-// bridging header (MIT), Support/Bridging-Header.h:29-41. They describe Apple's
-// private framework interface and can only be written one way; the surrounding
-// shim is Candela's own.
-//
 // Do not add selectors that are not verified to exist; void-returning
 // undeclared selectors crash through perform().
 //
