@@ -221,6 +221,8 @@ var skippedLocked = 0
 var skippedAsleep = 0
 var skippedBlack = 0
 var skippedUnusable = 0
+var mirroredReported = Set<CGDirectDisplayID>()
+var unreachableReported = Set<CGDirectDisplayID>()
 var captureFailures = 0
 var writeFailures = 0
 var contentFailures = 0
@@ -277,6 +279,20 @@ while taken < options.maxSamples {
     lastOnline = onlineNow
   }
 
+  // Silence is the failure mode this whole tool was rebuilt around: a panel that
+  // is online but unreachable must say so once, not simply never appear.
+  for entry in discovered where !content.displays.contains(where: { $0.displayID == entry.display.id })
+    && !discovered.contains(where: { CGDisplayMirrorsDisplay($0.display.id) == entry.display.id })
+  {
+    let mirrorTarget = CGDisplayMirrorsDisplay(entry.display.id)
+    if mirrorTarget == 0, unreachableReported.insert(entry.display.id).inserted {
+      print(
+        "  WARNING: \(entry.display.name) (id \(entry.display.id)) is online but absent from "
+          + "ScreenCaptureKit and mirrors nothing. It will not be recorded.")
+      fflush(stdout)
+    }
+  }
+
   if screenIsLocked() {
     skippedLocked += 1
     try await Task.sleep(for: .seconds(options.interval))
@@ -296,10 +312,33 @@ while taken < options.maxSamples {
     // framebuffer rather than emitted light, so nothing here needs a physical
     // panel. Fall back to a key derived from the display ID, which is stable
     // for the life of a run and is only used to group records.
+    // A MIRRORING panel is absent from ScreenCaptureKit entirely, so the pixels
+    // it is showing arrive here under the display it mirrors. Attribute them to
+    // the PANEL, never to the surface carrying them: a virtual display has no
+    // EDID and its fallback key changes when it is recreated, so nothing
+    // accumulated under it can be attached to the glass that actually wore.
+    //
+    // Measured 2026-08-18 with a synthesized size engaged: the MAG reported
+    // `inSCK=false, mirrorOf=79` while online, awake and advertising its native
+    // descriptor, and produced ZERO records. Silent, because a display missing
+    // from the list is indistinguishable from one that was skipped.
+    let mirroring = discovered.first {
+      CGDisplayMirrorsDisplay($0.display.id) == scDisplay.displayID
+    }
+    if let mirroring, mirroredReported.insert(mirroring.display.id).inserted {
+      print(
+        "  note: \(mirroring.display.name) (id \(mirroring.display.id)) is mirroring "
+          + "display \(scDisplay.displayID); attributing its capture to the panel")
+      fflush(stdout)
+    }
     let persistenceKey =
-      discovered.first(where: { $0.display.id == scDisplay.displayID })?.display.persistenceKey
+      mirroring?.display.persistenceKey
+      ?? discovered.first(where: { $0.display.id == scDisplay.displayID })?.display.persistenceKey
       ?? "cgdisplay-\(scDisplay.displayID)"
-    guard let rotation = DisplayRotation(degrees: CGDisplayRotation(scDisplay.displayID)) else {
+    guard
+      let rotation = DisplayRotation(
+        degrees: CGDisplayRotation(mirroring?.display.id ?? scDisplay.displayID))
+    else {
       // Counted, not silent: an all-zero skip line beside zero written records
       // is the "recording nothing" shape the progress rewrite exists to expose.
       skippedUnusable += 1
