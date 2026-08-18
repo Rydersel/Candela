@@ -7,12 +7,18 @@ let package = Package(
   products: [
     .library(name: "CandelaKit", targets: ["CandelaKit"]),
     .executable(name: "candela-probe", targets: ["CandelaProbe"]),
+    .executable(name: "candela-model-capture", targets: ["CandelaModelCapture"]),
+    .executable(name: "candela-model-fit", targets: ["CandelaModelFit"]),
   ],
   targets: [
     .target(name: "CandelaPrivateAPIs",
             linkerSettings: [.linkedFramework("CoreDisplay")]),
     .target(name: "CandelaKit", dependencies: ["CandelaPrivateAPIs"]),
     .executableTarget(name: "CandelaProbe", dependencies: ["CandelaKit"]),
+    // Tool targets, not the engine: MP5 records that §4's import restriction
+    // binds the CandelaKit library target, which is what stays UI-free.
+    .executableTarget(name: "CandelaModelCapture", dependencies: ["CandelaKit"]),
+    .executableTarget(name: "CandelaModelFit", dependencies: ["CandelaKit"]),
     .testTarget(name: "CandelaKitTests", dependencies: ["CandelaKit"]),
   ]
 )

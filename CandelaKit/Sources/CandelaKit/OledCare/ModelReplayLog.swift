@@ -13,7 +13,7 @@ import Foundation
 /// can be restructured freely; the field exists only so the harness refuses a
 /// log it does not understand instead of misreading one.
 public struct ModelReplayRecord: Codable, Equatable, Sendable {
-  public static let formatVersion = 1
+  public static let formatVersion = 2
 
   public struct Display: Codable, Equatable, Sendable {
     public var persistenceKey: String
@@ -111,12 +111,25 @@ public struct ModelReplayRecord: Codable, Equatable, Sendable {
   public var modelledBaseline: [Double]
   public var wallpaper: [Double]?
   public var appearanceIsDark: Bool
+  /// Exactly what the app's own window source reports, so `modelledBaseline`
+  /// is reproducible from this alone.
   public var windows: [Window]
+  /// The desktop elements the app's source filters out before the model ever
+  /// sees them: the Dock, the menu bar, the desktop backdrop.
+  ///
+  /// Recorded but NOT fed to the baseline model, because they are not what the
+  /// shipped model consumes. `ExposureModel.includedLayers` documents itself as
+  /// reaching "up through the Dock and the menu bar", but the source applies
+  /// `.excludeDesktopElements` first, so that range never sees them. The
+  /// measured capture does contain their light. Whether closing that asymmetry
+  /// helps is a variant this log can answer offline instead of costing another
+  /// collection run.
+  public var chrome: [Window]
 
   public init(
     v: Int = ModelReplayRecord.formatVersion, t: Double, elapsed: TimeInterval,
     display: Display, capture: Capture, measuredPanel: [Double], modelledBaseline: [Double],
-    wallpaper: [Double]?, appearanceIsDark: Bool, windows: [Window]
+    wallpaper: [Double]?, appearanceIsDark: Bool, windows: [Window], chrome: [Window] = []
   ) {
     self.v = v
     self.t = t
@@ -128,6 +141,7 @@ public struct ModelReplayRecord: Codable, Equatable, Sendable {
     self.wallpaper = wallpaper
     self.appearanceIsDark = appearanceIsDark
     self.windows = windows
+    self.chrome = chrome
   }
 
   public var transform: PanelSpaceTransform {
@@ -139,6 +153,15 @@ public struct ModelReplayRecord: Codable, Equatable, Sendable {
   public var inputs: ExposureModelInputs {
     ExposureModelInputs(
       windows: windows.map(\.snapshot), wallpaperCells: wallpaper,
+      appearanceIsDark: appearanceIsDark)
+  }
+
+  /// The same instant with system chrome admitted, for the variant that asks
+  /// whether modelling the Dock and menu bar closes any of the gap. Chrome goes
+  /// BEHIND the app windows: it is what a window occludes, never the reverse.
+  public var inputsIncludingChrome: ExposureModelInputs {
+    ExposureModelInputs(
+      windows: (windows + chrome).map(\.snapshot), wallpaperCells: wallpaper,
       appearanceIsDark: appearanceIsDark)
   }
 
