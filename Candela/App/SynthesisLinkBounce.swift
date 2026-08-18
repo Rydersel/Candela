@@ -48,7 +48,17 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     // engage under HDR, so reaching here with it on means an outside actor
     // moved it mid-engage, and a bounce would end their choice.
     guard await hdr.measuredHDREnabled(displayID: displayID) == false else { return }
-    guard await hdr.setHDR(displayID: displayID, enabled: true) else {
+    // The engage's reconfigure is still settling when this runs, and the
+    // MonitorPanel access lock is non-blocking: the first write straight
+    // after the engage was measured refused. Settle first, then retry the
+    // on leg with the same patience the off leg gets.
+    try? await Task.sleep(for: .seconds(3))
+    var wentOn = false
+    for _ in 1...3 {
+      if await hdr.setHDR(displayID: displayID, enabled: true) { wentOn = true; break }
+      try? await Task.sleep(for: .seconds(2))
+    }
+    guard wentOn else {
       Self.log.info("synthesis.bounce skipped: the on write was refused for display \(displayID)")
       return
     }
