@@ -328,6 +328,10 @@ func scoreJointly(
 
 // MARK: - Load
 
+guard FileManager.default.fileExists(atPath: directory.path) else {
+  print("no such log directory: \(directory.path)")
+  exit(2)
+}
 let (records, skipped) = try ModelReplayLog.read(directory: directory)
 print("log: \(directory.path)")
 print("records \(records.count), skipped \(skipped)")
@@ -426,7 +430,13 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
   // does contain overlapping covered windows, reversing them must change the
   // result. Where it contains none, the answer is "not applicable", never
   // "failed". `ExposureModelCompositingTests` pins the code property itself.
-  for record in raw.prefix(40) {
+  // Sampled ACROSS the log, not from its head. A divergence that begins later
+  // was invisible: mutating a record at index 60 left the control printing
+  // "yes" while every rung scored on 154 records the harness and the shipped
+  // model disagreed about. The release binary makes the wider sample free.
+  let stride = max(1, raw.count / 60)
+  let sampled = Swift.stride(from: 0, to: raw.count, by: stride).map { raw[$0] }
+  for record in sampled {
     let prepared = prepare(record)
     for candidate in probes {
       // Both chrome settings: V2 onward all composite with chrome admitted, and
@@ -446,7 +456,7 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
 
   var orderTested = 0
   var orderBlind = 0
-  for record in raw.prefix(40) {
+  for record in sampled {
     let prepared = prepare(record)
     let covering = prepared.windows.filter { $0.coverage.contains { $0 > 0 } }
     guard covering.count > 1 else { continue }
@@ -490,6 +500,7 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
   // and a tiled desktop legitimately cannot. Failing a panel for that dropped
   // the rotated Dell and then reported an app with 45 windows on it as having
   // no coverage.
+  _ = orderTested
   if orderTested == 0 {
     print("  note:    window order not exercised by this log (no differing-owner overlap)")
   } else if orderBlind == orderTested {
@@ -498,10 +509,11 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
     print(
       "  control: window ORDER changes the model               yes (\(orderTested - orderBlind)/\(orderTested))")
   }
-  let chromeSeen = raw.prefix(40).contains { !$0.chrome.isEmpty }
+  let chromeSeen = sampled.contains { !$0.chrome.isEmpty }
   print(
     "  control: prepared path matches ExposureModel \(mismatches == 0 ? "yes" : "NO (\(mismatches))")"
-      + " (\(probes.count) parameterisations, chrome \(chromeSeen ? "present" : "ABSENT from this log"))")
+      + " (\(sampled.count) of \(raw.count) records, \(probes.count) parameterisations, "
+      + "chrome \(chromeSeen ? "present" : "ABSENT from this log"))")
   return mismatches == 0
 }
 
@@ -637,14 +649,18 @@ func passes(
   // that printed a rung which beat the bar by six cells as
   // "fail (ranking UNREACHABLE)" — and the run card tells the reader to trust
   // that line above the others.
+  func signed(_ value: Int) -> String { value >= 0 ? "+\(value)" : "\(value)" }
   if decile - baselineDecile >= 3 { return (true, "PASS") }
-  if ceiling - baselineDecile < 3 {
-    return (
-      false,
-      "decile +\(decile - baselineDecile); best objective-optimal fit on the holdout also "
-        + "reached only +\(ceiling - baselineDecile), so the bar may be unreachable here")
+  // The reference is only mentioned when it is BELOW this rung's own gain;
+  // saying "the bar may be unreachable" on a rung that already beat the
+  // reference is the wrong-quantity comparison surviving in prose.
+  if ceiling - baselineDecile < 3, ceiling <= decile {
+    return (false, "decile \(signed(decile - baselineDecile)), and an objective-optimal fit on "
+      + "the holdout reached only \(signed(ceiling - baselineDecile))")
   }
-  return (false, "decile +\(decile - baselineDecile), reference +\(ceiling - baselineDecile)")
+  return (
+    false,
+    "decile \(signed(decile - baselineDecile)), reference \(signed(ceiling - baselineDecile))")
 }
 
 /// Returns this rung's hottest-DECILE agreement so the next rung can be judged
@@ -712,6 +728,12 @@ func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelP
     if parameters.darkAppearancePrior <= 0 || parameters.darkAppearancePrior >= 1,
       sensitivity(fitGroups, parameters, get: { $0.darkAppearancePrior },
         set: { $0.darkAppearancePrior = $1 }) > 1e-6 { pinnedNames.append("dark") }
+    // The light prior is the one the run card asks the operator to exercise, so
+    // it is the one most likely to land on a clamp during the session. Its check
+    // was dropped when this block was rewritten.
+    if parameters.lightAppearancePrior <= 0 || parameters.lightAppearancePrior >= 1,
+      sensitivity(fitGroups, parameters, get: { $0.lightAppearancePrior },
+        set: { $0.lightAppearancePrior = $1 }) > 1e-6 { pinnedNames.append("light") }
   }
   let pinned = !pinnedNames.isEmpty
   print(
@@ -794,6 +816,13 @@ for group in fitGroups {
     // non-zero app layers such as 3 when any are present, which is why the
     // rung is not purely about chrome.
     for window in record.chrome {
+      // Only ADMISSIBLE coverage counts. Ranking by raw coverage let the Dock
+      // and the WindowServer backdrop, both at exactly 1.0 and therefore
+      // refused at every limit, take the top two of four slots on weight ~12x
+      // the menu bar's, squeezing out real app layers and printing as
+      // UNIDENTIFIABLE every run. That biases the ladder toward no-go.
+      let fraction = window.coverage.reduce(0, +) / Double(PanelGrid.cellCount)
+      guard fraction > 0, fraction < 1 else { continue }
       layerWeight[window.layer, default: 0] += window.coverage.reduce(0, +) * record.elapsed
     }
   }
