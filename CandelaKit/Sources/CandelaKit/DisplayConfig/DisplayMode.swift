@@ -35,7 +35,9 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
   public let refreshHz: Double
   /// `kDisplayModeNativeFlag` — the panel's own timing.
   public let isNative: Bool
-  /// Which list published this mode, and therefore which call applies it.
+  /// Where this mode came from, and therefore what applies it: one of the two
+  /// enumerations and its matching call, or synthesis, which no configurator
+  /// call applies at all.
   public let provenance: ModeProvenance
 
   public init(

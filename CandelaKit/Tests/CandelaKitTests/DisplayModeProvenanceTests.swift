@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 
@@ -46,6 +47,58 @@ struct DisplayModeProvenanceTests {
     #expect(!m.isRevealed)
     #expect(m.ioModeID == -1002)
     #expect(m.isHiDPI)
+  }
+}
+
+/// SS5's routing half, against the REAL configurator: a synthesized mode is
+/// refused by the CoreGraphics apply path rather than routed anywhere in it.
+///
+/// Safe on this machine, and the safety is structural rather than lucky: the
+/// `.synthesized` arm throws before `beginDisplayConfiguration`, so no
+/// transaction is opened. It stays safe under the mutation these tests exist to
+/// catch, because a sentinel `ioModeID` is negative and therefore resolves to no
+/// `CGDisplayMode` on any display, and the published path's lookup also throws
+/// before opening a transaction.
+///
+/// The expected error is spelled exactly, not merely `DisplayConfigError.self`.
+/// Both wrong routings throw SOMETHING (the published path fails to resolve the
+/// sentinel; the revealed path stages it and fails), so a type-only expectation
+/// would pass against a configurator that had stopped refusing entirely.
+@Suite("Synthesized apply refusal (SS5)")
+struct SynthesizedApplyRefusalTests {
+  private let refusal = DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue)
+
+  private func synthesizedMode() -> DisplayMode {
+    DisplayMode(
+      ioModeID: DisplayMode.syntheticIoModeID(stopIndex: 2),
+      logicalWidth: 2580, logicalHeight: 1080,
+      pixelWidth: 5160, pixelHeight: 2160,
+      refreshHz: 0, isNative: false, provenance: .synthesized
+    )
+  }
+
+  /// A real, attached display: the refusal is keyed on provenance, not on the
+  /// display being bogus. This is the one that would catch a caller wiring a
+  /// synthesized row into the ordinary apply path.
+  @Test func applyRefusesASynthesizedModeOnAnAttachedDisplay() {
+    let configurator = CoreGraphicsDisplayConfigurator()
+    #expect(throws: refusal) {
+      try configurator.apply(synthesizedMode(), to: CGMainDisplayID(), scope: .preview)
+    }
+  }
+
+  @Test func applyRefusesASynthesizedModeForANonexistentDisplayToo() {
+    let configurator = CoreGraphicsDisplayConfigurator()
+    #expect(throws: refusal) {
+      try configurator.apply(synthesizedMode(), to: 0xDEAD_BEEF, scope: .preview)
+    }
+  }
+
+  /// The refusal code must stay distinguishable from the published path's
+  /// stale-ID failure, which is the only reason the expectations above can tell
+  /// a refusal from a wrong routing that happened to fail.
+  @Test func theRefusalCodeIsNotTheStaleIDCode() {
+    #expect(refusal.cgErrorCode != CGError.illegalArgument.rawValue)
   }
 }
 
