@@ -210,9 +210,12 @@ struct AllModesPage: View {
     chosenListMode = catalog.rows.isEmpty ? .all : .recommended
     // The size in use opens with the page — it is the one group somebody
     // arriving here is looking for, and leaving it shut would put the
-    // checkmark's own row behind a click.
-    if let current = catalog.current {
-      expandedSizes.insert(RowID.size(width: current.logicalWidth, height: current.logicalHeight))
+    // checkmark's own row behind a click. `onScreen`, so while a size this app
+    // renders is engaged this opens nothing rather than opening the native
+    // group under a caption saying the running size is not in the list.
+    if let onScreen = catalog.onScreen {
+      expandedSizes.insert(
+        RowID.size(width: onScreen.logicalWidth, height: onScreen.logicalHeight))
     }
   }
 
@@ -278,9 +281,15 @@ struct AllModesPage: View {
           // SS4's All clause. This list enumerates what the DISPLAY reports, so
           // a synthesized stop has no row here and, while one is engaged, the
           // checkmark is on nothing at all. Saying so beats a list that reads as
-          // though it had lost track of the size on screen. (`catalog.current`
-          // is no help either: a mirrored display reports a fabricated
-          // descriptor that appears in no enumeration [MEASURED 2026-08-17].)
+          // though it had lost track of the size on screen.
+          //
+          // The raw readback cannot stand in. Since the engage tail re-times
+          // the slave onto its own mode it names the display's NATIVE geometry
+          // [MEASURED 2026-08-18], which is a real row in this list and not
+          // what is on the glass: matching against it ticked a row directly
+          // under this caption. Every reader here goes through
+          // `Catalog.onScreen`, which answers from the engine's pairing while a
+          // stop is engaged.
           if Self.showsEngagedSizeNotice(in: catalog) {
             SettingsCaption(verbatim: SynthesisCopy.engagedSizeNotListed)
           }
@@ -346,10 +355,10 @@ struct AllModesPage: View {
     _ row: DisplayModeRow, in catalog: DisplayModeCoordinator.Catalog
   ) -> AllModesRow {
     // A synthesized stop is not in `catalog.all` and has no rate of its own, so
-    // the outcome question does not apply to it: what scans out is whatever the
-    // display was already running, which the mirror preserves [MEASURED
-    // 2026-08-17]. Asking anyway would compare its size against a list that
-    // does not hold it and answer nil for every field.
+    // the outcome question does not apply to it: what scans out is the
+    // display's own timing, which the engage tail re-times it back onto
+    // [MEASURED 2026-08-18]. Asking anyway would compare its size against a
+    // list that does not hold it and answer nil for every field.
     let synthesized = row.mode.isSynthesized
     let outcome = synthesized ? nil : DisplayModeCatalog.outcome(
       selectingWidth: row.mode.logicalWidth,
@@ -367,8 +376,8 @@ struct AllModesPage: View {
     // A synthesized row is the third case, and the one that has something to
     // say: its `refreshHz` is the 0 sentinel, so the branch above would leave
     // the column blank on the rows most in need of explaining. It names the
-    // rule instead, and never a figure: 175 Hz is a prediction rather than a
-    // measurement.
+    // rule instead, and never a figure: the rule holds for every panel, and a
+    // figure would be this panel's.
     let rate = synthesized
       ? SynthesisCopy.keepsPanelRefresh
       : (hz > 0
@@ -463,7 +472,12 @@ struct AllModesPage: View {
       ] + tags + [badge].compactMap { $0 }).joined(separator: ", "),
       // Exact here, unlike the curated rows: this list holds every rate of
       // every size, so the row the display is running is one specific mode.
-      isCurrent: mode.ioModeID == catalog.current?.ioModeID
+      //
+      // Against `onScreen`, which answers nothing in this list while a size
+      // this app renders is engaged: its sentinel mode id belongs to no
+      // published row, so no row is ticked, which is what the caption above the
+      // list already says.
+      isCurrent: mode.ioModeID == catalog.onScreen?.ioModeID
     )
   }
 
@@ -474,7 +488,7 @@ struct AllModesPage: View {
     _ group: DisplayModeCatalog.SizeGroup, in catalog: DisplayModeCoordinator.Catalog,
     expanded: Bool
   ) -> AllModesRow {
-    let holdsCurrent = catalog.current.map {
+    let holdsCurrent = catalog.onScreen.map {
       $0.logicalWidth == group.logicalWidth && $0.logicalHeight == group.logicalHeight
     } ?? false
     let top = group.modes.map(\.refreshHz).max().map(DisplayMode.quantizedRefresh)
@@ -702,12 +716,14 @@ struct AllModesPage: View {
   /// holds one row per SIZE, and `All` holds the exact mode — behind a size row
   /// that may be shut, in which case the size row is the thing to land on.
   private var currentRowID: String? {
-    guard let catalog, let current = catalog.current else { return nil }
+    guard let catalog, let onScreen = catalog.onScreen else { return nil }
     switch listMode {
     case .recommended:
       return catalog.rows.first { catalog.isCurrentSize($0.mode) }.map { RowID.mode($0.id) }
     case .all:
-      return rowID(forModeAt: current, in: catalog)
+      // Answers nil while a size this app renders is engaged: the All list does
+      // not hold that size, so there is nothing to scroll to.
+      return rowID(forModeAt: onScreen, in: catalog)
     }
   }
 

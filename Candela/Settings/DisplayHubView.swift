@@ -437,9 +437,8 @@ struct DisplayHubView: View {
   ///
   /// Absent entirely while a synthesized size is engaged, and `synthesizedRateRow`
   /// takes its place. Two reasons, either of which is enough: the rates it would
-  /// list belong to a size that is not on the glass (the display is showing the
-  /// virtual master's geometry), and picking one would apply a published mode to
-  /// a display whose picture comes from somewhere else.
+  /// list belong to a size that is not on the glass, and picking one would apply
+  /// a published mode to a display whose picture comes from somewhere else.
   @ViewBuilder private func refreshPicker(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
     if let current = catalog.current, catalog.engagedSyntheticSize == nil {
       let selected = catalog.rows.first { $0.id == curatedSelection(in: catalog) }?.mode ?? current
@@ -464,11 +463,11 @@ struct DisplayHubView: View {
 
   /// What the refresh picker's slot says while a synthesized size is engaged.
   ///
-  /// The rate is not a property of the stop: the mirror preserves whatever the
-  /// display was already running [MEASURED 2026-08-17, 100 Hz before, during
-  /// and after], so this states the rule and never a figure. A row rather than
-  /// nothing, because a refresh control that simply vanished would read as the
-  /// feature having taken the rate away.
+  /// The rate is not a property of the stop: the engage tail re-times the
+  /// display onto its own mode, so it keeps its own rate [MEASURED 2026-08-18],
+  /// and this states the rule rather than a figure. A row rather than nothing,
+  /// because a refresh control that simply vanished would read as the feature
+  /// having taken the rate away.
   @ViewBuilder private func synthesizedRateRow(
     _ catalog: DisplayModeCoordinator.Catalog
   ) -> some View {

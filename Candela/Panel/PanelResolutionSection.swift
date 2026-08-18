@@ -154,8 +154,11 @@ struct PanelResolutionSection: View {
       // to find out. It costs 50 pt of the row's slack (measured at 12 pt
       // system: 72.4 → 122.2, against the 161.6 that truncated), so the
       // badges' verdict is unchanged.
-      detail: catalog.current.map(summary),
-      spokenDetail: catalog.current.map(spokenSummary),
+      // `onScreen`, never the raw readback: while a size this app renders is
+      // engaged the readback names the display's native geometry, and this row
+      // is the only place in the menu bar that states what is running.
+      detail: catalog.onScreen.map(summary),
+      spokenDetail: catalog.onScreen.map(spokenSummary),
       accessibilityName: displayName,
       accessibilityRole: "resolution",
       isExpanded: isExpanded

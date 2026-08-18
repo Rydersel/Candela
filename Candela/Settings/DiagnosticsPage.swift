@@ -187,10 +187,14 @@ struct DiagnosticsPage: View {
       }
     }
 
+    // `onScreen`, never the raw readback. While a size this app renders is
+    // engaged the readback names the display's native geometry, and this row
+    // would then contradict the "Synthesized size active" line further down the
+    // same page and the mode line of the report pasted from it.
     if let native = model.displayModes.catalogs[state.id], native.nativeKnown,
-       let current = native.current {
+       let onScreen = native.onScreen {
       LabeledContent("Current mode") {
-        Text(verbatim: DiagnosticsCopy.mode(current)).foregroundStyle(.secondary)
+        Text(verbatim: DiagnosticsCopy.mode(onScreen)).foregroundStyle(.secondary)
       }
     }
 
@@ -621,10 +625,11 @@ struct DiagnosticsPage: View {
   }
 
   /// The engaged pairing, from the ENGINE's own table (SS1) and never from a CG
-  /// mirror flag or a mode readback: a synthesis-engaged display reports the
-  /// virtual master's geometry under a fabricated mode id that appears in no
-  /// enumeration [MEASURED 2026-08-17], so "Current mode" above is describing
-  /// the set rather than the display.
+  /// mirror flag or a mode readback: the engage tail re-times the slave, so a
+  /// synthesis-engaged display reports its own native mode [MEASURED
+  /// 2026-08-18]. "Current mode" above reads `Catalog.onScreen` for exactly
+  /// that reason, so the two rows name the same size; this one adds the slot,
+  /// which is what tells two engaged displays apart in a pasted report.
   ///
   /// Directly under Mirroring, which is where the same set shows up as a
   /// mirror. This line is what says whose mirror it is.
