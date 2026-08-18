@@ -553,6 +553,27 @@ final class SynthesisCoordinator {
     return true
   }
 
+  /// A picker-driven ordinary size choice over a COMMITTED set (SS10): the
+  /// set comes down through the engine before any mode may touch the panel,
+  /// which is otherwise a mirror slave the apply would land on invisibly.
+  /// Returns false without touching anything when it refuses; the caller
+  /// refuses the mode change in turn.
+  func disengageForModeChange(_ display: ConfiguredDisplay) async -> Bool {
+    await disengageForOptOut(display)
+  }
+
+  /// Clears the stored stop without touching the opt-in or the machine.
+  /// For the kept-ordinary-mode funnel: a kept normal size is an explicit
+  /// choice against the stored stop, which would otherwise re-engage at the
+  /// next launch over the size the user just kept.
+  func clearStoredSize(displayID: CGDirectDisplayID) {
+    guard let key = persistenceKey(displayID) else { return }
+    let prefs = DisplayPrefs(persistenceKey: key)
+    guard prefs.storedSyntheticSize != nil else { return }
+    prefs.setStoredSyntheticSize(nil)
+    didWriteSynthesisPref(.storedSyntheticSize, key)
+  }
+
   /// The verified disengage both opt-out paths share.
   ///
   /// Returns false without touching anything when it refuses, which is what

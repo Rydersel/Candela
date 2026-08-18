@@ -1217,6 +1217,25 @@ final class DisplayModeCoordinator {
       await adopt(.keep)
       return
     }
+    // A COMMITTED set is not a preview, so the guard above never sees it.
+    // Picking an ordinary row while a synthesized size is engaged must take
+    // the set down through the engine first (SS10): the panel is a mirror
+    // slave, and a mode applied underneath the mirror lands invisibly while
+    // the set stands. Same stand-down-before-claim ordering as above.
+    if mode.provenance != .synthesized, synthesis?.isEngaged(displayID: displayID) == true {
+      guard let display = configurator.displays().first(where: { $0.id == displayID }),
+            await synthesis?.disengageForModeChange(display) == true
+      else {
+        log.error("Refused a mode change on display \(displayID): the engaged synthesized size could not be disengaged")
+        await adopt(.keep)
+        return
+      }
+      // The disengage reconfigured the display; the rows this pick was made
+      // from are stale. The apply below still cross-checks the descriptor, so
+      // a reassigned ioModeID surfaces as a reported failure, never a wrong
+      // mode.
+      refreshCatalog(for: displayID)
+    }
     // AR12, asked BEFORE `begin()` because that is what makes a refusal cost
     // nothing: no transaction has been opened and no display has moved, so there
     // is a sentence to say and nothing to undo. Granted when WE are already the
@@ -1737,6 +1756,12 @@ final class DisplayModeCoordinator {
     _ mode: DisplayMode, on displayID: CGDirectDisplayID, for identity: DisplayConfigIdentity
   ) {
     persistence.store(mode.descriptor, for: identity)
+    // A kept ordinary mode is an explicit choice against any stored stop,
+    // which would otherwise re-engage at the next launch over the size the
+    // user just kept. No-op when nothing is stored.
+    if mode.provenance != .synthesized {
+      synthesis?.clearStoredSize(displayID: displayID)
+    }
     didStoreMode(displayID)
   }
 
