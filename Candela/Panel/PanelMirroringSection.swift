@@ -57,10 +57,34 @@ struct PanelMirroringSection: View {
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+  /// The coordinator's sample, which since synthesis carries the engine's
+  /// pairing (SS1). Every predicate below is an SS7 carve-out site and answers
+  /// "ordinary mirror set" for everything on an un-stamped one.
   private var topology: MirrorTopology { coordinator.topology }
   private var isExpanded: Bool { expanded == PanelDisclosureID(displayID, .mirroring) }
-  private var isInSet: Bool { !topology.setMembers(containing: displayID).isEmpty }
-  private var isLocked: Bool { topology.cannotBeUnmirrored(displayID) }
+
+  /// True when this panel is showing a synthesized size (SS7). The ONE predicate
+  /// behind this file's carve-outs; it lives in `MirroringPredicates`, shared
+  /// with the settings section and the display hero.
+  private var isSynthesized: Bool {
+    MirroringPredicates.isSynthesized(topology, displayID: displayID)
+  }
+
+  /// The displays this section may count and speak about: the virtual displays
+  /// synthesis renders onto are not among them. A VD is online and would
+  /// otherwise be the second display that makes a lone panel look like a rig
+  /// worth offering a mirror control to.
+  private var userVisibleDisplays: [ConfiguredDisplay] {
+    MirroringPredicates.userVisibleDisplays(topology)
+  }
+
+  private var isInSet: Bool {
+    !isSynthesized && !topology.setMembers(containing: displayID).isEmpty
+  }
+
+  /// Never true for a synthesized panel: `isAlwaysInMirrorSet` drives a caption
+  /// about macOS refusing to release a set, and Candela engaged this one.
+  private var isLocked: Bool { !isSynthesized && topology.cannotBeUnmirrored(displayID) }
 
   /// Whether this display is offered the control at all.
   ///
@@ -83,7 +107,7 @@ struct PanelMirroringSection: View {
   /// under the user's hands, and the display it vanished from is precisely the
   /// one the user is looking for it on.
   private var isUsable: Bool {
-    topology.displays.filter { !$0.isAlwaysInMirrorSet }.count >= 2 || isInSet || isLocked
+    userVisibleDisplays.filter { !$0.isAlwaysInMirrorSet }.count >= 2 || isInSet || isLocked
   }
 
   /// The residue of a break that committed exactly what it staged and STILL left
@@ -141,7 +165,12 @@ struct PanelMirroringSection: View {
       // "Showing Built-in Display" / "Mirrored to 2 displays" / "Not mirrored" —
       // words rather than a badge, so the state survives a screenshot in a bug
       // report. The same sentence Settings and the confirmation window use.
-      detail: MirroringCopy.state(topology: topology, displayID: displayID, name: name),
+      //
+      // A synthesized panel reads "Not mirrored", the true answer to what this
+      // row asks: the user is mirroring nothing, and the set behind the size in
+      // force is the size picker's to describe. "Showing <virtual display>"
+      // would name a display nobody has, over a row offering to start mirroring.
+      detail: MirroringPredicates.statusLine(topology, displayID: displayID, name: name),
       accessibilityName: displayName,
       accessibilityRole: "mirroring",
       isExpanded: isExpanded

@@ -67,6 +67,7 @@ struct DiagnosticsPrefSummaryTests {
     prefs.pollingMode = .heavy
     prefs.pollingCount = 4
     prefs.sizeRecommendationDismissed = true
+    prefs.setOfferSyntheticSizes(true)
     // Every OLED-care value off its Recommended-preset default (the accessor
     // defaults, pinned by `oledDefaultsAreTheRecommendedPreset`).
     prefs.oledCareEnrolled = true
@@ -137,6 +138,10 @@ struct DiagnosticsPrefSummaryTests {
     // is in force. The descriptor belongs in the report's `current mode` line,
     // not in a list of settings.
     .storedDisplayMode,
+    // Per-display, excluded on the same reasoning: it is the synthesized stop
+    // in force, which the report's mode line carries, and `offerSyntheticSizes`
+    // already reports that synthesis is available on this display.
+    .storedSyntheticSize,
   ]
 
   /// Closes the gap this suite's comments used to CLAIM was closed. A fixture

@@ -3,8 +3,11 @@ import CoreGraphics
 import SwiftUI
 import Testing
 
-// Direct assertions over the app target's six copy builders (AT5), plus the
-// suite-wide em-dash scan that makes the house rule mechanical.
+// Direct assertions over the app target's eight copy builders (AT5), plus the
+// two suite-wide scans that make house rules mechanical rather than review
+// habits: no em dash anywhere, and no visible "panel" (SO14). `OledCareCopy`
+// and `SynthesisCopy` are the two most recent; `SynthesisCopy`'s own pins, and
+// the two scans only that feature needs, live in `SynthesisCopyTests`.
 //
 // The builders return three different types and every one of them is read
 // through `String(describing:)`:
@@ -20,7 +23,7 @@ import Testing
 //   pretends otherwise.
 //
 // `theScanCanSeeThroughEveryReturnType` is the positive control for all of it:
-// if reflection ever stops carrying the words, the em-dash scan would pass
+// if reflection ever stops carrying the words, both scans would pass
 // vacuously, and that test fails first.
 @Suite("Copy builders")
 @MainActor
@@ -629,11 +632,60 @@ struct CopyBuilderTests {
     #expect(render(RotationCopy.resolveFailure).contains("Nothing retries this on its own"))
   }
 
+  // MARK: - OledCareCopy
+
+  /// OC13's pause has two reasons since SS8, and the whole point of the
+  /// parameter is that the sentences differ: a person who never mirrored
+  /// anything must not be told they did. The three synthesis strings reached
+  /// only the scans below, which would pass just as happily if all three fell
+  /// back to their mirrored neighbours' words.
+  @Test func theSynthesisPauseSaysWhichMirrorItIsAbout() {
+    // No terminal period on either arm (ruled 2026-08-18): a status row reads
+    // like its neighbours, and every one of those is period-free.
+    #expect(render(OledCareCopy.suspendedStatus(synthesized: true))
+      .contains("\"Paused while a synthesized size is active\""))
+    #expect(OledCareCopy.suspendedPreview(synthesized: true) == "Paused for a synthesized size")
+    #expect(OledCareCopy.suspendedSpokenPreview(synthesized: true)
+      == "Paused while a synthesized size is active")
+
+    #expect(render(OledCareCopy.suspendedStatus(synthesized: false))
+      .contains("\"Paused while this display is mirrored\""))
+    #expect(OledCareCopy.suspendedPreview(synthesized: false) == "Paused while mirrored")
+    #expect(OledCareCopy.suspendedSpokenPreview(synthesized: false)
+      == "Paused while this display is mirrored")
+  }
+
+  /// OC17's denominator is MASK-COULD-APPLY time (ruled 2026-08-18) and the
+  /// histogram beside it covers every state, so the page says which is which.
+  /// Pinned because the whole value of the sentence is that it names both
+  /// scopes: a caption that lost either half would leave the two numbers
+  /// looking like a share of each other again.
+  @Test func theWearFractionCaptionNamesBothScopes() {
+    #expect(OledCareCopy.wearFractionScope == """
+      The bars cover every state this display was tracked in. \
+      The percentage covers only the time a protective dim could apply.
+      """)
+  }
+
   // MARK: - The suite-wide em-dash scan
 
   @Test func noBuilderEmitsAnEmDash() {
     for entry in everyBuilderString() {
       #expect(!entry.text.contains(Self.emDash), "\(entry.site) emits an em dash: \(entry.text)")
+    }
+  }
+
+  /// SO14 over every builder rather than over one feature's. Hardware is always
+  /// a "display" in visible copy; the type and comment vocabulary keeps the
+  /// word, and none of that is read here.
+  ///
+  /// Lifted out of `SynthesisCopyTests`, where the same scan covered only the
+  /// newest builder: the rule binds all of them, and it was verified free
+  /// across the whole set before this test was written, so it starts green
+  /// rather than carrying an allowance.
+  @Test func noBuilderSaysPanel() {
+    for entry in everyBuilderString() {
+      #expect(!entry.text.lowercased().contains("panel"), "\(entry.site) says panel: \(entry.text)")
     }
   }
 
@@ -649,6 +701,7 @@ struct CopyBuilderTests {
     #expect(render(LocalizedStringKey("planted \(Self.emDash) key")).contains(Self.emDash))
     #expect(render(Text(verbatim: "planted \(Self.emDash) verbatim")).contains(Self.emDash))
     #expect(render(Text(LocalizedStringKey("planted \(Self.emDash) localized"))).contains(Self.emDash))
+    #expect(render(LocalizedStringKey("planted panel key")).lowercased().contains("panel"))
 
     // A collapse detector, not a ratchet: the scan covering a handful of
     // strings would pass while covering almost nothing. 295 at the time of
@@ -856,6 +909,26 @@ struct CopyBuilderTests {
       }
     }
 
+    // OledCareCopy
+    for skip in Self.allLockDimSkips {
+      let name = String(describing: skip)
+      add("OledCareCopy.lockDimStatus(\(name))", OledCareCopy.lockDimStatus(skip))
+      add("OledCareCopy.lockDimPreview(\(name))", OledCareCopy.lockDimPreview(skip))
+      add("OledCareCopy.lockDimSpokenPreview(\(name))", OledCareCopy.lockDimSpokenPreview(skip))
+    }
+    for synthesized in [true, false] {
+      add(
+        "OledCareCopy.suspendedStatus(\(synthesized))",
+        OledCareCopy.suspendedStatus(synthesized: synthesized))
+      add(
+        "OledCareCopy.suspendedPreview(\(synthesized))",
+        OledCareCopy.suspendedPreview(synthesized: synthesized))
+      add(
+        "OledCareCopy.suspendedSpokenPreview(\(synthesized))",
+        OledCareCopy.suspendedSpokenPreview(synthesized: synthesized))
+    }
+    add("OledCareCopy.wearFractionScope", OledCareCopy.wearFractionScope)
+
     // ReconfigurationCopy
     for claimant in ReconfigurationClaimant.allCases {
       add("ReconfigurationCopy.blocked(by: \(claimant))", ReconfigurationCopy.blocked(by: claimant))
@@ -883,6 +956,27 @@ struct CopyBuilderTests {
     for refusal in Self.allRotationRefusals {
       add("RotationCopy.refusal(\(refusal))", RotationCopy.refusal(refusal))
     }
+
+    // SynthesisCopy. Its strings are pinned, and scanned for a rate and for a
+    // sharpness claim, in `SynthesisCopyTests`; they are here as well because
+    // this is the suite-wide em-dash scan and a builder outside it is a builder
+    // the house rule is not mechanical for.
+    add("SynthesisCopy.reportMode", SynthesisCopy.reportMode(width: 3096, height: 1296, slot: 4))
+    add("SynthesisCopy.optInTitle", SynthesisCopy.optInTitle)
+    add("SynthesisCopy.optInCaption", SynthesisCopy.optInCaption)
+    add("SynthesisCopy.badge", SynthesisCopy.badge)
+    add("SynthesisCopy.keepsPanelRefresh", SynthesisCopy.keepsPanelRefresh)
+    add("SynthesisCopy.engagedSizeNotListed", SynthesisCopy.engagedSizeNotListed)
+    for reason in Self.allSynthesisRefusalReasons {
+      add("SynthesisCopy.refusal(\(reason))", SynthesisCopy.refusal(reason))
+    }
+    for failure in Self.allSynthesisFailures {
+      add("SynthesisCopy.engineFailure(\(failure))", SynthesisCopy.engineFailure(failure))
+    }
+    add(
+      "SynthesisCopy.diagnosticsActive",
+      SynthesisCopy.diagnosticsActive(width: 3096, height: 1296, slot: 4))
+    for count in counts { add("SynthesisCopy.diagnosticsOffered(\(count))", SynthesisCopy.diagnosticsOffered(count)) }
 
     return out
   }
@@ -1050,6 +1144,64 @@ struct CopyBuilderTests {
     }
   }
 
+  /// nil is a sample too: it is the case both lock-dim builders treat as "the
+  /// dim happened", and the one the OC7 defect printed for a refusal.
+  private static let allLockDimSkips: [LockDimSkip?] =
+    [nil, .nothingDrivesBrightness, .outsideSoftwareBand, .alreadyAtTarget]
+
+  private static func guardLockDimSkip(_ skip: LockDimSkip?) -> Int {
+    switch skip {
+    case nil: 0
+    case .nothingDrivesBrightness: 1
+    case .outsideSoftwareBand: 2
+    case .alreadyAtTarget: 3
+    }
+  }
+
+  private static let allSynthesisFailures: [SynthesisFailure] = [
+    .unavailable, .noFreeSlot, .createFailed(.classFamilyUnavailable),
+    .virtualModeNotAchieved, .mirrorRefused, .engageNotAchieved, .notEngaged,
+    .unwindIncomplete,
+  ]
+
+  private static func guardSynthesisFailure(_ failure: SynthesisFailure) -> Int {
+    switch failure {
+    case .unavailable: 0
+    case .noFreeSlot: 1
+    case .createFailed: 2
+    case .virtualModeNotAchieved: 3
+    case .mirrorRefused: 4
+    case .engageNotAchieved: 5
+    case .notEngaged: 6
+    case .unwindIncomplete: 7
+    }
+  }
+
+  private static let allSynthesisRefusalReasons: [SynthesisCoordinator.Refusal.Reason] =
+    [
+      .builtIn, .hdrEngaged, .alreadyMirrored, .notOffered, .sizeNoLongerOffered,
+      .restoreSuperseded, .hdrLeftStanding, .busy,
+    ]
+      + ReconfigurationClaimant.allCases.map { .blocked(by: $0) }
+      + allSynthesisFailures.map { .engine($0) }
+
+  private static func guardSynthesisRefusalReason(
+    _ reason: SynthesisCoordinator.Refusal.Reason
+  ) -> Int {
+    switch reason {
+    case .builtIn: 0
+    case .hdrEngaged: 1
+    case .alreadyMirrored: 2
+    case .notOffered: 3
+    case .sizeNoLongerOffered: 4
+    case .restoreSuperseded: 5
+    case .hdrLeftStanding: 6
+    case .busy: 7
+    case .blocked: 8
+    case .engine: 9
+    }
+  }
+
   /// Both naming outcomes for the two count-fallback builders: fully named,
   /// partly named (which falls back), and a single member.
   private static let allDisplayIDLists: [[CGDirectDisplayID]] = [
@@ -1082,5 +1234,8 @@ struct CopyBuilderTests {
     #expect(Set(Self.allRotationRefusals.map(Self.guardRotationRefusal)).count == 4)
     #expect(Set(Self.allModeReapplyNotices.map(Self.guardModeReapplyNotice)).count == 3)
     #expect(Set(Self.allStartFailureReasons.map(Self.guardStartFailureReason)).count == 2)
+    #expect(Set(Self.allLockDimSkips.map(Self.guardLockDimSkip)).count == 4)
+    #expect(Set(Self.allSynthesisFailures.map(Self.guardSynthesisFailure)).count == 8)
+    #expect(Set(Self.allSynthesisRefusalReasons.map(Self.guardSynthesisRefusalReason)).count == 10)
   }
 }

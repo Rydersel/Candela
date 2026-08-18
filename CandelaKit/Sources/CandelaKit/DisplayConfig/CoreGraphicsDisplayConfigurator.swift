@@ -161,6 +161,19 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
       try applyPublishedMode(mode, to: displayID, scope: scope)
     case .coreGraphicsServices:
       try applyRevealedMode(mode, to: displayID, scope: scope)
+    case .synthesized:
+      // Refused, not routed. A synthesized size is engaged by
+      // `ModeSynthesisEngine` (a virtual display plus a mirror), and its
+      // sentinel `ioModeID` denotes nothing in either mode-ID space, so there
+      // is no configuration transaction this could stage. Reaching here means a
+      // caller bypassed the engine.
+      //
+      // `invalidOperation` rather than the `illegalArgument` the published path
+      // throws for an ID it cannot resolve, and the difference is load-bearing:
+      // a refusal that shared that code would be indistinguishable from an
+      // ordinary stale-ID failure, so neither a caller nor a test could tell
+      // "you bypassed the engine" from "that mode is not on this display".
+      throw DisplayConfigError(cgErrorCode: CGError.invalidOperation.rawValue)
     }
   }
 

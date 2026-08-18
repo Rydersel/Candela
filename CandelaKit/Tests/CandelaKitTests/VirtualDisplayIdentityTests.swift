@@ -26,6 +26,37 @@ struct VirtualDisplayIdentityTests {
     #expect(Set(products).count == products.count)
   }
 
+  /// The whole family, user slots and synthesis slots alike, is one flat
+  /// per-slot formula: product 0x2000 + slot, serial == slot, one vendor.
+  /// Every advertised identity costs a permanent ColorSync profile, so the
+  /// family is small and fixed and each member is checked here by hand.
+  @Test func everySlotInTheFamilyFollowsThePerSlotFormula() {
+    #expect(VirtualDisplayIdentity.slotRange == 1 ... 5)
+    for slot in VirtualDisplayIdentity.slotRange {
+      #expect(VirtualDisplayIdentity.productID(slot: slot) == UInt32(0x2000 + slot))
+      #expect(VirtualDisplayIdentity.serial(slot: slot) == UInt32(slot))
+      // The identity only exposes its key, and the key's first field IS the
+      // vendor, so the prefix is how "one vendor for the whole family" is
+      // checkable from outside.
+      #expect(VirtualDisplayIdentity.configIdentity(slot: slot).key.hasPrefix("ca1d-"))
+    }
+    #expect(VirtualDisplayIdentity.configIdentity(slot: 4).key == "ca1d-2004-4")
+    #expect(VirtualDisplayIdentity.configIdentity(slot: 5).key == "ca1d-2005-5")
+  }
+
+  /// SS6: slots 4 and 5 are engine-internal synthesis slots. Nothing
+  /// user-facing may show or allocate them, and the two sub-ranges must
+  /// together account for the whole family, or a slot exists that no rule
+  /// governs.
+  @Test func theUserAndSynthesisSlotRangesPartitionTheFamily() {
+    #expect(VirtualDisplayIdentity.userSlotRange == 1 ... 3)
+    #expect(VirtualDisplayIdentity.synthesisSlotRange == 4 ... 5)
+    let user = Set(VirtualDisplayIdentity.userSlotRange)
+    let synthesis = Set(VirtualDisplayIdentity.synthesisSlotRange)
+    #expect(user.isDisjoint(with: synthesis))
+    #expect(user.union(synthesis) == Set(VirtualDisplayIdentity.slotRange))
+  }
+
   @Test func slotIdentitiesNeverCollide() {
     let keys = VirtualDisplayIdentity.slotRange.map { VirtualDisplayIdentity.configIdentity(slot: $0).key }
     #expect(Set(keys).count == keys.count)

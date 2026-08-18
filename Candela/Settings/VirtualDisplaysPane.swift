@@ -48,7 +48,7 @@ struct VirtualDisplaysPane: View {
   /// Slots the user has ADDED, in slot order: these have tiles whether or
   /// not a display is currently running.
   private var definedSlots: [Int] {
-    VirtualDisplayIdentity.slotRange.filter { prefs.virtualSlot($0).defined }
+    VirtualDisplayIdentity.userSlotRange.filter { prefs.virtualSlot($0).defined }
   }
 
   private func effectiveSelection(in defined: [Int]) -> Int? {
@@ -121,7 +121,7 @@ struct VirtualDisplaysPane: View {
         ForEach(defined, id: \.self) { slot in
           slotTile(slot, isSelected: selection == slot)
         }
-        if let free = VirtualDisplayIdentity.slotRange.first(where: { !defined.contains($0) }) {
+        if let free = VirtualDisplayIdentity.userSlotRange.first(where: { !defined.contains($0) }) {
           addTile(slot: free, isFirst: defined.isEmpty)
         }
       }
@@ -164,8 +164,11 @@ struct VirtualDisplaysPane: View {
 
   /// The tile's one-line status, shared by the picture and VoiceOver so the
   /// two can never disagree: achieved size while running (never the spec's
-  /// claim), a bare "Running" when the live mode cannot be read, and
+  /// claim), a bare "Running" when no verdict was recorded for the slot, and
   /// "Not created" otherwise.
+  ///
+  /// `achievedMode` is the host's RECORDED verdict from creation, not a read of
+  /// the live topology: this process usually cannot read a display it created.
   private func tileStatus(_ slot: Int) -> (running: Bool, line: String) {
     let running = liveHandle(slot: slot) != nil
     if running, let achieved = model.virtualDisplays.achievedMode(slot: slot) {
@@ -241,10 +244,11 @@ struct VirtualDisplaysPane: View {
         ProgressView().controlSize(.small)
         Text("Working").foregroundStyle(.secondary)
       } else if live != nil, let achieved = model.virtualDisplays.achievedMode(slot: slot) {
-        // ACHIEVED state, read from the live topology, never the spec's
-        // claim: the Retina suffix appears only when the 2x mode actually
-        // engaged. `String(_:)` verbatim, or interpolation groups the digits
-        // (1,920 x 1,080).
+        // ACHIEVED state, never the spec's claim: the Retina suffix appears
+        // only when the 2x mode actually engaged. From the host's verdict
+        // recorded at creation rather than a live read, which this process
+        // usually cannot perform on a display it created. `String(_:)`
+        // verbatim, or interpolation groups the digits (1,920 x 1,080).
         Text("Running at \(String(achieved.width)) x \(String(achieved.height))\(achieved.hiDPI ? " (Retina)" : "")")
           .foregroundStyle(.secondary)
       } else if live != nil {

@@ -32,6 +32,21 @@ import os
 ///   engine paused (it returns `.suspended` while the signal holds), hours not
 ///   accumulated. Membership comes from the app's one mirror definition,
 ///   `MirrorTopologyStore`/`MirrorTopology.isInMirrorSet`, master included.
+/// - **SS8 carves synthesis out of the two counters, not out of the pause.** A
+///   mirror set Candela engaged to render a synthesized size is not mirroring
+///   the user asked for (`MirrorTopology.isSynthesisSet`, the one predicate),
+///   and the panel behind it is lit and being worn, so panel hours and the wear
+///   signal keep accruing and the window observer's ages are PRESERVED across
+///   the span. Preserved, not running: `samplingQualifies` still demands
+///   `.active`, and the pause holds `.suspended`, so nothing is observed while
+///   a synthesized size is engaged. That leaves ages that describe a span
+///   nobody watched, which is the staleness a departure forgets for
+///   (`reconcileEnrollment` into `dropState`); what bounds it here is that
+///   engaging a size changes desktop geometry, so most windows MOVE and their
+///   `since` stamps reset on the way in, starting the ages from scratch anyway.
+///   Not a re-keying: `WindowObservation` keys on `windowID` and a size change
+///   does not touch that; it is the bounds comparison that restarts the clock.
+///   The pause itself stays for v1; the pane says which mirror it is.
 /// - **Safe Mode builds `chrome` and nothing else** (spec §7): chrome toggles
 ///   are explicit user actions on system settings, not automatic behavior, so
 ///   they stay functional; the driver loop — overlays, sampling, hours — never
@@ -61,6 +76,16 @@ final class OledCareCoordinator {
   /// sub-ruling 4 is "recorded, never reported as dimmed", and a record no
   /// surface reads satisfies only the first half.
   private(set) var lockDimSkips: [String: LockDimSkip] = [:]
+
+  /// The enrolled displays whose OC13 pause is a synthesis set rather than
+  /// mirroring the user asked for, by persistenceKey. Rebuilt whole every tick
+  /// from the same verdict the loop already made, so it cannot disagree with
+  /// `dimStates` about why a display is paused.
+  ///
+  /// v1 keeps the pause under a synthesized size (SS8), so the pane still reads
+  /// "paused"; this is what lets it name the right mirror instead of telling a
+  /// user they mirrored something they never asked for.
+  private(set) var synthesisSuspensions: Set<String> = []
 
   private struct PerDisplay {
     var engine: IdleDimmingEngine
@@ -118,10 +143,12 @@ final class OledCareCoordinator {
     /// A capture is out on the XPC round trip. Nothing else may issue one: two
     /// in flight would double-book the interval they both stand for.
     var sampleInFlight = false
-    /// Mirror-set membership as of the last tick, for OC13's entry EDGE. The
-    /// steady state is already handled (a mirrored display never qualifies);
-    /// this exists so the observer's ageing state is dropped exactly once,
-    /// when the panel stops showing what those ages describe.
+    /// USER mirror-set membership as of the last tick, for OC13's entry EDGE.
+    /// The steady state is already handled (a mirrored display never
+    /// qualifies); this exists so the observer's ageing state is dropped
+    /// exactly once, when the panel stops showing what those ages describe.
+    /// A synthesis set is not membership for this purpose (SS8): the panel goes
+    /// on showing those same windows, so the edge must not fire on an engage.
     var wasMirrored = false
     /// Whether THIS coordinator has a temporary dim outstanding on the
     /// display's controller. Tracked here rather than read back off the
@@ -559,6 +586,7 @@ final class OledCareCoordinator {
     clearAllOverlays()
     states = [:]
     dimStates = [:]
+    synthesisSuspensions = []
     for tracker in trackers.values { tracker.reset() }
     // Same reason, same moment: a live wear tracker's debounced write-through
     // would re-persist the histogram the wipe just removed.
@@ -749,6 +777,10 @@ final class OledCareCoordinator {
       }
     }
     dimStates.removeValue(forKey: key)
+    // Paired with the removal above: the reason for a pause must not outlive
+    // the pause. The tick rebuilds this set only while some display is
+    // enrolled, so un-enrolling the last one would otherwise leave it standing.
+    synthesisSuspensions.remove(key)
     // Window ages describe how long a rect has been where it is ON THIS PANEL,
     // so a departure or an un-enrollment invalidates them for the same reason
     // mirroring does. Both ACCUMULATORS stay — the exposure map and the
@@ -788,6 +820,10 @@ final class OledCareCoordinator {
       uniquingKeysWith: { first, _ in first }
     )
     var published = dimStates
+    // Built empty rather than copied from the published set: a display that
+    // stopped being a synthesis slave simply does not get re-added, so a
+    // disengage clears the sentence with no removal pass.
+    var synthesisPaused: Set<String> = []
 
     for key in Array(states.keys) {
       guard var state = states[key] else { continue }
@@ -802,6 +838,13 @@ final class OledCareCoordinator {
       let id = displayState.id
       state.lastDisplayID = id
       let isMirrored = topology.displays.first { $0.id == id }?.isInMirrorSet ?? false
+      // SS8's carve-out, from the one synthesis predicate (SS7) over the
+      // stamped store topology. `isMirrored` still drives the engine, so the
+      // pause is unchanged; `isUserMirrored` is what the wear counters and the
+      // observer's ageing state key on, because a panel rendering a synthesized
+      // size is lit and being worn and none of that can be reconstructed later.
+      let isSynthesis = topology.isSynthesisSet(containing: id)
+      let isUserMirrored = isMirrored && !isSynthesis
 
       // The settle latch is unbounded in BrightnessController; bound the
       // deferral here so a dropped clear cannot disable dimming all session.
@@ -849,13 +892,16 @@ final class OledCareCoordinator {
         isHDRSettling: hdrSettling,
         unfocusedSeconds: unfocusedSeconds
       ))
+      if isSynthesis, newState == .suspended { synthesisPaused.insert(key) }
 
       // Hours. SuspendingClock, not ContinuousClock: the delta must not book
       // a system-sleep span as awake panel time, and SuspendingClock does not
       // advance while the machine is suspended. Display sleep WITHOUT system
       // sleep is handled by the awake gate — the loop keeps ticking, so the
-      // asleep spans contribute no noteTick. Mirrored displays accumulate
-      // nothing (OC13: suspended means suspended).
+      // asleep spans contribute no noteTick. A display the USER mirrored
+      // accumulates nothing (OC13: suspended means suspended); a synthesis
+      // slave does accumulate (SS8), which is why the gate reads
+      // `isUserMirrored` and not the engine's suspension.
       //
       // Known over-count, documented in the pane's caption rather than fixed
       // (#94): a panel blanked by DPMS keeps reporting
@@ -871,16 +917,18 @@ final class OledCareCoordinator {
       let awake = CGDisplayIsAsleep(id) == 0
       if state.hoursTracking {
         if state.wasAwake, !awake { hoursTracker(for: key).noteStandby() }
-        if awake, !isMirrored, let last = state.hoursLastTick {
+        if awake, !isUserMirrored, let last = state.hoursLastTick {
           let elapsed = Self.seconds(now - last)
           hoursTracker(for: key).noteTick(
             displayAwake: true, secondsSinceLastTick: elapsed
           )
           // OC20 rides the SAME gate and the SAME delta as panel hours, so the
-          // two counters cannot disagree about how long a panel was on. That is
-          // also why `.suspended` never accumulates here: a mirrored display
-          // books nothing in either counter (OC13), and the slot exists only so
-          // the on-disk state ordering stays stable.
+          // two counters cannot disagree about how long a panel was on. Under a
+          // synthesized size that state IS `.suspended` and both counters run
+          // anyway (SS8), so the wear tracker's `.suspended` slot is no longer
+          // structurally empty: it books the seconds a panel spends lit behind
+          // Candela's own mirror, and `wearWeightableFraction` subtracts them
+          // from its denominator, which its own docs still call defensive.
           wearTracker(for: key).noteTick(
             dimState: newState,
             effectiveLevel: Self.effectiveLevel(
@@ -893,8 +941,13 @@ final class OledCareCoordinator {
       state.hoursLastTick = now
 
       // OC13's mirror-entry edge: drop the ageing state once, on the way in.
-      if isMirrored, !state.wasMirrored { forgetWindowObservation(for: key) }
-      state.wasMirrored = isMirrored
+      // Synthesis never crosses it (SS8). The panel keeps showing the windows
+      // those ages describe, only at a different size, so keying the edge on
+      // raw membership would cost the observer its whole history on every
+      // engage. The edge is entry-only, so a disengage never fired it and
+      // still does not.
+      if isUserMirrored, !state.wasMirrored { forgetWindowObservation(for: key) }
+      state.wasMirrored = isUserMirrored
       // Telemetry rides this loop at its own cadence; `newState` is the
       // suspension authority, not a second reading of the same signals.
       updateTelemetry(for: key, state: &state, dimState: newState, on: id, at: now)
@@ -930,6 +983,7 @@ final class OledCareCoordinator {
     // Assigned only on change: @Observable notifies on every set and this
     // runs at up to 10 Hz.
     if published != dimStates { dimStates = published }
+    if synthesisPaused != synthesisSuspensions { synthesisSuspensions = synthesisPaused }
   }
 
   /// A given-up verify drops the fast cadence only when nothing is wanted (the

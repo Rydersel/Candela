@@ -77,22 +77,57 @@ public protocol MirrorTopologyProviding: Sendable {
 /// a mirror BREAKING resolves to a real but WRONG display, which is the only
 /// case in this design where a caller can succeed at the wrong thing.
 public final class MirrorTopologyStore: MirrorTopologyProviding, Sendable {
-  private let stored: OSAllocatedUnfairLock<MirrorTopology>
+  /// The published sample and the synthesis pairing it is stamped with, under
+  /// ONE lock. Two locks would let an update read a master set a concurrent
+  /// note had already replaced, which is the torn read this type exists to
+  /// close one level down.
+  private struct State {
+    var topology: MirrorTopology
+    var synthesisMasters: Set<CGDirectDisplayID>
+  }
+
+  private let stored: OSAllocatedUnfairLock<State>
 
   public init(_ topology: MirrorTopology = MirrorTopology([])) {
-    stored = OSAllocatedUnfairLock(initialState: topology)
+    stored = OSAllocatedUnfairLock(
+      initialState: State(topology: topology, synthesisMasters: topology.synthesisMasters)
+    )
   }
 
   /// Called at launch and on every screen-parameters change. ONE assignment of
   /// a whole sample, never a field at a time, so no reader ever sees a topology
   /// half-way between two machine states — the sampling hazard `MirrorTopology`
   /// exists to close would otherwise walk straight back in here.
+  ///
+  /// **The synthesis pairing is re-stamped here and the sample's own is
+  /// ignored** (SS1). Both writers build their sample from
+  /// `configurator.displays()`, and a CoreGraphics sample cannot tell a mirror
+  /// set the app engaged to serve a synthesized size from one the user asked
+  /// for. Stamping at the door rather than at each construction is what stops
+  /// the hotkey's live sample (`MirroringCoordinator.adoptTopology`) from
+  /// blanking the pairing until the next notification lands.
   public func update(_ topology: MirrorTopology) {
-    stored.withLock { $0 = topology }
+    stored.withLock { state in
+      state.topology = MirrorTopology(
+        topology.displays, synthesisMasters: state.synthesisMasters
+      )
+    }
+  }
+
+  /// The virtual displays a synthesized size is mirrored onto right now, from
+  /// the engine's pairing table (SS1). Held here rather than passed at every
+  /// `MirrorTopology(...)` because the app has two topology writers and neither
+  /// can see the engine.
+  public func noteSynthesisMasters(_ ids: Set<CGDirectDisplayID>) {
+    stored.withLock { state in
+      guard state.synthesisMasters != ids else { return }
+      state.synthesisMasters = ids
+      state.topology = MirrorTopology(state.topology.displays, synthesisMasters: ids)
+    }
   }
 
   public func topology() -> MirrorTopology {
-    stored.withLock { $0 }
+    stored.withLock { $0.topology }
   }
 
   public func drawableDisplayID(for displayID: CGDirectDisplayID) -> CGDirectDisplayID {

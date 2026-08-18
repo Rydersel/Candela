@@ -11,6 +11,7 @@ struct ArrangementReapplyPolicyTests {
     switch name {
     case "mag": DisplayConfigIdentity(vendor: 0x3669, model: 0x3DD0, serial: 0, isBuiltIn: false)
     case "dell": DisplayConfigIdentity(vendor: 0x10AC, model: 0x436A, serial: 0x4433334C, isBuiltIn: false)
+    case "vd": DisplayConfigIdentity(vendor: 0xCA11, model: 0x1, serial: 0x1, isBuiltIn: false)
     default: DisplayConfigIdentity(vendor: 0, model: 0, serial: 0, isBuiltIn: true)
     }
   }
@@ -179,6 +180,94 @@ struct ArrangementReapplyPolicyTests {
     ])
     #expect(TopologySignature(online: mirrored) == TopologySignature(withMirror))
     #expect(TopologySignature(online: mirrored) == TopologySignature(online: attached))
+  }
+
+  // MARK: - Synthesized sizes (SS12)
+
+  /// The MAG showing a synthesized size: the virtual display (id 7) owns the
+  /// desktop and the panel is its slave, so the panel holds no tile.
+  private var engagedOnline: [ConfiguredDisplay] {
+    [display(3, "mag", mirrors: 7), display(7, "vd"), display(2, "dell")]
+  }
+
+  private var engagedOnScreen: DisplayArrangement {
+    DisplayArrangement(tiles: [tile(7, "vd", left, mirroredIDs: [3]), tile(2, "dell", right)])
+  }
+
+  private var pairing: [CGDirectDisplayID: String] { [7: Self.identity("mag").key] }
+
+  /// SS12's whole point at the arrival gate: engaging a size is not a change of
+  /// display SET. Without this the set reads as new, every display in it counts
+  /// as having arrived, and the saved layout is re-asserted over whatever the
+  /// user last did by hand.
+  @Test func engagingASynthesizedSizeIsNotASetChange() {
+    var arrivals = TopologyArrivalTracker()
+    #expect(arrivals.claimArrivals(online: attached, substituting: [:]) == [2, 3])
+
+    // The VD is a display nobody has seen before, so it arrives; the two
+    // panels, which never left, do not.
+    #expect(arrivals.claimArrivals(online: engagedOnline, substituting: pairing) == [7])
+    #expect(arrivals.claimArrivals(online: engagedOnline, substituting: pairing).isEmpty)
+  }
+
+  /// The control. Without the map the same engage resets the tracker, which is
+  /// the re-assertion above stated as the bug it would be.
+  @Test func withoutTheMapEngagingASizeResetsTheArrivalGate() {
+    var arrivals = TopologyArrivalTracker()
+    #expect(arrivals.claimArrivals(online: attached, substituting: [:]) == [2, 3])
+    #expect(arrivals.claimArrivals(online: engagedOnline, substituting: [:]) == [2, 3, 7])
+  }
+
+  /// The restore decision itself, with a size standing. The layout was saved
+  /// for the panel; the origins land on the virtual display, which is the only
+  /// member of the pair a plan can move.
+  @Test func aLayoutSavedForThePanelIsRestoredOntoTheEngagedPair() {
+    let decision = ArrangementReapplyPolicy.decide(
+      isEnabled: true, arrivals: [7], stored: saved,
+      attached: engagedOnline, current: engagedOnScreen, substituting: pairing
+    )
+    let layout = decision.arrangementToApply
+    #expect(decision.notice == nil)
+    #expect(layout?.tile(7)?.rect.origin == DisplayPoint(x: 1920, y: 0))
+    #expect(layout?.tile(2)?.rect.origin == DisplayPoint(x: 0, y: 0))
+  }
+
+  /// And the control for that: unsubstituted, the pair reads as a set the saved
+  /// layout is not about, and the user gets a report naming a display they have
+  /// never heard of.
+  @Test func withoutTheMapTheEngagedPairIsReportedAsADifferentSet() {
+    let decision = ArrangementReapplyPolicy.decide(
+      isEnabled: true, arrivals: [7], stored: saved,
+      attached: engagedOnline, current: engagedOnScreen
+    )
+    #expect(decision.arrangementToApply == nil)
+    #expect(decision.notice == .setDiffers(
+      missing: [Self.identity("mag").key], extra: [Self.identity("vd").key]
+    ))
+  }
+
+  /// A size that CHANGES the desktop's footprint, which is what a synthesized
+  /// size normally does. The v1 pin declined this on geometry and the hardware
+  /// overturned it (2026-08-18): refusing hands the virtual display to the
+  /// OS's default placement, on the wrong side of the arrangement. The layout
+  /// is found under the panel, the substitute is re-anchored at the panel's
+  /// saved tile, and the plan is applied with nothing to report.
+  @Test func aSizeThatChangesTheFootprintIsFoundAndApplied() {
+    // A stop the size ladder actually offers under a 1920x1080 panel.
+    let resized = DisplayArrangement(tiles: [
+      tile(7, "vd", DisplayRect(x: 0, y: 0, width: 1728, height: 972), mirroredIDs: [3]),
+      tile(2, "dell", right),
+    ])
+    let decision = ArrangementReapplyPolicy.decide(
+      isEnabled: true, arrivals: [7], stored: saved,
+      attached: engagedOnline, current: resized, substituting: pairing
+    )
+    #expect(decision.notice == nil)
+    #expect(!decision.isDeferred)
+    let layout = decision.arrangementToApply
+    #expect(layout?.tile(7)?.rect == DisplayRect(x: 1920, y: 0, width: 1728, height: 972))
+    #expect(layout?.tile(2)?.rect.origin == DisplayPoint(x: 0, y: 0))
+    if let layout { #expect(ArrangementRules.problems(in: layout).isEmpty) }
   }
 
   // MARK: - The read-side trap (AR4)

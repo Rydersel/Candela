@@ -1,17 +1,23 @@
 import Foundation
 
-/// Which enumeration published this mode, and therefore which call applies it.
+/// Where this mode came from.
 ///
-/// CoreGraphics and CGS share ONE mode-ID space — measured 2026-08-06 across
-/// three panels, 0 IDs absent (S6 §4) — so this is not a second identity, only
-/// a routing tag. It deliberately does NOT reach `DisplayModeDescriptor`: the
-/// persisted form stays geometry-keyed so a mode that migrates between the two
-/// sources across an OS update still re-finds (CR3).
+/// CoreGraphics and CGS share ONE mode-ID space (measured 2026-08-06 across
+/// three panels, 0 IDs absent, S6 §4), so those two are not a second identity,
+/// only a routing tag. It deliberately does NOT reach `DisplayModeDescriptor`:
+/// the persisted form stays geometry-keyed so a mode that migrates between the
+/// two sources across an OS update still re-finds (CR3).
 public enum ModeProvenance: Sendable, Equatable, Hashable {
   /// `CGDisplayCopyAllDisplayModes`, applied with `CGConfigureDisplayWithDisplayMode`.
   case coreGraphics
   /// Revealed from the CGS mode list, applied with `CGSConfigureDisplayMode`.
   case coreGraphicsServices
+  /// Not from any enumeration: a size Candela renders by mirroring the panel
+  /// onto a virtual display (SS5). It shares no ID space with the other two,
+  /// so its `ioModeID` is a sentinel from `DisplayMode.syntheticIoModeID` that
+  /// is never handed to CoreGraphics or CGS, and applying it is the
+  /// `ModeSynthesisEngine`'s job rather than a configuration transaction's.
+  case synthesized
 }
 
 /// One mode a display can run in.
@@ -29,7 +35,9 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
   public let refreshHz: Double
   /// `kDisplayModeNativeFlag` — the panel's own timing.
   public let isNative: Bool
-  /// Which list published this mode, and therefore which call applies it.
+  /// Where this mode came from, and therefore what applies it: one of the two
+  /// enumerations and its matching call, or synthesis, which no configurator
+  /// call applies at all.
   public let provenance: ModeProvenance
 
   public init(
@@ -70,13 +78,33 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
   /// enumerations is a synonym for `!isHiDPI`, which was built once and removed
   /// for exactly that reason.
   ///
-  /// Switched rather than compared so a third source (injection) cannot be
-  /// added without deciding whether the pickers mark it, and with which words.
+  /// Switched rather than compared so a third source cannot be added without
+  /// deciding whether the pickers mark it, and with which words. Synthesis was
+  /// that third source: it gets its own badge, so this stays true for the
+  /// revealed rows alone.
   public var isRevealed: Bool {
     switch provenance {
     case .coreGraphics: false
     case .coreGraphicsServices: true
+    case .synthesized: false
     }
+  }
+
+  /// A size Candela renders rather than one the panel offers (SS5). Distinct
+  /// from `isRevealed` in both mechanism and badge copy.
+  public var isSynthesized: Bool {
+    switch provenance {
+    case .coreGraphics, .coreGraphicsServices: false
+    case .synthesized: true
+    }
+  }
+
+  /// The sentinel `ioModeID` for the stop at `stopIndex` in the synthetic
+  /// catalog. Negative because no real `IODisplayModeID` is, so a sentinel that
+  /// leaks into a CoreGraphics or CGS call fails loudly instead of landing on
+  /// somebody else's mode.
+  public static func syntheticIoModeID(stopIndex: Int) -> Int32 {
+    Int32(-(1000 + stopIndex))
   }
 
   /// A scaled mode renders oversized and downsamples. The comparison is

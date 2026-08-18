@@ -588,7 +588,17 @@ public enum DiagnosticsCopy {
   /// SHOWING. It is not a membership test (a mirror MASTER reports null, and so
   /// does a standalone display), so this claims only what that call can support.
   /// nil is the display not having been enumerated yet.
-  public static func mirroring(isMirrorSlave: Bool?) -> String {
+  ///
+  /// **`isSynthesized` outranks the flag, in all three of its states** (SS7). A
+  /// panel showing a synthesized size IS a mirror slave as far as CoreGraphics
+  /// is concerned, and it is showing its own desktop: the pixels come from a
+  /// virtual display Candela created for it, so "showing another display's
+  /// contents" names a display the user does not have and cannot look at. The
+  /// caller answers this from the engine's pairing table, which is the authority
+  /// on synthesis topology (SS1); a mirror flag that has not been enumerated yet
+  /// is not evidence against it.
+  public static func mirroring(isMirrorSlave: Bool?, isSynthesized: Bool = false) -> String {
+    if isSynthesized { return "Showing a synthesized size" }
     guard let isMirrorSlave else { return notEnumerated }
     return isMirrorSlave
       ? "Showing another display's contents"

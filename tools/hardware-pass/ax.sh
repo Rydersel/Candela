@@ -32,7 +32,12 @@
 # selector reports every control missing, which reads exactly like a real defect
 # in the app, and that has already cost one issue filed against a defect that did
 # not exist.
-BIND='set cands to (every window whose name does not start with "Candela Gamma Activity Enforcer" and name does not start with "Candela OLED Care Overlay")
+# "Display resolution" and "Display mirroring" are the keep/revert countdown
+# windows: transient, legitimate, and open exactly when a pick just landed, so
+# a selector that errors on them misdiagnoses a successful pick as a selector
+# failure. They are excluded like the decoys; axprobe reaches INTO them (it
+# walks every candidate), which is how Keep is pressed.
+BIND='set cands to (every window whose name does not start with "Candela Gamma Activity Enforcer" and name does not start with "Candela OLED Care Overlay" and name does not start with "Display resolution" and name does not start with "Display mirroring")
     if (count of cands) is not 1 then
       set seen to ""
       repeat with x in windows
@@ -146,7 +151,74 @@ tell application "System Events"
             delay 0.6
             click menu item "$2" of menu 1 of u
             delay 1.2
-            return "$1 -> " & (value of u as text)
+            -- The click may fire a display reconfigure that tears the AX tree;
+            -- reading the value back then throws, and the outer try would turn
+            -- a SUCCESSFUL pick into NOT FOUND. The click is the deed; the
+            -- readback is best-effort.
+            set v to "(value unreadable: reconfigure in flight)"
+            try
+              set v to value of u as text
+            end try
+            return "$1 -> " & v
+          end if
+        end repeat
+      end try
+    end repeat
+    return "NOT FOUND: $1"
+  end tell
+end tell
+EOF
+}
+
+# title: the settings window's own name. Read it back after every `nav`: the
+# sidebar index table is a property of the current build, and index 8 is an
+# inert header that leaves the title on the PREVIOUS pane rather than erroring,
+# so a script that trusts the table reads the wrong pane's controls while every
+# call reports success.
+title() {
+  osascript <<EOF 2>&1
+tell application "System Events"
+  tell process "Candela"
+    $BIND
+    return name of w
+  end tell
+end tell
+EOF
+}
+
+# items <popup name>: the pop-up's menu item names, one per line, choosing
+# nothing. The items do not exist in the tree until the menu is open, so this
+# opens it and closes it with Escape. Needed because a size item's label carries
+# whatever marks apply to it ("Recommended", "Rendered by Candela"), and a
+# hard-coded label is a selector that silently matches nothing the day a mark
+# changes.
+items() {
+  osascript <<EOF 2>&1
+tell application "System Events"
+  tell process "Candela"
+    $BIND
+    set dg to $DETAIL
+    repeat with t in (UI elements of dg)
+      try
+        repeat with u in (UI elements of t)
+          set nm to ""
+          try
+            set nm to name of u as text
+          end try
+          if (class of u as text) is "pop up button" and nm is "$1" then
+            click u
+            delay 0.6
+            set out to ""
+            repeat with mi in (menu items of menu 1 of u)
+              set mn to ""
+              try
+                set mn to name of mi as text
+              end try
+              set out to out & mn & linefeed
+            end repeat
+            key code 53
+            delay 0.3
+            return out
           end if
         end repeat
       end try

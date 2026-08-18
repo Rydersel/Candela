@@ -53,11 +53,12 @@ final class KeyActionExecutor {
         }
         // Focus mode falls back to the pointer when no window resolves (a
         // full-screen-less desktop, a frontmost app with no on-screen window):
-        // losing the targeting refinement beats losing the keypress.
-        let anchor: CGDirectDisplayID? = (mode == .focusInsteadOfMouse
+        // losing the targeting refinement beats losing the keypress. That
+        // fallback is `keyTargets`' nil-anchor case.
+        let focused = mode == .focusInsteadOfMouse
           ? FocusedDisplay.frontmostWindowDisplayID()
-          : nil) ?? Self.pointerDisplayID()
-        let affected = anchor.map(expandToMirrorSet) ?? []
+          : nil
+        let affected = keyTargets(anchoredOn: focused)
         let stepped = model.stepBrightness(
           displayIDs: affected, isUp: isUp, isFine: isFine
         )
@@ -138,7 +139,7 @@ final class KeyActionExecutor {
       // follows the brightness mouse policy), with the same fall-back-to-all
       // — fallback BEFORE the isDisabled filter, so a resolved-but-disabled
       // display swallows the press instead of triggering the fallback (R1).
-      let affected = Self.pointerDisplayID().map(expandToMirrorSet) ?? []
+      let affected = keyTargets()
       var targets = affected.compactMap { id in model.displays.first { $0.id == id } }
       if targets.isEmpty { targets = model.displays }
       var stepped: [(state: AppModel.DisplayState, value: Double)] = []
@@ -233,8 +234,7 @@ final class KeyActionExecutor {
       // empty match set swallows the press.
       return model.audioMatchingDisplays()
     case .mouse:
-      let ids = Self.pointerDisplayID().map(expandToMirrorSet) ?? []
-      let resolved = ids.compactMap { id in model.displays.first { $0.id == id } }
+      let resolved = keyTargets().compactMap { id in model.displays.first { $0.id == id } }
       // DIVERGENCE from the fork (planner flag 6, endorsed): the fork
       // SWALLOWS the press when the pointer resolves no external (its tap
       // already ate the event and it has no fallback — the dossier calls
@@ -370,28 +370,54 @@ final class KeyActionExecutor {
     return screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
   }
 
-  /// `displayID` plus, when it is the master of a mirror set, every display
-  /// mirroring it (fork: the mirror-set expansion inside `getAffectedDisplays`).
-  /// A mirrored member is never the pointer's display in practice, but the
-  /// master's ID is what the pointer resolves to, and the members need the same
-  /// step — the set shows one picture, so stepping only the master would leave
-  /// it visibly mismatched. Non-mirrored displays expand to themselves.
+  /// THE resolution every pointer-targeted key path shares: which displays a
+  /// press acts on, given where the user is working. `anchoredOn` is the
+  /// focused-window display when that preference is on and a window resolved;
+  /// nil means "ask the pointer", which is both the default and the focus
+  /// mode's fallback. Empty when nothing resolves at all: each caller keeps its
+  /// own answer to that, and they differ (volume falls back to every display,
+  /// brightness to a separate step path, contrast to every display it controls).
+  ///
+  /// The anchor is expanded rather than used directly, and the expansion is
+  /// where a synthesized size is answered (SS1). While one is engaged the
+  /// physical panel has NO `NSScreen` and no entry in the active display list,
+  /// so `pointerDisplayID` and `FocusedDisplay` both answer with the virtual
+  /// display the size is mirrored onto: the panel the user is pointing at is
+  /// unreachable from AppKit geometry. `MirrorTopology.expand` consults the
+  /// engine's pairing table before it consults anything CoreGraphics reports,
+  /// and hands back BOTH ends of the set, which is the only way the panel's own
+  /// controller (and the DDC bus the step is written over) is reached from a
+  /// pointer that can only ever land on the virtual one. The virtual display
+  /// itself carries no controller and no DDC, so every caller drops it simply by
+  /// failing to resolve it.
+  ///
+  /// The same call covers an ordinary mirror set, which was its original job
+  /// (fork: the mirror-set expansion inside `getAffectedDisplays`). A mirrored
+  /// member is never the pointer's display in practice, but the master's ID is
+  /// what the pointer resolves to, and the members need the same step: the set
+  /// shows one picture, so stepping only the master would leave it visibly
+  /// mismatched. A display in no set expands to itself.
   ///
   /// Reads ONE sample from the topology store rather than re-querying
-  /// CoreGraphics per call site (DT13). The three call sites here each used to
-  /// take a fresh `CGGetOnlineDisplayList` plus N `CGDisplayMirrorsDisplay`
-  /// calls, so two presses a frame apart could disagree about the topology —
-  /// and the predicate they used was one of the three disagreeing definitions
-  /// of "mirrored" this app used to carry.
+  /// CoreGraphics per call site (DT13), and that store is where the synthesis
+  /// pairing is stamped, so the expansion cannot see a topology and a pairing
+  /// from two different instants. The three call sites here each used to take a
+  /// fresh `CGGetOnlineDisplayList` plus N `CGDisplayMirrorsDisplay` calls, so
+  /// two presses a frame apart could disagree about the topology; and the
+  /// predicate they used was one of the three disagreeing definitions of
+  /// "mirrored" this app used to carry.
   ///
   /// These are STEP targets, so they stay RAW: what comes back is fed to
   /// `model.stepBrightness(displayIDs:)` and to the volume/contrast
-  /// controllers, which write DDC to the panel the user asked for. Nothing on
-  /// this path resolves to a master — D29 leaves it UNVERIFIED whether a
-  /// slave's DDC is suppressed, and treating it as unavailable would put VCP
-  /// 0x8D out of reach and strand a hardware-muted panel with no way back.
-  private func expandToMirrorSet(_ displayID: CGDirectDisplayID) -> [CGDirectDisplayID] {
-    model.mirrorTopology.topology().expand(displayID)
+  /// controllers, which write DDC to the panel the user asked for. No master is
+  /// ever SUBSTITUTED for that panel: an engaged synthesis set expands from
+  /// either end, so its virtual master joins the list, and the physical panel
+  /// stays in it. D29 leaves it UNVERIFIED whether a slave's DDC is suppressed,
+  /// and dropping the panel as unavailable would put VCP 0x8D out of reach and
+  /// strand a hardware-muted display with no way back.
+  private func keyTargets(anchoredOn anchor: CGDirectDisplayID? = nil) -> [CGDirectDisplayID] {
+    guard let target = anchor ?? Self.pointerDisplayID() else { return [] }
+    return model.mirrorTopology.topology().expand(target)
   }
 
 }

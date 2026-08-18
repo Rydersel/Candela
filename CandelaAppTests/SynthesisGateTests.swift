@@ -1,0 +1,279 @@
+import CandelaKit
+import CoreGraphics
+import Foundation
+import Testing
+
+/// The AR12 claim across a synthesized-size pick, end to end through the real
+/// coordinators, the real preview session, the real engine and the real gate.
+///
+/// `DisplayReconfigurationGateTests` characterises the gate itself and cannot
+/// catch what this catches: the ordering lives in `performSynthesisSelect`, so a
+/// claim taken AFTER the engage, or released by the stand-down that precedes it,
+/// leaves the gate open for the tens of seconds the engine runs and the thirty
+/// the countdown stands. Both mistakes pass every pure gate test.
+///
+/// End to end means the whole sequence, not just its front half: the pin below
+/// drives the select through engage, revert and disengage, and asserts the
+/// pairing comes down and the gate comes back.
+@Suite("Synthesis holds the reconfiguration gate") @MainActor
+struct SynthesisGateTests {
+  private typealias Fixture = SynthesisFixture
+  private static let panelID = SynthesisFixture.panelID
+  private static let secondPanelID = SynthesisFixture.secondPanelID
+  private static let nativeWidth = SynthesisFixture.nativeWidth
+
+  @Test func anOptedInPanelOffersSynthesizedStops() async {
+    let fixture = Fixture()
+    defer { fixture.forgetPrefs() }
+    let stops = fixture.modes.catalogs[Self.panelID]?.syntheticStops ?? []
+    #expect(!stops.isEmpty)
+    #expect(stops.allSatisfy { $0.logicalWidth <= Self.nativeWidth })
+    #expect(fixture.modes.catalogs[Self.panelID]?.rows.contains { $0.mode.isSynthesized } == true)
+    await fixture.revertAnyPreview()
+  }
+
+  /// SS4: opted out, the picker holds no synthesized row at all. The ladder is
+  /// still arithmetically generable from this panel, so this is the opt-in
+  /// doing the work rather than a panel with nothing to offer.
+  @Test func anOptedOutPanelOffersNoSynthesizedRowAtAll() async {
+    let fixture = Fixture(optedIn: false)
+    defer { fixture.forgetPrefs() }
+    let catalog = fixture.modes.catalogs[Self.panelID]
+    #expect(catalog?.syntheticStops.isEmpty == true)
+    #expect(catalog?.rows.contains { $0.mode.isSynthesized } == false)
+    #expect(catalog?.rows.isEmpty == false, "the published rows must still be there")
+    await fixture.revertAnyPreview()
+  }
+
+  /// The pin. `create` is the engine's first hardware step and it runs inside
+  /// `session.begin`, so a competing claimant refused AT THAT INSTANT is
+  /// evidence the claim was taken before the engage and is still held during it.
+  @Test func theDisplayModesClaimIsHeldWhileTheEngineIsEngaging() async throws {
+    let fixture = Fixture()
+    defer { fixture.forgetPrefs() }
+    let stop = try #require(fixture.modes.catalogs[Self.panelID]?.syntheticStops.first)
+
+    // `create` blocks on the engine's executor until this test lets it go. That
+    // is the only way to observe the gate mid-engage: the hook is synchronous
+    // and the gate is an actor, so it cannot read the holder itself.
+    let entered = DispatchSemaphore(value: 0)
+    let proceed = DispatchSemaphore(value: 0)
+    fixture.host.onCreate = {
+      entered.signal()
+      proceed.wait()
+    }
+
+    fixture.modes.select(
+      SyntheticSizeCatalog.row(for: stop), on: Self.panelID,
+      from: .settings, surface: .settingsBanner
+    )
+    // Off the cooperative pool: `wait()` is unavailable in an async context, and
+    // parking a pool thread on a semaphore is what this needs to avoid.
+    //
+    // DEADLINED, and the result is carried back rather than recorded on the
+    // waiting thread. An unbounded wait here would turn "the select never
+    // reached the engage" into a hung suite that no cancellation can reach: the
+    // thread is blocked in a semaphore, not suspended at an await. Five seconds
+    // is three orders of magnitude past what the fakes need, so it can only
+    // expire on a real regression.
+    let engineEntered: Bool = await withCheckedContinuation { continuation in
+      DispatchQueue.global().async {
+        continuation.resume(returning: entered.wait(timeout: .now() + 5) == .success)
+      }
+    }
+    guard engineEntered else {
+      // Signalled anyway: harmless if nothing is waiting, and it keeps a late
+      // arrival from parking a thread for the rest of the run.
+      proceed.signal()
+      Issue.record("the engine never entered `create`: the select did not reach the engage")
+      return
+    }
+
+    let refusal = await fixture.gate.claim(.mirroring)
+    proceed.signal()
+    #expect(refusal.refusedBy == .displayModes)
+
+    await fixture.settle()
+    await fixture.revertAnyPreview()
+    // The far end of the same sequence, and the reason the world had to learn
+    // to restore a slave's own mode: the revert reaches the engine's disengage,
+    // the panel comes back to its own geometry, and the pairing goes. Without
+    // it this answered `unwindIncomplete` and the claim below stayed held.
+    #expect(fixture.synthesis.pairings.isEmpty, "the revert must take the pairing down")
+    let afterRevert = await fixture.gate.claim(.mirroring)
+    #expect(afterRevert.isGranted, "and the gate must come back with it")
+    await fixture.gate.release(.mirroring)
+  }
+
+  /// A reset issued while an engage is mid-flight refuses and writes NOTHING.
+  ///
+  /// The pairing snapshot is the state every teardown path reads, and it is
+  /// EMPTY for the whole of an engage: the coordinator re-reads the engine's
+  /// table only after the operation it performed returns. So the per-display
+  /// reset, which is ungated on the hub, used to ask "is anything engaged?",
+  /// hear "no", clear both keys, and finish before the engage landed. What was
+  /// left was a synthesis set with its opt-in off, which is exactly the state
+  /// where nothing on screen offers to take it down.
+  ///
+  /// The parked `create` is what makes that window observable: it holds the
+  /// engine's executor open for as long as this test wants it.
+  @Test func aResetDuringAnEngageRefusesAndWritesNothing() async throws {
+    let fixture = Fixture()
+    defer { fixture.forgetPrefs() }
+    let display = try fixture.configured(Self.panelID)
+    let stop = try #require(fixture.modes.catalogs[Self.panelID]?.syntheticStops.first)
+    let prefs = fixture.prefs
+
+    let entered = DispatchSemaphore(value: 0)
+    let proceed = DispatchSemaphore(value: 0)
+    fixture.host.onCreate = {
+      entered.signal()
+      proceed.wait()
+    }
+
+    fixture.modes.select(
+      SyntheticSizeCatalog.row(for: stop), on: Self.panelID,
+      from: .settings, surface: .settingsBanner
+    )
+    // Deadlined for `theDisplayModesClaimIsHeldWhileTheEngineIsEngaging`'s
+    // reason: a blocked thread is not a suspended one and no cancellation
+    // reaches it.
+    let engineEntered: Bool = await withCheckedContinuation { continuation in
+      DispatchQueue.global().async {
+        continuation.resume(returning: entered.wait(timeout: .now() + 5) == .success)
+      }
+    }
+    guard engineEntered else {
+      proceed.signal()
+      Issue.record("the engine never entered `create`: the select did not reach the engage")
+      return
+    }
+
+    // The vacuous reading the guard exists for, asserted rather than described:
+    // mid-engage the snapshot says nothing is engaged, on a machine that is
+    // about to have a synthesis set on it.
+    #expect(fixture.synthesis.pairings.isEmpty)
+    #expect(fixture.synthesis.isWorking)
+
+    let didReset = await fixture.synthesis.reset(display)
+    let didOptOut = await fixture.synthesis.setOptIn(false, on: display)
+    let didUnwind = await fixture.synthesis.disengageAllForReset()
+
+    #expect(!didReset, "a per-display reset must refuse over an engage in flight")
+    #expect(!didOptOut, "and so must the opt-out, for the same reason")
+    #expect(!didUnwind, "and the whole-app teardown, which reports it to its caller")
+    #expect(fixture.synthesis.refusal?.reason == .busy)
+    // The half that matters most: SS11's ordering is only honoured if a refused
+    // teardown leaves both keys exactly as it found them.
+    #expect(prefs.offerSyntheticSizes)
+    #expect(prefs.storedSyntheticSize == nil)
+
+    proceed.signal()
+    await fixture.settle()
+    // And the engage really did land, so the refusals above were about a live
+    // sequence rather than about one that had already failed.
+    #expect(fixture.synthesis.isEngaged(displayID: Self.panelID))
+    await fixture.revertAnyPreview()
+  }
+
+  /// A departure that reached no sweep is caught by the next engage.
+  ///
+  /// Every departure sweep keys on the pairing snapshot, and the snapshot is
+  /// empty or stale for the whole of an engage, so a panel that leaves inside
+  /// that window is skipped by all of them and nothing re-runs them afterwards.
+  /// The pairing then survives naming a display that is not attached: it holds
+  /// one of two slots, and the reapply pass and the arrangement signature both
+  /// read it.
+  ///
+  /// Driven here by a second engage rather than by a parked one, because that
+  /// is the deterministic shape of the same question: the sweep runs when an
+  /// engage lands, and what it must find is a departure nothing else saw.
+  @Test func anEngageSweepsADepartureNoOtherSweepSaw() async throws {
+    let fixture = Fixture(secondPanel: true)
+    defer { fixture.forgetPrefs() }
+    let first = try fixture.configured(Self.panelID)
+    let second = try fixture.configured(Self.secondPanelID)
+    let stop = try #require(fixture.modes.catalogs[Self.panelID]?.syntheticStops.first)
+
+    _ = await fixture.synthesis.engage(stop, on: first)
+    #expect(fixture.synthesis.isEngaged(displayID: Self.panelID))
+
+    // The panel leaves with no notification behind it, which is what a
+    // departure landing inside an engage amounts to: no sweep ran, and none
+    // will.
+    fixture.world.detach(Self.panelID)
+    #expect(fixture.synthesis.isEngaged(displayID: Self.panelID), "nothing has swept yet")
+
+    _ = await fixture.synthesis.engage(stop, on: second)
+
+    #expect(fixture.synthesis.isEngaged(displayID: Self.secondPanelID))
+    #expect(
+      fixture.synthesis.pairing(forPhysical: Self.panelID) == nil,
+      "the engage must take down a pairing whose panel has gone"
+    )
+    #expect(fixture.synthesis.freeSlots == 1, "and give its slot back")
+  }
+
+  /// SS7 in the direction nothing consulted before: a synthesis engage over a
+  /// mirror set the USER built is refused, at the same seam every other refusal
+  /// is decided.
+  @Test func aUserMirrorSetRefusesASynthesizedSize() throws {
+    let fixture = Fixture(mirroring: Self.secondPanelID)
+    defer { fixture.forgetPrefs() }
+    let display = try fixture.configured(Self.panelID)
+
+    #expect(fixture.synthesis.refusalReason(for: display) == .alreadyMirrored)
+  }
+
+  /// The MASTER of the user's mirror set, which the test above cannot reach:
+  /// CoreGraphics reports the flag on both ends of a set but names a master
+  /// only on the slave, so the master carries `isInMirrorSet` with no
+  /// `mirrorsDisplay` at all. A predicate written over the master id instead of
+  /// the flag reads that display as standalone and lets a synthesis engage
+  /// straight into the user's own mirror.
+  @Test func aUserMirrorMasterRefusesASynthesizedSize() throws {
+    let fixture = Fixture(mirrorMaster: true)
+    defer { fixture.forgetPrefs() }
+    let display = try fixture.configured(Self.panelID)
+
+    // The state under test, spelled out: no master id, and neither of the two
+    // exclusions that make a mirrored display OURS applies.
+    #expect(display.isInMirrorSet)
+    #expect(display.mirrorsDisplay == kCGNullDirectDisplay)
+    #expect(!fixture.synthesis.isEngaged(displayID: Self.panelID))
+    #expect(!fixture.synthesis.masterIDs.contains(Self.panelID))
+
+    #expect(fixture.synthesis.refusalReason(for: display) == .alreadyMirrored)
+  }
+
+  /// The other half of the same predicate, and the one a raw mirror flag gets
+  /// wrong: a display carrying a synthesis set IS mirrored, and refusing it
+  /// would be the feature refusing its own work.
+  @Test func aSynthesisSetIsNotAUserMirrorSet() async throws {
+    let fixture = Fixture()
+    defer { fixture.forgetPrefs() }
+    let display = try fixture.configured(Self.panelID)
+    let stop = try #require(fixture.modes.catalogs[Self.panelID]?.syntheticStops.first)
+
+    _ = await fixture.synthesis.engage(stop, on: display)
+    let engaged = try fixture.configured(Self.panelID)
+
+    // The fixture's own control: the world really does report it mirrored, so
+    // the expectation below is the exclusion doing the work.
+    #expect(engaged.isInMirrorSet)
+    #expect(fixture.synthesis.refusalReason(for: engaged) == nil)
+  }
+
+  /// The control for the test above: with nothing selected the gate is free, so
+  /// the refusal there is about the operation rather than about a gate that
+  /// refuses everything.
+  @Test func theGateIsFreeWithNoSelectionOutstanding() async {
+    let fixture = Fixture()
+    defer { fixture.forgetPrefs() }
+    let outcome = await fixture.gate.claim(.mirroring)
+    #expect(outcome.isGranted)
+    await fixture.gate.release(.mirroring)
+    await fixture.revertAnyPreview()
+  }
+
+}

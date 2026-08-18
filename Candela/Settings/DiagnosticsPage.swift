@@ -187,10 +187,14 @@ struct DiagnosticsPage: View {
       }
     }
 
+    // `onScreen`, never the raw readback. While a size this app renders is
+    // engaged the readback names the display's native geometry, and this row
+    // would then contradict the "Synthesized size active" line further down the
+    // same page and the mode line of the report pasted from it.
     if let native = model.displayModes.catalogs[state.id], native.nativeKnown,
-       let current = native.current {
+       let onScreen = native.onScreen {
       LabeledContent("Current mode") {
-        Text(verbatim: DiagnosticsCopy.mode(current)).foregroundStyle(.secondary)
+        Text(verbatim: DiagnosticsCopy.mode(onScreen)).foregroundStyle(.secondary)
       }
     }
 
@@ -208,8 +212,14 @@ struct DiagnosticsPage: View {
     if let catalog = model.displayModes.catalogs[state.id] {
       // Two counts, two predicates, and they are not each other's complement.
       // "Listed by macOS" names ONE source explicitly; `isRevealed` switches
-      // over the provenance, so adding injection is a compile error there and a
-      // silent miscount here. When that lands this row pair becomes three.
+      // over the provenance, so a third source is a compile error there and a
+      // silent miscount here.
+      //
+      // Synthesis was that third source, and it is counted separately below
+      // rather than folded into either of these: `catalog.all` is the display's
+      // OWN enumeration and holds no synthesized stop, so neither count is
+      // wrong, and a synthesized size is not a resolution anyone found. It is
+      // one this app renders.
       let publishedCount = catalog.all.count { $0.provenance == .coreGraphics }
       let revealedCount = catalog.all.count(where: \.isRevealed)
 
@@ -224,6 +234,26 @@ struct DiagnosticsPage: View {
       }
 
       wireTimingRow(withheld: catalog.withheldForWireTiming)
+      synthesizedOfferRow(catalog)
+    }
+  }
+
+  /// The third source (SS4/SS5), silent unless this display's opt-in is on: a
+  /// count of 0 under an opt-in nobody turned on would read as a feature that
+  /// looked and found nothing.
+  ///
+  /// A whole line rather than a label and a value, because it is a report line
+  /// about what this app added rather than a property of the display, and the
+  /// two facts it carries (that sizes are offered at all, and how many) only
+  /// mean anything together. Secondary, like every value in this page's rows,
+  /// so a line that is not a heading does not read as one.
+  @ViewBuilder private func synthesizedOfferRow(
+    _ catalog: DisplayModeCoordinator.Catalog
+  ) -> some View {
+    if model.synthesis.offersSyntheticSizes(displayID: state.id) {
+      Text(verbatim: SynthesisCopy.diagnosticsOffered(catalog.syntheticStops.count))
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
     }
   }
 
@@ -580,9 +610,38 @@ struct DiagnosticsPage: View {
     }
 
     LabeledContent("Mirroring") {
+      // SS7: a synthesis set is not user mirroring, and the CG flag says it is.
+      // The pairing table is the authority (SS1), so it decides here and the
+      // flag answers only when it is not a synthesis set. Without this the row
+      // reads "Showing another display's contents" about a display that is
+      // showing its own picture at a size this app renders.
       Text(verbatim: DiagnosticsCopy.mirroring(
-        isMirrorSlave: model.displayModes.catalogs[state.id]?.display.isMirrorSlave))
+        isMirrorSlave: model.displayModes.catalogs[state.id]?.display.isMirrorSlave,
+        isSynthesized: model.synthesis.isEngaged(displayID: state.id)))
         .foregroundStyle(.secondary)
+    }
+
+    synthesizedActiveRow
+  }
+
+  /// The engaged pairing, from the ENGINE's own table (SS1) and never from a CG
+  /// mirror flag or a mode readback: the engage tail re-times the slave, so a
+  /// synthesis-engaged display reports its own native mode [MEASURED
+  /// 2026-08-18]. "Current mode" above reads `Catalog.onScreen` for exactly
+  /// that reason, so the two rows name the same size; this one adds the slot,
+  /// which is what tells two engaged displays apart in a pasted report.
+  ///
+  /// Directly under Mirroring, which is where the same set shows up as a
+  /// mirror. This line is what says whose mirror it is.
+  @ViewBuilder private var synthesizedActiveRow: some View {
+    if let pairing = model.synthesis.pairing(forPhysical: state.id) {
+      Text(verbatim: SynthesisCopy.diagnosticsActive(
+        width: pairing.size.logicalWidth,
+        height: pairing.size.logicalHeight,
+        slot: pairing.slot
+      ))
+      .foregroundStyle(.secondary)
+      .fixedSize(horizontal: false, vertical: true)
     }
   }
 

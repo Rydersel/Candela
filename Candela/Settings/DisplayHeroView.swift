@@ -69,7 +69,14 @@ struct DisplayHeroView: View {
 
   /// nil means "not enumerated yet", which is deliberately distinct from a
   /// display with no modes — nothing below renders a guess for it.
-  private var currentMode: DisplayMode? { catalog?.current }
+  ///
+  /// `onScreen`, never the raw readback. This is the line directly under the
+  /// display's name, so it is the first thing a person reads on the page, and
+  /// while a size this app renders is engaged the readback names the display's
+  /// own native mode: the caption would say "3440 × 1440" while the size
+  /// pop-up two rows below has the rendered size selected. Same page, same
+  /// display, two answers.
+  private var currentMode: DisplayMode? { catalog?.onScreen }
 
   var body: some View {
     // Required even though this view binds no pref directly: `name` resolves
@@ -154,8 +161,15 @@ struct DisplayHeroView: View {
   /// The coordinator's own topology sample, read the way `MirroringSection`
   /// reads it — `MirrorTopology` is the one definition of "mirrored" in this
   /// app and this is a reader of it, never a second opinion.
+  ///
+  /// A synthesis set is not mirroring the user did (SS7), so the badge stays
+  /// off for one. The tile's own contract is why this matters more here than
+  /// the shape of a small icon suggests: what it draws must also be stated in
+  /// words on this page, and the Mirroring row below now reads "Not mirrored"
+  /// for a synthesized panel. A badge over that row would be the only claim of
+  /// its kind on the page, with nothing saying what it meant.
   private var isMirroring: Bool {
-    !model.mirroring.topology.setMembers(containing: state.id).isEmpty
+    MirroringPredicates.showsMirroringBadge(model.mirroring.topology, displayID: state.id)
   }
 
   // MARK: - Identity
@@ -206,6 +220,10 @@ struct DisplayHeroView: View {
   /// noise would read as a faster rate rather than as the same one. The
   /// quantizer still keeps a genuine 59.94 apart from 60 — it is designed for
   /// exactly that.
+  ///
+  /// Silent while a rendered size is engaged, and correctly so: that size is in
+  /// no published list, so the lookup finds no rates and the caption does not
+  /// append a "max" belonging to a size that is not on the glass.
   private var fasterRateAtCurrentSize: Double? {
     guard let mode = currentMode, let catalog else { return nil }
     let rates = DisplayModeCatalog.refreshRates(

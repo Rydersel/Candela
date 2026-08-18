@@ -46,6 +46,12 @@ public enum HUDGrouping {
   /// keeps the pill honest about that: the name and the value describe one
   /// member, and the suffix says the others moved too.
   ///
+  /// A SYNTHESIS SET is the exception to the naming rule, and the reason this
+  /// takes the whole topology rather than a resolution closure: the pairing it
+  /// carries (SS1) is what tells a set the app engaged to serve a size from one
+  /// the user asked for, and the two want opposite answers here. See the branch
+  /// below.
+  ///
   /// A repeated ID is counted once. Callers assemble this list from several
   /// step paths (every external, plus the built-in) and a duplicate would
   /// inflate the count for a display that moved a single time.
@@ -62,10 +68,31 @@ public enum HUDGrouping {
     }
     return order.compactMap { placement in
       guard let group = members[placement], let first = group.first else { return nil }
+      guard topology.isSynthesisSet(containing: placement) else {
+        return Pill(
+          placement: placement,
+          named: group.contains(placement) ? placement : first,
+          othersInSet: group.count - 1
+        )
+      }
+      // SS1: a synthesized size is a mirror set the APP engaged, and its master
+      // is a virtual display created to hold the framebuffer. The pill still
+      // has to be DRAWN there (it is the only member with a screen), but the
+      // person who pressed the key is looking at one panel: naming the virtual
+      // display would put a name they have never seen on the pill, and counting
+      // it as "+ 1 more" would announce a display that does not exist for them.
+      // So the master is dropped from the naming and the count, and only from
+      // those: a second real panel showing the same framebuffer is one the
+      // user CAN see, and is counted like any other member.
+      //
+      // The fallback keeps the master's name rather than dropping the
+      // announcement: a set whose panel took no step is not a reason to swallow
+      // a pill the caller has already decided to show.
+      let panels = group.filter { $0 != placement }
       return Pill(
         placement: placement,
-        named: group.contains(placement) ? placement : first,
-        othersInSet: group.count - 1
+        named: panels.first ?? first,
+        othersInSet: max(panels.count - 1, 0)
       )
     }
   }
