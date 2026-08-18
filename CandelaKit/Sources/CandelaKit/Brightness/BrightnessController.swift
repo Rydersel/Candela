@@ -770,6 +770,17 @@ public final class BrightnessController: PendingWireDraining {
     mirrorTopology.drawableDisplayID(for: displayID)
   }
 
+  /// The companion ID the last gamma write went to, so a reconfigure can clear
+  /// the baseline the island cached for it.
+  ///
+  /// Remembered rather than re-derived: a synthesis disengage destroys the
+  /// virtual display and the topology stops naming it in the same breath, so by
+  /// the time `handleReconfigure` runs there is nothing left to ask. Without
+  /// this the island keeps a baseline keyed on an ID CoreGraphics is free to
+  /// hand to the next display that arrives, and a re-engaged slot would scale a
+  /// new display's table against a destroyed one's.
+  private var lastGammaCompanionID: CGDirectDisplayID?
+
   /// Every gamma write this controller makes, and the ONE place SS15's double
   /// write is decided.
   ///
@@ -779,17 +790,27 @@ public final class BrightnessController: PendingWireDraining {
   /// changed, and that whether it reaches the glass is not decidable from
   /// software: scanout comes from the master's framebuffer, and no reachable
   /// layer distinguishes a dimmed panel from an undimmed one. So both are
-  /// written. Nothing here claims either one lands; the tables are identical and
-  /// a gamma write is idempotent, so the pair costs a second CoreGraphics call
-  /// and nothing else, and the hardware pass's eyes item picks the survivor.
+  /// written, which is what SS15 asks for.
+  ///
+  /// **This is not a free double write, and nothing here claims otherwise.**
+  /// Zero, one or both of the two tables may reach the glass, and software
+  /// cannot tell which. Two LUTs in one scanout chain COMPOUND: 0.5 applied
+  /// twice is 0.25, a visibly darker panel than the value asked for. The
+  /// hardware pass's eyes item is therefore checking for doubled dimming exactly
+  /// as much as for missing dimming, and it is what decides the final single
+  /// routing.
   ///
   /// Restricted to a SYNTHESIS set (SS1's pairing, never the mirror flags). In a
   /// mirror set the user built, the master is somebody else's desktop and
   /// scaling its table would dim a display nobody asked about.
   ///
-  /// Only the PANEL's write decides the return value. The process that created a
-  /// virtual display cannot read it back, so the companion write can refuse for
-  /// reasons that say nothing about the dimming, and letting that answer
+  /// The companion leg goes through the assumed-linear-baseline entry point,
+  /// because the process that created a virtual display cannot read its table
+  /// back and the ordinary leg refuses a display whose baseline it never
+  /// captured. Without it the second write is issued here and never made.
+  ///
+  /// Only the PANEL's write decides the return value. The companion can refuse
+  /// for reasons that say nothing about the dimming, and letting that answer
   /// `landed` would clear the dedupe memo and re-attempt on every drag event:
   /// the live-lock DT17's reporting rule exists to avoid.
   @discardableResult
@@ -798,7 +819,8 @@ public final class BrightnessController: PendingWireDraining {
   ) -> Bool {
     let landed = gamma.applyGammaScale(scale, on: displayID, enforcerOn: drawable)
     if drawable != displayID, mirrorTopology.topology().isSynthesisSet(containing: displayID) {
-      gamma.applyGammaScale(scale, on: drawable, enforcerOn: drawable)
+      gamma.applyGammaScale(assumingLinearBaseline: scale, on: drawable, enforcerOn: drawable)
+      lastGammaCompanionID = drawable
     }
     return landed
   }
@@ -1415,6 +1437,15 @@ public final class BrightnessController: PendingWireDraining {
     // next real reconfiguration recaptures normally.
     if recapture {
       backends.gamma?.recaptureDefaultTable(on: displayID)
+      // SS15's companion leg makes the island hold a baseline for a display this
+      // controller does not own, and a synthesis disengage destroys that display
+      // while CoreGraphics is free to reissue its ID. Dropping the baseline here
+      // is what stops a re-engaged slot from scaling a new display's table
+      // against a destroyed one's.
+      if let companion = lastGammaCompanionID, companion != displayID {
+        backends.gamma?.recaptureDefaultTable(on: companion)
+        lastGammaCompanionID = nil
+      }
     }
     backends.shade?.repinFrames()
     lastAppliedSw = nil

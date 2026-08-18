@@ -123,24 +123,43 @@ struct SoftwareDimmingReportingTests {
 /// tests are about.
 @MainActor
 private final class SelectiveGamma: GammaApplying {
+  struct Write: Equatable {
+    var scale: Double
+    var target: CGDirectDisplayID
+    var enforcer: CGDirectDisplayID
+    /// Which entry point issued it. The two legs differ in what they do about a
+    /// display whose baseline cannot be captured, so a double that collapsed
+    /// them could not see the companion routed through the leg that refuses.
+    var assumesLinearBaseline: Bool
+  }
+
   var refuses: Set<CGDirectDisplayID> = []
-  private(set) var writes: [(scale: Double, write: CGDirectDisplayID, enforcer: CGDirectDisplayID)] = []
-  private(set) var verified: [CGDirectDisplayID] = []
+  private(set) var writes: [Write] = []
+  private(set) var recaptured: [CGDirectDisplayID] = []
 
   @discardableResult
   func applyGammaScale(
     _ scale: Double, on displayID: CGDirectDisplayID, enforcerOn drawableDisplayID: CGDirectDisplayID
   ) -> Bool {
-    writes.append((scale, displayID, drawableDisplayID))
+    writes.append(
+      Write(scale: scale, target: displayID, enforcer: drawableDisplayID, assumesLinearBaseline: false)
+    )
     return !refuses.contains(displayID)
   }
 
-  func verifyTableIntact(on displayID: CGDirectDisplayID) -> Bool {
-    verified.append(displayID)
-    return true
+  @discardableResult
+  func applyGammaScale(
+    assumingLinearBaseline scale: Double, on displayID: CGDirectDisplayID,
+    enforcerOn drawableDisplayID: CGDirectDisplayID
+  ) -> Bool {
+    writes.append(
+      Write(scale: scale, target: displayID, enforcer: drawableDisplayID, assumesLinearBaseline: true)
+    )
+    return !refuses.contains(displayID)
   }
 
-  func recaptureDefaultTable(on _: CGDirectDisplayID) {}
+  func verifyTableIntact(on _: CGDirectDisplayID) -> Bool { true }
+  func recaptureDefaultTable(on displayID: CGDirectDisplayID) { recaptured.append(displayID) }
   func resetAllGamma() {}
 }
 
@@ -180,13 +199,58 @@ struct SynthesisGammaRoutingTests {
       store: MirrorTopologyStore(MirrorFixtures.synthesisPair())
     )
     controller.setBrightness(0.4)
-    #expect(gamma.writes.map(\.write) == [Self.panelID, Self.virtualID])
-    // Both halves carry the same scale: the tables are identical, which is what
-    // makes writing both cost nothing but a second call.
+    #expect(gamma.writes.map(\.target) == [Self.panelID, Self.virtualID])
+    // Both halves carry the same scale.
     #expect(Set(gamma.writes.map(\.scale)).count == 1)
     // And the enforcer stays where it has to be: only the virtual display has a
     // compositor to force a pass on.
     #expect(gamma.writes.allSatisfy { $0.enforcer == Self.virtualID })
+  }
+
+  /// THE DEFECT the first round shipped. The companion went through the ordinary
+  /// leg, which refuses a display whose baseline it could not capture, and the
+  /// creating process measurably cannot read a virtual display's table: the
+  /// second write was issued and never made. The panel keeps the ordinary leg,
+  /// which must keep refusing rather than flattening a real colour profile.
+  @Test func theCompanionLegAssumesALinearBaselineAndThePanelLegDoesNot() {
+    let gamma = SelectiveGamma()
+    let controller = controller(
+      displayID: Self.panelID, gamma: gamma,
+      store: MirrorTopologyStore(MirrorFixtures.synthesisPair())
+    )
+    controller.setBrightness(0.4)
+    #expect(gamma.writes.map(\.assumesLinearBaseline) == [false, true])
+  }
+
+  /// A synthesis disengage destroys the virtual display, and CoreGraphics may
+  /// reissue its ID. The baseline the island cached for it has to go with it, or
+  /// a re-engaged slot scales a new display's table against a dead one's.
+  @Test func aReconfigureDropsTheCompanionBaselineAsWellAsThePanels() async {
+    let gamma = SelectiveGamma()
+    let controller = controller(
+      displayID: Self.panelID, gamma: gamma,
+      store: MirrorTopologyStore(MirrorFixtures.synthesisPair())
+    )
+    controller.setBrightness(0.4)
+    await controller.handleReconfigure()
+    #expect(gamma.recaptured.contains(Self.virtualID))
+    #expect(gamma.recaptured.contains(Self.panelID))
+  }
+
+  /// And nothing is dropped for a display that never took a companion write, so
+  /// an ordinary mirror set's master keeps the baseline it captured for itself.
+  @Test func aReconfigureWithNoCompanionRecapturesOnlyThePanel() async {
+    let gamma = SelectiveGamma()
+    let controller = controller(
+      displayID: 3, gamma: gamma,
+      store: MirrorTopologyStore(MirrorTopology([
+        MirrorFixtures.display(2, inSet: true),
+        MirrorFixtures.display(3, mirrors: 2),
+      ]))
+    )
+    controller.setBrightness(0.4)
+    await controller.handleReconfigure()
+    #expect(gamma.recaptured == [3])
   }
 
   /// The carve-out is the pairing, not the mirror flags: a mirror set the user
@@ -203,7 +267,7 @@ struct SynthesisGammaRoutingTests {
       ]))
     )
     controller.setBrightness(0.4)
-    #expect(gamma.writes.map(\.write) == [3])
+    #expect(gamma.writes.map(\.target) == [3])
   }
 
   @Test func anUnmirroredDisplayKeepsTheSingleWrite() {
@@ -212,7 +276,7 @@ struct SynthesisGammaRoutingTests {
       displayID: 2, gamma: gamma, store: MirrorTopologyStore(MirrorFixtures.unmirroredPair)
     )
     controller.setBrightness(0.4)
-    #expect(gamma.writes.map(\.write) == [2])
+    #expect(gamma.writes.map(\.target) == [2])
   }
 
   /// Only the PANEL's write decides whether the dimming landed. The process that

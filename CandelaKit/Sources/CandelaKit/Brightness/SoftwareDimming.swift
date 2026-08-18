@@ -43,12 +43,14 @@ import CoreGraphics
   /// did not happen or the CG call failed.
   ///
   /// TWO display IDs, and the difference is load-bearing (DT17):
-  /// - `displayID` is the WRITE target and stays the RAW panel ID. Gamma is a
-  ///   per-display property and the slave's own panel is what we want dimmed.
-  ///   (Whether that write reaches a hardware mirror slave at all is
-  ///   UNVERIFIED; Apple's rationale for the online list names gamma tables
-  ///   specifically, which is encouraging and is not proof. Nothing depends on
-  ///   the answer, because this call now reports rather than pretends.)
+  /// - `displayID` is the WRITE target. Gamma is a per-display property, and
+  ///   which display should be dimmed is the engine's decision rather than this
+  ///   call's. Ordinarily it is the raw panel ID; under an engaged synthesis
+  ///   pairing the engine issues TWO legs (SS15), the panel here and the
+  ///   drawable ID through `applyGammaScale(assumingLinearBaseline:on:
+  ///   enforcerOn:)` below. Whether either write reaches the glass on a mirror
+  ///   slave is not decidable from software, which is why both are issued and
+  ///   why nothing here claims an outcome beyond "the call was accepted".
   /// - `drawableDisplayID` is where the 1x1 activity-enforcer window goes. Only
   ///   a drawable display has a compositor, and the enforcer's whole job is to
   ///   force a composite pass.
@@ -56,11 +58,38 @@ import CoreGraphics
   func applyGammaScale(
     _ scale: Double, on displayID: CGDirectDisplayID, enforcerOn drawableDisplayID: CGDirectDisplayID
   ) -> Bool
+  /// SS15's second leg: the same write, for a display whose own default table
+  /// may not be readable at all.
+  ///
+  /// The process that created a virtual display cannot read it back, and SS15
+  /// requires both IDs of an engaged synthesis set to receive the table, so a
+  /// refused capture must not swallow the write. An implementation that holds
+  /// baselines uses the straight 0…1 ramp when it has none. That the ramp is a
+  /// virtual display's true untouched table is an ASSUMPTION and is unverified;
+  /// the hardware pass's eyes item decides the final routing.
+  ///
+  /// The default forwards to `applyGammaScale`, so a backend that captures no
+  /// baseline of its own behaves exactly as it did.
+  @discardableResult
+  func applyGammaScale(
+    assumingLinearBaseline scale: Double, on displayID: CGDirectDisplayID,
+    enforcerOn drawableDisplayID: CGDirectDisplayID
+  ) -> Bool
   /// True while the last-written table (peak ratio) is still installed within 0.02.
   func verifyTableIntact(on displayID: CGDirectDisplayID) -> Bool
   /// Re-capture the default table (call after reconfiguration).
   func recaptureDefaultTable(on displayID: CGDirectDisplayID)
   func resetAllGamma() // CGDisplayRestoreColorSyncSettings()
+}
+
+public extension GammaApplying {
+  @discardableResult
+  func applyGammaScale(
+    assumingLinearBaseline scale: Double, on displayID: CGDirectDisplayID,
+    enforcerOn drawableDisplayID: CGDirectDisplayID
+  ) -> Bool {
+    applyGammaScale(scale, on: displayID, enforcerOn: drawableDisplayID)
+  }
 }
 
 /// Presents the user-facing choice the dimming engine cannot make on its own —
