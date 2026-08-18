@@ -260,6 +260,31 @@ case "modes":
           + "  id \(mode.ioModeID)")
     }
   }
+case "synthstops":
+  // The synthesized-size ladder exactly as the launch reapply computes it:
+  // raw configurator rows, native from the native flag, and the stored-stop
+  // resolution beside it. Built for the #186 pass, where the pane and the
+  // launch path disagreed and nothing could print the launch path's view.
+  guard let target = displayFilter else {
+    print("synthstops requires --display <id>")
+    exit(2)
+  }
+  let configurator = CoreGraphicsDisplayConfigurator()
+  let rows = configurator.modes(for: target)
+  print("rows: \(rows.count)")
+  let native = rows.first(where: \.isNative)
+  print("native: \(native.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) @\($0.refreshHz)Hz" } ?? "NIL")")
+  if let native {
+    let stops = SyntheticSizeCatalog.stops(
+      nativeLogicalWidth: native.logicalWidth, nativeLogicalHeight: native.logicalHeight,
+      existingRows: rows,
+      ceilingPixelWidth: VirtualDisplayIdentity.maxPixels.wide,
+      ceilingPixelHeight: VirtualDisplayIdentity.maxPixels.high)
+    for stop in stops {
+      print("stop: \(stop.logicalWidth)x\(stop.logicalHeight) @\(stop.percentOfNative)%")
+    }
+    if stops.isEmpty { print("stop: NONE") }
+  }
 case "curated":
   // What the DEFAULT picker actually shows, after DisplayModeCatalog curation.
   //

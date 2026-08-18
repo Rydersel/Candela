@@ -867,7 +867,12 @@ final class DisplayModeCoordinator {
   /// lookup, so it must never be handed an unresolved one.
   private func reapplySynthesis(for display: ConfiguredDisplay) async {
     guard let synthesis, !display.isBuiltIn else { return }
-    let modes = configurator.modes(for: display.id)
+    // Through DisplayModeCatalog.full, exactly as refreshCatalog feeds
+    // baseline(): in the RAW list the native flag rides the HiDPI twin
+    // (logical 1720x720 on the MAG), the ladder computes from that, and every
+    // stop lands under the minor-axis floor. The stored stop then resolves
+    // nil and the relaunch restore reports staleDescriptor forever.
+    let modes = DisplayModeCatalog.full(configurator.modes(for: display.id))
     let baseline = baseline(
       for: display, modes: modes, isEngaged: synthesis.isEngaged(displayID: display.id)
     )
