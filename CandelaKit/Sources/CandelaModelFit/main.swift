@@ -415,7 +415,7 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
   for compositing in [ExposureModelParameters.Compositing.summedCoverage, .topmostWins] {
     var probe = ExposureModelParameters.baseline
     probe.compositing = compositing
-    probe.chromeCoverageLimit = compositing == .topmostWins ? 0.5 : 0.08
+    probe.chromeCoverageLimit = compositing == .topmostWins ? ladderChromeLimit : 0.08
     // Priors drawn from the log's own owners and layers, so the probe cannot
     // miss for want of an app that happens not to be on this panel.
     for (index, owner) in Set(raw.flatMap { $0.windows.map(\.owner) }).sorted().enumerated() {
@@ -620,7 +620,7 @@ func sensitivity(
 func ceilingDecile(_ hold: [Prepared], apps: [String], layers: [Int]) -> Int {
   var cheat = ExposureModelParameters.baseline
   cheat.compositing = .topmostWins
-  cheat.chromeCoverageLimit = 0.5
+  cheat.chromeCoverageLimit = ladderChromeLimit
   for layer in layers { cheat.layerPriors[layer] = 0.5 }
   for (offset, app) in apps.enumerated() {
     cheat.appPriors[app] = Double(offset + 1) / Double(apps.count + 1)

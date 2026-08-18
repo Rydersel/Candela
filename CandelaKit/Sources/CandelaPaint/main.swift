@@ -107,6 +107,8 @@ print(
     + "\(Int(options.rect.width))x\(Int(options.rect.height)) on display \(options.displayID)")
 
 Timer.scheduledTimer(withTimeInterval: options.hold, repeats: false) { _ in
-  application.terminate(nil)
+  // The timer fires on the main run loop, so the isolation is real; Swift 6
+  // cannot see that through the nonisolated closure type.
+  MainActor.assumeIsolated { application.terminate(nil) }
 }
 application.run()

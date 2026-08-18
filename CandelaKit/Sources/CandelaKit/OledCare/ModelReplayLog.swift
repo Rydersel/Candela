@@ -272,11 +272,19 @@ public final class ModelReplayLog {
     var skipped = 0
     for index in indices {
       let path = directory.appendingPathComponent(String(format: "replay-%05d.jsonl", index))
-      guard let text = try? String(contentsOf: path, encoding: .utf8) else { continue }
-      for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-        guard let data = line.data(using: .utf8),
-          let record = try? decoder.decode(ModelReplayRecord.self, from: data)
-        else {
+      // Read BYTES and split on newline, rather than decoding the file as one
+      // UTF-8 string. A tear that splits a multi-byte character made the whole
+      // file fail to decode, so `continue` discarded every record in it and
+      // reported `skipped 0`: the count actively misdirected the diagnosis, and
+      // an interrupted capture is the ordinary way to produce that tear.
+      guard let bytes = try? Data(contentsOf: path) else {
+        skipped += 1
+        continue
+      }
+      for line in bytes.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true) {
+        let data = Data(line)
+        guard !data.isEmpty else { continue }
+        guard let record = try? decoder.decode(ModelReplayRecord.self, from: data) else {
           skipped += 1
           continue
         }
