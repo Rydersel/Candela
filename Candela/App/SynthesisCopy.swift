@@ -103,6 +103,11 @@ enum SynthesisCopy {
       // can fire while the size is engaged and visible, and a sentence
       // contradicting the screen is worse than a vague one.
       "\(AppInfo.productName) could not match that size to this display. Pick one from the list of sizes."
+    case .restoreSuperseded:
+      // Names the outcome and the one move that undoes it. No mechanism: the
+      // person did not start the operation that took over and does not need to
+      // know which one it was.
+      "Another display change took over, so the size \(AppInfo.productName) renders was not put back. Pick it again from the list of sizes."
     case .hdrLeftStanding:
       // The one state this feature can leave behind that only the person can
       // clear, so it names the control rather than describing the mechanism.

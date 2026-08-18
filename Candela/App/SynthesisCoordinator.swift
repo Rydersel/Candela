@@ -61,6 +61,11 @@ final class SynthesisCoordinator {
       case notOffered
       /// The size asked for is no longer one the catalog offers for this panel.
       case sizeNoLongerOffered
+      /// A size this app renders was taken down for an ordinary pick, the pick
+      /// did not stand, and something else claimed the displays before it could
+      /// be put back. Not a refused request either: it explains a disappearance
+      /// the person did not ask for and cannot otherwise account for.
+      case restoreSuperseded
       /// The post-engage link bounce turned HDR on to renegotiate the wire
       /// and could not turn it back off. Not a refused request: the size is on
       /// the glass. It is the one state this feature can leave behind that a

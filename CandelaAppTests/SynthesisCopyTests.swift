@@ -224,7 +224,7 @@ struct SynthesisCopyTests {
   private static let everyReason: [SynthesisCoordinator.Refusal.Reason] =
     [
       .builtIn, .hdrEngaged, .alreadyMirrored, .notOffered, .sizeNoLongerOffered,
-      .hdrLeftStanding, .busy,
+      .restoreSuperseded, .hdrLeftStanding, .busy,
     ]
       + ReconfigurationClaimant.allCases.map { .blocked(by: $0) }
       + everyFailure.map { .engine($0) }
