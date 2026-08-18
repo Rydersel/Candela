@@ -110,39 +110,70 @@ final class LuminanceSampler {
     return Sample(grid: grid, cols: cols, rows: rows)
   }
 
-  /// The capture is requested at the **storage grid's own resolution**,
-  /// oriented to the display: the long edge gets `PanelGrid.cols`, the short
-  /// edge `PanelGrid.rows`. Rotation maps a panel's long axis onto the
-  /// display's long axis in every orientation, so this lands one captured
-  /// pixel per stored cell on an upright MAG and on the Dell at 270° alike.
+  /// The capture is requested at the **display's own aspect**, with its long
+  /// edge at `PanelGrid` resolution. `panelNativeGrid` then re-bins whatever
+  /// shape arrives into the fixed 24x10 storage grid, so the request never has
+  /// to match the storage shape.
   ///
-  /// The plan asked for 96×40 on the premise that ScreenCaptureKit would
-  /// reduce it to 24×10. It does not:
+  /// **This asks for the display's aspect rather than the grid's because SCK
+  /// letterboxes.** [MEASURED 2026-08-17, macOS 26] A capture whose requested
+  /// frame aspect differs from the source is scaled to fit and the remainder is
+  /// padded with **black**, inside a frame that still comes back at exactly the
+  /// requested size. Black is a luminance the accumulator cannot tell from a
+  /// dark panel, so the padding books as real exposure and a band of the map
+  /// stays cold forever.
+  ///
+  /// The earlier rule here gave the long edge `PanelGrid.cols` and the short
+  /// edge `PanelGrid.rows` regardless of the panel, which measured as:
+  ///
+  /// | panel | aspect | requested | dead band |
+  /// |---|---|---|---|
+  /// | Dell 1440x2560 at 270 deg | 0.5625 | 10x24 (0.4167) | 6 blank rows |
+  /// | built-in 1800x1169 | 1.5398 | 24x10 (2.4000) | 8 blank columns |
+  /// | MAG 3440x1440 | 2.3889 | 24x10 (2.4000) | none |
+  ///
+  /// Only the MAG escaped, and only because 2.3889 is a hair off 2.4. On the
+  /// Dell the blank rows are display rows; at 270 deg `panelPoint` turns them
+  /// into blank *panel columns*, which is why a rotation-shaped defect had a
+  /// capture-shaped cause.
+  ///
+  /// **`preservesAspectRatio = false` does not help.** [MEASURED 2026-08-17]
+  /// `SCScreenshotManager.captureImage` letterboxes identically with the flag
+  /// cleared; the same Dell request came back with the same six blank rows.
+  /// Do not reach for it again.
+  ///
+  /// Still true from the earlier pass, and still not a contract:
   ///
   /// - [MEASURED 2026-08-07, macOS 26.4] **SCK delivers exactly the size
-  ///   requested.** 96×40 came back 96×40 and 24×10 came back 24×10, on all
-  ///   three attached displays, including requests whose aspect did not match
-  ///   the panel's. The spec's "~96×40 requested, reduced to 24×10" describes
-  ///   a reduction nobody observed — S3 simply passed 24 as its grid argument.
-  ///   Requesting 96 would hand Kit 3840 floats per sample instead of the 240
-  ///   the privacy story promises.
+  ///   requested.** That is about the frame's dimensions, not about the content
+  ///   filling it: the delivered size matched on every panel while the Dell's
+  ///   content occupied 18 of its 24 rows. Reading back the delivered size was
+  ///   never going to catch this, so nothing here should be read as evidence
+  ///   that the frame is fully covered.
   /// - [MEASURED 2026-08-07] **SCK's downscale area-averages, it does not
-  ///   point-sample.** A direct 24×10 capture and a 384×160 capture
-  ///   box-filtered to 24×10 agreed to a mean |Δ| of 0.003–0.016 luminance on
-  ///   all three panels. Oversampling buys no fidelity, so there is nothing to
-  ///   trade against the extra data.
+  ///   point-sample.** A direct 24x10 capture and a 384x160 capture
+  ///   box-filtered to 24x10 agreed to a mean |delta| of 0.003 to 0.016
+  ///   luminance on all three panels. Oversampling buys no fidelity, so there
+  ///   is nothing to trade against the extra data.
   ///
-  /// Neither measurement is a contract, which is why the delivered size is
-  /// read back in `sample(displayID:)` rather than assumed here.
+  /// The delivered size is still read back in `sample(displayID:)` rather than
+  /// assumed here.
   // Internal, not private: the wallpaper source renders through the same
-  // orientation rule and EOTF math, so both stay one implementation.
+  // orientation rule and EOTF math, so both stay one implementation. It draws
+  // through `meanLuminance`, which stretches to fill and never letterboxes, so
+  // an aspect-matched request is correct on that path too.
   static func requestedSize(displayWidth: Int, displayHeight: Int) -> (Int, Int) {
     let long = max(PanelGrid.cols, PanelGrid.rows)
-    let short = min(PanelGrid.cols, PanelGrid.rows)
     // A zero-sized display reading only happens mid-reconfiguration; the square
     // fallback keeps the request valid and the next sample corrects it.
     guard displayWidth > 0, displayHeight > 0 else { return (long, long) }
-    return displayWidth >= displayHeight ? (long, short) : (short, long)
+    let aspect = Double(displayWidth) / Double(displayHeight)
+    guard aspect.isFinite, aspect > 0 else { return (long, long) }
+    // The short edge is rounded, never floored: a floor can reach 0 on an
+    // extreme aspect and a zero-sized request is not capturable.
+    return aspect >= 1
+      ? (long, max(1, Int((Double(long) / aspect).rounded())))
+      : (max(1, Int((Double(long) * aspect).rounded())), long)
   }
 
   // MARK: - Luminance
