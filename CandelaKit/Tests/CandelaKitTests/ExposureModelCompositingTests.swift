@@ -202,3 +202,119 @@ struct ExposureModelCompositingTests {
     for value in grid { #expect(value >= 0 && value <= 1) }
   }
 }
+
+// Chrome admission by coverage.
+//
+// The layer range excludes everything below zero because the desktop backdrop
+// fills the screen, and counting it would read the wallpaper as full-screen
+// window coverage. That reasoning is about AREA, not layer, so a coverage bound
+// expresses it directly while admitting the menu-bar strips the measured
+// capture contains and the model has never seen.
+//
+// These exist because the offline harness modelled chrome the shipped type
+// could not express, which would have made a passing rung unimplementable.
+@Suite("Chrome admission by coverage")
+struct ChromeCoverageAdmissionTests {
+
+  private let transform = PanelSpaceTransform(
+    displaySize: CGSize(width: 2400, height: 1000), rotation: .standard)
+
+  private func window(_ owner: String, _ rect: CGRect, layer: Int) -> WindowSnapshot {
+    WindowSnapshot(windowID: 1, ownerPID: 1, ownerName: owner, bounds: rect, layer: layer)
+  }
+
+  private let menuBar = -2_147_483_602
+  private let transientAbove = 2_147_483_630
+
+  private func grid(_ windows: [WindowSnapshot], _ parameters: ExposureModelParameters)
+    -> [Double]
+  {
+    ExposureModel.modelledGrid(
+      inputs: ExposureModelInputs(windows: windows, wallpaperCells: nil, appearanceIsDark: false),
+      through: transform, parameters: parameters)
+  }
+
+  /// The shipped default must not move. This is the regression guard for a
+  /// change made to the engine at the request of an offline tool.
+  @Test("a nil limit is the shipped behaviour, for every layer")
+  func nilLimitChangesNothing() {
+    let strip = window("Window Server", CGRect(x: 0, y: 0, width: 2400, height: 100), layer: menuBar)
+    let cursor = window("Cursor", CGRect(x: 0, y: 0, width: 200, height: 200),
+      layer: transientAbove)
+    let ordinary = window("App", CGRect(x: 0, y: 200, width: 1200, height: 600), layer: 0)
+
+    for compositing in [ExposureModelParameters.Compositing.summedCoverage, .topmostWins] {
+      var params = ExposureModelParameters.baseline
+      params.compositing = compositing
+      // Priors that would show if either window were admitted.
+      params.layerPriors = [menuBar: 0.0, transientAbove: 1.0]
+      #expect(grid([ordinary, strip, cursor], params) == grid([ordinary], params))
+    }
+  }
+
+  @Test("a chrome-sized window below the range is admitted once a limit is set")
+  func chromeIsAdmittedByCoverage() {
+    // A full cell tall (the grid is 24x10, so 100 px on a 1000 px display), or
+    // cell 0 is only partly covered and mixes with the backdrop.
+    let strip = window("Window Server", CGRect(x: 0, y: 0, width: 2400, height: 100), layer: menuBar)
+    var params = ExposureModelParameters.baseline
+    params.compositing = .topmostWins
+    params.layerPriors = [menuBar: 1.0]
+    params.chromeCoverageLimit = 0.5
+
+    let without = grid([strip], .baseline)
+    let with = grid([strip], params)
+    #expect(with != without)
+    // Cell 0 is inside the strip, so it takes the layer's own luminance.
+    #expect(abs(with[0] - 1.0) < 1e-12)
+  }
+
+  @Test("a full-display backdrop is refused, so the wallpaper term survives")
+  func fullDisplayBackdropIsRefused() {
+    let backdrop = window(
+      "Dock", CGRect(x: 0, y: 0, width: 2400, height: 1000), layer: -2_147_483_624)
+    var params = ExposureModelParameters.baseline
+    params.compositing = .topmostWins
+    params.chromeCoverageLimit = 0.5
+    let paper = [Double](repeating: 0.42, count: PanelGrid.cellCount)
+
+    let modelled = ExposureModel.modelledGrid(
+      inputs: ExposureModelInputs(
+        windows: [backdrop], wallpaperCells: paper, appearanceIsDark: false),
+      through: transform, parameters: params)
+    // The wallpaper must still be visible everywhere; a blanketed grid would
+    // read 0.7 (the appearance prior) instead.
+    for value in modelled { #expect(abs(value - 0.42) < 1e-12) }
+  }
+
+  /// The two exclusions are not symmetric, and a coverage bound cannot tell a
+  /// transient pop-up from a menu bar, because both are small.
+  @Test("a transient window above the range is never admitted, whatever the limit")
+  func transientLayersStayExcluded() {
+    // Big enough to fill a cell, and given a prior that differs from the
+    // backdrop. Without both, admitting it would change no number and the test
+    // could not fail: a transient window with no prior resolves to the same
+    // appearance prior an uncovered cell falls back to.
+    let cursor = window("Window Server", CGRect(x: 0, y: 0, width: 200, height: 200),
+      layer: transientAbove)
+    var params = ExposureModelParameters.baseline
+    params.compositing = .topmostWins
+    params.layerPriors = [transientAbove: 0.0]
+    params.chromeCoverageLimit = 0.99
+    #expect(grid([cursor], params) == grid([cursor], .baseline))
+  }
+
+  @Test("the limit is a strict upper bound")
+  func limitIsStrict() {
+    // Exactly half the display: 1200x1000 of 2400x1000.
+    let half = window("Dock", CGRect(x: 0, y: 0, width: 1200, height: 1000), layer: menuBar)
+    var params = ExposureModelParameters.baseline
+    params.compositing = .topmostWins
+    params.layerPriors = [menuBar: 1.0]
+    params.chromeCoverageLimit = 0.5
+    #expect(grid([half], params) == grid([half], .baseline))
+
+    params.chromeCoverageLimit = 0.51
+    #expect(grid([half], params) != grid([half], .baseline))
+  }
+}
