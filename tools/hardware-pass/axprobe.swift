@@ -56,7 +56,7 @@ func actions(_ element: AXUIElement) -> [String] {
 /// half the tree.
 func labels(_ element: AXUIElement) -> [String] {
   [string(element, kAXDescriptionAttribute as String), string(element, kAXTitleAttribute as String)]
-    .filter { $0 != "(absent)" && $0 != "(empty)" && $0 != "(non-string)" }
+    .filter { $0 != "(absent)" && $0 != "(empty)" && $0 != "(non-string)" && !$0.hasPrefix("(error") }
 }
 
 let arguments = CommandLine.arguments
@@ -123,21 +123,39 @@ print("window [\(string(settings, kAXTitleAttribute as String))]")
 
 var pressable: [AXUIElement] = []
 
+// SwiftUI publishes this app's toggles with no label of their own: the caption
+// lives in a sibling AXStaticText visited just before the control. An
+// unlabelled control therefore adopts the most recent static text, which is
+// cleared on adoption so a later control cannot inherit it by accident.
+// Measured on the display pane 2026-08-18: every checkbox follows its caption.
+var pendingCaption = ""
+
 func walk(_ element: AXUIElement, depth: Int) {
   guard depth <= 24 else { return }
   let role = string(element, kAXRoleAttribute as String)
   let title = string(element, kAXTitleAttribute as String)
   let description = string(element, kAXDescriptionAttribute as String)
   let value = string(element, kAXValueAttribute as String)
-  let line = "\(String(repeating: " ", count: depth))\(role)"
+  if role == "AXStaticText", !value.hasPrefix("("), !value.isEmpty {
+    pendingCaption = value
+  }
+  var adopted = ""
+  if role != "AXStaticText", labels(element).isEmpty, !pendingCaption.isEmpty,
+     actions(element).contains("AXPress")
+  {
+    adopted = pendingCaption
+    pendingCaption = ""
+  }
+  var line = "\(String(repeating: " ", count: depth))\(role)"
     + " AXTitle=[\(title)] AXDescription=[\(description)] AXValue=[\(value)]"
+  if !adopted.isEmpty { line += " (label: \(adopted))" }
   switch verb {
   case "dump":
     if argument == nil || line.localizedCaseInsensitiveContains(argument!) { print(line) }
   default:
-    if actions(element).contains("AXPress"),
-       labels(element).contains(where: { $0.localizedCaseInsensitiveContains(argument!) })
-    {
+    let ownMatch = labels(element).contains(where: { $0.localizedCaseInsensitiveContains(argument!) })
+    let adoptedMatch = adopted.localizedCaseInsensitiveContains(argument!)
+    if actions(element).contains("AXPress"), ownMatch || adoptedMatch {
       pressable.append(element)
       print("candidate:\(line)")
     }
