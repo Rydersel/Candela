@@ -55,6 +55,11 @@ final class FakeSynthesisWorld: @unchecked Sendable {
   /// `VirtualDisplayHost` records its engage helper's verdict. Never derived
   /// from a read: the creating process cannot read its own virtual display.
   private var _achievedModes: [Int: (width: Int, height: Int, hiDPI: Bool)] = [:]
+  /// Slots whose destroy released the token while the display stayed online,
+  /// recorded exactly as `VirtualDisplayHost` records them. The slot entry is
+  /// dropped either way, so this is the only thing a LATER destroy of the same
+  /// slot can answer from.
+  private var _stranded: Set<Int> = []
 
   private var _isAvailable = true
   private var _createFailure: VirtualDisplayFailure?
@@ -227,13 +232,21 @@ final class FakeSynthesisWorld: @unchecked Sendable {
 
   /// The host's shape exactly: the slot entry is dropped BEFORE the release, so
   /// a display that did not depart leaves the slot looking free while the
-  /// display is still online. Only the return value says what happened.
+  /// display is still online. Only the return value says what happened, and a
+  /// slot already recorded as stranded keeps saying so however often it is
+  /// asked: the display is still there, and there is no entry left to find it
+  /// by.
   func destroy(slot: Int) -> Bool {
     lock.withLock {
       _calls.append(.destroyVirtualDisplay(slot: slot))
       _achievedModes.removeValue(forKey: slot)
-      guard let handle = _liveSlots.removeValue(forKey: slot) else { return true }
-      guard _destroySucceeds else { return false }
+      guard let handle = _liveSlots.removeValue(forKey: slot)
+      else { return !_stranded.contains(slot) }
+      guard _destroySucceeds else {
+        _stranded.insert(slot)
+        return false
+      }
+      _stranded.remove(slot)
       _panels.removeValue(forKey: handle.displayID)
       _order.removeAll { $0 == handle.displayID }
       // A departing master takes its set with it, the way the host's own

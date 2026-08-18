@@ -195,8 +195,16 @@ public final class VirtualDisplayHost: VirtualDisplayProviding, @unchecked Senda
     lock.lock()
     achievedModes.removeValue(forKey: slot)
     guard let entry = slots.removeValue(forKey: slot) else {
+      // A slot this host no longer holds is normally nothing to destroy, and
+      // saying so is right. A STRANDED slot is the exception and it is the one
+      // that matters: the token was released while the display stayed online,
+      // so there is no entry left and the display is still there. Answering
+      // true would report a clean revert over it, and `ModeSynthesisEngine`'s
+      // unwind takes this return as its departure check (SS10), so a retried
+      // disengage would drop a pairing whose virtual display is still standing.
+      let stillStranded = stranded.contains(slot)
       lock.unlock()
-      return true
+      return !stillStranded
     }
     lock.unlock()
     breakMasteredMirrors(of: entry.handle.displayID)

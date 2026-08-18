@@ -383,6 +383,31 @@ struct ModeSynthesisEngineTests {
     #expect(world.mirrors.isEmpty)
   }
 
+  /// The RETRY after a stranded destroy, which is the whole point of retaining
+  /// the pairing. The first attempt dropped the slot entry before releasing the
+  /// token, so the second one reaches the host's "no such slot" arm while the
+  /// virtual display is still online. Answering true there would report a clean
+  /// revert over a display nothing can destroy again, and take the pairing that
+  /// is its only record with it: SS10's departure check is this return value
+  /// and nothing else.
+  @Test func aRetriedDisengageOverAStrandedSlotIsStillIncomplete() async {
+    let world = world()
+    let engine = engine(world)
+    _ = await engage(engine, world, size, on: Self.physical)
+    world.destroySucceeds = false
+
+    let first = await engine.disengage(fromPhysical: Self.physical)
+    #expect(first.failureValue == .unwindIncomplete)
+    #expect(world.liveSlots.isEmpty)
+    #expect(world.onlineVirtualDisplayIDs == [FakeSynthesisWorld.virtualDisplayID(slot: 4)])
+
+    let retry = await engine.disengage(fromPhysical: Self.physical)
+
+    #expect(retry.failureValue == .unwindIncomplete)
+    #expect(await engine.pairing(forPhysical: Self.physical)?.slot == 4)
+    #expect(world.onlineVirtualDisplayIDs == [FakeSynthesisWorld.virtualDisplayID(slot: 4)])
+  }
+
   /// SS10's last disengage step. The mirror came off, the virtual display went
   /// away, and the panel is still on the synthesized geometry: the size is
   /// still on the glass, so the teardown did not finish whatever the topology
