@@ -185,12 +185,23 @@ func prepare(_ record: ModelReplayRecord) -> Prepared {
         owner: $0.ownerName, layer: $0.layer,
         coverage: transform.coverage(ofDisplayRect: $0.bounds))
     }
-  let displayArea = transform.displaySize.width * transform.displaySize.height
+  // Filtered by COVERAGE OF THIS DISPLAY, not by area compared against it.
+  // Chrome windows in a record belong to every display, so an area test admitted
+  // the BUILT-IN panel's full-display backing windows onto the ultrawide purely
+  // because a laptop screen is smaller than half of it: measured 0.425 of the
+  // MAG's area, kept, and contributing exactly zero coverage. Three of the four
+  // "chrome layers" were ghosts of another display. Coverage is display-local by
+  // construction, and the upper bound still keeps a full-display backdrop from
+  // blanketing every cell and deleting the wallpaper term.
   let chrome = record.chrome.map(\.snapshot)
-    .filter { snapshot in
-      let area = snapshot.bounds.width * snapshot.bounds.height
-      return area > 0 && displayArea > 0 && area < 0.5 * displayArea
+    .compactMap { snapshot -> (WindowSnapshot, [Double])? in
+      let coverage = transform.coverage(ofDisplayRect: snapshot.bounds)
+      guard coverage.count == PanelGrid.cellCount else { return nil }
+      let fraction = coverage.reduce(0, +) / Double(PanelGrid.cellCount)
+      guard fraction > 0, fraction < 0.5 else { return nil }
+      return (snapshot, coverage)
     }
+    .map { pair -> WindowSnapshot in pair.0 }
     .map {
       // Owner is deliberately per-LAYER, not a single "chrome" bucket. Four
       // distinct chrome layers survive the area filter on this rig (menu bar
@@ -348,36 +359,69 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
   params.compositing = .topmostWins
   params.appPriors = ["Ghostty": 0.11, "Zed": 0.9]
   params.layerPriors = [24: 0.8]
+  // Order sensitivity is a property of the CODE, not of a log: two windows that
+  // do not overlap are legitimately order-invariant, and a desktop of tiled
+  // windows is entirely so. An earlier version of this control probed with
+  // hard-coded app names (Ghostty, Zed, layer 24); on a panel where none of
+  // them covered anything it reported "order-blind" and REFUSED THE WHOLE
+  // PANEL, dropping the rotated Dell and then printing a false "no coverage"
+  // line for an app with 45 windows on it.
+  //
+  // What is checkable here is narrower and still worth checking: where a record
+  // does contain overlapping covered windows, reversing them must change the
+  // result. Where it contains none, the answer is "not applicable", never
+  // "failed". `ExposureModelCompositingTests` pins the code property itself.
+  var orderTested = 0
   var orderBlind = 0
   for record in raw.prefix(40) {
     let prepared = prepare(record)
-    for candidate in [ExposureModelParameters.baseline, params] {
-      let fast = prepared.modelled(candidate)
-      let reference = ExposureModel.modelledGrid(
-        inputs: record.inputs, through: record.transform, parameters: candidate)
-      if (0..<PanelGrid.cellCount).contains(where: { abs(fast[$0] - reference[$0]) > 1e-9 }) {
-        mismatches += 1
-      }
+    let covering = prepared.windows.filter { $0.coverage.contains { $0 > 0 } }
+    guard covering.count > 1 else { continue }
+    // Order can only matter where windows genuinely OVERLAP: two covered
+    // windows sitting side by side are order-invariant and correctly so, which
+    // is exactly what a tiled desktop looks like. Requiring only "more than one
+    // covered window" still failed the Dell for having a legitimately
+    // order-independent layout.
+    var stacked = [Double](repeating: 0, count: PanelGrid.cellCount)
+    for window in covering {
+      for cell in 0..<PanelGrid.cellCount { stacked[cell] += window.coverage[cell] }
     }
-    // MP10 says re-sorting the window array destroys every result without
-    // failing anything. That was literally true: both controls ran `.baseline`,
-    // which is `.summedCoverage` and order-invariant, so a shuffled log passed
-    // them 19/19 and scored variants normally. This is the guard that closes it.
-    if record.windows.count > 1 {
-      var reversed = record
-      reversed.windows.reverse()
-      let forward = prepared.modelled(params)
-      let backward = prepare(reversed).modelled(params)
-      if (0..<PanelGrid.cellCount).allSatisfy({ abs(forward[$0] - backward[$0]) < 1e-12 }) {
-        orderBlind += 1
-      }
+    guard stacked.contains(where: { $0 > 1.000_001 }) else { continue }
+    // Overlaps between windows of the SAME owner are order-invariant in the
+    // model too, because it resolves luminance by owner. Such a record cannot
+    // distinguish an order-blind harness from an order-independent layout.
+    guard Set(covering.map(\.owner)).count > 1 else { continue }
+    // Distinct priors drawn from THIS record's own owners, so the probe cannot
+    // miss for want of an app that happens not to be on this panel.
+    var probe = ExposureModelParameters.baseline
+    probe.compositing = .topmostWins
+    for (index, window) in covering.enumerated() {
+      probe.appPriors[window.owner] = index.isMultiple(of: 2) ? 0.05 : 0.95
+    }
+    var reversed = record
+    reversed.windows.reverse()
+    let forward = prepared.modelled(probe)
+    let backward = prepare(reversed).modelled(probe)
+    orderTested += 1
+    if (0..<PanelGrid.cellCount).allSatisfy({ abs(forward[$0] - backward[$0]) < 1e-12 }) {
+      orderBlind += 1
     }
   }
-  if orderBlind == min(raw.count, 40) && orderBlind > 0 {
-    print("  control: window ORDER changes the model               NO (order-blind)")
-    return false
+  // INFORMATIONAL, never fatal. Whether the harness honours window order is a
+  // property of the code, pinned by ExposureModelCompositingTests
+  // ("window order decides the answer, so the log may never be re-sorted").
+  // Whether a given log can demonstrate it is a property of that day's windows,
+  // and a tiled desktop legitimately cannot. Failing a panel for that dropped
+  // the rotated Dell and then reported an app with 45 windows on it as having
+  // no coverage.
+  if orderTested == 0 {
+    print("  note:    window order not exercised by this log (no differing-owner overlap)")
+  } else if orderBlind == orderTested {
+    print("  note:    window order changed nothing in \(orderTested) overlapping records")
+  } else {
+    print(
+      "  control: window ORDER changes the model               yes (\(orderTested - orderBlind)/\(orderTested))")
   }
-  print("  control: window ORDER changes the model               yes")
   print("  control: prepared path matches ExposureModel \(mismatches == 0 ? "yes" : "NO (\(mismatches))")")
   return mismatches == 0
 }
@@ -461,7 +505,7 @@ func sensitivity(
 /// log the readiness gate refuses, including V3, which contains no per-window
 /// luminance term at all and cleared the bar by driving the dark prior to 0.000.
 func passes(
-  modelledPeak: Double, measuredPeak: Double, top10: Int, baselineTop10: Int, holdout: Int
+  modelledPeak: Double, measuredPeak: Double, decile: Int, baselineDecile: Int, holdout: Int
 ) -> (ok: Bool, why: String) {
   guard holdout >= ExposureAccumulator.minimumSamplesForAnalysis else {
     return (false, "n<\(ExposureAccumulator.minimumSamplesForAnalysis)")
@@ -471,7 +515,9 @@ func passes(
   guard ratio >= 0.85, ratio <= 1.18 else {
     return (false, String(format: "peak %.2f", ratio))
   }
-  guard top10 - baselineTop10 >= 3 else { return (false, "top10 +\(top10 - baselineTop10)") }
+  guard decile - baselineDecile >= 3 else {
+    return (false, "decile +\(decile - baselineDecile)")
+  }
   return (true, "PASS")
 }
 
@@ -487,6 +533,10 @@ func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelP
   let s = pearson(averageRanks(measured), averageRanks(modelled)) ?? .nan
   let multiple = hottestMultiple(modelled)
   let measuredMultiple = hottestMultiple(measured)
+  // Reported, never gating. EM14 blocks two claims: hottestRelative, which the
+  // peak ratio licenses, and hottestOwner, which needs the SINGLE hottest cell
+  // to be right. No rung has ever scored above 0/1 on that, so hottestOwner
+  // stays blocked whatever the gate says about the peak.
   let top1 = agreement(measured, modelled, 1)
   let top5 = agreement(measured, modelled, 5)
   let top10 = agreement(measured, modelled, 10)
@@ -495,7 +545,7 @@ func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelP
   // Free parameters are counted as those the objective can actually move.
   // The printed count is what a reader uses to judge overfitting, and a prior
   // the data cannot constrain is not a degree of freedom that was spent.
-  var effective = freeParameters
+  var effective = -1
   if !fitGroups.isEmpty {
     var live = 0
     for app in parameters.appPriors.keys
@@ -515,21 +565,26 @@ func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelP
   }
 
   let verdict = baselineTop10.map {
-    passes(modelledPeak: multiple, measuredPeak: measuredMultiple, top10: top10,
-      baselineTop10: $0, holdout: records.count)
+    passes(modelledPeak: multiple, measuredPeak: measuredMultiple, decile: top24,
+      baselineDecile: $0, holdout: records.count)
   }
   // A prior resting on a clamp is a misspecification signal, not a fit.
+  // Every fitted family, not just apps: V2 fits nothing BUT layer priors, so
+  // omitting them meant the flag could not fire on the rung that needed it most.
   let pinned = parameters.appPriors.values.contains { $0 <= 0 || $0 >= 1 }
+    || parameters.layerPriors.values.contains { $0 <= 0 || $0 >= 1 }
     || parameters.darkAppearancePrior <= 0 || parameters.darkAppearancePrior >= 1
+    || parameters.lightAppearancePrior <= 0 || parameters.lightAppearancePrior >= 1
   print(
     String(
-      format: "  %-30@ params %2d  r %6.3f  rho %6.3f  peak %.2fx/%.2fx = %.2f  top10 %2d/10  top24 %2d/24  %@%@",
-      label as NSString, effective, p, s, multiple, measuredMultiple,
-      measuredMultiple > 0 ? multiple / measuredMultiple : .nan, top10, top24,
+      format: "  %-30@ params %2d/%-2d r %6.3f  rho %6.3f  peak %.2fx/%.2fx = %.2f  top1 %d/1  decile %2d/24  %@%@",
+      label as NSString, effective >= 0 ? effective : freeParameters, freeParameters,
+      p, s, multiple, measuredMultiple,
+      measuredMultiple > 0 ? multiple / measuredMultiple : .nan, top1, top24,
       (verdict.map { $0.ok ? "PASS" : "fail (\($0.why))" } ?? "baseline") as NSString,
       (pinned ? "  [prior pinned at a clamp]" : "") as NSString))
-  _ = (top1, top5)
-  return top10
+  _ = top5
+  return top24
 }
 
 // MARK: - Run

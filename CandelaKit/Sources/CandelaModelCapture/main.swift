@@ -177,8 +177,14 @@ let ownPID = ProcessInfo.processInfo.processIdentifier
 /// wrong label. Exercising the light prior is a thing this probe actively wants
 /// the operator to do, so freezing it made the advice self-defeating.
 @MainActor func currentAppearanceIsDark() -> Bool {
-  UserDefaults.standard.removeVolatileDomain(forName: UserDefaults.globalDomain)
-  return UserDefaults.standard.string(forKey: "AppleInterfaceStyle")?.lowercased() == "dark"
+  // A plain read is enough: cfprefsd invalidates the cache, so a live toggle is
+  // picked up [MEASURED 2026-08-18, with a positive and negative control pair].
+  // An earlier version called `removeVolatileDomain(forName: .globalDomain)`
+  // first, which measured byte-identical: NSGlobalDomain is a PERSISTENT domain
+  // and `volatileDomainNames` is empty, so there was nothing to remove. Removed
+  // rather than kept as a charm; the same idiom aimed at NSRegistrationDomain
+  // would wipe every registered default.
+  UserDefaults.standard.string(forKey: "AppleInterfaceStyle")?.lowercased() == "dark"
 }
 
 let log = try ModelReplayLog(directory: options.out)
@@ -207,11 +213,14 @@ for entry in DisplayDiscovery.discover() {
 if let filter = options.displayFilter { print("  restricted to display \(filter)") }
 fflush(stdout)
 
+var discovered = DisplayDiscovery.discover()
+var lastOnline = Set<CGDirectDisplayID>()
 var taken = 0
 var written = 0
 var skippedLocked = 0
 var skippedAsleep = 0
 var skippedBlack = 0
+var skippedUnusable = 0
 var captureFailures = 0
 var writeFailures = 0
 var contentFailures = 0
@@ -231,16 +240,27 @@ while taken < options.maxSamples {
   }
 
   let appearanceIsDark = currentAppearanceIsDark()
-  // Re-resolved EVERY tick. The ID-to-EDID-key map is what moves: CLAUDE.md
+  // Re-resolved on a TOPOLOGY CHANGE rather than blindly every tick. The ID-to-EDID-key map is what moves: CLAUDE.md
   // records the MAG going 3->2 and the Dell 2->3 across one dock cycle. Frozen
   // at launch, a swap silently writes one panel's records under the other
   // panel's key, and the fit then merges a landscape panel and a rotated one
   // into a single 240-cell map. Every control still passes. Discovery is IOKit
-  // iteration only, no DDC traffic, so per-tick costs nothing.
-  let discovered = DisplayDiscovery.discover()
+  // iteration only and issues no DDC traffic, so §2's single-writer rule is
+  // safe, but it is not free: it leaks 2 mach ports per call and costs ~13 ms,
+  // so calling it every tick turns a once-per-launch leak into a per-tick one.
+  // Keying off the online display set catches the reconfiguration that matters
+  // while leaving a steady rig alone.
+  let onlineNow = Set(content.displays.map(\.displayID))
+  if onlineNow != lastOnline {
+    discovered = DisplayDiscovery.discover()
+    lastOnline = onlineNow
+  }
 
   if screenIsLocked() {
     skippedLocked += 1
+    // Advances `taken` for the same reason the content-failure path does: a
+    // machine left locked would otherwise never reach --max-samples.
+    taken += 1
     try await Task.sleep(for: .seconds(options.interval))
     continue
   }
@@ -262,6 +282,9 @@ while taken < options.maxSamples {
       discovered.first(where: { $0.display.id == scDisplay.displayID })?.display.persistenceKey
       ?? "cgdisplay-\(scDisplay.displayID)"
     guard let rotation = DisplayRotation(degrees: CGDisplayRotation(scDisplay.displayID)) else {
+      // Counted, not silent: an all-zero skip line beside zero written records
+      // is the "recording nothing" shape the progress rewrite exists to expose.
+      skippedUnusable += 1
       continue
     }
 
@@ -299,7 +322,10 @@ while taken < options.maxSamples {
     let rows = image.height
     guard cols > 0, rows > 0,
       let captured = LuminanceReduction.meanLuminance(of: image, cols: cols, rows: rows)
-    else { continue }
+    else {
+      skippedUnusable += 1
+      continue
+    }
 
     // Belt and braces: an awake, unlocked display that captures pure black is
     // more likely a state we failed to detect than a panel genuinely showing
@@ -356,7 +382,8 @@ while taken < options.maxSamples {
     // nothing reached disk.
     print(
       "written \(written) records over \(taken) ticks  "
-        + "skipped: locked \(skippedLocked), asleep \(skippedAsleep), black \(skippedBlack)  "
+        + "skipped: locked \(skippedLocked), asleep \(skippedAsleep), black \(skippedBlack), "
+        + "unusable \(skippedUnusable)  "
         + "failures: content \(contentFailures), capture \(captureFailures), write \(writeFailures)")
     fflush(stdout)
   }
