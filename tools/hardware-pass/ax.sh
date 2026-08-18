@@ -32,7 +32,12 @@
 # selector reports every control missing, which reads exactly like a real defect
 # in the app, and that has already cost one issue filed against a defect that did
 # not exist.
-BIND='set cands to (every window whose name does not start with "Candela Gamma Activity Enforcer" and name does not start with "Candela OLED Care Overlay")
+# "Display resolution" and "Display mirroring" are the keep/revert countdown
+# windows: transient, legitimate, and open exactly when a pick just landed, so
+# a selector that errors on them misdiagnoses a successful pick as a selector
+# failure. They are excluded like the decoys; axprobe reaches INTO them (it
+# walks every candidate), which is how Keep is pressed.
+BIND='set cands to (every window whose name does not start with "Candela Gamma Activity Enforcer" and name does not start with "Candela OLED Care Overlay" and name does not start with "Display resolution" and name does not start with "Display mirroring")
     if (count of cands) is not 1 then
       set seen to ""
       repeat with x in windows
