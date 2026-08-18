@@ -364,14 +364,15 @@ final class DisplayModeCoordinator {
   /// that reassigns display IDs. See `PanelBaseline`.
   @ObservationIgnored private var baselines: [String: PanelBaseline] = [:]
   /// The panel's own refresh rate at the moment a synthesized size was picked
-  /// on it.
+  /// on it: the FALLBACK for a confirmation label rendered before the engage
+  /// settles.
   ///
   /// The catalog's synthesized ROWS carry the `refreshHz: 0` sentinel, because
-  /// a stop is a size and the rate it runs at is the panel's, not the stop's.
-  /// The confirmation surfaces name a rate though, and "0 Hz" is a number no
-  /// display runs at. The mirror preserves the physical panel's refresh
-  /// [MEASURED 2026-08-17: 100 Hz before, during and after], so the honest
-  /// answer is the rate the panel was already running.
+  /// a stop is a size and the rate it runs at is not the stop's. The engaged
+  /// rate is the virtual master's achievable one and can be LOWER than the
+  /// pre-pick rate [MEASURED 2026-08-18: 100 on the wire from a 175 start],
+  /// so the label prefers the live reading and uses this only when that is
+  /// not available yet.
   @ObservationIgnored private var synthesisPreviewRefresh: [CGDirectDisplayID: Double] = [:]
   /// Which displays count as having just arrived — the "launch and reconnect,
   /// never continuously" rule (DM7). It lives in `CandelaKit` under test
@@ -1398,18 +1399,22 @@ final class DisplayModeCoordinator {
   }
 
   /// The synthesized stop as a mode a preview surface can name, with the rate
-  /// the panel is keeping rather than the catalog row's `refreshHz: 0`
-  /// sentinel. See `synthesisPreviewRefresh`.
+  /// the display is actually running rather than the catalog row's
+  /// `refreshHz: 0` sentinel.
   ///
-  /// The rate is only ever for the label: the answer routes on
-  /// `Preview.synthesized`, which carries the whole pairing, so nothing matches
-  /// on this value.
+  /// Read LIVE first: the countdown appears after the engage has landed, and
+  /// the wire runs the virtual master's achievable rate, which can be lower
+  /// than the pre-pick rate the fallback carries [MEASURED 2026-08-18, OSD
+  /// confirmed twice]. Label-only, so the synthetic descriptor's rate is safe
+  /// here; the answer routes on `Preview.synthesized`, which carries the
+  /// whole pairing, so nothing matches on this value.
   private func synthesizedPreviewRow(
     _ size: SyntheticSize, on displayID: CGDirectDisplayID
   ) -> DisplayMode {
     let row = SyntheticSizeCatalog.row(for: size)
-    guard let hz = synthesisPreviewRefresh[displayID] ?? catalogs[displayID]?.current?.refreshHz,
-          hz > 0
+    let live = configurator.currentMode(for: displayID)?.refreshHz
+    guard let hz = [live, synthesisPreviewRefresh[displayID], catalogs[displayID]?.current?.refreshHz]
+      .compactMap({ $0 }).first(where: { $0 > 0 })
     else { return row }
     return DisplayMode(
       ioModeID: row.ioModeID,
@@ -1861,7 +1866,10 @@ extension DisplayModeCoordinator.Catalog {
   func tags(for mode: DisplayMode, isLowResolutionDuplicate: Bool) -> [String] {
     var tags: [String] = []
     if mode.isNative { tags.append("Native") }
-    if isScaled(mode) { tags.append("Scaled") }
+    // A synthesized row never says "Scaled": the rendered badge subsumes it
+    // (a stop is scaled by construction), and the pair together truncates a
+    // menu-bar panel row to "(Scaled, Rendered by C...)".
+    if isScaled(mode), !mode.isSynthesized { tags.append("Scaled") }
     if isLowResolutionDuplicate { tags.append("low resolution") }
     return tags
   }
@@ -1925,9 +1933,11 @@ extension DisplayModeCoordinator.Catalog {
   /// was touched.
   func modeKeepingCurrentRefreshRate(for row: DisplayModeRow) -> DisplayMode {
     // A synthesized row carries the `refreshHz: 0` sentinel and has no rate to
-    // keep: the mirror preserves the PANEL's refresh, whatever it is running
-    // [MEASURED 2026-08-17]. Resolving it against the live list would match on
-    // geometry the panel does not publish, or on nothing.
+    // keep: while engaged the rate is the virtual master's achievable one
+    // [MEASURED 2026-08-18: 100 Hz on a 5160x2160 master, from both 175 and
+    // 100 Hz starts], and the display's own rate returns on disengage.
+    // Resolving it against the live list would match on geometry the panel
+    // does not publish, or on nothing.
     guard !row.mode.isSynthesized else { return row.mode }
     let wanted = DisplayModeDescriptor(
       logicalWidth: row.mode.logicalWidth,

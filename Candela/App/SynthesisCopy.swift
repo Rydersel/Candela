@@ -16,11 +16,12 @@ import SwiftUI
 /// granularity: "more sizes", never "sharper", "full resolution" or "Retina".
 ///
 /// No refresh rate is ever named. A synthesized row carries the `refreshHz: 0`
-/// sentinel because the rate belongs to the display rather than to the stop,
-/// and the mirror preserves whatever the display was already running [MEASURED
-/// 2026-08-17 at 100 Hz: 100 before, during and after]. 175 Hz specifically is a
-/// prediction and not a measurement, so no sentence may name a figure, and
-/// "0 Hz" is a value no display runs at.
+/// sentinel because the rate belongs to the display rather than to the stop.
+/// While a size is engaged the display runs at the virtual master's achievable
+/// rate, which can be lower than what it ran before [MEASURED 2026-08-18:
+/// 100 Hz on the wire from a 175 Hz start; the display's own rate returns on
+/// disengage]. The cap depends on the master's pixel size, so no sentence may
+/// name a figure, and "0 Hz" is a value no display runs at.
 ///
 /// No refusal claims a size has been withdrawn. `sizeNoLongerOffered` is
 /// reachable while the size is visibly on the glass, so it states what the app
@@ -51,13 +52,14 @@ enum SynthesisCopy {
   /// two marks stay distinguishable (SS5).
   static var badge: String { "Rendered by \(AppInfo.productName)" }
 
-  /// The rate column of a synthesized row. The stop has no rate of its own:
-  /// what scans out is whatever the display was already running.
+  /// The rate column of a synthesized row. The stop has no rate of its own,
+  /// and the engaged rate can be LOWER than what the display ran before
+  /// [MEASURED 2026-08-18], so this is a cost note rather than a promise.
   ///
   /// "display", not "panel". SO14 retired that word from visible copy while
   /// leaving it in the type and comment vocabulary, which is exactly the split
   /// this property's own name sits on the other side of.
-  static var keepsPanelRefresh: String { "Keeps the display's refresh rate" }
+  static var keepsPanelRefresh: String { "May lower the refresh rate while in use" }
 
   /// The All list enumerates what the display reports, and a synthesized size
   /// is not in it, so the row the checkmark would sit on is absent while a size
@@ -156,8 +158,8 @@ enum SynthesisCopy {
   /// Its own sentence rather than the page's line above, because a report line
   /// is already labelled ("current mode: ...") and would otherwise read as two
   /// labels stacked. It names NO rate: the readback it replaces is the virtual
-  /// master's descriptor, and the display's own rate is preserved by the mirror
-  /// rather than chosen here.
+  /// master's descriptor, and the engaged rate is the master's achievable one
+  /// rather than anything chosen here.
   static func reportMode(width: Int, height: Int, slot: Int) -> String {
     "\(DisplayModeCopy.size(width: width, height: height)) (synthesized, virtual display slot \(slot))"
   }

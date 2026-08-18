@@ -53,7 +53,7 @@ struct SynthesisCopyTests {
   /// "display", never "panel": SO14 retired the word from visible copy while
   /// leaving it in the type vocabulary this property is named from.
   @Test func theRateColumnStatesTheRuleRatherThanAFigure() {
-    #expect(SynthesisCopy.keepsPanelRefresh == "Keeps the display's refresh rate")
+    #expect(SynthesisCopy.keepsPanelRefresh == "May lower the refresh rate while in use")
   }
 
   /// Pinned through the quoted key rather than by equality: a
