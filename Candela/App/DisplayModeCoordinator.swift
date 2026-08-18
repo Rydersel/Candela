@@ -131,15 +131,16 @@ final class DisplayModeCoordinator {
     /// `current` is the raw readback, and while a stop is engaged it is not the
     /// answer. It used to be a fabricated descriptor that matched nothing,
     /// which was survivable: a reader comparing against it simply matched
-    /// nothing either. Since the engage tail re-times the slave onto its own
-    /// mode it is a REAL descriptor naming the display's native geometry, so
-    /// the same readers now match the wrong row confidently. The engine's
-    /// pairing decides instead (SS1), exactly as `isCurrentSize` already does.
+    /// nothing either. Since the engage tail re-times the slave it is a REAL
+    /// descriptor the panel publishes (the HiDPI twin of its own mode, whose
+    /// logical size is half the panel's), so the same readers now match the
+    /// wrong row confidently. The engine's pairing decides instead (SS1),
+    /// exactly as `isCurrentSize` already does.
     ///
     /// The RATE comes from the readback, and only because the re-time is what
-    /// put it there: the display is running its own mode, so the descriptor's
-    /// rate is the glass's rate even though its geometry is not the glass's
-    /// size. Label-only; nothing may match or persist this value, and the
+    /// put it there: the twin it re-times onto carries the panel's own refresh
+    /// by construction, so the descriptor's rate is the glass's rate even
+    /// though its geometry is not the glass's size. Label-only; nothing may match or persist this value, and the
     /// sentinel `ioModeID` a synthesized row carries is never sent to
     /// CoreGraphics.
     var onScreen: DisplayMode? {
@@ -156,10 +157,13 @@ final class DisplayModeCoordinator {
 
     /// What the already-on-screen no-op guards compare against. While a stop
     /// is engaged the answer is nil: the stop is what is on screen (SS1), and
-    /// since the engage tail re-times the slave onto its own mode, the
-    /// panel's descriptor equals the NATIVE mode exactly. Comparing against
-    /// it made picking the native size a silent no-op, which is the one pick
-    /// that disengages [MEASURED 2026-08-18: a real mouse click did nothing].
+    /// since the engage tail re-times the slave, the panel's descriptor is a
+    /// mode it really publishes. It was the NATIVE mode exactly when this was
+    /// written, and comparing against it made picking the native size a silent
+    /// no-op, which is the one pick that disengages [MEASURED 2026-08-18: a
+    /// real mouse click did nothing]. The re-time now lands on the HiDPI twin
+    /// instead, which moves the collision to a row rather than removing it,
+    /// so the answer stays nil.
     var alreadyOnScreenModeID: Int32? {
       engagedSyntheticSize == nil ? current?.ioModeID : nil
     }
@@ -1016,8 +1020,8 @@ final class DisplayModeCoordinator {
     queue.enqueue {
       guard await self.session.previewedMode?.displayID != displayID else { return }
       // A synthesis-engaged panel's readback is not the size on the glass: the
-      // engage tail re-times the slave, so it names the panel's own native
-      // mode [MEASURED 2026-08-18]. Pinning it would store a real, resolvable
+      // engage tail re-times the slave, so it names the HiDPI twin of the
+      // panel's own mode [MEASURED 2026-08-18]. Pinning it would store a real, resolvable
       // mode that is not the one the person is looking at and reapply it at
       // every reconnect. The synthesized choice has its own store
       // (`storedSyntheticSize`), written when a synthesis preview is kept.

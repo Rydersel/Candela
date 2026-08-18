@@ -71,6 +71,8 @@ struct BouncingSynthesisDriver: SynthesisDriving {
   let hdr: SynthesisHDRBounce
   let configurator: any DisplayConfiguring
   var durations: Durations = .production
+  /// Shared by every copy of this struct: see `SynthesisOwnModeLedger`.
+  let ownModes = SynthesisOwnModeLedger()
 
   private static let log = Logger(
     subsystem: "com.rydersel.Candela", category: "synthesis"
@@ -89,15 +91,88 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     // master's geometry instead, which the apply's own descriptor cross-check
     // rejects: the tail falls to the bounce rather than putting a wrong mode on
     // the glass.
-    let ownMode = configurator.currentMode(for: displayID)
+    //
+    // Recorded rather than merely read, and first write wins: the re-enter case
+    // above would otherwise overwrite the user's own mode with the previous
+    // engage's re-time, and the disengage restore would then put the twin back
+    // rather than the mode the user chose.
+    let ownMode = ownModes.remember(configurator.currentMode(for: displayID), for: displayID)
     let result = await engine.engage(size, onPhysical: displayID, identityKey: identityKey)
-    if case .success = result {
-      if await retime(displayID, to: ownMode) == false { await bounce(displayID) }
+    switch result {
+    case let .success(pairing):
+      let target = retimeTarget(
+        for: displayID, ownMode: ownMode, master: pairing.virtualDisplayID)
+      if await retime(displayID, to: target) == false { await bounce(displayID) }
+    case .failure:
+      // Nothing of ours stands, so nothing of ours is owed a restore. Leaving
+      // the record would make a mode the user has since changed the thing a
+      // later disengage reasserts.
+      ownModes.forget(displayID)
     }
     return result
   }
 
-  /// Re-applies the display's own mode to the mirror SLAVE after the engage.
+  /// **The re-time lands on the HiDPI TWIN of the display's own mode, not on the
+  /// mode itself.**
+  ///
+  /// The hardware cursor is sized by the SLAVE's mode scale while the content
+  /// comes from the 2x master, so a panel re-timed onto its 1x native mode draws
+  /// a tiny cursor over an enlarged UI [MEASURED 2026-08-18, eyes]. The twin has
+  /// the SAME framebuffer pixels and the same refresh, so the wire timing is
+  /// identical and the picture is unchanged; only the cursor scale follows.
+  ///
+  /// The twin is matched on the panel's own published list by framebuffer and
+  /// quantized refresh, with the scale taken from the master rather than
+  /// assumed. A synthesis master is always HiDPI, so this resolves to the 2x
+  /// twin in every case the feature produces; reading it keeps the rule true
+  /// rather than merely usually true, and an unreadable master falls back to
+  /// HiDPI for the same reason.
+  ///
+  /// A native-flagged candidate wins, then the lowest mode id, so a panel
+  /// publishing duplicate twins re-times onto the same one every session rather
+  /// than onto whichever came back first.
+  ///
+  /// **The twin can never look like the size being rendered**, which is what
+  /// keeps the teardown's panel-restore check able to fail. That check calls a
+  /// panel wrong when its readback IS the rendered stop; a 2x twin's logical
+  /// size is exactly half the panel's, and the ladder's lowest rung is 65
+  /// percent of it, so the two cannot collide. A ladder that ever reached 50
+  /// percent would put the re-time target on top of a stop and make every
+  /// teardown report an incomplete unwind.
+  ///
+  /// **The fallback is the display's own mode**, with a log line: no twin
+  /// published means the cursor mismatch comes back, and nothing else changes.
+  /// That is the state this whole tail shipped in, so it is a degradation rather
+  /// than a failure, and it must not stop the re-time from running.
+  private func retimeTarget(
+    for displayID: CGDirectDisplayID, ownMode: DisplayMode?, master: CGDirectDisplayID
+  ) -> DisplayMode? {
+    guard let ownMode else { return nil }
+    let wantsHiDPI = configurator.currentMode(for: master)?.isHiDPI ?? true
+    let twins = configurator.modes(for: displayID).filter {
+      $0.pixelWidth == ownMode.pixelWidth && $0.pixelHeight == ownMode.pixelHeight
+        && DisplayMode.quantizedRefresh($0.refreshHz)
+        == DisplayMode.quantizedRefresh(ownMode.refreshHz)
+        && $0.isHiDPI == wantsHiDPI
+    }
+    guard let twin = twins.min(by: { left, right in
+      left.isNative == right.isNative
+        ? left.ioModeID < right.ioModeID : left.isNative
+    }) else {
+      Self.log.info("""
+      synthesis.retime display \(displayID) publishes no \
+      \(wantsHiDPI ? "HiDPI" : "1x", privacy: .public) twin of \
+      \(ownMode.pixelWidth, privacy: .public)x\(ownMode.pixelHeight, privacy: .public) \
+      @\(ownMode.refreshHz, privacy: .public)Hz; re-timing onto its own mode, which leaves \
+      the pointer sized for that mode rather than for the size on screen
+      """)
+      return ownMode
+    }
+    return twin
+  }
+
+  /// Re-applies the display's own timing to the mirror SLAVE after the engage,
+  /// as the HiDPI twin `retimeTarget` chose.
   ///
   /// The mirror leaves the slave on a timing of the OS's choosing: the wire was
   /// measured at 100 Hz from a 175 Hz start, and on some establishments the
@@ -108,12 +183,12 @@ struct BouncingSynthesisDriver: SynthesisDriving {
   /// renegotiates the link onto its own known-good timing. Returns false when
   /// it could not run OR could not be confirmed; the HDR bounce is the fallback
   /// renegotiator.
-  private func retime(_ displayID: CGDirectDisplayID, to ownMode: DisplayMode?) async -> Bool {
-    guard let ownMode else { return false }
+  private func retime(_ displayID: CGDirectDisplayID, to target: DisplayMode?) async -> Bool {
+    guard let target else { return false }
     try? await Task.sleep(for: durations.beforeRetime)
     do {
       // Session scope, matching the engine's own applies.
-      try configurator.apply(ownMode, to: displayID, scope: .session)
+      try configurator.apply(target, to: displayID, scope: .session)
     } catch {
       Self.log.info("synthesis.retime could not run for display \(displayID): \(String(describing: error), privacy: .public)")
       return false
@@ -126,24 +201,111 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     // evidence about, and reporting it as landed skips the bounce in exactly
     // the situation the bounce exists for.
     guard let achieved = configurator.currentMode(for: displayID),
-          achieved.logicalWidth == ownMode.logicalWidth,
-          achieved.logicalHeight == ownMode.logicalHeight,
-          achieved.pixelWidth == ownMode.pixelWidth,
-          achieved.pixelHeight == ownMode.pixelHeight,
+          achieved.logicalWidth == target.logicalWidth,
+          achieved.logicalHeight == target.logicalHeight,
+          achieved.pixelWidth == target.pixelWidth,
+          achieved.pixelHeight == target.pixelHeight,
           DisplayMode.quantizedRefresh(achieved.refreshHz)
-          == DisplayMode.quantizedRefresh(ownMode.refreshHz)
+          == DisplayMode.quantizedRefresh(target.refreshHz)
     else {
       Self.log.info(
         "synthesis.retime did not take on display \(displayID): the apply reported success and the display did not follow it"
       )
       return false
     }
-    Self.log.info("synthesis.retime display \(displayID) back to \(ownMode.logicalWidth)x\(ownMode.logicalHeight) @\(ownMode.refreshHz)Hz")
+    Self.log.info("synthesis.retime display \(displayID) onto \(target.logicalWidth)x\(target.logicalHeight) (framebuffer \(target.pixelWidth)x\(target.pixelHeight)) @\(target.refreshHz)Hz")
     return true
   }
 
+  /// Takes the set down, then puts the panel back on the mode the user chose.
+  ///
+  /// The restore is the other half of the twin re-time. The panel spent the
+  /// engagement on a 2x mode this feature applied, and breaking a mirror can
+  /// leave a slave on whichever mode it last held, so without this a user who
+  /// turns a synthesized size off can be left looking at half the desktop they
+  /// asked for.
+  ///
+  /// **Paths that bypass it, named rather than implied.** Only the preview
+  /// session's stand-down comes through here. Process death takes the ledger
+  /// with it. The engine's own teardowns do not come through here at all: the
+  /// one at the top of a switch between stops, and the unwind after a failed
+  /// engage. Neither needs this, because of what follows them: a switch
+  /// re-engages and re-times immediately, and an unwind ends with nothing of
+  /// this feature's standing.
+  ///
+  /// `SynthesisCoordinator` also calls the engine directly, and those four are
+  /// worth reading one at a time. A departure teardown has no panel to put
+  /// back. The whole-app reset is about to rebuild everything anyway. The
+  /// ordinary-pick teardown is followed immediately by the mode the user
+  /// picked, so a restore there would be a reconfiguration for a mode that is
+  /// about to be replaced. The opt-out (and the per-display reset that shares
+  /// its path) is the one where the panel stays attached and the user is
+  /// looking at it, so it is the bypass that matters; routing it through here
+  /// is a coordinator decision, not this file's.
+  ///
+  /// For every bypass the net is the remembered-mode reapply, which reasserts
+  /// the user's stored mode on reconfiguration when it is enabled for that
+  /// display. That net is a preference rather than a guarantee, which is why
+  /// this path does not lean on it.
   func disengage(fromPhysical displayID: CGDirectDisplayID) async -> Result<Void, SynthesisFailure> {
-    await engine.disengage(fromPhysical: displayID)
+    // Read, not taken: a disengage that fails leaves the set standing, and the
+    // panel still owes the restore.
+    let ownMode = ownModes.mode(for: displayID)
+    let result = await engine.disengage(fromPhysical: displayID)
+    if case .success = result {
+      ownModes.forget(displayID)
+      await restoreOwnMode(displayID, to: ownMode)
+    }
+    return result
+  }
+
+  /// Puts `ownMode` back when the panel came out of the mirror on a different
+  /// SCALE, which is the shape the twin re-time can leave behind.
+  ///
+  /// Scale rather than any difference: a panel that came back on some unrelated
+  /// mode is a state this feature did not create, and the user's own mode is
+  /// still the right answer for it, so the same reapply covers both. What the
+  /// scale test buys is silence in the ordinary case, where the mirror break
+  /// already restored the mode and an apply would be a reconfiguration for
+  /// nothing.
+  ///
+  /// An unreadable achieved mode reapplies rather than standing down, which is
+  /// the opposite of the HDR legs' rule in this file and deliberate: the write
+  /// they are careful about can leave DDC dead, while the only thing this can
+  /// put on the glass is the mode the user picked.
+  private func restoreOwnMode(_ displayID: CGDirectDisplayID, to ownMode: DisplayMode?) async {
+    guard let ownMode else { return }
+    // The mirror break is a reconfiguration and the window server lags it, so a
+    // mode read taken inline would describe the world before it. Paid only on a
+    // disengage of a set this driver engaged, because of the guard above.
+    try? await Task.sleep(for: durations.beforeRetime)
+    let achieved = configurator.currentMode(for: displayID)
+    if let achieved, achieved.isHiDPI == ownMode.isHiDPI { return }
+    do {
+      try configurator.apply(ownMode, to: displayID, scope: .session)
+    } catch {
+      Self.log.error("""
+      synthesis.restore could not put display \(displayID, privacy: .public) back on \
+      \(ownMode.logicalWidth, privacy: .public)x\(ownMode.logicalHeight, privacy: .public): \
+      \(String(describing: error), privacy: .public)
+      """)
+      return
+    }
+    // The apply's return code is not the evidence, for `retime`'s reason.
+    guard let landed = configurator.currentMode(for: displayID),
+          landed.isHiDPI == ownMode.isHiDPI
+    else {
+      Self.log.error("""
+      synthesis.restore display \(displayID, privacy: .public) did not follow the mode it \
+      was put back on; it is left at the scale the mirror break chose
+      """)
+      return
+    }
+    Self.log.info("""
+    synthesis.restore display \(displayID, privacy: .public) back on \
+    \(ownMode.logicalWidth, privacy: .public)x\(ownMode.logicalHeight, privacy: .public) \
+    @\(ownMode.refreshHz, privacy: .public)Hz
+    """)
   }
 
   func pairing(forPhysical displayID: CGDirectDisplayID) async -> SynthesisPairing? {
@@ -227,5 +389,51 @@ struct BouncingSynthesisDriver: SynthesisDriving {
     )
     await hdr.reportHDRLeftStanding(displayID)
     return false
+  }
+}
+
+/// The mode each panel was on when its synthesized size was engaged, so the
+/// disengage can put it back.
+///
+/// A reference behind a value type, deliberately: the driver is a struct and is
+/// copied (the coordinator holds one, the preview session another), and both
+/// copies have to see one record. One lock over one dictionary, synchronous
+/// readers, the same shape as `MirrorTopologyStore`.
+///
+/// **First write wins per display, until a disengage clears it.** Switching from
+/// one stop to another re-enters the engage while the previous set still
+/// stands, and what the panel reads as its current mode then is the previous
+/// engage's re-time: the HiDPI twin, not the mode the user chose. Overwriting
+/// would make the twin the thing a later disengage restores, which is the
+/// defect the restore exists to prevent.
+///
+/// Keyed by runtime display ID, which is an address rather than an identity.
+/// That is safe here because an entry's whole life is one engage and the
+/// disengage that follows it, and every engage rewrites the entry for whatever
+/// panel holds that ID now. A record stranded by a replug is dropped by the
+/// engage that claims the ID next.
+final class SynthesisOwnModeLedger: Sendable {
+  private let stored = OSAllocatedUnfairLock<[CGDirectDisplayID: DisplayMode]>(
+    initialState: [:]
+  )
+
+  /// Records `mode` unless something is already on record for this display, and
+  /// answers with whatever now stands.
+  @discardableResult
+  func remember(_ mode: DisplayMode?, for displayID: CGDirectDisplayID) -> DisplayMode? {
+    stored.withLock { modes in
+      if let existing = modes[displayID] { return existing }
+      guard let mode else { return nil }
+      modes[displayID] = mode
+      return mode
+    }
+  }
+
+  func mode(for displayID: CGDirectDisplayID) -> DisplayMode? {
+    stored.withLock { $0[displayID] }
+  }
+
+  func forget(_ displayID: CGDirectDisplayID) {
+    stored.withLock { $0[displayID] = nil }
   }
 }
