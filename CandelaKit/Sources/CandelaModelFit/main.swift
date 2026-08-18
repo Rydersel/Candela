@@ -192,8 +192,13 @@ func prepare(_ record: ModelReplayRecord) -> Prepared {
       return area > 0 && displayArea > 0 && area < 0.5 * displayArea
     }
     .map {
+      // Owner is deliberately per-LAYER, not a single "chrome" bucket. Four
+      // distinct chrome layers survive the area filter on this rig (menu bar
+      // -2147483602, Dock -2147483624, Wallpaper -2147483625, WindowServer
+      // -2147483626), and collapsing them into one prior is what made MP4's
+      // "layer-aware chrome priors" look untestable when it is not.
       PreparedWindow(
-        owner: "chrome", layer: $0.layer,
+        owner: "chrome\($0.layer)", layer: $0.layer,
         coverage: transform.coverage(ofDisplayRect: $0.bounds))
     }
   return Prepared(
@@ -586,9 +591,15 @@ for group in fitGroups {
       layerWeight[window.layer, default: 0] += mass
       appWeight[window.owner, default: 0] += mass
     }
+    // Chrome layers count toward the LAYER table only. Every ordinary window is
+    // layer 0, so without these the table is always empty and V2 is byte
+    // identical to V1 while printing as a rung that ran.
+    for window in record.chrome {
+      layerWeight[window.layer, default: 0] += window.coverage.reduce(0, +) * record.elapsed
+    }
   }
 }
-let layers = layerWeight.filter { $0.key != 0 }.sorted { $0.value > $1.value }.prefix(3).map(\.key)
+let layers = layerWeight.filter { $0.key != 0 }.sorted { $0.value > $1.value }.prefix(4).map(\.key)
 // Apps with no coverage on these panels cannot be fitted, however often they
 // appear in the window list. `coverage` is already clipped to the display, so
 // an app living on another panel scores ~0 here.
@@ -608,20 +619,23 @@ if !excluded.isEmpty {
 var v1 = ExposureModelParameters.baseline
 v1.compositing = .topmostWins
 
+// V2 is MP4's stated bet: admit system chrome and give each chrome LAYER its
+// own luminance. Chrome enters here rather than at the end of the ladder,
+// because the layer table has nothing else to fit on an ordinary desktop.
 var v2 = v1
 for layer in layers { v2.layerPriors[layer] = 0.5 }
 v2 = refine(
   v2,
   keys: layers.map { layer in
     (get: { $0.layerPriors[layer] ?? 0.5 }, set: { $0.layerPriors[layer] = $1 })
-  }, on: fitGroups)
+  }, on: fitGroups, includeChrome: true)
 
 let v3 = refine(
   v2,
   keys: [
     (get: { $0.lightAppearancePrior }, set: { $0.lightAppearancePrior = $1 }),
     (get: { $0.darkAppearancePrior }, set: { $0.darkAppearancePrior = $1 }),
-  ], on: fitGroups)
+  ], on: fitGroups, includeChrome: true)
 
 // Spread the starting values rather than sharing one. Coordinate descent from a
 // single shared start can sit still in a flat region and report "no app
@@ -634,22 +648,15 @@ v4 = refine(
   v4,
   keys: apps.map { app in
     (get: { $0.appPriors[app] ?? 0.5 }, set: { $0.appPriors[app] = $1 })
-  }, on: fitGroups, passes: 4)
-
-var v5 = v4
-v5.appPriors["chrome"] = v4.lightAppearancePrior
-v5 = refine(
-  v5, keys: [(get: { $0.appPriors["chrome"] ?? 0.5 }, set: { $0.appPriors["chrome"] = $1 })],
-  on: fitGroups, includeChrome: true)
+  }, on: fitGroups, includeChrome: true, passes: 4)
 
 let ladder:
   [(String, ExposureModelParameters, Int, Bool)] = [
     ("V0 baseline", .baseline, 0, false),
     ("V1 z-order only", v1, 0, false),
-    ("V2 + layer priors", v2, layers.count, false),
-    ("V3 + refitted appearance", v3, layers.count + 2, false),
-    ("V4 + app priors", v4, layers.count + 2 + apps.count, false),
-    ("V5 + menu-bar chrome", v5, layers.count + 3 + apps.count, true),
+    ("V2 + chrome, per-layer priors", v2, layers.count, true),
+    ("V3 + refitted appearance", v3, layers.count + 2, true),
+    ("V4 + app priors", v4, layers.count + 2 + apps.count, true),
   ]
 
 for run in runs {
@@ -668,25 +675,26 @@ for run in runs {
   }
 }
 
+let final = v4
 print("\nfitted parameters (joint), with objective sensitivity:")
 func line(_ name: String, _ value: Double, _ moved: Double) {
   let verdict = moved < 1e-6 ? "  UNIDENTIFIABLE from this data" : ""
   print(String(format: "    %-28@ %.3f   sensitivity %.5f%@",
     name as NSString, value, moved, verdict as NSString))
 }
-line("light appearance", v5.lightAppearancePrior,
-  sensitivity(fitGroups, v5, get: { $0.lightAppearancePrior },
+line("light appearance", final.lightAppearancePrior,
+  sensitivity(fitGroups, final, get: { $0.lightAppearancePrior },
     set: { $0.lightAppearancePrior = $1 }, includeChrome: true))
-line("dark appearance", v5.darkAppearancePrior,
-  sensitivity(fitGroups, v5, get: { $0.darkAppearancePrior },
+line("dark appearance", final.darkAppearancePrior,
+  sensitivity(fitGroups, final, get: { $0.darkAppearancePrior },
     set: { $0.darkAppearancePrior = $1 }, includeChrome: true))
-for (app, value) in v5.appPriors.sorted(by: { $0.value > $1.value }) {
+for (app, value) in final.appPriors.sorted(by: { $0.value > $1.value }) {
   line("app \(app)", value,
-    sensitivity(fitGroups, v5, get: { $0.appPriors[app] ?? 0 },
+    sensitivity(fitGroups, final, get: { $0.appPriors[app] ?? 0 },
       set: { $0.appPriors[app] = $1 }, includeChrome: true))
 }
-for (layer, value) in v5.layerPriors.sorted(by: { $0.key < $1.key }) {
+for (layer, value) in final.layerPriors.sorted(by: { $0.key < $1.key }) {
   line("layer \(layer)", value,
-    sensitivity(fitGroups, v5, get: { $0.layerPriors[layer] ?? 0 },
+    sensitivity(fitGroups, final, get: { $0.layerPriors[layer] ?? 0 },
       set: { $0.layerPriors[layer] = $1 }, includeChrome: true))
 }
