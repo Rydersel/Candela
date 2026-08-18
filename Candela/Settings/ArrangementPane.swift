@@ -51,6 +51,34 @@ struct ArrangementPane: View {
 
   private var coordinator: ArrangementCoordinator { model.arrangement }
 
+  /// The panel each synthesis virtual display is standing in for, by the
+  /// virtual display's ID (SS12). Runtime IDs, derived per read: the pairing
+  /// changes while this pane is open, and display IDs are reassigned across a
+  /// replug, so nothing here may be held.
+  private static func panels(
+    standingBehind pairings: [SynthesisPairing]
+  ) -> [CGDirectDisplayID: CGDirectDisplayID] {
+    pairings.reduce(into: [:]) { $0[$1.virtualDisplayID] = $1.physicalDisplayID }
+  }
+
+  /// What every surface in this pane calls a display: its own name, or (while a
+  /// synthesized size is engaged) the name of the panel whose picture the tile
+  /// is (SS12). ONE closure for the map, the refusal sentence and the
+  /// restore notice, so they cannot disagree about what a display is called.
+  private var displayName: (CGDirectDisplayID) -> String {
+    let panels = Self.panels(standingBehind: model.synthesis.pairings)
+    return { id in
+      guard let panel = panels[id] else { return coordinator.displayName(id) }
+      let friendly = coordinator.displayName(panel)
+      guard friendly.isEmpty else { return friendly }
+      // Every caller falls back to the name the topology carries when this
+      // answers "", and for a pair that name is the virtual display's: the one
+      // string that must never appear on this map. So the fallback is resolved
+      // for the PANEL here, where the pairing is still in hand.
+      return model.mirrorTopology.topology().displays.first { $0.id == panel }?.name ?? ""
+    }
+  }
+
   var body: some View {
     // `DisplayPrefs` is plain UserDefaults and not observable, and every tile is
     // NAMED through it (`PanelView.title(for:)` resolves `friendlyName`). Without
@@ -96,12 +124,22 @@ struct ArrangementPane: View {
       model.virtualDisplays.ownedDisplayIDs.contains(id)
         || VirtualDisplayDetection.isVirtual(id) == true
     })
+    // SS12. Snapshotted here for `virtualIDs`' reason, and read from the pairing
+    // rather than from the mirror flags: the pairing is what says a mirror set
+    // is a size this app engaged rather than one the user asked for.
+    //
+    // The pair keeps ONE tile, the virtual display's, and it stays movable: that
+    // display owns the desktop, so it is the member of the pair a layout can
+    // place (AR6). The panel is its slave and has no tile of its own, which is
+    // why the tile has to speak for it.
+    let panels = Self.panels(standingBehind: model.synthesis.pairings)
     return Section {
       VStack(alignment: .leading, spacing: 8) {
         ArrangementCanvasView(
           arrangement: coordinator.arrangement,
-          name: coordinator.displayName,
+          name: displayName,
           isVirtual: { virtualIDs.contains($0) },
+          isSynthesisPair: { panels[$0] != nil },
           selection: reconciledSelection,
           onPropose: { coordinator.apply($0) },
           onRefuse: { problems in
@@ -148,7 +186,7 @@ struct ArrangementPane: View {
         // transaction is present. Confirm by looking before claiming a symmetric
         // fade; the mirror shape is the fix if the snap is unacceptable.
         if !refusal.isEmpty {
-          ArrangementCopy.invalidLayout(refusal, name: coordinator.displayName)
+          ArrangementCopy.invalidLayout(refusal, name: displayName)
             .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
@@ -279,7 +317,7 @@ struct ArrangementPane: View {
       // to the mirror write and not to the button.
       if let notice = shownRestoreNotice {
         VStack(alignment: .leading, spacing: 6) {
-          ArrangementCopy.restoreNotice(notice, name: coordinator.displayName)
+          ArrangementCopy.restoreNotice(notice, name: displayName)
             .font(.callout)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)

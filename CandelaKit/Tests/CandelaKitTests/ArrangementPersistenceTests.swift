@@ -397,6 +397,85 @@ struct ArrangementPersistenceTests {
     )
   }
 
+  /// The layout as the machine reads while a size stands: the virtual display
+  /// holds the desktop and the panel is its slave, so the panel has no tile.
+  private var engagedLayout: DisplayArrangement {
+    DisplayArrangement(tiles: [
+      tile(id: 7, identity: "vd", left, mirroredIDs: [3]),
+      tile(id: 2, identity: "dell", right),
+    ])
+  }
+
+  /// SS12 through the REAL save path, which is where the property has to hold:
+  /// the layout is filed under the PANEL, so one store answers whether or not a
+  /// size is engaged, and nothing on disk names a display that exists only
+  /// while the size does.
+  @Test func aLayoutSavedWhileASizeIsEngagedIsFiledUnderThePhysicalPanel() throws {
+    let store = ArrangementPersistence(defaults: InMemoryDefaults())
+    store.save(engagedLayout, substituting: [7: Self.magKey])
+
+    let saved = try #require(store.savedArrangement(for: TopologySignature(deskLayout)))
+    #expect(saved.entries.map(\.identity).sorted() == [Self.dellKey, Self.magKey].sorted())
+    #expect(!saved.entries.contains { $0.identity == Self.identity(named: "vd").key })
+  }
+
+  /// And end to end the other way, which is the case a user reaches without
+  /// doing anything unusual: the layout was saved with no synthesized size, and
+  /// it is found and resolved while one stands. The origin lands on the VIRTUAL
+  /// display, which is the one that owns the desktop and the only member of the
+  /// pair a plan can move.
+  @Test func aLayoutSavedUnmirroredIsFoundAndResolvedWhileASizeIsEngaged() throws {
+    let store = ArrangementPersistence(defaults: InMemoryDefaults())
+    store.save(deskLayout)
+
+    // The pair has since been engaged, and the desktop sits on the right.
+    let engaged = DisplayArrangement(tiles: [
+      tile(id: 7, identity: "vd", right, mirroredIDs: [3]),
+      tile(id: 2, identity: "dell", left),
+    ])
+    let substituting = [CGDirectDisplayID(7): Self.magKey]
+    let saved = try #require(
+      store.savedArrangement(for: TopologySignature(engaged, substituting: substituting))
+    )
+    guard case let .exact(restored) = ArrangementPersistence.resolve(
+      saved, against: engaged, substituting: substituting
+    ) else {
+      Issue.record("a layout saved for the panel should resolve onto the pair standing in for it")
+      return
+    }
+    #expect(restored.tile(7)?.rect.origin == DisplayPoint(x: 0, y: 0))
+    #expect(restored.tile(2)?.rect.origin == DisplayPoint(x: 1920, y: 0))
+  }
+
+  /// The control for both of the above. Without the map the same read signs and
+  /// matches under the virtual display, so the assertions are about the
+  /// substitution rather than about the fixtures.
+  @Test func withoutTheMapAnEngagedPairOrphansTheLayout() {
+    let store = ArrangementPersistence(defaults: InMemoryDefaults())
+    store.save(deskLayout)
+    #expect(store.savedArrangement(for: TopologySignature(engagedLayout)) == nil)
+    #expect(
+      ArrangementPersistence.resolve(SavedArrangement(deskLayout), against: engagedLayout)
+        == .setDiffers(missing: [Self.magKey], extra: [Self.identity(named: "vd").key])
+    )
+  }
+
+  /// Both spellings of the substituted signature agree, for the reason the
+  /// unsubstituted pair does: the arrival gate reads the online list and the
+  /// store keys on the layout, and a disagreement between them would file a
+  /// layout under a set the gate never recognises.
+  @Test func bothSpellingsOfTheSubstitutedSignatureAgree() {
+    let engaged = [
+      online(id: 3, identity: "mag", mirrors: 7),
+      online(id: 7, identity: "vd", inSet: true),
+      online(id: 2, identity: "dell"),
+    ]
+    #expect(
+      TopologySignature(online: engaged, substituting: [7: Self.magKey])
+        == TopologySignature(engagedLayout, substituting: [7: Self.magKey])
+    )
+  }
+
   // MARK: - Geometry
 
   /// §7.4: the recorded size is validation, never authority. Never authority is

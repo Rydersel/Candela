@@ -28,6 +28,18 @@ struct ArrangementCanvasView: View {
   /// virtual displays in the Virtual Displays pane's purple. Defaults to "no"
   /// so previews and callers without an opinion keep compiling.
   var isVirtual: (CGDirectDisplayID) -> Bool = { _ in false }
+  /// Is this tile a synthesized size: a virtual display whose picture IS a
+  /// physical panel's, standing in for it while the size is engaged (SS12).
+  ///
+  /// The tile is presented as that panel and nothing else: `name` resolves the
+  /// panel's name, and here the two decorations that would give the arrangement
+  /// away are dropped. It is not drawn as a virtual display, because the person
+  /// looking at it is looking at their monitor; and it carries no mirror count,
+  /// because the display it would be counting is the very panel the tile is
+  /// already naming. It stays movable and keeps its own ID: the virtual display
+  /// owns the desktop, so it is the member of the pair a layout can move (AR6).
+  /// Asked, not decided, for `name`'s reason.
+  var isSynthesisPair: (CGDirectDisplayID) -> Bool = { _ in false }
   @Binding var selection: CGDirectDisplayID?
   /// Called ONLY with a valid layout that differs from the current one. Starts
   /// the preview and its countdown.
@@ -103,7 +115,7 @@ struct ArrangementCanvasView: View {
         size: CGSize(width: rect.width, height: rect.height),
         name: label(for: tile),
         pointSize: pointSize(tile),
-        isMirrored: !tile.mirroredIDs.isEmpty
+        isMirrored: mirroredCount(tile) > 0
       )
     })
   }
@@ -159,13 +171,13 @@ struct ArrangementCanvasView: View {
     DisplayTile(
       name: label(for: tile),
       pointSize: pointSize(tile),
-      mirroredCount: tile.mirroredIDs.count,
+      mirroredCount: mirroredCount(tile),
       isMain: isMain(tile.id),
       isSelected: selection == tile.id,
       isFocused: focused == tile.id,
       isInvalid: invalidIDs.contains(tile.id),
       isDragging: isDragging,
-      isVirtual: isVirtual(tile.id),
+      isVirtual: presentsAsVirtual(tile.id),
       labels: labelStyle
     )
     // ORDER IS LOAD-BEARING, and this is the top-ranked risk in the feature.
@@ -239,6 +251,19 @@ struct ArrangementCanvasView: View {
     return friendly.isEmpty ? tile.name : friendly
   }
 
+  /// A synthesis pair is drawn as the panel it is showing, so it is not one of
+  /// the purple software displays (SS12).
+  private func presentsAsVirtual(_ id: CGDirectDisplayID) -> Bool {
+    isVirtual(id) && !isSynthesisPair(id)
+  }
+
+  /// The displays this tile is showing on OTHER screens. A synthesis pair has
+  /// none: its one member without a tile is the panel the tile already names,
+  /// and counting it would report the display as mirroring itself.
+  private func mirroredCount(_ tile: ArrangementTile) -> Int {
+    isSynthesisPair(tile.id) ? 0 : tile.mirroredIDs.count
+  }
+
   /// The tile's resolution, in the ONE spelling the map and the tooltip share.
   private func pointSize(_ tile: ArrangementTile) -> String {
     "\(tile.rect.width) × \(tile.rect.height)"
@@ -259,8 +284,8 @@ struct ArrangementCanvasView: View {
   private func accessibilityValue(_ tile: ArrangementTile) -> String {
     var parts = ["positioned at x \(tile.rect.x), y \(tile.rect.y)"]
     if isMain(tile.id) { parts.append("main display") }
-    if isVirtual(tile.id) { parts.append("virtual display") }
-    if !tile.mirroredIDs.isEmpty { parts.append("mirrored to \(tile.mirroredIDs.count) more") }
+    if presentsAsVirtual(tile.id) { parts.append("virtual display") }
+    if mirroredCount(tile) > 0 { parts.append("mirrored to \(mirroredCount(tile)) more") }
     return parts.joined(separator: ", ")
   }
 
