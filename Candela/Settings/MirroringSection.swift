@@ -59,26 +59,63 @@ struct MirroringSection: View {
   @State private var shownReasons = ReasonLines.none
 
   private var displayID: CGDirectDisplayID { state.display.id }
+
+  /// The coordinator's sample, which since synthesis carries the engine's
+  /// pairing (SS1): the predicates below are the SS7 carve-out and they answer
+  /// "ordinary mirror set" for everything on an un-stamped one.
   private var topology: MirrorTopology { coordinator.topology }
+
+  /// True when this panel is showing a synthesized size (SS7). The ONE predicate
+  /// behind every carve-out in this file: a mirror set the app engaged to render
+  /// a size is not mirroring the user asked for, has nothing here to decide, and
+  /// is presented by the size picker instead.
+  private var isSynthesized: Bool { topology.isSynthesisSet(containing: displayID) }
+
+  /// The displays this section may speak about: everything except the virtual
+  /// displays synthesis is rendering onto.
+  ///
+  /// The VD is a real online display and every count below would otherwise
+  /// include it, which is how "no other display can be mirrored onto this one"
+  /// ends up on screen on a single-panel rig: a sentence about macOS locking
+  /// displays, over a display Candela created a moment ago.
+  ///
+  /// The physical panel of a synthesis set STAYS, and it is not an oversight:
+  /// it is a display the user has, can name and can mirror. Only the set it is
+  /// in is hidden.
+  private var userVisibleDisplays: [ConfiguredDisplay] {
+    topology.displays.filter { !topology.synthesisMasters.contains($0.id) }
+  }
 
   /// Displays that can own a set: anything not locked into one. Sorted by id,
   /// like every other list this feature hands out — never enumeration order.
   ///
   /// The built-in is INCLUDED, unlike in the hotkey's automatic scan. A person
   /// naming a master by hand is not a heuristic guessing for them, and
-  /// `MirrorTopologyPolicy.engage` accepts it for exactly that reason.
+  /// `MirrorTopologyPolicy.engage` accepts it for exactly that reason. A
+  /// synthesis VD is not: nobody chose it, it exists to render one panel's size,
+  /// and picking it here would offer to mirror the machine onto a display that
+  /// disappears the moment the size does.
   private var eligibleMasters: [ConfiguredDisplay] {
-    topology.displays
+    userVisibleDisplays
       .filter { !$0.isAlwaysInMirrorSet }
       .sorted { $0.id < $1.id }
   }
 
   /// The set this display belongs to, as `MirrorTopologyPolicy.disengage` will
-  /// read it: the members, id-ascending, intersected with the sample.
-  private var setMembers: [CGDirectDisplayID] { topology.setMembers(containing: displayID) }
+  /// read it: the members, id-ascending, intersected with the sample. EMPTY for
+  /// a synthesis set, which is what keeps this pane's Stop control, its status
+  /// line and its locked-member sentences off a set the user did not build.
+  private var setMembers: [CGDirectDisplayID] {
+    isSynthesized ? [] : topology.setMembers(containing: displayID)
+  }
 
   private var isInSet: Bool { !setMembers.isEmpty }
-  private var isLocked: Bool { topology.cannotBeUnmirrored(displayID) }
+
+  /// Never true for a synthesized panel. `isAlwaysInMirrorSet` is macOS refusing
+  /// to release a set, and the caption it drives says so; over a set Candela
+  /// engaged that sentence blames the wrong party, and the Stop button it
+  /// disables is not the control that takes a synthesized size down.
+  private var isLocked: Bool { !isSynthesized && topology.cannotBeUnmirrored(displayID) }
 
   /// Members macOS will not release. Not the same question as `isLocked`, which
   /// is about THIS display only — a perfectly free master can be in a set full
@@ -112,10 +149,15 @@ struct MirroringSection: View {
     let _ = model.prefsRevision
     Group {
       LabeledContent(MirroringCopy.statusLabel) {
-        Text(verbatim: MirroringCopy.state(
-          topology: topology, displayID: displayID, name: name
-        ))
-        .foregroundStyle(.secondary)
+        // A synthesized panel reads "Not mirrored" here, and it is the true
+        // answer to what this row asks: the user is mirroring nothing. The set
+        // it is in belongs to the size in force, which the size picker states in
+        // its own words. "Showing <virtual display>" would name a display nobody
+        // has, two rows under a control offering to start mirroring.
+        Text(verbatim: isSynthesized
+          ? MirroringCopy.notMirroredText
+          : MirroringCopy.state(topology: topology, displayID: displayID, name: name))
+          .foregroundStyle(.secondary)
       }
       // The mirror's two hooks hang HERE, on the one row of this section that is
       // always present: a hook on the reason lines' own container would only
@@ -316,7 +358,7 @@ struct MirroringSection: View {
     // cancels the whole transaction. On a rig that has one, the promise is
     // narrower and the sentence says so.
     SettingRow(
-      topology.displays.contains(where: \.isAlwaysInMirrorSet)
+      userVisibleDisplays.contains(where: \.isAlwaysInMirrorSet)
         ? MirroringCopy.startExplanationSomeLocked
         : MirroringCopy.startExplanation
     ) {
@@ -366,9 +408,11 @@ struct MirroringSection: View {
     }
     // An empty sample lands here too, and this is the truth on the rig it
     // actually happens on — a laptop with nothing plugged in. Same reading as
-    // `MirrorRefusal.onlyOneDisplay`.
-    if topology.displays.count < 2 { return MirroringCopy.needsASecondDisplay }
-    if !topology.displays.contains(where: { $0.id == displayID }) {
+    // `MirrorRefusal.onlyOneDisplay`. Counted over the displays the user has:
+    // a lone panel rendering a synthesized size would otherwise count its own
+    // virtual display as the second one and be told macOS keeps the rest locked.
+    if userVisibleDisplays.count < 2 { return MirroringCopy.needsASecondDisplay }
+    if !userVisibleDisplays.contains(where: { $0.id == displayID }) {
       return MirroringCopy.noSuchDisplay
     }
     return MirroringCopy.nothingToMirror

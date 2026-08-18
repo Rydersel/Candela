@@ -154,8 +154,17 @@ struct DisplayHeroView: View {
   /// The coordinator's own topology sample, read the way `MirroringSection`
   /// reads it — `MirrorTopology` is the one definition of "mirrored" in this
   /// app and this is a reader of it, never a second opinion.
+  ///
+  /// A synthesis set is not mirroring the user did (SS7), so the badge stays
+  /// off for one. The tile's own contract is why this matters more here than
+  /// the shape of a small icon suggests: what it draws must also be stated in
+  /// words on this page, and the Mirroring row below now reads "Not mirrored"
+  /// for a synthesized panel. A badge over that row would be the only claim of
+  /// its kind on the page, with nothing saying what it meant.
   private var isMirroring: Bool {
-    !model.mirroring.topology.setMembers(containing: state.id).isEmpty
+    let topology = model.mirroring.topology
+    guard !topology.isSynthesisSet(containing: state.id) else { return false }
+    return !topology.setMembers(containing: state.id).isEmpty
   }
 
   // MARK: - Identity

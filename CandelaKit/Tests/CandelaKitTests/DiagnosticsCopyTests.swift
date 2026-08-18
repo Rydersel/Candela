@@ -738,6 +738,31 @@ struct DiagnosticsCopyTests {
     #expect(DiagnosticsCopy.mirroring(isMirrorSlave: false) == "Showing its own contents")
   }
 
+  /// SS7: a synthesized size is not the user mirroring anything, and the page
+  /// must never report the panel as showing another display's contents while it
+  /// is showing its own desktop at a size Candela renders.
+  ///
+  /// The pairing OUTRANKS the mirror flag in all three of its states, the
+  /// not-enumerated one included: the engine's table is the authority on
+  /// synthesis topology (SS1), and a catalog nobody has built yet is not
+  /// evidence against it.
+  @Test func aSynthesizedSizeIsNeverReportedAsAnotherDisplaysContents() {
+    #expect(
+      DiagnosticsCopy.mirroring(isMirrorSlave: true, isSynthesized: true)
+        == "Showing a synthesized size")
+    #expect(
+      DiagnosticsCopy.mirroring(isMirrorSlave: false, isSynthesized: true)
+        == "Showing a synthesized size")
+    #expect(
+      DiagnosticsCopy.mirroring(isMirrorSlave: nil, isSynthesized: true)
+        == "Showing a synthesized size")
+    // The default keeps every existing caller on the pre-synthesis sentences.
+    #expect(
+      DiagnosticsCopy.mirroring(isMirrorSlave: true, isSynthesized: false)
+        == "Showing another display's contents")
+    #expect(DiagnosticsCopy.mirroring(isMirrorSlave: true) == "Showing another display's contents")
+  }
+
   // MARK: - Modes
 
   @Test func aModeReadsAsSizeAndRefreshRate() {
@@ -863,6 +888,7 @@ struct DiagnosticsCopyTests {
       DiagnosticsCopy.mirroring(isMirrorSlave: nil),
       DiagnosticsCopy.mirroring(isMirrorSlave: true),
       DiagnosticsCopy.mirroring(isMirrorSlave: false),
+      DiagnosticsCopy.mirroring(isMirrorSlave: true, isSynthesized: true),
       DiagnosticsCopy.hdrState(engaged: true),
       DiagnosticsCopy.hdrState(engaged: false),
       DiagnosticsCopy.writeGate(isSending: true),

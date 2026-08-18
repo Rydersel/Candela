@@ -231,16 +231,34 @@ final class MirroringCoordinator {
     adoptTopology(MirrorTopology(configurator.displays()))
   }
 
+  /// Re-samples, republishes, and hands back what was PUBLISHED rather than what
+  /// was sampled. The two differ by the synthesis pairing (SS1): a
+  /// `configurator.displays()` sample cannot tell a mirror set the app engaged to
+  /// serve a synthesized size from one the user asked for, and the store is where
+  /// that pairing is stamped on. Every command below decides from this value, so
+  /// no decision in this file is taken on an un-stamped sample.
+  @discardableResult
+  private func resampleAndPublish() -> MirrorTopology {
+    refreshTopology()
+    return topology
+  }
+
   private func adoptTopology(_ sample: MirrorTopology) {
-    let changed = sample != topology
-    topology = sample
     // The store's SECOND writer (`MirrorTopologySampler` is the first). Both
     // write a whole sample from the same source, so this is last-write-wins over
     // two values of the same shape, never a field at a time. Worth doing because
     // a keypress samples LIVE here — `toggleUnlessSingleDisplay` cannot wait for
     // a notification to have landed — and every drawable-ID resolution in the
     // app reads the store.
+    //
+    // Written FIRST and then read BACK, so what this object publishes carries the
+    // synthesis pairing the store stamps on (SS1). The three UI readers of
+    // `topology` are the SS7 carve-out sites, and on an un-stamped sample every
+    // one of their predicates answers "ordinary mirror set".
     store.update(sample)
+    let stamped = store.topology()
+    let changed = stamped != topology
+    topology = stamped
     // Ordered AFTER the store write, and only when the topology actually moved.
     // The rebuild resolves drawable ids through the store, so a rebuild ahead of
     // the write would re-create the shade under the key it is trying to retire.
@@ -293,26 +311,154 @@ final class MirroringCoordinator {
   /// Synchronous for exactly this question and queued for everything else. A
   /// keypress cannot wait for a task chain to learn whether it was a keypress
   /// about brightness.
+  ///
+  /// **A synthesized size comes down FIRST, through the engine** (SS13). The
+  /// panic button's job is to give someone their desktops back, and
+  /// `MirrorTopologyPolicy.toggle` would happily take a synthesis set apart with
+  /// a null-master change: that leaves the virtual display standing with nothing
+  /// showing on it, one of only two synthesis slots held, and the engine's
+  /// pairing table describing a set that no longer exists. What the remaining
+  /// sets get afterwards is unchanged: every one of them is broken, which is this
+  /// key's measured behaviour and not something this task reopens.
+  ///
+  /// It still returns true in that case. There IS something to do, so the key
+  /// must not fall through to a brightness step, even on the rig where the
+  /// answer arrives seconds later.
   @discardableResult
   func toggleUnlessSingleDisplay() -> Bool {
-    let sample = MirrorTopology(configurator.displays())
-    adoptTopology(sample)
+    let sample = resampleAndPublish()
+    guard sample.synthesisMasters.isEmpty else {
+      unwindingSynthesis { fresh in
+        let decision = MirrorTopologyPolicy.toggle(fresh)
+        // A rig that is a single panel once its synthesized size is down has
+        // nothing left to toggle, and taking the size down is what the press
+        // achieved. Reporting a refusal over it would put a card on screen about
+        // a machine state the press itself produced.
+        if case .refused(.onlyOneDisplay) = decision { return }
+        self.perform(decision, capturedFrom: fresh)
+      }
+      return true
+    }
     let decision = MirrorTopologyPolicy.toggle(sample)
     if case .refused(.onlyOneDisplay) = decision { return false }
     perform(decision, capturedFrom: sample)
     return true
   }
 
+  /// **Also unwinds synthesis first**, and for a sharper reason than the toggle:
+  /// `MirrorTopologyPolicy.engage` stages a change for every other display in the
+  /// sample, the synthesis VD included, so a user set built while a synthesized
+  /// size is engaged would point the virtual display at the panel that is
+  /// currently mirroring ONTO it. Nothing in this app may hand CoreGraphics that
+  /// (SS13's rule generalised: no raw mirror change is staged over a standing
+  /// synthesis set).
   func engage(master: CGDirectDisplayID) {
-    let sample = MirrorTopology(configurator.displays())
-    adoptTopology(sample)
+    let sample = resampleAndPublish()
+    guard sample.synthesisMasters.isEmpty else {
+      unwindingSynthesis { fresh in
+        self.perform(MirrorTopologyPolicy.engage(fresh, master: master), capturedFrom: fresh)
+      }
+      return
+    }
     perform(MirrorTopologyPolicy.engage(sample, master: master), capturedFrom: sample)
   }
 
+  /// The UI's one-set break. A GENUINE user set on a machine that also has a
+  /// synthesized size engaged breaks exactly as it does today: the policy reads
+  /// `setMembers(containing:)`, which is that display's own set, so nothing here
+  /// can stage a change against a synthesis member unless `member` is one.
+  ///
+  /// When it IS one, the set comes down through the engine instead (SS13). No
+  /// surface offers Stop Mirroring for a synthesis set (both sections drop them
+  /// from their listings), so this is the defensive half of that rule rather than
+  /// a reachable path, and it is here because "any Stop Mirroring affordance" is
+  /// what the ruling binds, not "the two we happen to have written".
   func disengage(containing member: CGDirectDisplayID) {
-    let sample = MirrorTopology(configurator.displays())
-    adoptTopology(sample)
+    let sample = resampleAndPublish()
+    guard !sample.isSynthesisSet(containing: member) else {
+      // Takes down every synthesis set, not just this one: the engine's only
+      // pref-free teardown is the all-sets one, and SS6 caps the pool at two
+      // slots. A per-display route would have to be added to
+      // `SynthesisCoordinator` rather than reimplemented here, since the verified
+      // sequence (SS10) is the whole point of going through the engine.
+      unwindingSynthesis { _ in }
+      return
+    }
     perform(MirrorTopologyPolicy.disengage(sample, containing: member), capturedFrom: sample)
+  }
+
+  /// The mode-synthesis coordinator, reached through the mode coordinator this
+  /// object is already constructed with.
+  ///
+  /// Deliberately NOT a second injection point in `AppModel`: `displayModes.synthesis`
+  /// is assigned in the very initialiser that produces the `modes` reference
+  /// below, so this is non-nil for as long as the app is, while a closure of our
+  /// own would be one more thing a future wiring change could leave sitting at
+  /// its no-op default, with no symptom until a panic press orphaned a virtual
+  /// display. nil is the unwired case (a fixture), and it degrades to exactly the
+  /// pre-synthesis behaviour.
+  private var synthesis: SynthesisCoordinator? { modes.synthesis }
+
+  /// Takes every synthesis set down through the engine, VERIFIES from the pairing
+  /// table that they are gone, and only then runs `body` against a fresh sample
+  /// (SS13).
+  ///
+  /// The verification is the pairing table rather than the disengage's own
+  /// return, which is the house rule about achieved state applied to a caller
+  /// that has one available: `SynthesisCoordinator` re-reads the engine's table
+  /// after every operation it performs, so an empty table is the engine's answer
+  /// about what is still standing rather than a report about what it attempted.
+  ///
+  /// `disengageAllForReset()` is the whole-app reset's method and its name says
+  /// so, but it is also the only pref-free teardown the coordinator exposes: it
+  /// ends outstanding previews, claims the gate, disengages each pairing through
+  /// the engine and releases through the funnel, and it writes no pref. A panic
+  /// press must not opt a display out of synthesized sizes, so the two paths that
+  /// DO write prefs (`setOptIn`, `reset`) are the wrong ones here.
+  ///
+  /// `body` is not run when anything is still engaged: staging a raw mirror
+  /// change over a set the engine could not take down is the exact outcome this
+  /// ruling exists to prevent.
+  private func unwindingSynthesis(then body: @escaping (MirrorTopology) -> Void) {
+    guard let synthesis else { return }
+    // Raised synchronously, before any await, for `perform`'s reason: a control
+    // that queues work and only then disables itself is a control two clicks get
+    // through. The unwind runs for seconds, so this is the window that matters
+    // most.
+    inFlight += 1
+    isApplying = true
+    queue.enqueue {
+      defer {
+        self.inFlight -= 1
+        if self.inFlight == 0 { self.isApplying = false }
+      }
+      let engaged = synthesis.pairings.count
+      await synthesis.disengageAllForReset()
+      let remaining = synthesis.pairings
+      guard remaining.isEmpty else {
+        self.log.error("Synthesis did not come down, so no mirror change was staged; \(remaining.count, privacy: .public) still engaged")
+        if let stuck = remaining.first {
+          // The engine's own word for it, on the surface that renders synthesis
+          // refusals: no `MirrorRefusal` case describes a synthesized size that
+          // would not come down, and inventing one would put a sentence about
+          // mirroring in front of a person who never asked for mirroring.
+          synthesis.note(.engine(.unwindIncomplete), for: stuck.physicalDisplayID)
+        }
+        // Reported as a mirroring failure ONLY when nothing came down. The
+        // sentence `lastFailure` renders ends "and nothing was altered", which a
+        // partial teardown falsifies; the partial case is the one the user can
+        // already see, since a panel came back to its own size.
+        if remaining.count == engaged {
+          self.lastFailure = DisplayConfigError(cgErrorCode: CGError.failure.rawValue)
+          self.syncConfirmation()
+        }
+        return
+      }
+      // Re-sampled rather than carried: the unwind destroyed a display and
+      // changed a mirror set, so the entry sample describes a machine that no
+      // longer exists, and it is what the staged changes would be decided from.
+      body(self.resampleAndPublish())
+    }
   }
 
   @discardableResult
