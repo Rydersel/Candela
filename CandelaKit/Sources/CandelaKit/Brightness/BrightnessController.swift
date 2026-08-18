@@ -1438,8 +1438,13 @@ public final class BrightnessController: PendingWireDraining {
   /// Returns the MEASURED state after the settle, never the write's ACK. False
   /// whenever a newer transition took the display mid-flight: a superseded call
   /// established nothing, so it may not claim its leg landed.
+  ///
+  /// `settle` is the caller's, not this controller's, because the caller is the
+  /// one that has to state its own worst case: six legs of a link bounce pay
+  /// this window six times, inside a gate claim nothing else can take. Omit it
+  /// to take `settleDelay`.
   @discardableResult
-  public func setTransientHDR(_ enabled: Bool) async -> Bool {
+  public func setTransientHDR(_ enabled: Bool, settle: Duration? = nil) async -> Bool {
     guard role == .external else { return false }
     beginHDRTransition()
     let generation = hdrTransitionGeneration
@@ -1452,7 +1457,7 @@ public final class BrightnessController: PendingWireDraining {
       cachedHDRActive = true // assume locked: the exit path's rule, same reason
       return false
     }
-    try? await Task.sleep(for: settleDelay)
+    try? await Task.sleep(for: settle ?? settleDelay)
     guard hdrTransitionGeneration == generation else {
       cachedHDRActive = true // assume locked
       return false
