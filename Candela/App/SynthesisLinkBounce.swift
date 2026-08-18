@@ -21,6 +21,7 @@ import os
 struct BouncingSynthesisDriver: SynthesisDriving {
   let engine: ModeSynthesisEngine
   let hdr: any HDRToggling
+  let configurator: any DisplayConfiguring
 
   private static let log = Logger(
     subsystem: "com.rydersel.Candela", category: "synthesis"
@@ -29,9 +30,44 @@ struct BouncingSynthesisDriver: SynthesisDriving {
   func engage(
     _ size: SyntheticSize, onPhysical displayID: CGDirectDisplayID, identityKey: String
   ) async -> Result<SynthesisPairing, SynthesisFailure> {
+    // Captured BEFORE the engage: once the mirror stands the display's
+    // descriptor answers for the master, and the mode the panel was running
+    // is not recoverable from anywhere.
+    let ownMode = configurator.currentMode(for: displayID)
     let result = await engine.engage(size, onPhysical: displayID, identityKey: identityKey)
-    if case .success = result { await bounce(displayID) }
+    if case .success = result {
+      if await retime(displayID, to: ownMode) == false { await bounce(displayID) }
+    }
     return result
+  }
+
+  /// Re-applies the panel's own mode to the mirror SLAVE after the engage.
+  ///
+  /// The mirror leaves the slave on a timing of the OS's choosing: the wire
+  /// was measured at 100 Hz from a 175 Hz start, and on some establishments
+  /// the chosen timing is marginal (visible flashing, software-invisible). A
+  /// mode apply on a mirrored slave lands on the glass while the mirror keeps
+  /// scanning the master's picture [MEASURED 2026-08-18: OSD 175, picture
+  /// intact, mirror standing], so this both preserves the panel's refresh and
+  /// renegotiates the link to the panel's own known-good timing. Returns
+  /// false when it could not run; the HDR bounce is the fallback
+  /// renegotiator.
+  private func retime(_ displayID: CGDirectDisplayID, to ownMode: DisplayMode?) async -> Bool {
+    guard let ownMode else { return false }
+    // The engage's reconfigure needs to settle before another one begins.
+    try? await Task.sleep(for: .seconds(2))
+    do {
+      // Session scope, matching the engine's own applies. The apply
+      // cross-checks the resolved descriptor and throws on a reassigned
+      // ioModeID, so a stale capture surfaces here rather than as a wrong
+      // mode on the glass.
+      try configurator.apply(ownMode, to: displayID, scope: .session)
+      Self.log.info("synthesis.retime display \(displayID) back to \(ownMode.logicalWidth)x\(ownMode.logicalHeight) @\(ownMode.refreshHz)Hz")
+      return true
+    } catch {
+      Self.log.info("synthesis.retime could not run for display \(displayID): \(String(describing: error), privacy: .public)")
+      return false
+    }
   }
 
   func disengage(fromPhysical displayID: CGDirectDisplayID) async -> Result<Void, SynthesisFailure> {

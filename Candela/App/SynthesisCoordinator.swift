@@ -220,7 +220,7 @@ final class SynthesisCoordinator {
     // Both engage entry points route through the bouncing driver, so the
     // post-engage link bounce runs for a picked size and an unattended
     // restore alike. Disengage and the pairing read forward untouched.
-    let driver = BouncingSynthesisDriver(engine: engine, hdr: hdr)
+    let driver = BouncingSynthesisDriver(engine: engine, hdr: hdr, configurator: configurator)
     self.driver = driver
     session = SynthesisPreviewSession(driver: driver)
     self.gate = gate
