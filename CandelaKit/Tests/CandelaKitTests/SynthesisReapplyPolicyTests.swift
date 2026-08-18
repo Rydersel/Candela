@@ -22,6 +22,7 @@ struct SynthesisReapplyPolicyTests {
     isBuiltIn: Bool = false,
     hdrEngaged: Bool = false,
     alreadyEngaged: Bool = false,
+    alreadyMirrored: Bool = false,
     freeSlots: Int = 2
   ) -> SynthesisReapplyDecision {
     SynthesisReapplyPolicy.decide(
@@ -31,6 +32,7 @@ struct SynthesisReapplyPolicyTests {
       isBuiltIn: isBuiltIn,
       hdrEngaged: hdrEngaged,
       alreadyEngaged: alreadyEngaged,
+      alreadyMirrored: alreadyMirrored,
       freeSlots: freeSlots
     )
   }
@@ -53,7 +55,8 @@ struct SynthesisReapplyPolicyTests {
   @Test func nothingStoredIsNothingToEngage() {
     let decision = SynthesisReapplyPolicy.decide(
       optedIn: true, stored: nil, resolved: nil,
-      isBuiltIn: false, hdrEngaged: false, alreadyEngaged: false, freeSlots: 2
+      isBuiltIn: false, hdrEngaged: false, alreadyEngaged: false,
+      alreadyMirrored: false, freeSlots: 2
     )
     #expect(decision == .skip(.nothingStored))
   }
@@ -66,7 +69,8 @@ struct SynthesisReapplyPolicyTests {
   @Test func aResolvedSizeWithNothingStoredIsStillNothingToEngage() {
     let decision = SynthesisReapplyPolicy.decide(
       optedIn: true, stored: nil, resolved: resolved,
-      isBuiltIn: false, hdrEngaged: false, alreadyEngaged: false, freeSlots: 2
+      isBuiltIn: false, hdrEngaged: false, alreadyEngaged: false,
+      alreadyMirrored: false, freeSlots: 2
     )
     #expect(decision == .skip(.nothingStored))
   }
@@ -78,7 +82,8 @@ struct SynthesisReapplyPolicyTests {
   @Test func aStoredSizeTheLadderNoLongerOffersIsStale() {
     let decision = SynthesisReapplyPolicy.decide(
       optedIn: true, stored: stored, resolved: nil,
-      isBuiltIn: false, hdrEngaged: false, alreadyEngaged: false, freeSlots: 2
+      isBuiltIn: false, hdrEngaged: false, alreadyEngaged: false,
+      alreadyMirrored: false, freeSlots: 2
     )
     #expect(decision == .skip(.staleDescriptor))
   }
@@ -87,6 +92,15 @@ struct SynthesisReapplyPolicyTests {
   /// working synthesis set down and rebuild it for nothing.
   @Test func aDisplayAlreadyCarryingItsStoredSizeIsLeftAlone() {
     #expect(decide(alreadyEngaged: true) == .skip(.alreadyEngaged))
+  }
+
+  /// SS7 in the direction nothing consulted before. A display already showing
+  /// another display's framebuffer cannot also mirror onto a virtual one, and
+  /// the unattended path must never take apart a mirror set the person built:
+  /// the same predicate that hides synthesis sets from the mirroring surfaces
+  /// answers this, so a display carrying a synthesis set is not caught by it.
+  @Test func aUserMirrorSetRefusesTheEngage() {
+    #expect(decide(alreadyMirrored: true) == .skip(.alreadyMirrored))
   }
 
   /// SS9. Mode changes were measured silently dropping HDR, so synthesis
@@ -120,13 +134,15 @@ struct SynthesisReapplyPolicyTests {
     var isBuiltIn = true
     var hdrEngaged = true
     var alreadyEngaged = true
+    var alreadyMirrored = true
     var freeSlots = 0
 
     func current() -> SynthesisReapplyDecision {
       SynthesisReapplyPolicy.decide(
         optedIn: optedIn, stored: storedDescriptor, resolved: resolvedSize,
         isBuiltIn: isBuiltIn, hdrEngaged: hdrEngaged,
-        alreadyEngaged: alreadyEngaged, freeSlots: freeSlots
+        alreadyEngaged: alreadyEngaged, alreadyMirrored: alreadyMirrored,
+        freeSlots: freeSlots
       )
     }
 
@@ -140,6 +156,8 @@ struct SynthesisReapplyPolicyTests {
     resolvedSize = resolved
     #expect(current() == .skip(.alreadyEngaged))
     alreadyEngaged = false
+    #expect(current() == .skip(.alreadyMirrored))
+    alreadyMirrored = false
     #expect(current() == .skip(.hdrEngaged))
     hdrEngaged = false
     #expect(current() == .skip(.noFreeSlot))

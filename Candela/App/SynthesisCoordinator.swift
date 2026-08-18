@@ -52,6 +52,11 @@ final class SynthesisCoordinator {
       /// SS9. Engaging while HDR is on risks the silent HDR drop the
       /// revealed-mode work measured on mode changes.
       case hdrEngaged
+      /// The display is in a mirror set the USER built. Synthesis mirrors the
+      /// panel onto a virtual display, which a panel already showing another
+      /// display's framebuffer cannot do, and the set is one the person asked
+      /// for rather than one this feature may take apart.
+      case alreadyMirrored
       /// The display's opt-in is off, so there was nothing to engage.
       case notOffered
       /// The size asked for is no longer one the catalog offers for this panel.
@@ -82,7 +87,20 @@ final class SynthesisCoordinator {
   /// True while an engage or disengage this object started is still running.
   /// Observable so a surface can disable its own control rather than letting a
   /// second click queue behind a sequence that takes tens of seconds.
-  private(set) var isWorking = false
+  ///
+  /// It is also what the teardown paths below refuse on, so it has to stay true
+  /// for the WHOLE of an operation and not merely for its innermost step.
+  var isWorking: Bool { workDepth > 0 }
+
+  /// A depth rather than a flag, and the difference is load-bearing.
+  /// `performing` nests: an engage runs its own departure sweep when it lands,
+  /// and that sweep performs disengages of its own. A boolean would be cleared
+  /// by the inner operation returning, leaving `isWorking` false while the
+  /// outer sequence is still running and every guard that reads it open.
+  ///
+  /// Not `@ObservationIgnored`: `isWorking` is computed from it, so this is the
+  /// property observation has to track for a surface to see the flag change.
+  private var workDepth = 0
 
   /// The preview session, reached DIRECTLY by the countdown driver.
   ///
@@ -94,6 +112,10 @@ final class SynthesisCoordinator {
 
   @ObservationIgnored private let engine: ModeSynthesisEngine
   @ObservationIgnored private let gate: DisplayReconfigurationGate
+  /// The same configurator the engine drives, kept for ONE question this object
+  /// has to answer for itself: which displays are attached right now. See
+  /// `sweepDeparturesAfterEngage`.
+  @ObservationIgnored private let configurator: any DisplayConfiguring
   /// Where the pairing enters the app's topology (SS7). Stamped on the store
   /// rather than at each `MirrorTopology(...)` construction because the store
   /// has two writers and the other one samples CoreGraphics alone, which cannot
@@ -194,6 +216,7 @@ final class SynthesisCoordinator {
     )
     session = SynthesisPreviewSession(driver: engine)
     self.gate = gate
+    self.configurator = configurator
     self.topologyStore = topologyStore
   }
 
@@ -250,11 +273,38 @@ final class SynthesisCoordinator {
   /// Why this display cannot take a synthesized size right now, or nil when it
   /// can. The order is the contract: hardware facts before the user's choices,
   /// so a built-in panel says what it is rather than reporting an opt-in.
+  ///
+  /// The mirror check sits where `SynthesisReapplyPolicy` puts its own, and the
+  /// two orderings are kept aligned deliberately: the attended and unattended
+  /// paths refusing for different reasons over the same machine is a difference
+  /// nobody could explain from what is on screen.
   func refusalReason(for display: ConfiguredDisplay) -> Refusal.Reason? {
     if display.isBuiltIn { return .builtIn }
     guard offersSyntheticSizes(displayID: display.id) else { return .notOffered }
+    if isInUserMirrorSet(display) { return .alreadyMirrored }
     if isHDREngaged(display.id) { return .hdrEngaged }
     return nil
+  }
+
+  /// SS7's predicate in the direction nothing consulted before: this display is
+  /// mirrored, and it is not one of OUR sets.
+  ///
+  /// The halves come from different places on purpose. The flag is
+  /// CoreGraphics' own, sampled with the display, so it describes the machine
+  /// rather than what the app remembers. Reading it alone would have every
+  /// engaged synthesis set refuse the next request about itself.
+  ///
+  /// The exclusion is asked of the pairing snapshot FIRST and the topology
+  /// store second. SS1 makes the pairing the authority on synthesis topology
+  /// and this object holds it, so the snapshot answers without a sample for
+  /// both ends of a set this object engaged; the store answers for anything the
+  /// snapshot has not caught up with. Asking only the store would put a window
+  /// between the mirror landing and the sampler running in which our own set
+  /// reads as the user's.
+  private func isInUserMirrorSet(_ display: ConfiguredDisplay) -> Bool {
+    guard display.isInMirrorSet else { return false }
+    if isEngaged(displayID: display.id) || masterIDs.contains(display.id) { return false }
+    return !topologyStore.topology().isSynthesisSet(containing: display.id)
   }
 
   func note(_ reason: Refusal.Reason, for displayID: CGDirectDisplayID) {
@@ -273,7 +323,7 @@ final class SynthesisCoordinator {
   func beginPreview(
     _ size: SyntheticSize, onPhysical displayID: CGDirectDisplayID, identityKey: String
   ) async -> Result<PreviewedSynthesis, SynthesisPreviewRefusal> {
-    let result = await performing {
+    let result = await engaging {
       await self.session.begin(size: size, onPhysical: displayID, identityKey: identityKey)
     }
     if case let .failure(refusal) = result {
@@ -341,6 +391,7 @@ final class SynthesisCoordinator {
       isBuiltIn: display.isBuiltIn,
       hdrEngaged: isHDREngaged(display.id),
       alreadyEngaged: engagedSize(displayID: display.id) == resolved && resolved != nil,
+      alreadyMirrored: isInUserMirrorSet(display),
       freeSlots: freeSlots
     )
     guard case let .engage(size) = decision else { return decision }
@@ -361,7 +412,7 @@ final class SynthesisCoordinator {
   func engage(
     _ size: SyntheticSize, on display: ConfiguredDisplay
   ) async -> Result<SynthesisPairing, SynthesisFailure> {
-    await performing {
+    await engaging {
       await self.engine.engage(
         size, onPhysical: display.id, identityKey: display.identity.key
       )
@@ -452,8 +503,23 @@ final class SynthesisCoordinator {
   /// departed and a physical panel still mirroring nothing. The prefs are
   /// cleared by the wipe that follows, which is SS11's ordering: teardown
   /// first, keys after.
-  func disengageAllForReset() async {
-    guard !pairings.isEmpty else { return }
+  ///
+  /// **Returns false when it refused**, which is not the same as "nothing came
+  /// down": the pairing table is EMPTY for the whole of an engage, so an empty
+  /// table is only evidence of a clean machine while nothing is running. A
+  /// caller that reads the table to decide whether the teardown worked has to
+  /// read this first (`MirroringCoordinator.unwindingSynthesis` does).
+  @discardableResult
+  func disengageAllForReset() async -> Bool {
+    // Refused rather than run, and it is the FIRST thing checked. The snapshot
+    // below is empty for the whole multi-second engage, so every question asked
+    // of it in that window answers "nothing is engaged" about a machine that is
+    // about to have a synthesis set on it.
+    guard !isWorking else {
+      log.error("synthesis: a teardown was asked for while a hardware sequence was still running; nothing was taken down")
+      return false
+    }
+    guard !pairings.isEmpty else { return true }
     // The result is DISCARDED, deliberately, and this is the one path where
     // that is right. Everywhere else a preview that would not stand down
     // refuses the operation; here the operation is the whole-app reset, which
@@ -477,10 +543,24 @@ final class SynthesisCoordinator {
     // `releaseClaimIfIdle`. Guarded on having been granted so a claim held by
     // another feature is not reconciled away by this pass.
     if claimed { await releaseClaimIfIdle() }
+    return true
   }
 
   /// The verified disengage both opt-out paths share.
+  ///
+  /// Returns false without touching anything when it refuses, which is what
+  /// keeps SS11's ordering honest: both callers write prefs only after this
+  /// says the machine is clean.
   private func disengageForOptOut(_ display: ConfiguredDisplay) async -> Bool {
+    // BEFORE the `isEngaged` question, not after. `isEngaged` reads the
+    // snapshot, which is empty for the whole of an engage, so an in-flight
+    // engage would otherwise answer "nothing to take down", let the prefs be
+    // written, and then land: an engaged set with the rows that could take it
+    // down hidden behind an opt-in that is now off.
+    guard !isWorking else {
+      note(.busy, for: display.id)
+      return false
+    }
     guard isEngaged(displayID: display.id) else { return true }
     guard await endOutstandingPreview() else {
       note(.busy, for: display.id)
@@ -565,14 +645,52 @@ final class SynthesisCoordinator {
     topologyStore.noteSynthesisMasters(masterIDs)
   }
 
-  /// Runs a hardware operation with the working flag raised and the snapshot
+  /// Runs a hardware operation with the working depth raised and the snapshot
   /// re-read afterwards, so no path can perform one and forget either.
+  ///
+  /// Re-entrant: `engaging` runs a departure sweep inside its own call, and the
+  /// sweep performs disengages. The depth is what keeps `isWorking` true across
+  /// all of that.
   private func performing<T>(_ operation: () async -> T) async -> T {
-    isWorking = true
+    workDepth += 1
     let result = await operation()
-    isWorking = false
+    workDepth -= 1
     await refreshSnapshot()
     return result
+  }
+
+  /// `performing`, plus the departure sweep an ENGAGE has to run for itself.
+  ///
+  /// The depth is held across BOTH halves rather than left to the inner
+  /// `performing`: the sweep is part of the engage, and a teardown granted in
+  /// the gap between them would be granted against a machine that is still
+  /// being reconfigured.
+  private func engaging<T>(_ operation: () async -> T) async -> T {
+    workDepth += 1
+    defer { workDepth -= 1 }
+    let result = await performing(operation)
+    await sweepDeparturesAfterEngage()
+    return result
+  }
+
+  /// Take down any pairing whose physical panel is no longer attached, once,
+  /// straight after an engage.
+  ///
+  /// Every other departure sweep keys on the pairing SNAPSHOT, and the snapshot
+  /// is empty (or stale) for the whole of an engage, which runs for seconds. A
+  /// panel that leaves inside that window therefore reaches no sweep at all,
+  /// and nothing re-runs them once the engage lands: the pairing survives,
+  /// naming a display that is not there, holding one of two slots, and putting
+  /// a departed panel's name into the arrangement signature and the reapply
+  /// pass. So the engage asks the question itself, at the one moment the
+  /// snapshot is fresh again.
+  ///
+  /// The live list, not the notification's: this is about hardware to take
+  /// down, so what matters is what is attached NOW. Same reading as
+  /// `DisplayModeCoordinator.dropSynthesisOnDepartedDisplay`.
+  private func sweepDeparturesAfterEngage() async {
+    guard !pairings.isEmpty else { return }
+    await noteDepartures(live: Set(configurator.displays().map(\.id)))
   }
 
   private func resolving(

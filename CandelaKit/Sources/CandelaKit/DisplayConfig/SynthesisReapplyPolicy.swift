@@ -22,6 +22,11 @@ public enum SynthesisSkipReason: Sendable, Equatable {
   case builtIn
   /// The stored size is already engaged on this display.
   case alreadyEngaged
+  /// The display is in a mirror set the USER built (SS7's predicate, in the
+  /// direction nothing consulted before). Engaging would point a virtual
+  /// display at a panel that is already showing another display's framebuffer,
+  /// over a set the person asked for.
+  case alreadyMirrored
   /// SS6 reserves two slots for synthesis, and both are in use.
   case noFreeSlot
 }
@@ -69,6 +74,16 @@ public enum SynthesisReapplyPolicy {
   ///     working is never reported as a refusal: HDR cannot be on under an
   ///     engaged set, and the slot it occupies is by definition not free, so
   ///     either gate would otherwise turn a no-op into a false alarm.
+  ///   - alreadyMirrored: this display is in a mirror set the USER built, which
+  ///     is the caller's `isInMirrorSet`-and-not-`isSynthesisSet` answer rather
+  ///     than a raw mirror flag: a display carrying a synthesis set is mirrored
+  ///     too, and reporting that as a refusal would be this feature refusing its
+  ///     own work. Checked AFTER `alreadyEngaged` for the same reason, and
+  ///     BEFORE the HDR and slot gates because it is the condition that makes
+  ///     the engage structurally impossible rather than merely risky: the panel
+  ///     cannot mirror onto a virtual display while it is already showing
+  ///     another display's framebuffer, and nothing this feature does may take
+  ///     apart a set the person asked for.
   ///   - freeSlots: how many of SS6's synthesis slots are unused.
   public static func decide(
     optedIn: Bool,
@@ -77,6 +92,7 @@ public enum SynthesisReapplyPolicy {
     isBuiltIn: Bool,
     hdrEngaged: Bool,
     alreadyEngaged: Bool,
+    alreadyMirrored: Bool,
     freeSlots: Int
   ) -> SynthesisReapplyDecision {
     guard !isBuiltIn else { return .skip(.builtIn) }
@@ -84,6 +100,7 @@ public enum SynthesisReapplyPolicy {
     guard stored != nil else { return .skip(.nothingStored) }
     guard let resolved else { return .skip(.staleDescriptor) }
     guard !alreadyEngaged else { return .skip(.alreadyEngaged) }
+    guard !alreadyMirrored else { return .skip(.alreadyMirrored) }
     guard !hdrEngaged else { return .skip(.hdrEngaged) }
     guard freeSlots > 0 else { return .skip(.noFreeSlot) }
     return .engage(resolved)

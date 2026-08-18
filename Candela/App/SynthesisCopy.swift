@@ -78,6 +78,12 @@ enum SynthesisCopy {
       "\(AppInfo.productName) renders these sizes on external displays only."
     case .hdrEngaged:
       "Turn off HDR to use a synthesized size."
+    case .alreadyMirrored:
+      // Says what is true of both ends of a set: the reason fires for the
+      // display that is showing another one and for the one being shown, and a
+      // sentence that picked a side would be wrong half the time. No internal
+      // name for the mechanism, and no promise about what happens next.
+      "This display is part of a mirror set. Turn mirroring off to use a size \(AppInfo.productName) renders."
     case .notOffered:
       "Turn on More sizes to use a size \(AppInfo.productName) renders."
     case .sizeNoLongerOffered:
@@ -120,7 +126,14 @@ enum SynthesisCopy {
       // The loudest answer in the enum, and the one case where saying nothing
       // would leave a virtual display standing with no account of it anywhere a
       // person can read.
-      "\(AppInfo.productName) could not finish taking the last rendered size down. A virtual display may still be in place; quitting \(AppInfo.productName) removes it."
+      //
+      // "usually", and the second route, because quitting is NOT sufficient in
+      // the measured exception (S1 5A): while the virtual display is the only
+      // ACTIVE display, macOS will not remove it, and it survived both the
+      // owning object's release and a SIGKILL of the owner. What clears it is a
+      // real display being active again, within about a second. Promising that
+      // quitting removes it would be a promise the machine can refuse.
+      "\(AppInfo.productName) could not finish taking the last rendered size down. A virtual display may still be in place: quitting \(AppInfo.productName) usually removes it, and if one stays, waking the screen or connecting another display releases it."
     }
   }
 

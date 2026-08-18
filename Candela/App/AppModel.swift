@@ -376,7 +376,18 @@ final class AppModel {
     // that has departed and every SS7 carve-out reading a set that is not
     // there. The synthesis prefs are cleared by the domain wipe that follows,
     // which is the same ordering: teardown first, keys after.
-    await synthesis.disengageAllForReset()
+    //
+    // A REFUSAL (a synthesis sequence still running) is logged and the reset
+    // continues, and that is the deliberate half of this call. `destroyAll`
+    // below then does release those slots behind the engine's back, which is
+    // the lesser fault by a distance: this is the whole-app reset, and a
+    // virtual display that outlived it would stand until quit with every
+    // control that knew about it already rebuilt. The engine's table is stale
+    // for the rest of the session either way, so the log line is what a later
+    // report has to explain it by.
+    if await synthesis.disengageAllForReset() == false {
+      log.error("reset: the synthesis engine refused its teardown; the virtual displays go down without it")
+    }
     let host = virtualDisplays
     await withCheckedContinuation { continuation in
       virtualDisplayQueue.async {

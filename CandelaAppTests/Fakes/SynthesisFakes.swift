@@ -77,6 +77,12 @@ final class FakeDisplayWorld: @unchecked Sendable {
   /// `FakeSynthesisWorld`: without that half, the engine's unwind never sees
   /// the panel return to its own geometry and every disengage answers
   /// `unwindIncomplete` against a fake that did exactly what it was asked.
+  ///
+  /// `isInMirrorSet` moves with the master, because CoreGraphics reports it for
+  /// a slave and every predicate written over "is this display mirrored" reads
+  /// that flag rather than `mirrorsDisplay`. A fake that left it false made a
+  /// mirrored panel indistinguishable from a standalone one to exactly the
+  /// carve-outs this world exists to exercise.
   func applyMirroring(_ changes: [MirrorChange]) {
     lock.withLock {
       mirrorChanges.append(changes)
@@ -84,7 +90,8 @@ final class FakeDisplayWorld: @unchecked Sendable {
         guard let display = displaysByID[change.display] else { continue }
         displaysByID[change.display] = ConfiguredDisplay(
           id: display.id, identity: display.identity, name: display.name,
-          isBuiltIn: display.isBuiltIn, mirrorsDisplay: change.master
+          isBuiltIn: display.isBuiltIn, mirrorsDisplay: change.master,
+          isInMirrorSet: change.master != kCGNullDirectDisplay
         )
         guard change.master != kCGNullDirectDisplay else {
           currentByID[change.display] = ownModeByID[change.display]
