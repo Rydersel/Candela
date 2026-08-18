@@ -1,0 +1,552 @@
+import CandelaKit
+import CoreGraphics
+import Foundation
+import Observation
+import os
+
+/// App-side owner of the mode-synthesis engine, its preview session, and the
+/// two per-display prefs behind synthesized sizes (SS4).
+///
+/// Deliberately NOT a fifth preview coordinator. A synthesized size is a SIZE,
+/// so it is chosen from the same picker, answered in the same confirmation
+/// surface and counted down by the same clock as every other size:
+/// `DisplayModeCoordinator` owns all of that and reaches in here for the
+/// hardware. What lives here is what only synthesis has: the engine, the
+/// pairing snapshot every SS7 carve-out reads, the guards (SS9/SS14), and the
+/// SS11 ordering that puts a verified disengage before the opt-in is written
+/// false.
+///
+/// **`pairings` is a SNAPSHOT this object holds, never a question asked of the
+/// engine.** `ModeSynthesisEngine.engage` and `.disengage` are non-async actor
+/// methods that BLOCK for the whole hardware sequence (up to about 24 seconds
+/// worst case: the appearance poll, the in-process retry, the helper semaphore,
+/// then a destroy per unwind step), so every other call into the actor queues
+/// behind them. A UI path that asked the actor would stall for that whole
+/// window, and it would do it during the VD arrival that is firing topology
+/// refreshes. So: this object re-reads the table after each operation IT
+/// performed, and everything else reads the snapshot.
+///
+/// **The two key spaces are not interchangeable, and mixing them is silent.**
+/// Prefs are keyed by `DisplayPrefs`' persistence key (the EDID UUID, what
+/// `SettingsActions`' writer uses); the engine's pairing carries
+/// `DisplayConfigIdentity.key` (vendor-model-serial, what `ModePersistence`
+/// uses). Every parameter here says which one it wants.
+@MainActor @Observable
+final class SynthesisCoordinator {
+  /// Why a synthesis request produced nothing, and which display it was about.
+  ///
+  /// Its own type rather than a case on `DisplayModeCoordinator.StartFailure`,
+  /// for the reason `SynthesisPreviewOutcome` is not `PreviewOutcome`: that
+  /// type's diagnostic line renders "CoreGraphics error <n>", and no synthesis
+  /// refusal has a CGError behind it. A `.unwindIncomplete` reported that way
+  /// would name a source it never came from.
+  struct Refusal: Equatable {
+    let displayID: CGDirectDisplayID
+    let reason: Reason
+
+    /// The copy lives in `SynthesisCopy` (Task 10 owns the wording); this is
+    /// the distinction it renders.
+    enum Reason: Equatable {
+      /// SS14. The built-in panel is never a synthesis target in v1.
+      case builtIn
+      /// SS9. Engaging while HDR is on risks the silent HDR drop the
+      /// revealed-mode work measured on mode changes.
+      case hdrEngaged
+      /// The display's opt-in is off, so there was nothing to engage.
+      case notOffered
+      /// The size asked for is no longer one the catalog offers for this panel.
+      case sizeNoLongerOffered
+      /// A hardware sequence was already running. THE one reason worth
+      /// retrying: both busy shapes the session can answer with
+      /// (`SynthesisPreviewRefusal.busy` and `SynthesisPreviewOutcome.busy`)
+      /// land here, because a caller that cannot tell "never" from "again in a
+      /// moment" gets one of them wrong.
+      case busy
+      /// AR12: another display-reconfiguring feature holds the gate.
+      case blocked(by: ReconfigurationClaimant)
+      /// The engine's sequence failed. Every case names the step it stopped at.
+      case engine(SynthesisFailure)
+    }
+  }
+
+  /// The engine's pairing table as of the last operation this object performed
+  /// (SS1). Master-first ordering is `MirrorTopology`'s business, not this
+  /// one's; here it is `physicalDisplayID`-ascending, as the engine returns it.
+  private(set) var pairings: [SynthesisPairing] = []
+
+  /// The last refusal, or nil. One value rather than one per display: a
+  /// refusal is about the request just made, and the surfaces that render it
+  /// check the display themselves.
+  private(set) var refusal: Refusal?
+
+  /// True while an engage or disengage this object started is still running.
+  /// Observable so a surface can disable its own control rather than letting a
+  /// second click queue behind a sequence that takes tens of seconds.
+  private(set) var isWorking = false
+
+  /// The preview session, reached DIRECTLY by the countdown driver.
+  ///
+  /// `nonisolated` deliberately: `PreviewCountdownDriver` runs detached so a
+  /// wedged main thread cannot stop an expiry, and a tick routed through this
+  /// main-actor object would put the main thread back on the clock's critical
+  /// path. The driver awaits the actor; nothing else here does on a UI path.
+  @ObservationIgnored nonisolated let session: SynthesisPreviewSession
+
+  @ObservationIgnored private let engine: ModeSynthesisEngine
+  @ObservationIgnored private let gate: DisplayReconfigurationGate
+  /// Where the pairing enters the app's topology (SS7). Stamped on the store
+  /// rather than at each `MirrorTopology(...)` construction because the store
+  /// has two writers and the other one samples CoreGraphics alone, which cannot
+  /// know what the app engaged.
+  @ObservationIgnored private let topologyStore: MirrorTopologyStore
+
+  /// The DisplayPrefs persistence key for a display, or nil when nothing knows
+  /// it (a display discovery has not seen, which is every virtual display).
+  /// Wired by `AppModel`, which owns the join.
+  @ObservationIgnored var persistenceKey: (CGDirectDisplayID) -> String? = { _ in nil }
+
+  /// SS9's input, live. Wired by `AppModel` to the display's controller, which
+  /// is the achieved state rather than the stored intent.
+  @ObservationIgnored var isHDREngaged: (CGDirectDisplayID) -> Bool = { _ in false }
+
+  /// D27: called after either synthesis pref is written, with the pref name and
+  /// the display's persistence key, so the propagation seam hears about the
+  /// write whichever surface asked. The same shape as
+  /// `DisplayModeCoordinator.didStoreMode`, and for the same reason: the panel
+  /// and the confirmation window have no `SettingsActions`.
+  @ObservationIgnored var didWriteSynthesisPref: (PrefName, String) -> Void = { _, _ in }
+
+  /// Re-enumerates one display's mode catalog. Wired by `AppModel` to
+  /// `DisplayModeCoordinator.refreshCatalog(for:)`.
+  ///
+  /// The opt-in decides which ROWS the size picker holds (SS4), and the catalog
+  /// is enumerated on demand rather than reactively: the settings hub refreshes
+  /// it from a `.task` keyed on the display, and the pref rows fan out to
+  /// `.refreshUI`, which re-renders panes without re-enumerating anything. So
+  /// without this the toggle would change nothing visible until the display id
+  /// changed or a reconfiguration fired, and no test could catch it.
+  @ObservationIgnored var didChangeOffer: (CGDirectDisplayID) -> Void = { _ in }
+
+  /// Ends whatever preview any surface currently has outstanding, and reports
+  /// whether the machine came back. Wired by `AppModel` to
+  /// `DisplayModeCoordinator.endOutstandingPreview()`, which is the exact
+  /// mechanism `MirroringCoordinator` uses before its own applies: this object's
+  /// standalone paths (the opt-out, the resets) reconfigure displays too, so
+  /// they must not run over a preview whose fallback was captured before them.
+  ///
+  /// It enters `DisplayModeCoordinator`'s serial queue, so the standalone paths
+  /// that call it must never themselves be called from inside that queue: they
+  /// would wait on the operation doing the waiting. Every caller today is a
+  /// settings surface or the app reset, which are outside it.
+  @ObservationIgnored var endOutstandingPreview: () async -> Bool = { true }
+
+  @ObservationIgnored private let log = Logger(
+    subsystem: "com.rydersel.Candela", category: "synthesis"
+  )
+
+  init(
+    virtualDisplays: any VirtualDisplayAchievedModeReporting,
+    configurator: any DisplayConfiguring,
+    gate: DisplayReconfigurationGate,
+    topologyStore: MirrorTopologyStore
+  ) {
+    engine = ModeSynthesisEngine(virtualDisplays: virtualDisplays, configurator: configurator)
+    session = SynthesisPreviewSession(driver: engine)
+    self.gate = gate
+    self.topologyStore = topologyStore
+  }
+
+  // MARK: - Reading the snapshot
+
+  /// The virtual displays a synthesized size is mirrored onto right now (SS1).
+  var masterIDs: Set<CGDirectDisplayID> {
+    Set(pairings.map(\.virtualDisplayID))
+  }
+
+  func pairing(forPhysical displayID: CGDirectDisplayID) -> SynthesisPairing? {
+    pairings.first { $0.physicalDisplayID == displayID }
+  }
+
+  func isEngaged(displayID: CGDirectDisplayID) -> Bool {
+    pairing(forPhysical: displayID) != nil
+  }
+
+  func engagedSize(displayID: CGDirectDisplayID) -> SyntheticSize? {
+    pairing(forPhysical: displayID)?.size
+  }
+
+  /// The engaged stop for a panel named by `DisplayConfigIdentity.key`, which
+  /// is what survives the display IDs being reassigned across a replug.
+  func engagedSize(identityKey: String) -> SyntheticSize? {
+    pairings.first { $0.physicalIdentityKey == identityKey }?.size
+  }
+
+  /// How many of SS6's two synthesis slots are unused, as the snapshot sees it.
+  var freeSlots: Int {
+    max(0, VirtualDisplayIdentity.synthesisSlotRange.count - pairings.count)
+  }
+
+  // MARK: - Prefs (SS4)
+
+  func offersSyntheticSizes(displayID: CGDirectDisplayID) -> Bool {
+    prefs(for: displayID)?.offerSyntheticSizes ?? false
+  }
+
+  func storedSize(displayID: CGDirectDisplayID) -> SyntheticSizeDescriptor? {
+    prefs(for: displayID)?.storedSyntheticSize
+  }
+
+  /// Built from the DISPLAY PREFS persistence key, never from
+  /// `DisplayConfigIdentity.key`: the synthesis accessors suffix on the former,
+  /// matching every other per-display pref, and reading one while writing the
+  /// other makes an opt-in that saves and reads back false.
+  private func prefs(for displayID: CGDirectDisplayID) -> DisplayPrefs? {
+    persistenceKey(displayID).map { DisplayPrefs(persistenceKey: $0) }
+  }
+
+  // MARK: - Guards (SS9, SS14)
+
+  /// Why this display cannot take a synthesized size right now, or nil when it
+  /// can. The order is the contract: hardware facts before the user's choices,
+  /// so a built-in panel says what it is rather than reporting an opt-in.
+  func refusalReason(for display: ConfiguredDisplay) -> Refusal.Reason? {
+    if display.isBuiltIn { return .builtIn }
+    guard offersSyntheticSizes(displayID: display.id) else { return .notOffered }
+    if isHDREngaged(display.id) { return .hdrEngaged }
+    return nil
+  }
+
+  func note(_ reason: Refusal.Reason, for displayID: CGDirectDisplayID) {
+    refusal = Refusal(displayID: displayID, reason: reason)
+    log.error("synthesis refused on display \(displayID): \(String(describing: reason), privacy: .public)")
+  }
+
+  func dismissRefusal() {
+    refusal = nil
+  }
+
+  // MARK: - Preview (driven by DisplayModeCoordinator, always inside its queue)
+
+  /// Engages `size` as a preview. The caller holds the AR12 gate and has
+  /// already ended every other outstanding preview.
+  func beginPreview(
+    _ size: SyntheticSize, onPhysical displayID: CGDirectDisplayID, identityKey: String
+  ) async -> Result<PreviewedSynthesis, SynthesisPreviewRefusal> {
+    let result = await performing {
+      await self.session.begin(size: size, onPhysical: displayID, identityKey: identityKey)
+    }
+    if case let .failure(refusal) = result {
+      note(reason(for: refusal), for: displayID)
+    }
+    return result
+  }
+
+  func confirmPreview(_ answered: PreviewedSynthesis) async -> SynthesisPreviewOutcome {
+    await resolving(on: answered.physicalDisplayID) { await self.session.confirm(answered) }
+  }
+
+  func revertPreview(_ answered: PreviewedSynthesis) async -> SynthesisPreviewOutcome {
+    await resolving(on: answered.physicalDisplayID) { await self.session.revert(answered) }
+  }
+
+  /// The physical panel has gone. Disengages rather than dropping the record: a
+  /// pairing is a virtual display that outlives the panel's departure and holds
+  /// one of only two slots.
+  func revertOnDeparture(displayID: CGDirectDisplayID) async -> SynthesisPreviewOutcome? {
+    let outcome = await performing { await self.session.revertOnDeparture(displayID: displayID) }
+    if let outcome { record(outcome, for: displayID) }
+    return outcome
+  }
+
+  /// The countdown expired and the session resolved it. The clock reaches the
+  /// session directly, so this is how the snapshot catches up.
+  func adoptExpiry(_ outcome: SynthesisPreviewOutcome, on displayID: CGDirectDisplayID) async {
+    await refreshSnapshot()
+    record(outcome, for: displayID)
+  }
+
+  // MARK: - Unattended engage (SS9, SS14; the launch and arrival path)
+
+  /// The reapply decision for one display and, on `.engage`, the engage itself.
+  ///
+  /// `resolved` is always `SyntheticSizeCatalog.size(matching:)`'s answer:
+  /// `SynthesisReapplyPolicy` trusts that input and cannot tell a genuinely
+  /// stale descriptor from a caller that skipped the lookup.
+  ///
+  /// Unattended, so nothing here is previewed and nothing here writes a pref.
+  /// What the user stored is what is tried again; a refusal changes no state.
+  @discardableResult
+  func reapply(
+    for display: ConfiguredDisplay,
+    nativeLogicalWidth: Int?, nativeLogicalHeight: Int?,
+    existingRows: [DisplayMode]
+  ) async -> SynthesisReapplyDecision {
+    let stored = storedSize(displayID: display.id)
+    let resolved: SyntheticSize? = if let stored, let width = nativeLogicalWidth,
+                                      let height = nativeLogicalHeight {
+      SyntheticSizeCatalog.size(
+        matching: stored, ofNativeWidth: width, nativeHeight: height,
+        existingRows: existingRows,
+        ceilingPixelWidth: VirtualDisplayIdentity.maxPixels.wide,
+        ceilingPixelHeight: VirtualDisplayIdentity.maxPixels.high
+      )
+    } else {
+      nil
+    }
+    let decision = SynthesisReapplyPolicy.decide(
+      optedIn: offersSyntheticSizes(displayID: display.id),
+      stored: stored,
+      resolved: resolved,
+      isBuiltIn: display.isBuiltIn,
+      hdrEngaged: isHDREngaged(display.id),
+      alreadyEngaged: engagedSize(displayID: display.id) == resolved && resolved != nil,
+      freeSlots: freeSlots
+    )
+    guard case let .engage(size) = decision else { return decision }
+    switch await engage(size, on: display) {
+    case .success:
+      log.info("synthesis reapply engaged \(size.logicalWidth)x\(size.logicalHeight) on display \(display.id)")
+    case let .failure(failure):
+      // Unattended, so this is the only record. No pref is rewritten: what the
+      // user chose is what gets tried again next time the display shows up.
+      log.error("synthesis reapply failed on display \(display.id): \(String(describing: failure), privacy: .public)")
+      note(.engine(failure), for: display.id)
+    }
+    return decision
+  }
+
+  /// The bare engage, with no preview and no persistence. The caller holds the
+  /// gate.
+  func engage(
+    _ size: SyntheticSize, on display: ConfiguredDisplay
+  ) async -> Result<SynthesisPairing, SynthesisFailure> {
+    await performing {
+      await self.engine.engage(
+        size, onPhysical: display.id, identityKey: display.identity.key
+      )
+    }
+  }
+
+  // MARK: - Persistence
+
+  /// Records a kept synthesized size (SS11's ordering hangs off this moment:
+  /// the engage has landed and been verified before anything is stored).
+  ///
+  /// `unwindWasIncomplete` is the one case where a `.committed` outcome is not
+  /// evidence of a healthy set: a confirm following a FAILED revert can return
+  /// the identical retained pairing, which the engine kept precisely because
+  /// something it tried to take down is still standing. The size is persisted
+  /// either way (the user asked for it and it is on the glass), and the
+  /// incomplete unwind is surfaced rather than papered over.
+  func persist(_ pairing: SynthesisPairing, unwindWasIncomplete: Bool) {
+    guard let key = persistenceKey(pairing.physicalDisplayID) else {
+      log.error("synthesis: nothing knows a persistence key for display \(pairing.physicalDisplayID); the kept size was not stored")
+      return
+    }
+    DisplayPrefs(persistenceKey: key).setStoredSyntheticSize(
+      SyntheticSizeDescriptor(
+        logicalWidth: pairing.size.logicalWidth, logicalHeight: pairing.size.logicalHeight
+      )
+    )
+    didWriteSynthesisPref(.storedSyntheticSize, key)
+    if unwindWasIncomplete {
+      log.error("synthesis: display \(pairing.physicalDisplayID) kept a size whose previous teardown did not finish; a virtual display or a mirror set may still be standing")
+      note(.engine(.unwindIncomplete), for: pairing.physicalDisplayID)
+    }
+  }
+
+  // MARK: - Opt-in (SS11)
+
+  /// Turns the per-display opt-in on or off.
+  ///
+  /// **Off tears down BEFORE the pref persists** (SS11, the D29 ordering
+  /// shape). A pref written first would leave the app opted out with a
+  /// synthesis set still standing and no surface that still offers to take it
+  /// down: the picker's synthesized rows are exactly what the opt-in hides. So
+  /// a failed disengage LEAVES THE DISPLAY OPTED IN, and says so.
+  ///
+  /// Returns false when nothing was written.
+  @discardableResult
+  func setOptIn(_ enabled: Bool, on display: ConfiguredDisplay) async -> Bool {
+    guard let key = persistenceKey(display.id) else { return false }
+    dismissRefusal()
+    if enabled {
+      DisplayPrefs(persistenceKey: key).setOfferSyntheticSizes(true)
+      didWriteSynthesisPref(.offerSyntheticSizes, key)
+      didChangeOffer(display.id)
+      return true
+    }
+    guard await disengageForOptOut(display) else { return false }
+    DisplayPrefs(persistenceKey: key).setOfferSyntheticSizes(false)
+    didWriteSynthesisPref(.offerSyntheticSizes, key)
+    didChangeOffer(display.id)
+    return true
+  }
+
+  /// A per-display settings reset's synthesis half: disengage first, then clear
+  /// BOTH keys (SS11 applies to reset paths in the same order).
+  ///
+  /// Its own method rather than two more names in the pane's batch write,
+  /// because a batch pref write cannot perform a verified disengage. Returns
+  /// false when the teardown failed, in which case nothing was cleared.
+  @discardableResult
+  func reset(_ display: ConfiguredDisplay) async -> Bool {
+    guard let key = persistenceKey(display.id) else { return false }
+    dismissRefusal()
+    guard await disengageForOptOut(display) else { return false }
+    let prefs = DisplayPrefs(persistenceKey: key)
+    prefs.setStoredSyntheticSize(nil)
+    prefs.setOfferSyntheticSizes(false)
+    didWriteSynthesisPref(.storedSyntheticSize, key)
+    didWriteSynthesisPref(.offerSyntheticSizes, key)
+    didChangeOffer(display.id)
+    return true
+  }
+
+  /// The whole-app reset's synthesis half, run BEFORE `VirtualDisplayHost`'s
+  /// `destroyAll` and before the domain wipe.
+  ///
+  /// Without it the host takes the synthesis slots down behind the engine's
+  /// back, leaving the pairing table describing a virtual display that has
+  /// departed and a physical panel still mirroring nothing. The prefs are
+  /// cleared by the wipe that follows, which is SS11's ordering: teardown
+  /// first, keys after.
+  func disengageAllForReset() async {
+    guard !pairings.isEmpty else { return }
+    _ = await endOutstandingPreview()
+    let claimed = await gate.claim(.displayModes).refusedBy == nil
+    let engaged = pairings
+    await performing { [engine, log] in
+      for pairing in engaged {
+        let result = await engine.disengage(fromPhysical: pairing.physicalDisplayID)
+        if case let .failure(failure) = result, failure != .notEngaged {
+          log.error("synthesis reset: display \(pairing.physicalDisplayID) did not disengage (\(String(describing: failure), privacy: .public))")
+        }
+      }
+    }
+    if claimed { await gate.release(.displayModes) }
+  }
+
+  /// The verified disengage both opt-out paths share.
+  private func disengageForOptOut(_ display: ConfiguredDisplay) async -> Bool {
+    guard isEngaged(displayID: display.id) else { return true }
+    guard await endOutstandingPreview() else {
+      note(.busy, for: display.id)
+      return false
+    }
+    // AR12, asked before the reconfiguration for the reason every other
+    // claimant asks before its apply: a refusal has to cost nothing, and a
+    // claim taken after the transaction is staged protects nobody.
+    if let holder = await gate.claim(.displayModes).refusedBy {
+      note(.blocked(by: holder), for: display.id)
+      return false
+    }
+    let result = await performing { [engine] in
+      await engine.disengage(fromPhysical: display.id)
+    }
+    // Released unconditionally: the gate refuses a release from a claimant that
+    // is not holding it, and every preview was ended above, so nothing this
+    // release could free is still outstanding.
+    await gate.release(.displayModes)
+    switch result {
+    case .success:
+      return true
+    case .failure(.notEngaged):
+      // Nothing is synthesized, which is the state the teardown exists to
+      // reach. Reporting it as a failure would refuse an opt-out over a set
+      // that is not there.
+      return true
+    case let .failure(failure):
+      note(.engine(failure), for: display.id)
+      return false
+    }
+  }
+
+  // MARK: - Departure
+
+  /// Takes down every synthesis set whose physical panel has left.
+  ///
+  /// Both halves matter. A pairing under PREVIEW goes through the session, so
+  /// its record and its countdown go with it. A pairing already kept has no
+  /// session record, and leaving it would hold a slot and a virtual display for
+  /// a panel that is not attached, which is also what would put a departed
+  /// panel's name in an arrangement signature.
+  func noteDepartures(live: Set<CGDirectDisplayID>) async {
+    // A refusal names a display by its RUNTIME id, and the next display to
+    // arrive can inherit it, so one about a display that has gone has to go
+    // with it rather than resurface on whatever takes its place.
+    if let refusal, !live.contains(refusal.displayID) { dismissRefusal() }
+    let departed = pairings.map(\.physicalDisplayID).filter { !live.contains($0) }
+    guard !departed.isEmpty else { return }
+    let previewed = await session.previewedSynthesis?.physicalDisplayID
+    for displayID in departed {
+      if displayID == previewed {
+        _ = await revertOnDeparture(displayID: displayID)
+        continue
+      }
+      let result = await performing { [engine] in await engine.disengage(fromPhysical: displayID) }
+      if case let .failure(failure) = result, failure != .notEngaged {
+        log.error("synthesis: display \(displayID) departed and its set did not come down (\(String(describing: failure), privacy: .public))")
+      }
+    }
+  }
+
+  // MARK: - Snapshot maintenance
+
+  /// Re-reads the pairing table and republishes it.
+  ///
+  /// Called only after an operation this object performed, never from a view:
+  /// the engine's actor is busy for the whole of an engage, so this is a
+  /// multi-second call in exactly the window a UI must not block in.
+  private func refreshSnapshot() async {
+    pairings = await engine.pairings()
+    // The pairing is the authority on synthesis topology (SS1), and the store
+    // is where the app publishes topology, so this is where the two meet.
+    topologyStore.noteSynthesisMasters(masterIDs)
+  }
+
+  /// Runs a hardware operation with the working flag raised and the snapshot
+  /// re-read afterwards, so no path can perform one and forget either.
+  private func performing<T>(_ operation: () async -> T) async -> T {
+    isWorking = true
+    let result = await operation()
+    isWorking = false
+    await refreshSnapshot()
+    return result
+  }
+
+  private func resolving(
+    on displayID: CGDirectDisplayID,
+    _ operation: () async -> SynthesisPreviewOutcome
+  ) async -> SynthesisPreviewOutcome {
+    let outcome = await performing(operation)
+    record(outcome, for: displayID)
+    return outcome
+  }
+
+  /// The one place an outcome becomes a refusal the UI can render.
+  ///
+  /// `.committed` and `.reverted` are answers, not refusals, so they clear
+  /// whatever was on screen. `.stale` is final and says nothing worth showing:
+  /// the preview it named is gone, and the surface asking about it is about to
+  /// be rebuilt from the session anyway.
+  private func record(_ outcome: SynthesisPreviewOutcome, for displayID: CGDirectDisplayID) {
+    switch outcome {
+    case .committed, .reverted:
+      dismissRefusal()
+    case let .failed(failure):
+      note(.engine(failure), for: displayID)
+    case .busy:
+      note(.busy, for: displayID)
+    case .stale:
+      break
+    }
+  }
+
+  private func reason(for refusal: SynthesisPreviewRefusal) -> Refusal.Reason {
+    switch refusal {
+    case .busy: .busy
+    case let .engine(failure): .engine(failure)
+    }
+  }
+}

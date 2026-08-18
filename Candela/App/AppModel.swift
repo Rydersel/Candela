@@ -73,8 +73,86 @@ final class AppModel {
     coordinator.physicalFacts = { [weak self] display in
       self?.physicalPanelFacts(for: display)
     }
+    // A synthesized stop is a row in this coordinator's catalog and a preview on
+    // its clock, so the routing lives there; the engine lives in `synthesis`.
+    coordinator.synthesis = synthesis
     return coordinator
   }()
+
+  /// Synthesized sizes (SS4): the mode-synthesis engine, its preview session,
+  /// the pairing snapshot every SS7 carve-out reads, and the two per-display
+  /// prefs.
+  ///
+  /// Owned here for `displayModes`' reason and one of its own: an engage and a
+  /// disengage take tens of seconds and outlive any window that started them,
+  /// and the settings pane, the menu-bar panel and the whole-app reset all have
+  /// to drive the same engine.
+  @ObservationIgnored private(set) lazy var synthesis: SynthesisCoordinator = {
+    let coordinator = SynthesisCoordinator(
+      virtualDisplays: virtualDisplays,
+      configurator: CoreGraphicsDisplayConfigurator(),
+      gate: reconfigurationGate,
+      topologyStore: mirrorTopology
+    )
+    // The prefs join. Built from the DISPLAY PREFS persistence key, which is
+    // what every per-display accessor suffixes on; `DisplayConfigIdentity.key`
+    // is a different key space and reading one while writing the other is a
+    // silent opt-in that saves and reads back false.
+    coordinator.persistenceKey = { [weak self] displayID in
+      self?.allControlledStates.first { $0.id == displayID }?.display.persistenceKey
+    }
+    // SS9. The achieved state first, and the stored intent as well: at launch
+    // the controllers may not exist yet, and refusing on either answer is the
+    // conservative direction for a guard whose failure mode is a silently
+    // dropped HDR.
+    coordinator.isHDREngaged = { [weak self] displayID in
+      guard let self else { return false }
+      if allControlledStates.first(where: { $0.id == displayID })?.controller.isHDREngaged == true {
+        return true
+      }
+      guard let key = allControlledStates.first(where: { $0.id == displayID })?
+        .display.persistenceKey
+      else { return false }
+      return DisplayPrefs(persistenceKey: key).hdrMode != .off
+    }
+    coordinator.didWriteSynthesisPref = { [weak self] name, key in
+      self?.announceSynthesisPrefWrite(name, persistenceKey: key)
+    }
+    // The opt-in decides which rows the size picker holds, and the catalog is
+    // enumerated on demand: a pref write alone re-renders the panes over the
+    // rows they already had.
+    coordinator.didChangeOffer = { [weak self] displayID in
+      self?.displayModes.refreshCatalog(for: displayID)
+    }
+    // The exact mechanism `MirroringCoordinator` uses before its own applies: a
+    // synthesis teardown reconfigures displays too, so it must not run over a
+    // preview whose fallback was captured before it.
+    coordinator.endOutstandingPreview = { [weak self] in
+      guard let self else { return true }
+      return await displayModes.endOutstandingPreview()
+    }
+    return coordinator
+  }()
+
+  /// D27 for the two synthesis prefs, which are written by the coordinator
+  /// rather than by a pane.
+  ///
+  /// It reads the propagation table rather than repeating what is in it, so a
+  /// row that gains an effect cannot be silently missed here: anything this
+  /// object cannot perform itself is logged by name rather than dropped. The
+  /// full-fidelity path is `SettingsActions.prefDidChange`, which needs the
+  /// wiring `DisplayModeCoordinator.didStoreMode` gets in `StatusItemController`;
+  /// until that exists, both synthesis rows are `.refreshUI` alone and this
+  /// performs exactly that.
+  private func announceSynthesisPrefWrite(_ name: PrefName, persistenceKey _: String) {
+    let effects = PrefPropagation.effects(forChange: name)
+    if effects.contains(.refreshUI) || effects.contains(.rebuildPanel) { notePrefsChanged() }
+    let unhandled = effects.subtracting([.refreshUI, .rebuildPanel])
+    guard !unhandled.isEmpty else { return }
+    log.error(
+      "pref \(name.rawValue, privacy: .public) now carries effects this path cannot fan out (\(String(describing: unhandled), privacy: .public)); route it through SettingsActions"
+    )
+  }
 
   /// PD7: the app-side half of the density join. The Kit is handed a value and
   /// performs no lookup of its own.
@@ -306,6 +384,13 @@ final class AppModel {
   /// removes the slot keys: a wiped `configured` with the display still
   /// standing would be state the pane can no longer explain.
   func destroyAllVirtualDisplaysForReset() async {
+    // SS11: the ENGINE takes its own displays down first, and it is verified.
+    // `destroyAll` below would otherwise release the synthesis slots behind the
+    // engine's back, leaving its pairing table describing a virtual display
+    // that has departed and every SS7 carve-out reading a set that is not
+    // there. The synthesis prefs are cleared by the domain wipe that follows,
+    // which is the same ordering: teardown first, keys after.
+    await synthesis.disengageAllForReset()
     let host = virtualDisplays
     await withCheckedContinuation { continuation in
       virtualDisplayQueue.async {

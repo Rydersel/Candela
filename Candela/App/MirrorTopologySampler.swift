@@ -43,6 +43,14 @@ import CandelaKit
 /// notification, it closes on that notification, and no consumer takes an
 /// irreversible action inside it. It is the reason this samples the raw
 /// notification rather than anything debounced.
+///
+/// **What this does NOT sample: the synthesis pairing (SS1).** Which mirror
+/// sets the app engaged to serve a synthesized size is not something
+/// CoreGraphics reports, so it cannot be read here. `SynthesisCoordinator`
+/// notes it on the store instead, and `MirrorTopologyStore.update` stamps every
+/// sample with it. That placement is deliberate rather than incidental: this is
+/// not the store's only writer, and a sample published from anywhere else would
+/// otherwise blank the pairing until the next notification landed.
 @MainActor
 final class MirrorTopologySampler {
   private let store: MirrorTopologyStore
