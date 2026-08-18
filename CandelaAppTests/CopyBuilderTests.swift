@@ -869,6 +869,12 @@ struct CopyBuilderTests {
       add(
         "OledCareCopy.suspendedStatus(\(synthesized))",
         OledCareCopy.suspendedStatus(synthesized: synthesized))
+      add(
+        "OledCareCopy.suspendedPreview(\(synthesized))",
+        OledCareCopy.suspendedPreview(synthesized: synthesized))
+      add(
+        "OledCareCopy.suspendedSpokenPreview(\(synthesized))",
+        OledCareCopy.suspendedSpokenPreview(synthesized: synthesized))
     }
 
     // ReconfigurationCopy

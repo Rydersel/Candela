@@ -68,19 +68,38 @@ struct ArrangementPane: View {
   private var displayName: (CGDirectDisplayID) -> String {
     let panels = Self.panels(standingBehind: model.synthesis.pairings)
     return { id in
-      guard let panel = panels[id] else { return coordinator.displayName(id) }
-      let friendly = coordinator.displayName(panel)
-      guard friendly.isEmpty else { return friendly }
-      // NEVER "" for a pair, which is why this fallback is spelled out rather
-      // than left to the caller: the canvas answers an empty name with the name
-      // the TILE carries, and for a pair that is the virtual display's, the one
-      // string that must not appear on this map. So the panel's own name from
-      // the topology, and behind that the last-resort wording the app already
-      // uses for a display nothing can name.
-      let panelName = model.mirrorTopology.topology().displays.first { $0.id == panel }?.name ?? ""
-      return panelName.isEmpty ? "Display" : panelName
+      Self.name(
+        of: id, standingBehind: panels, friendly: coordinator.displayName,
+        fromTopology: { panel in
+          model.mirrorTopology.topology().displays.first { $0.id == panel }?.name
+        }
+      )
     }
   }
+
+  /// The resolution itself, pure so the fallback can be pinned without a window
+  /// (AT10).
+  ///
+  /// NEVER "" for a pair, which is why the last resort is spelled out rather
+  /// than left to the caller: the canvas answers an empty name with the name the
+  /// TILE carries, and for a pair that is the virtual display's, the one string
+  /// that must not appear on this map. So the panel's friendly name, then the
+  /// panel's own name from the topology, and behind those the wording the app
+  /// already uses for a display nothing can name.
+  static func name(
+    of id: CGDirectDisplayID, standingBehind panels: [CGDirectDisplayID: CGDirectDisplayID],
+    friendly: (CGDirectDisplayID) -> String,
+    fromTopology: (CGDirectDisplayID) -> String?
+  ) -> String {
+    guard let panel = panels[id] else { return friendly(id) }
+    let friendlyName = friendly(panel)
+    guard friendlyName.isEmpty else { return friendlyName }
+    let panelName = fromTopology(panel) ?? ""
+    return panelName.isEmpty ? unnamedDisplay : panelName
+  }
+
+  /// The app's last-resort wording for a display nothing can name.
+  static let unnamedDisplay = "Display"
 
   var body: some View {
     // `DisplayPrefs` is plain UserDefaults and not observable, and every tile is

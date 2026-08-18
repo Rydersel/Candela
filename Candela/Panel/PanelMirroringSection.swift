@@ -64,17 +64,18 @@ struct PanelMirroringSection: View {
   private var isExpanded: Bool { expanded == PanelDisclosureID(displayID, .mirroring) }
 
   /// True when this panel is showing a synthesized size (SS7). The ONE predicate
-  /// behind this file's carve-outs: the app engaged that set to render a size,
-  /// so there is nothing here to stop, list, or explain, and the size picker is
-  /// where it is presented.
-  private var isSynthesized: Bool { topology.isSynthesisSet(containing: displayID) }
+  /// behind this file's carve-outs; it lives in `MirroringPredicates`, shared
+  /// with the settings section and the display hero.
+  private var isSynthesized: Bool {
+    MirroringPredicates.isSynthesized(topology, displayID: displayID)
+  }
 
   /// The displays this section may count and speak about: the virtual displays
   /// synthesis renders onto are not among them. A VD is online and would
   /// otherwise be the second display that makes a lone panel look like a rig
   /// worth offering a mirror control to.
   private var userVisibleDisplays: [ConfiguredDisplay] {
-    topology.displays.filter { !topology.synthesisMasters.contains($0.id) }
+    MirroringPredicates.userVisibleDisplays(topology)
   }
 
   private var isInSet: Bool {
@@ -169,9 +170,7 @@ struct PanelMirroringSection: View {
       // row asks: the user is mirroring nothing, and the set behind the size in
       // force is the size picker's to describe. "Showing <virtual display>"
       // would name a display nobody has, over a row offering to start mirroring.
-      detail: isSynthesized
-        ? MirroringCopy.notMirroredText
-        : MirroringCopy.state(topology: topology, displayID: displayID, name: name),
+      detail: MirroringPredicates.statusLine(topology, displayID: displayID, name: name),
       accessibilityName: displayName,
       accessibilityRole: "mirroring",
       isExpanded: isExpanded

@@ -89,6 +89,53 @@ private func fixtureRow(
     #expect(small.map(\.percentOfNative) == [95, 90, 85, 80, 75, 70])
   }
 
+  /// The floor's other boundary, and the one a `>=` turned `>` would break:
+  /// 720 points is the smallest usable minor axis, so a stop landing exactly on
+  /// it survives. 80% of a 1600x900 panel is 1280x720 on the nose.
+  @Test func aStopExactlyOnTheFloorSurvives() {
+    let stops = SyntheticSizeCatalog.stops(
+      nativeLogicalWidth: 1600, nativeLogicalHeight: 900,
+      existingRows: [],
+      ceilingPixelWidth: Self.ceiling.width, ceilingPixelHeight: Self.ceiling.height)
+    let onTheFloor = stops.first { $0.percentOfNative == 80 }
+    #expect(onTheFloor?.logicalWidth == 1280)
+    #expect(onTheFloor?.logicalHeight == 720)
+    // And the rung below it is genuinely under the floor, so the case above is
+    // about the boundary rather than about a panel nothing drops from.
+    #expect(!stops.contains { $0.percentOfNative == 75 })
+  }
+
+  /// The sentinel is keyed on the stop's place in `stopPercents`, never on its
+  /// position in the ladder that survived filtering. On a 5K panel the ceiling
+  /// removes everything above 75%, so the first surviving stop is the ladder's
+  /// FIFTH percent: an ID derived from the filtered array's index would answer
+  /// -1000 and collide with the 95% stop's ID on every other panel.
+  @Test func theSentinelSurvivesAFilteredLadder() throws {
+    let fiveK = SyntheticSizeCatalog.stops(
+      nativeLogicalWidth: 5120, nativeLogicalHeight: 2880,
+      existingRows: [],
+      ceilingPixelWidth: Self.ceiling.width, ceilingPixelHeight: Self.ceiling.height)
+    let first = try #require(fiveK.first)
+    #expect(first.percentOfNative == 75)
+    #expect(SyntheticSizeCatalog.row(for: first).ioModeID
+      == DisplayMode.syntheticIoModeID(stopIndex: 4))
+    // The literal too: the sentinel space is a contract with every reader that
+    // routes on a negative mode ID.
+    #expect(DisplayMode.syntheticIoModeID(stopIndex: 4) == -1004)
+  }
+
+  /// The descriptor is what lands in UserDefaults, so its key names are on-disk
+  /// schema. Same pin as `DisplayModeDescriptor`'s: a later property rename
+  /// breaks a test instead of silently orphaning every stored choice.
+  @Test func theDescriptorSurvivesAJSONRoundTripWithStableKeys() throws {
+    let original = SyntheticSizeDescriptor(logicalWidth: 2580, logicalHeight: 1080)
+    let data = try JSONEncoder().encode(original)
+    #expect(try JSONDecoder().decode(SyntheticSizeDescriptor.self, from: data) == original)
+
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    #expect(Set(object.keys) == ["logicalWidth", "logicalHeight"])
+  }
+
   @Test func aStopExactlyAtTheCeilingSurvives() {
     // 75% of 5120x2880 is fb 7680x4320: the height sits ON the ceiling, and
     // the rule drops only what EXCEEDS it.

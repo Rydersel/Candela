@@ -281,7 +281,6 @@ struct AllModesPage: View {
           // though it had lost track of the size on screen. (`catalog.current`
           // is no help either: a mirrored display reports a fabricated
           // descriptor that appears in no enumeration [MEASURED 2026-08-17].)
-          //
           if Self.showsEngagedSizeNotice(in: catalog) {
             SettingsCaption(verbatim: SynthesisCopy.engagedSizeNotListed)
           }

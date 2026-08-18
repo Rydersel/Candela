@@ -66,24 +66,17 @@ struct MirroringSection: View {
   private var topology: MirrorTopology { coordinator.topology }
 
   /// True when this panel is showing a synthesized size (SS7). The ONE predicate
-  /// behind every carve-out in this file: a mirror set the app engaged to render
-  /// a size is not mirroring the user asked for, has nothing here to decide, and
-  /// is presented by the size picker instead.
-  private var isSynthesized: Bool { topology.isSynthesisSet(containing: displayID) }
+  /// behind every carve-out in this file; it lives in `MirroringPredicates`, and
+  /// the panel's section and the display hero read the same one.
+  private var isSynthesized: Bool {
+    MirroringPredicates.isSynthesized(topology, displayID: displayID)
+  }
 
   /// The displays this section may speak about: everything except the virtual
-  /// displays synthesis is rendering onto.
-  ///
-  /// The VD is a real online display and every count below would otherwise
-  /// include it, which is how "no other display can be mirrored onto this one"
-  /// ends up on screen on a single-panel rig: a sentence about macOS locking
-  /// displays, over a display Candela created a moment ago.
-  ///
-  /// The physical panel of a synthesis set STAYS, and it is not an oversight:
-  /// it is a display the user has, can name and can mirror. Only the set it is
-  /// in is hidden.
+  /// displays synthesis is rendering onto. `MirroringPredicates` says why the
+  /// physical panel of a synthesis set stays in the list.
   private var userVisibleDisplays: [ConfiguredDisplay] {
-    topology.displays.filter { !topology.synthesisMasters.contains($0.id) }
+    MirroringPredicates.userVisibleDisplays(topology)
   }
 
   /// Displays that can own a set: anything not locked into one. Sorted by id,
@@ -154,10 +147,10 @@ struct MirroringSection: View {
         // it is in belongs to the size in force, which the size picker states in
         // its own words. "Showing <virtual display>" would name a display nobody
         // has, two rows under a control offering to start mirroring.
-        Text(verbatim: isSynthesized
-          ? MirroringCopy.notMirroredText
-          : MirroringCopy.state(topology: topology, displayID: displayID, name: name))
-          .foregroundStyle(.secondary)
+        Text(verbatim: MirroringPredicates.statusLine(
+          topology, displayID: displayID, name: name
+        ))
+        .foregroundStyle(.secondary)
       }
       // The mirror's two hooks hang HERE, on the one row of this section that is
       // always present: a hook on the reason lines' own container would only

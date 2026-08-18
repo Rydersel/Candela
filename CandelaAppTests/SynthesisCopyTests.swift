@@ -56,13 +56,6 @@ struct SynthesisCopyTests {
     #expect(SynthesisCopy.keepsPanelRefresh == "Keeps the display's refresh rate")
   }
 
-  /// The same rule over everything this feature can put on screen.
-  @Test func noSentenceSaysPanel() {
-    for entry in everyString() {
-      #expect(!entry.text.lowercased().contains("panel"), "\(entry.site) says panel: \(entry.text)")
-    }
-  }
-
   /// Pinned through the quoted key rather than by equality: a
   /// `LocalizedStringKey` reflects to the key plus its formatting flags, so
   /// equality would pin the dump's shape instead of the sentence. The quotes on
@@ -95,7 +88,7 @@ struct SynthesisCopyTests {
         == "3096 × 1296 (synthesized, virtual display slot 5)")
   }
 
-  // MARK: - The three scans
+  // MARK: - The four scans
 
   @Test func noSentenceEmitsAnEmDash() {
     for entry in everyString() {
@@ -127,7 +120,16 @@ struct SynthesisCopyTests {
     }
   }
 
-  /// Positive control for all three scans. Reflection is what carries a
+  /// SO14 over everything this feature can put on screen: hardware is always a
+  /// "display". The type vocabulary keeps the word (`keepsPanelRefresh` is still
+  /// called that); only the sentences give it up.
+  @Test func noSentenceSaysPanel() {
+    for entry in everyString() {
+      #expect(!entry.text.lowercased().contains("panel"), "\(entry.site) says panel: \(entry.text)")
+    }
+  }
+
+  /// Positive control for all four scans. Reflection is what carries a
   /// `LocalizedStringKey`'s words into them; if it stopped, every scan above
   /// would pass over sentences it never saw.
   @Test func theScansCanSeeThroughEveryReturnType() {
@@ -138,6 +140,7 @@ struct SynthesisCopyTests {
     #expect(render(LocalizedStringKey("planted \(Self.emDash) key")).contains(Self.emDash))
     #expect(render(LocalizedStringKey("planted 60 Hz key")).contains("Hz"))
     #expect(render(LocalizedStringKey("planted sharp key")).contains("sharp"))
+    #expect(render(LocalizedStringKey("planted panel key")).lowercased().contains("panel"))
 
     // A collapse detector: the scans covering three strings would pass while
     // covering almost nothing.

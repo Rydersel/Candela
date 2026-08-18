@@ -162,9 +162,7 @@ struct DisplayHeroView: View {
   /// for a synthesized panel. A badge over that row would be the only claim of
   /// its kind on the page, with nothing saying what it meant.
   private var isMirroring: Bool {
-    let topology = model.mirroring.topology
-    guard !topology.isSynthesisSet(containing: state.id) else { return false }
-    return !topology.setMembers(containing: state.id).isEmpty
+    MirroringPredicates.showsMirroringBadge(model.mirroring.topology, displayID: state.id)
   }
 
   // MARK: - Identity

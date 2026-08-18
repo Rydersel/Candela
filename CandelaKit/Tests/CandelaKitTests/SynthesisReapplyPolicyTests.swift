@@ -58,6 +58,19 @@ struct SynthesisReapplyPolicyTests {
     #expect(decision == .skip(.nothingStored))
   }
 
+  /// The combination the doc comment rules on and no test reached:
+  /// `SyntheticSizeCatalog.size(matching:)` cannot answer a size for a
+  /// descriptor nobody stored, so nil-stored with a non-nil `resolved` means a
+  /// caller skipped the lookup and handed this a size out of thin air. The
+  /// stored intent wins, and nothing unattended engages on it.
+  @Test func aResolvedSizeWithNothingStoredIsStillNothingToEngage() {
+    let decision = SynthesisReapplyPolicy.decide(
+      optedIn: true, stored: nil, resolved: resolved,
+      isBuiltIn: false, hdrEngaged: false, alreadyEngaged: false, freeSlots: 2
+    )
+    #expect(decision == .skip(.nothingStored))
+  }
+
   /// A stored size the catalog no longer produces: the panel changed, or an
   /// existing HiDPI row has since taken the stop over under SS2. Distinct from
   /// `nothingStored` because a size the user chose has stopped being on offer,
