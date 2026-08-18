@@ -1416,6 +1416,61 @@ public final class BrightnessController: PendingWireDraining {
     }
   }
 
+  /// One leg of a TRANSIENT HDR round trip another feature needs on this
+  /// display, taken through the controller so the brightness stack sees the
+  /// window it opens.
+  ///
+  /// Deliberately NOT `setHDRMode`. Nothing here is a preference: `hdrMode` and
+  /// `prefs.hdrMode` are untouched, so a link renegotiation cannot rewrite the
+  /// mode a person chose, and the `.off` door stays live afterwards because
+  /// `cachedHDRActive` ends this call as a measured answer rather than the
+  /// stale false the mode guard would return early on.
+  ///
+  /// What the routing buys is the whole reason it exists: DDC does not work
+  /// while the display is in HDR. The transition token supersedes a parked
+  /// transition; `settleInProgress` and the optimistic mirror take the
+  /// brightness legs off DDC BEFORE the write goes out; and the wire's
+  /// duplicate memos are dropped on the way out of every leg. A window the
+  /// brightness stack never heard about leaves values ACKed, swallowed and
+  /// recorded as landed, which on a write-only display nothing downstream can
+  /// detect.
+  ///
+  /// Returns the MEASURED state after the settle, never the write's ACK. False
+  /// whenever a newer transition took the display mid-flight: a superseded call
+  /// established nothing, so it may not claim its leg landed.
+  @discardableResult
+  public func setTransientHDR(_ enabled: Bool) async -> Bool {
+    guard role == .external else { return false }
+    beginHDRTransition()
+    let generation = hdrTransitionGeneration
+    // Optimistic for the duration, in both directions, and written BEFORE the
+    // await: the legs have to stop treating DDC as reachable while the display
+    // enters HDR, and must not resume until the exit has been confirmed.
+    cachedHDRActive = enabled
+    _ = await backends.hdr?.setHDR(displayID: displayID, enabled: enabled)
+    guard hdrTransitionGeneration == generation else {
+      cachedHDRActive = true // assume locked: the exit path's rule, same reason
+      return false
+    }
+    try? await Task.sleep(for: settleDelay)
+    guard hdrTransitionGeneration == generation else {
+      cachedHDRActive = true // assume locked
+      return false
+    }
+    settleInProgress = false
+    // Unconditional, and on BOTH legs. The observed edge in `refreshHDRCaches`
+    // only fires for a window some refresh saw live, and a bounce is precisely
+    // the window that can open and close between two refreshes.
+    invalidateWireMemos()
+    await refreshHDRCaches(measured: true)
+    guard hdrTransitionGeneration == generation else { return false }
+    // No `clearSoftwareLeg` on the way in, so there is no cleared leg to
+    // rebuild: leaving the window only needs the current value re-asserted
+    // through whichever path applies now that the register is back.
+    if !enabled { applyPaths() }
+    return cachedHDRActive == enabled
+  }
+
   /// Re-evaluates the cached HDR state (Task 4's topology loop calls this for
   /// every surviving display after `HDRToggling.displaysReconfigured()`).
   /// Detecting an externally-toggled HDR entry runs the C1 clearing.
