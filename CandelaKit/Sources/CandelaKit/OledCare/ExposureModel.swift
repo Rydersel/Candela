@@ -9,6 +9,13 @@ import Foundation
 public struct ExposureModelInputs: Sendable {
   /// Display-local coordinates, top-left origin, our own process already
   /// excluded by the window source.
+  ///
+  /// **Front-to-back, and the order is load-bearing.**
+  /// `CGWindowListCopyWindowInfo` returns the list in that order and it must be
+  /// preserved. Under `.summedCoverage` order changes nothing, which is exactly
+  /// why it is easy to destroy by accident; under `.topmostWins` it decides
+  /// which window owns each cell. Sorting this array, by owner or by id or for
+  /// tidiness, silently changes every result without failing anything.
   public var windows: [WindowSnapshot]
   /// `PanelGrid.cellCount` values in panel-physical order, or nil when the
   /// wallpaper could not be read. Kit never loads images (EM6): the app target
@@ -20,6 +27,61 @@ public struct ExposureModelInputs: Sendable {
     self.windows = windows
     self.wallpaperCells = wallpaperCells
     self.appearanceIsDark = appearanceIsDark
+  }
+}
+
+/// What a candidate model varies, so variants can be swept without forking
+/// `ExposureModel`.
+///
+/// `.baseline` is exactly the shipped model, pinned by test rather than by
+/// inspection: the offline harness replays recorded inputs and checks its
+/// output against the grid the capture tool computed live, and that control is
+/// meaningless if the baseline drifts.
+public struct ExposureModelParameters: Equatable, Sendable {
+
+  /// How overlapping windows combine.
+  public enum Compositing: String, Equatable, Sendable, Codable {
+    /// Coverage sums across windows and clamps at 1, the shipped behaviour.
+    /// **Cannot express a per-window luminance**, which is the whole of the
+    /// comparison gate's finding: with one value for all covered area, every
+    /// fully covered cell gets the same number and the model can only vary
+    /// through the partial-coverage fraction at window edges.
+    case summedCoverage
+    /// Walk front-to-back; each window claims what is left of each cell at its
+    /// own luminance, and the remainder falls through to the wallpaper.
+    case topmostWins
+  }
+
+  public var lightAppearancePrior: Double
+  public var darkAppearancePrior: Double
+  /// Window layer to luminance. The defensible half of the luminance term: the
+  /// Dock and the menu bar are known chrome whose brightness tracks appearance.
+  public var layerPriors: [Int: Double]
+  /// Owning app to luminance. The half EM5 warned about, since a bad prior and
+  /// a bad model look alike; only held-out validation makes it mean anything.
+  public var appPriors: [String: Double]
+  public var compositing: Compositing
+
+  public init(
+    lightAppearancePrior: Double, darkAppearancePrior: Double,
+    layerPriors: [Int: Double], appPriors: [String: Double], compositing: Compositing
+  ) {
+    self.lightAppearancePrior = lightAppearancePrior
+    self.darkAppearancePrior = darkAppearancePrior
+    self.layerPriors = layerPriors
+    self.appPriors = appPriors
+    self.compositing = compositing
+  }
+
+  public static let baseline = ExposureModelParameters(
+    lightAppearancePrior: ExposureModel.lightAppearancePrior,
+    darkAppearancePrior: ExposureModel.darkAppearancePrior,
+    layerPriors: [:], appPriors: [:], compositing: .summedCoverage)
+
+  /// App prior, then layer prior, then the appearance prior. Most specific
+  /// evidence about a window wins.
+  func luminance(for window: WindowSnapshot, appearancePrior: Double) -> Double {
+    appPriors[window.ownerName] ?? layerPriors[window.layer] ?? appearancePrior
   }
 }
 
@@ -67,31 +129,65 @@ public enum ExposureModel {
   /// `PanelGrid.cellCount` values in `0...1` (EM12: panel-physical, through the
   /// same transform the measured path uses).
   ///
-  /// Coverage is the clamped sum of each included window's contribution.
-  /// Summing overlapping windows and clamping is the documented approximation:
-  /// with one shared prior for all covered area, stacking order changes nothing
-  /// but the covered fraction, so the clamp costs only the double-counting.
+  /// Compositing follows `parameters.compositing`. Both branches inherit the
+  /// same documented approximation: two windows covering parts of one cell are
+  /// assumed not to overlap within it until the cell fills, so the covered
+  /// fraction is the only thing their stacking decides.
   public static func modelledGrid(
-    inputs: ExposureModelInputs, through transform: PanelSpaceTransform
+    inputs: ExposureModelInputs, through transform: PanelSpaceTransform,
+    parameters: ExposureModelParameters = .baseline
   ) -> [Double] {
-    let prior = inputs.appearanceIsDark ? darkAppearancePrior : lightAppearancePrior
+    let prior =
+      inputs.appearanceIsDark
+      ? parameters.darkAppearancePrior : parameters.lightAppearancePrior
     let backdrop = usableWallpaper(inputs.wallpaperCells)
 
-    var coverage = [Double](repeating: 0, count: PanelGrid.cellCount)
-    for window in inputs.windows where includedLayers.contains(window.layer) {
-      let contribution = transform.coverage(ofDisplayRect: window.bounds)
-      guard contribution.count == coverage.count else { continue }
-      for cell in coverage.indices {
-        coverage[cell] += contribution[cell]
+    switch parameters.compositing {
+    case .summedCoverage:
+      var coverage = [Double](repeating: 0, count: PanelGrid.cellCount)
+      for window in inputs.windows where includedLayers.contains(window.layer) {
+        let contribution = transform.coverage(ofDisplayRect: window.bounds)
+        guard contribution.count == coverage.count else { continue }
+        for cell in coverage.indices {
+          coverage[cell] += contribution[cell]
+        }
       }
-    }
 
-    var grid = [Double](repeating: 0, count: PanelGrid.cellCount)
-    for cell in grid.indices {
-      let covered = min(1, max(0, coverage[cell]))
-      grid[cell] = covered * prior + (1 - covered) * (backdrop?[cell] ?? prior)
+      var grid = [Double](repeating: 0, count: PanelGrid.cellCount)
+      for cell in grid.indices {
+        let covered = min(1, max(0, coverage[cell]))
+        grid[cell] = covered * prior + (1 - covered) * (backdrop?[cell] ?? prior)
+      }
+      return grid
+
+    case .topmostWins:
+      // Each cell carries the fraction of itself not yet claimed by a nearer
+      // window. With one shared prior the claims telescope to
+      // `prior * min(1, sum)`, so this is a strict generalisation of the branch
+      // above rather than a different model.
+      var remaining = [Double](repeating: 1, count: PanelGrid.cellCount)
+      var accumulated = [Double](repeating: 0, count: PanelGrid.cellCount)
+      for window in inputs.windows where includedLayers.contains(window.layer) {
+        let contribution = transform.coverage(ofDisplayRect: window.bounds)
+        guard contribution.count == PanelGrid.cellCount else { continue }
+        let luminance = parameters.luminance(for: window, appearancePrior: prior)
+        for cell in 0..<PanelGrid.cellCount {
+          let claim = min(contribution[cell], remaining[cell])
+          guard claim > 0 else { continue }
+          accumulated[cell] += claim * luminance
+          remaining[cell] = max(0, remaining[cell] - claim)
+        }
+      }
+
+      var grid = [Double](repeating: 0, count: PanelGrid.cellCount)
+      for cell in grid.indices {
+        let value = accumulated[cell] + remaining[cell] * (backdrop?[cell] ?? prior)
+        // Float error at a boundary can put this a hair outside the range the
+        // accumulator's bookability check requires.
+        grid[cell] = min(1, max(0, value))
+      }
+      return grid
     }
-    return grid
   }
 
   /// A wallpaper is taken whole or refused whole, matching `ExposureAccumulator`.
