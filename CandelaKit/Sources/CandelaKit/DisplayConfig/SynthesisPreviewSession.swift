@@ -78,14 +78,30 @@ public enum SynthesisPreviewRefusal: Error, Sendable, Equatable {
 ///   moment the coordinator has something to persist (SS11's ordering hangs off
 ///   it). The mode and mirror sessions commit by re-applying and have nothing to
 ///   hand back.
+/// - `.busy` exists at all, which no other preview session needs.
+///
+/// One case, one meaning. The two "nothing happened" answers are separate
+/// because a caller has to act on them differently: `.stale` is final and
+/// `.busy` is worth repeating.
 public enum SynthesisPreviewOutcome: Sendable, Equatable {
+  /// The synthesis is kept. The pairing is the coordinator's to persist.
   case committed(SynthesisPairing)
+  /// The synthesis was taken down and the panel is back on its own desktop.
   case reverted
+  /// The teardown did not finish. `.unwindIncomplete` means a virtual display, a
+  /// mirror set, or both are still standing.
   case failed(SynthesisFailure)
-  /// The call resolved nothing: it named a preview that is no longer the
-  /// outstanding one, or it arrived while the session was already driving the
-  /// hardware. The outstanding preview, if any, is untouched.
+  /// The call resolved nothing and repeating it changes nothing: it named a
+  /// preview that is no longer the outstanding one, or the engine no longer
+  /// holds the pairing it named.
   case stale
+  /// The session was already driving a hardware sequence, so the call touched
+  /// nothing. The one answer here that means **try again**: the sequence in
+  /// flight is a bounded operation and the answer will differ once it lands.
+  /// Split out of `.stale` for the reason `SynthesisPreviewRefusal.busy` is
+  /// split out of `SynthesisFailure`: a caller that cannot tell "never retry"
+  /// from "retry" gets one of them wrong.
+  case busy
 }
 
 /// Preview → confirm → keep for a synthesized size, with a countdown that
@@ -122,10 +138,11 @@ public enum SynthesisPreviewOutcome: Sendable, Equatable {
 ///
 /// So: state is mutated either with no suspension in between, or while the gate
 /// is held; and every public entry point checks the gate before it touches the
-/// driver or mutates anything. No path re-checks its own captured state after a
-/// suspension,
-/// because under this rule nothing can have changed it, and a guard that cannot
-/// fire is a claim no test can back.
+/// driver, spends the clock, or mutates anything. A gated entrant says so:
+/// `.busy` from an answer, `nil` from a tick, `.failure(.busy)` from a begin. No
+/// path re-checks its own captured state after a suspension, because under this
+/// rule nothing can have changed it, and a guard that cannot fire is a claim no
+/// test can back.
 ///
 /// One preview at a time, enforced HERE the way `ModePreviewSession` enforces
 /// it: a `begin` on a different display disengages the outstanding one first and
@@ -237,7 +254,7 @@ public actor SynthesisPreviewSession {
   /// healthy one. That failure was already surfaced to the caller by whichever
   /// call produced it.
   public func confirm(_ answered: PreviewedSynthesis) async -> SynthesisPreviewOutcome {
-    guard !isResolving else { return .stale }
+    guard !isResolving else { return .busy }
     guard let outstanding else {
       // Nothing is engaged: repeat the answer already given rather than
       // inventing a reversion that never happened. Never begun at all is
@@ -275,7 +292,7 @@ public actor SynthesisPreviewSession {
   /// standing, so trying again is the whole recovery path: the error UI hangs
   /// off this, and it passes back the same value it is showing.
   public func revert(_ answered: PreviewedSynthesis) async -> SynthesisPreviewOutcome {
-    guard !isResolving else { return .stale }
+    guard !isResolving else { return .busy }
     guard let outstanding else { return lastOutcome ?? .reverted }
     guard answered == outstanding else { return .stale }
 
@@ -290,6 +307,13 @@ public actor SynthesisPreviewSession {
   /// A tick that arrives while the session is already resolving spends nothing
   /// and does nothing: the clock must not be burnt down by ticks that land
   /// inside a sequence which is itself about to decide the preview's fate.
+  ///
+  /// **The gate is checked BEFORE the clock is spent, and the order is the
+  /// point.** `PreviewCountdown` fires once, so a tick that spent the clock and
+  /// was then refused would disarm a countdown whose expiry never ran: on the
+  /// final second that leaves a preview outstanding, unresolved, and unable to
+  /// expire ever again. Both orderings pass every other test here, which is why
+  /// two tests pin this one.
   public func tick() async -> SynthesisPreviewOutcome? {
     guard !isResolving else { return nil }
     guard outstanding != nil, countdown.tick() else { return nil }
@@ -325,7 +349,7 @@ public actor SynthesisPreviewSession {
   @discardableResult
   public func revertOnDeparture(displayID: CGDirectDisplayID) async -> SynthesisPreviewOutcome? {
     guard let outstanding, outstanding.physicalDisplayID == displayID else { return nil }
-    guard !isResolving else { return .stale }
+    guard !isResolving else { return .busy }
 
     isResolving = true
     defer { isResolving = false }

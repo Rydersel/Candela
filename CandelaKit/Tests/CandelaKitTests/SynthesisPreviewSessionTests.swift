@@ -514,8 +514,9 @@ struct SynthesisPreviewSessionTests {
     await driver.waitForParkedCall()
 
     // The teardown is already running. Reporting a keep here would tell the
-    // coordinator to persist a size that is being removed as it answers.
-    #expect(await session.confirm(previewed) == .stale)
+    // coordinator to persist a size that is being removed as it answers, and
+    // `.stale` would tell it never to ask again.
+    #expect(await session.confirm(previewed) == .busy)
 
     await driver.release()
     #expect(await expiry.value == .reverted)
@@ -591,11 +592,78 @@ struct SynthesisPreviewSessionTests {
     let expiry = Task { await session.tick() }
     await driver.waitForParkedCall()
 
-    #expect(await session.revert(previewed) == .stale)
+    #expect(await session.revert(previewed) == .busy)
 
     await driver.release()
     #expect(await expiry.value == .reverted)
     // One teardown, not two.
     #expect(await driver.calls == [.engage(physical), .disengage(physical)])
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aDepartureLandingInsideAnotherResolutionIsToldToTryAgain() async {
+    let driver = ParkedSynthesisDriver()
+    let session = SynthesisPreviewSession(driver: driver, countdownSeconds: 3)
+    guard case let .success(previewed) = await session.begin(
+      size: size(95), onPhysical: physical, identityKey: key
+    ) else { return }
+
+    await driver.startParking()
+    let manual = Task { await session.revert(previewed) }
+    await driver.waitForParkedCall()
+
+    // Not `.stale`: the departure has not been dealt with, and a caller that
+    // read this as final would drop a display that still needs disengaging if
+    // the resolution in flight fails.
+    #expect(await session.revertOnDeparture(displayID: physical) == .busy)
+
+    await driver.release()
+    #expect(await manual.value == .reverted)
+    #expect(await driver.calls == [.engage(physical), .disengage(physical)])
+  }
+
+  @Test(.timeLimit(.minutes(1))) func aGatedTickSpendsNoneOfTheClock() async {
+    let driver = ParkedSynthesisDriver()
+    let session = SynthesisPreviewSession(driver: driver, countdownSeconds: 3)
+    guard case let .success(previewed) = await session.begin(
+      size: size(95), onPhysical: physical, identityKey: key
+    ) else { return }
+
+    await driver.startParking()
+    let manual = Task { await session.revert(previewed) }
+    await driver.waitForParkedCall()
+
+    #expect(await session.tick() == nil)
+    // The gate is checked BEFORE the clock is spent. A tick that decremented and
+    // was then refused would hand back seconds nobody was given.
+    #expect(await session.secondsRemaining == 3)
+
+    await driver.release()
+    #expect(await manual.value == .reverted)
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aGatedTickOnTheFinalSecondLeavesTheCountdownArmed() async {
+    let driver = ParkedSynthesisDriver()
+    let session = SynthesisPreviewSession(driver: driver, countdownSeconds: 1)
+    guard case let .success(previewed) = await session.begin(
+      size: size(95), onPhysical: physical, identityKey: key
+    ) else { return }
+
+    await driver.startParking()
+    // A resolution that will FAIL to complete would be the worst case, but any
+    // in-flight sequence is enough: what matters is that the tick is refused on
+    // the one second that would otherwise spend the clock for good.
+    let manual = Task { await session.revert(previewed) }
+    await driver.waitForParkedCall()
+
+    #expect(await session.tick() == nil)
+    // The clock fires once. Spending it here and then refusing the expiry would
+    // leave a preview outstanding that can never expire again.
+    #expect(await session.secondsRemaining == 1)
+    #expect(await session.isCountingDown)
+
+    await driver.release()
+    #expect(await manual.value == .reverted)
   }
 }
