@@ -14,7 +14,7 @@ import Foundation
 /// duplicate-display refusal on vendor+product+physical size, ignoring serial
 /// and name entirely (the twins measurement, tools/vdrig/src/vdrig.h: twins
 /// sharing the whole triple coexist only because their sizeInMillimeters
-/// differ). All three slots share one physical size, so the product is the
+/// differ). Every slot shares one physical size, so the product is the
 /// field doing the separating; two slots standing at once is measured
 /// (VERIFICATION-STATUS 2026-08-13). The product range 0x2001+ is disjoint
 /// from vdrig's 0x1001..0x1003 so rig displays and app displays read apart
@@ -32,7 +32,20 @@ public enum VirtualDisplayIdentity {
   /// argument worth having and deliberately not load-bearing.
   public static let vendorID: UInt32 = 0xCA1D
 
-  public static let slotRange = 1 ... 3
+  /// Every slot the host will stand, user and engine alike. The host's guard
+  /// is the one place that means ALL of them.
+  public static let slotRange = 1 ... 5
+
+  /// Slots a person can add, name and remove in the Virtual Displays pane.
+  /// Everything user-facing (pane tiles, the slot prefs the reconciler
+  /// converges, the probe's `vd create`) is clamped to this.
+  public static let userSlotRange = 1 ... 3
+
+  /// Engine-internal slots for synthesized sizes (SS6). They never appear in
+  /// the pane and are never allocated by a user action; the family stays two
+  /// wide because each advertised identity leaks one permanent ColorSync
+  /// profile (S1 §5B), so the cost of a slot is paid once and forever.
+  public static let synthesisSlotRange = 4 ... 5
 
   /// Ceiling for `maxPixelsWide/High`. The real control surface for HiDPI:
   /// macOS emits a 2x variant only for modes whose doubled framebuffer fits

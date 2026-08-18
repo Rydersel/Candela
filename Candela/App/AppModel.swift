@@ -192,7 +192,7 @@ final class AppModel {
     // VD9: every configured slot has a persisted uuid BEFORE any create, so
     // "the same display across recreations" holds on every configure path,
     // not only the pane's.
-    for n in VirtualDisplayIdentity.slotRange where slot == nil || slot == n {
+    for n in VirtualDisplayIdentity.userSlotRange where slot == nil || slot == n {
       var definition = appPrefs.virtualSlot(n)
       if definition.configured, definition.uuid == nil {
         definition.uuid = UUID()

@@ -82,7 +82,10 @@ public enum VirtualDisplayReconciler {
     // is a public function: keep the first rather than trapping.
     let liveBySlot = Dictionary(live.map { ($0.slot, $0) }, uniquingKeysWith: { first, _ in first })
     var actions: [Action] = []
-    for slot in VirtualDisplayIdentity.slotRange {
+    // USER slots only (SS6). Synthesis slots are stood and torn down by the
+    // engine and have no stored definition, so a full-family sweep would read
+    // them as unconfigured-but-live and destroy them on the next sync.
+    for slot in VirtualDisplayIdentity.userSlotRange {
       if let limitedTo, slot != limitedTo { continue }
       let configured = definitions[slot]?.configured == true
       switch (configured, liveBySlot[slot]) {

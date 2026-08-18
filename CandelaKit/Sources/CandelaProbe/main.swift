@@ -175,7 +175,11 @@ case "vd":
     print(usage)
     exit(2)
   }
+  // User slots only. The host stands synthesis slots 4 and 5 too, but those
+  // are engine-internal (SS6) and standing one by hand would leave a display
+  // the app's reconciler does not own.
   guard arguments.count >= 4, let slot = Int(arguments[2]),
+        VirtualDisplayIdentity.userSlotRange.contains(slot),
         let width = Int(arguments[3]), arguments.count >= 5, let height = Int(arguments[4])
   else {
     print("usage: vd create <slot 1-3> <width> <height> [--hidpi] [--hold <seconds>]")

@@ -48,7 +48,7 @@ struct VirtualDisplaysPane: View {
   /// Slots the user has ADDED, in slot order: these have tiles whether or
   /// not a display is currently running.
   private var definedSlots: [Int] {
-    VirtualDisplayIdentity.slotRange.filter { prefs.virtualSlot($0).defined }
+    VirtualDisplayIdentity.userSlotRange.filter { prefs.virtualSlot($0).defined }
   }
 
   private func effectiveSelection(in defined: [Int]) -> Int? {
@@ -121,7 +121,7 @@ struct VirtualDisplaysPane: View {
         ForEach(defined, id: \.self) { slot in
           slotTile(slot, isSelected: selection == slot)
         }
-        if let free = VirtualDisplayIdentity.slotRange.first(where: { !defined.contains($0) }) {
+        if let free = VirtualDisplayIdentity.userSlotRange.first(where: { !defined.contains($0) }) {
           addTile(slot: free, isFirst: defined.isEmpty)
         }
       }

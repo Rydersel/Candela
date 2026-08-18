@@ -768,9 +768,12 @@ public final class DisplayPrefs: @unchecked Sendable {
     // Retina. Removal is `clearVirtualSlots` alone.
   }
 
-  /// The slot definitions the reconciler consumes, keyed by slot.
+  /// The slot definitions the reconciler consumes, keyed by slot. User slots
+  /// only: synthesis slots (SS6) carry no stored definition.
   public func virtualSlotDefinitions() -> [Int: VirtualSlotDefinition] {
-    Dictionary(uniqueKeysWithValues: VirtualDisplayIdentity.slotRange.map { ($0, virtualSlot($0)) })
+    Dictionary(
+      uniqueKeysWithValues: VirtualDisplayIdentity.userSlotRange.map { ($0, virtualSlot($0)) }
+    )
   }
 
   /// VD15's second half: the reset calls this AFTER the live displays were
@@ -780,6 +783,9 @@ public final class DisplayPrefs: @unchecked Sendable {
   /// property every reset path in this file has), and the ONLY place a
   /// stored uuid is ever removed.
   public func clearVirtualSlots() {
+    // The WHOLE family, deliberately: this is a removal, not an allocation,
+    // and a reset that left a synthesis slot's keys behind would be the one
+    // way stored state outlives the wipe.
     for slot in VirtualDisplayIdentity.slotRange {
       clearVirtualSlot(slot)
     }
