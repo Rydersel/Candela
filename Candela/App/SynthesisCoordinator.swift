@@ -570,9 +570,12 @@ final class SynthesisCoordinator {
     _ = await endOutstandingPreview()
     let claimed = await gate.claim(.displayModes).refusedBy == nil
     let engaged = pairings
-    await performing { [engine, log] in
+    // Through the driver, so the panel comes back on the mode the user chose
+    // rather than the HiDPI twin the engage tail re-timed it onto; the driver
+    // also clears its own-mode record on success.
+    await performing { [driver, log] in
       for pairing in engaged {
-        let result = await engine.disengage(fromPhysical: pairing.physicalDisplayID)
+        let result = await driver.disengage(fromPhysical: pairing.physicalDisplayID)
         if case let .failure(failure) = result, failure != .notEngaged {
           log.error("synthesis reset: display \(pairing.physicalDisplayID) did not disengage (\(String(describing: failure), privacy: .public))")
         }
@@ -645,8 +648,10 @@ final class SynthesisCoordinator {
       note(.blocked(by: holder), for: display.id)
       return false
     }
-    let result = await performing { [engine] in
-      await engine.disengage(fromPhysical: display.id)
+    // Through the driver for the twin restore: this is the one teardown where
+    // the panel stays attached and the user is watching it.
+    let result = await performing { [driver] in
+      await driver.disengage(fromPhysical: display.id)
     }
     // Through the funnel, never `gate.release` from here: every preview was
     // ended before the claim, but the disengage above takes seconds, and a
@@ -691,7 +696,11 @@ final class SynthesisCoordinator {
         _ = await revertOnDeparture(displayID: displayID)
         continue
       }
-      let result = await performing { [engine] in await engine.disengage(fromPhysical: displayID) }
+      // Through the driver: the restore skips a display that is gone (the
+      // achieved read is nil), but the driver clears its own-mode record on
+      // the successful teardown, and display IDs reassign across a replug,
+      // so a stale record must not wait for whatever takes the ID next.
+      let result = await performing { [driver] in await driver.disengage(fromPhysical: displayID) }
       if case let .failure(failure) = result, failure != .notEngaged {
         log.error("synthesis: display \(displayID) departed and its set did not come down (\(String(describing: failure), privacy: .public))")
       }
