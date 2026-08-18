@@ -460,12 +460,13 @@ struct ArrangementPersistenceTests {
     )
   }
 
-  /// The v1 outcome for the case a user meets first, and it is intended rather
-  /// than a gap: a synthesized size changes the desktop's footprint, so the
-  /// layout is FOUND under the panel and then declined by
-  /// `savedForDifferentGeometry`, because its origins were measured on a screen
-  /// that is not the shape this one is now.
-  @Test func aSizeThatChangesTheFootprintIsFoundAndThenDeclinedOnGeometry() throws {
+  /// The v1 pin declined this case on geometry and the hardware overturned
+  /// it (2026-08-18): refusing hands the virtual display to the OS's default
+  /// placement, which put it on the opposite side of the arrangement from the
+  /// panel's saved tile. A substitute's size difference is definitional, so
+  /// the layout resolves with the substitute re-anchored on the saved edge
+  /// that keeps it abutting its neighbour, and the rules judge the result.
+  @Test func aSubstituteAtASmallerSizeResolvesReAnchored() throws {
     let store = ArrangementPersistence(defaults: InMemoryDefaults())
     store.save(deskLayout)
 
@@ -482,9 +483,40 @@ struct ArrangementPersistenceTests {
     let saved = try #require(
       store.savedArrangement(for: TopologySignature(engaged, substituting: substituting))
     )
+    guard case let .exact(restored) = ArrangementPersistence.resolve(
+      saved, against: engaged, substituting: substituting
+    ) else {
+      Issue.record("a substitute's own size must not orphan the saved layout")
+      return
+    }
+    // Origin-anchored leaves a 192 point gap to the Dell, so the search keeps
+    // the saved tile's RIGHT edge instead: 0 + 1920 - 1728.
+    #expect(restored.tile(7)?.rect == DisplayRect(x: 192, y: 0, width: 1728, height: 972))
+    #expect(restored.tile(2)?.rect == right)
+    #expect(ArrangementRules.problems(in: restored).isEmpty)
+  }
+
+  /// The relaxation is scoped to the substitute: an ordinary member's change
+  /// still invalidates every origin, with or without a map in hand, and the
+  /// sentence names only the display the user can act on.
+  @Test func anOrdinaryFootprintChangeStillDeclinesUnderTheMap() throws {
+    let store = ArrangementPersistence(defaults: InMemoryDefaults())
+    store.save(deskLayout)
+
+    let engaged = DisplayArrangement(tiles: [
+      tile(
+        id: 7, identity: "vd", DisplayRect(x: 0, y: 0, width: 1728, height: 972),
+        mirroredIDs: [3]
+      ),
+      tile(id: 2, identity: "dell", DisplayRect(x: 1920, y: 0, width: 2560, height: 1440)),
+    ])
+    let substituting = [CGDirectDisplayID(7): Self.magKey]
+    let saved = try #require(
+      store.savedArrangement(for: TopologySignature(engaged, substituting: substituting))
+    )
     #expect(
       ArrangementPersistence.resolve(saved, against: engaged, substituting: substituting)
-        == .geometryDiffers([Self.magKey])
+        == .geometryDiffers([Self.dellKey])
     )
   }
 

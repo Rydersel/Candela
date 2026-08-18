@@ -364,30 +364,79 @@ public final class ArrangementPersistence: @unchecked Sendable {
     // display: a layout is a statement about how displays sit RELATIVE to each
     // other, so one display changing size invalidates every origin in it,
     // including the ones whose own display never moved.
-    let moved = saved.entries
+    let movedEntries = saved.entries.filter { entry in
+      guard let tile = tilesByIdentity[entry.identity]?.first else { return false }
+      return tile.rect.width != entry.width || tile.rect.height != entry.height
+    }
+    // A synthesis SUBSTITUTE wears the panel's identity at its own size, so a
+    // size difference there is definitional rather than stale. Refusing it
+    // hands the virtual display to the OS's default placement, which was
+    // measured putting it on the opposite side of the arrangement from the
+    // panel's saved tile. The origins-were-measured-elsewhere hazard stays
+    // real, so the substitute is re-anchored below and the rebuilt layout must
+    // still validate; an ORDINARY member's change still invalidates every
+    // origin in the layout.
+    let ordinaryMoved = movedEntries
       .filter { entry in
-        guard let tile = tilesByIdentity[entry.identity]?.first else { return false }
-        return tile.rect.width != entry.width || tile.rect.height != entry.height
+        guard let tile = tilesByIdentity[entry.identity]?.first else { return true }
+        return substituting[tile.id] == nil
       }
       .map(\.identity).sorted()
-    guard moved.isEmpty else { return .geometryDiffers(moved) }
+    guard ordinaryMoved.isEmpty else { return .geometryDiffers(ordinaryMoved) }
+    let resized = Set(movedEntries.map(\.identity))
 
-    let tiles = saved.entries.compactMap { entry in
-      tilesByIdentity[entry.identity]?.first.map { tile in
-        ArrangementTile(
-          id: tile.id,
-          identity: tile.identity,
-          name: tile.name,
-          // The stored origin on the CURRENT footprint (§7.4). The two are the
-          // same shape by the time this runs (the guard above is what makes that
-          // true), so this is the size never being authority rather than a
-          // reconstruction: nothing here can put a display at a size the screen
-          // does not have.
-          rect: DisplayRect(x: entry.x, y: entry.y, width: tile.rect.width, height: tile.rect.height),
-          mirroredIDs: tile.mirroredIDs
-        )
+    func tiles(anchors: [String: (right: Bool, bottom: Bool)]) -> [ArrangementTile] {
+      saved.entries.compactMap { entry in
+        tilesByIdentity[entry.identity]?.first.map { tile in
+          let anchor = anchors[entry.identity] ?? (right: false, bottom: false)
+          return ArrangementTile(
+            id: tile.id,
+            identity: tile.identity,
+            name: tile.name,
+            // The stored origin on the CURRENT footprint (§7.4) for every
+            // unchanged member: the size is never authority. A resized
+            // substitute keeps the saved edge its anchor names, so the edge
+            // that abutted a neighbour goes on abutting it.
+            rect: DisplayRect(
+              x: anchor.right ? entry.x + entry.width - tile.rect.width : entry.x,
+              y: anchor.bottom ? entry.y + entry.height - tile.rect.height : entry.y,
+              width: tile.rect.width, height: tile.rect.height
+            ),
+            mirroredIDs: tile.mirroredIDs
+          )
+        }
       }
     }
+
+    // Which edge of the saved tile the smaller substitute should keep is not
+    // recorded anywhere, so the candidates are tried and the arrangement
+    // rules judge: the first anchoring that yields a valid layout wins. Two
+    // synthesis slots bound the search. When nothing validates, the
+    // origin-anchored layout goes forward and the caller's AR7 check speaks.
+    var chosen: [String: (right: Bool, bottom: Bool)] = [:]
+    if !resized.isEmpty {
+      let identities = resized.sorted()
+      let options: [(right: Bool, bottom: Bool)] = [
+        (false, false), (true, false), (false, true), (true, true),
+      ]
+      func search(
+        _ index: Int, _ assignment: [String: (right: Bool, bottom: Bool)]
+      ) -> [String: (right: Bool, bottom: Bool)]? {
+        guard index < identities.count else {
+          let layout = DisplayArrangement(tiles: tiles(anchors: assignment))
+          return ArrangementRules.problems(in: layout).isEmpty ? assignment : nil
+        }
+        for option in options {
+          var next = assignment
+          next[identities[index]] = option
+          if let found = search(index + 1, next) { return found }
+        }
+        return nil
+      }
+      chosen = search(0, [:]) ?? [:]
+    }
+
+    let tiles = tiles(anchors: chosen)
     // AR4 on the read side. UNREACHABLE as the checks above stand — no identity
     // names two tiles and the two multisets are equal, so every entry has
     // exactly one tile — and kept anyway, because what it guards is a partial

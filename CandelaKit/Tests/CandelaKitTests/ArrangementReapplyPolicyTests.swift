@@ -246,12 +246,13 @@ struct ArrangementReapplyPolicyTests {
     ))
   }
 
-  /// The v1 outcome for a size that CHANGES the desktop's footprint, which is
-  /// what a synthesized size normally does, and it is the intended answer rather
-  /// than a gap: the layout is found under the panel and then declined, because
-  /// its origins were measured on a screen that is not the shape this one is
-  /// now. Nothing is applied, and the user is not interrupted for it.
-  @Test func aSizeThatChangesTheFootprintIsFoundAndNotApplied() {
+  /// A size that CHANGES the desktop's footprint, which is what a synthesized
+  /// size normally does. The v1 pin declined this on geometry and the hardware
+  /// overturned it (2026-08-18): refusing hands the virtual display to the
+  /// OS's default placement, on the wrong side of the arrangement. The layout
+  /// is found under the panel, the substitute is re-anchored at the panel's
+  /// saved tile, and the plan is applied with nothing to report.
+  @Test func aSizeThatChangesTheFootprintIsFoundAndApplied() {
     // A stop the size ladder actually offers under a 1920x1080 panel.
     let resized = DisplayArrangement(tiles: [
       tile(7, "vd", DisplayRect(x: 0, y: 0, width: 1728, height: 972), mirroredIDs: [3]),
@@ -261,10 +262,12 @@ struct ArrangementReapplyPolicyTests {
       isEnabled: true, arrivals: [7], stored: saved,
       attached: engagedOnline, current: resized, substituting: pairing
     )
-    #expect(decision.arrangementToApply == nil)
+    #expect(decision.notice == nil)
     #expect(!decision.isDeferred)
-    #expect(decision.notice == .savedForDifferentGeometry([Self.identity("mag").key]))
-    #expect(decision.notice?.isWorthInterrupting == false)
+    let layout = decision.arrangementToApply
+    #expect(layout?.tile(7)?.rect == DisplayRect(x: 1920, y: 0, width: 1728, height: 972))
+    #expect(layout?.tile(2)?.rect.origin == DisplayPoint(x: 0, y: 0))
+    if let layout { #expect(ArrangementRules.problems(in: layout).isEmpty) }
   }
 
   // MARK: - The read-side trap (AR4)
