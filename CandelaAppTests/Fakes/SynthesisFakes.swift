@@ -22,6 +22,11 @@ final class FakeDisplayWorld: @unchecked Sendable {
   private var displaysByID: [CGDirectDisplayID: ConfiguredDisplay] = [:]
   private var modesByID: [CGDirectDisplayID: [DisplayMode]] = [:]
   private var currentByID: [CGDirectDisplayID: DisplayMode] = [:]
+  /// The mode a display shows when it is NOT a slave, kept so a null-master
+  /// change can put it back. Without it a broken mirror leaves the panel
+  /// reporting the master's geometry forever, and the engine's unwind check
+  /// answers `unwindIncomplete` against a fake that did unwind.
+  private var ownModeByID: [CGDirectDisplayID: DisplayMode] = [:]
   private var nativeByID: [CGDirectDisplayID: (width: Int, height: Int)] = [:]
   private(set) var mirrorChanges: [[MirrorChange]] = []
 
@@ -34,6 +39,7 @@ final class FakeDisplayWorld: @unchecked Sendable {
       displaysByID[display.id] = display
       modesByID[display.id] = modes
       currentByID[display.id] = current
+      ownModeByID[display.id] = current
       nativeByID[display.id] = nativePixels
     }
   }
@@ -44,6 +50,7 @@ final class FakeDisplayWorld: @unchecked Sendable {
       displaysByID[displayID] = nil
       modesByID[displayID] = nil
       currentByID[displayID] = nil
+      ownModeByID[displayID] = nil
       nativeByID[displayID] = nil
     }
   }
@@ -65,7 +72,11 @@ final class FakeDisplayWorld: @unchecked Sendable {
   }
 
   /// A slave takes its master's geometry and keeps its own refresh, which is
-  /// the measured behaviour the whole feature rests on (Phase 0).
+  /// the measured behaviour the whole feature rests on (Phase 0). A null master
+  /// puts the display back on its OWN mode, matching the Kit's
+  /// `FakeSynthesisWorld`: without that half, the engine's unwind never sees
+  /// the panel return to its own geometry and every disengage answers
+  /// `unwindIncomplete` against a fake that did exactly what it was asked.
   func applyMirroring(_ changes: [MirrorChange]) {
     lock.withLock {
       mirrorChanges.append(changes)
@@ -75,8 +86,11 @@ final class FakeDisplayWorld: @unchecked Sendable {
           id: display.id, identity: display.identity, name: display.name,
           isBuiltIn: display.isBuiltIn, mirrorsDisplay: change.master
         )
-        guard change.master != kCGNullDirectDisplay,
-              let master = currentByID[change.master], let own = currentByID[change.display]
+        guard change.master != kCGNullDirectDisplay else {
+          currentByID[change.display] = ownModeByID[change.display]
+          continue
+        }
+        guard let master = currentByID[change.master], let own = ownModeByID[change.display]
         else { continue }
         currentByID[change.display] = DisplayMode(
           ioModeID: own.ioModeID,
@@ -92,6 +106,15 @@ final class FakeDisplayWorld: @unchecked Sendable {
 /// `DisplayConfiguring` over the world. Mode applies and rotation are not part
 /// of any synthesis path; they record nothing and do nothing, so a test that
 /// wants them has a reason to extend this rather than a silent success.
+///
+/// `@unchecked Sendable` justification: every field this type carries is either
+/// the `let world` (which does its own locking) or a plain test KNOB
+/// (`refusesMirroring`). The knobs are written on the test's main actor BEFORE
+/// the coordinator is asked to do anything, and the call that reads them is
+/// spawned by that same actor afterwards, so task creation supplies the
+/// happens-before and no read can race the write that configured it. A test that
+/// wants to flip a knob MID-operation would break that argument and needs a
+/// lock, not a comment.
 final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sendable {
   let world: FakeDisplayWorld
   /// Refuse the mirror, to reach the engine's `mirrorRefused` arm.
@@ -127,6 +150,15 @@ final class FakeSynthesisDisplayConfigurator: DisplayConfiguring, @unchecked Sen
 /// `VirtualDisplayAchievedModeReporting` over the world: a created display is
 /// attached to it, and the achieved mode is the spec's, so the engine's 2x
 /// check passes unless a test says otherwise.
+///
+/// `@unchecked Sendable` justification, same shape as the configurator's: the
+/// mutable state that is READ AND WRITTEN across executors (`handles`,
+/// `nextDisplayID`) is under `lock`, and the rest (`isAvailable`, `achieves2x`,
+/// `onCreate`) are test knobs set on the main actor before the operation that
+/// reads them is spawned, so task creation is the happens-before. `onCreate` is
+/// invoked on the ENGINE's executor, which is the point of it: it is the one
+/// hook a test has into the middle of an engage, and anything it touches must
+/// be safe there on its own terms.
 final class FakeSynthesisVirtualDisplayHost: VirtualDisplayAchievedModeReporting, @unchecked Sendable {
   let world: FakeDisplayWorld
   var isAvailable = true

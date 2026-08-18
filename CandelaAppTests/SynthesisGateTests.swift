@@ -11,6 +11,10 @@ import Testing
 /// claim taken AFTER the engage, or released by the stand-down that precedes it,
 /// leaves the gate open for the tens of seconds the engine runs and the thirty
 /// the countdown stands. Both mistakes pass every pure gate test.
+///
+/// End to end means the whole sequence, not just its front half: the pin below
+/// drives the select through engage, revert and disengage, and asserts the
+/// pairing comes down and the gate comes back.
 @Suite("Synthesis holds the reconfiguration gate") @MainActor
 struct SynthesisGateTests {
   private static let panelID: CGDirectDisplayID = 2
@@ -67,21 +71,32 @@ struct SynthesisGateTests {
     return Fixture(modes: modes, synthesis: synthesis, gate: gate, host: host, persistenceKey: key)
   }
 
-  /// Reverts whatever preview stands, so no countdown outlives the test, and
-  /// takes the pref keys back out of the process's defaults.
-  private func tearDown(_ fixture: Fixture) async {
+  /// Takes the fixture's pref keys back out of the process's defaults.
+  ///
+  /// Synchronous and separate from the revert below so every test can `defer`
+  /// it at the top: a throwing `#require` skips the rest of the body, and a
+  /// cleanup that only runs on the happy path leaks a key on exactly the runs
+  /// that failed.
+  private func forgetPrefs(_ persistenceKey: String) {
+    UserDefaults.standard.removeObject(forKey: "offerSyntheticSizes.\(persistenceKey)")
+    UserDefaults.standard.removeObject(forKey: "storedSyntheticSize.\(persistenceKey)")
+  }
+
+  /// Reverts whatever preview stands, so no countdown outlives the test. Stays
+  /// at the end of the body rather than in a `defer`: it is async, and a
+  /// `defer` cannot await.
+  private func revertAnyPreview(_ fixture: Fixture) async {
     if let preview = fixture.modes.preview { _ = await fixture.modes.revert(preview) }
-    UserDefaults.standard.removeObject(forKey: "offerSyntheticSizes.\(fixture.persistenceKey)")
-    UserDefaults.standard.removeObject(forKey: "storedSyntheticSize.\(fixture.persistenceKey)")
   }
 
   @Test func anOptedInPanelOffersSynthesizedStops() async {
     let fixture = fixture()
+    defer { forgetPrefs(fixture.persistenceKey) }
     let stops = fixture.modes.catalogs[Self.panelID]?.syntheticStops ?? []
     #expect(!stops.isEmpty)
     #expect(stops.allSatisfy { $0.logicalWidth <= Self.nativeWidth })
     #expect(fixture.modes.catalogs[Self.panelID]?.rows.contains { $0.mode.isSynthesized } == true)
-    await tearDown(fixture)
+    await revertAnyPreview(fixture)
   }
 
   /// SS4: opted out, the picker holds no synthesized row at all. The ladder is
@@ -89,11 +104,12 @@ struct SynthesisGateTests {
   /// doing the work rather than a panel with nothing to offer.
   @Test func anOptedOutPanelOffersNoSynthesizedRowAtAll() async {
     let fixture = fixture(optedIn: false)
+    defer { forgetPrefs(fixture.persistenceKey) }
     let catalog = fixture.modes.catalogs[Self.panelID]
     #expect(catalog?.syntheticStops.isEmpty == true)
     #expect(catalog?.rows.contains { $0.mode.isSynthesized } == false)
     #expect(catalog?.rows.isEmpty == false, "the published rows must still be there")
-    await tearDown(fixture)
+    await revertAnyPreview(fixture)
   }
 
   /// The pin. `create` is the engine's first hardware step and it runs inside
@@ -101,6 +117,7 @@ struct SynthesisGateTests {
   /// evidence the claim was taken before the engage and is still held during it.
   @Test func theDisplayModesClaimIsHeldWhileTheEngineIsEngaging() async throws {
     let fixture = fixture()
+    defer { forgetPrefs(fixture.persistenceKey) }
     let stop = try #require(fixture.modes.catalogs[Self.panelID]?.syntheticStops.first)
 
     // `create` blocks on the engine's executor until this test lets it go. That
@@ -119,11 +136,24 @@ struct SynthesisGateTests {
     )
     // Off the cooperative pool: `wait()` is unavailable in an async context, and
     // parking a pool thread on a semaphore is what this needs to avoid.
-    await withCheckedContinuation { continuation in
+    //
+    // DEADLINED, and the result is carried back rather than recorded on the
+    // waiting thread. An unbounded wait here would turn "the select never
+    // reached the engage" into a hung suite that no cancellation can reach: the
+    // thread is blocked in a semaphore, not suspended at an await. Five seconds
+    // is three orders of magnitude past what the fakes need, so it can only
+    // expire on a real regression.
+    let engineEntered: Bool = await withCheckedContinuation { continuation in
       DispatchQueue.global().async {
-        entered.wait()
-        continuation.resume()
+        continuation.resume(returning: entered.wait(timeout: .now() + 5) == .success)
       }
+    }
+    guard engineEntered else {
+      // Signalled anyway: harmless if nothing is waiting, and it keeps a late
+      // arrival from parking a thread for the rest of the run.
+      proceed.signal()
+      Issue.record("the engine never entered `create`: the select did not reach the engage")
+      return
     }
 
     let refusal = await fixture.gate.claim(.mirroring)
@@ -131,7 +161,15 @@ struct SynthesisGateTests {
     #expect(refusal.refusedBy == .displayModes)
 
     await settle(fixture.modes)
-    await tearDown(fixture)
+    await revertAnyPreview(fixture)
+    // The far end of the same sequence, and the reason the world had to learn
+    // to restore a slave's own mode: the revert reaches the engine's disengage,
+    // the panel comes back to its own geometry, and the pairing goes. Without
+    // it this answered `unwindIncomplete` and the claim below stayed held.
+    #expect(fixture.synthesis.pairings.isEmpty, "the revert must take the pairing down")
+    let afterRevert = await fixture.gate.claim(.mirroring)
+    #expect(afterRevert.isGranted, "and the gate must come back with it")
+    await fixture.gate.release(.mirroring)
   }
 
   /// The control for the test above: with nothing selected the gate is free, so
@@ -139,10 +177,11 @@ struct SynthesisGateTests {
   /// refuses everything.
   @Test func theGateIsFreeWithNoSelectionOutstanding() async {
     let fixture = fixture()
+    defer { forgetPrefs(fixture.persistenceKey) }
     let outcome = await fixture.gate.claim(.mirroring)
     #expect(outcome.isGranted)
     await fixture.gate.release(.mirroring)
-    await tearDown(fixture)
+    await revertAnyPreview(fixture)
   }
 
   /// The select is fire-and-forget onto the coordinator's queue; nothing in the
