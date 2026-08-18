@@ -5,6 +5,15 @@ public enum ArrangementProblem: Sendable, Equatable {
   /// Lower id first, once per pair.
   case overlap(CGDirectDisplayID, CGDirectDisplayID)
   case disconnected(CGDirectDisplayID)
+
+  /// The two kinds are not interchangeable to a drop. A display touching
+  /// nothing has an obvious repair (put it against the nearest edge) and a
+  /// display on top of another does not, so `ArrangementDragPolicy` attaches
+  /// the first and springs the second back under AR7.
+  var isDisconnection: Bool {
+    if case .disconnected = self { return true }
+    return false
+  }
 }
 
 /// drag-canvas §3.2. An arrangement is valid iff no pair of displays overlaps and

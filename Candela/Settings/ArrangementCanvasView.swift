@@ -120,6 +120,14 @@ struct ArrangementCanvasView: View {
     })
   }
 
+  /// The snap guides for where the tile is, plus the landing guide for where it
+  /// goes if it cannot stay there. Both come from the one proposal, so the edge
+  /// drawn is always the edge the release commits to.
+  private var guideLines: [SnapLine] {
+    guard let drag else { return [] }
+    return drag.proposal.lines + (drag.proposal.landing.map { [$0.line] } ?? [])
+  }
+
   /// Every display NAMED in a problem, not just the dragged one (§3.5): moving
   /// the middle display of a row strands the far one, and the user has to see
   /// which displays they broke rather than only which one they are holding.
@@ -145,10 +153,8 @@ struct ArrangementCanvasView: View {
         tileView(tile)
       }
 
-      if let drag {
-        ForEach(Array(drag.proposal.lines.enumerated()), id: \.offset) { _, line in
-          guide(line)
-        }
+      ForEach(Array(guideLines.enumerated()), id: \.offset) { _, line in
+        guide(line)
       }
     }
     .frame(width: Self.canvasSize.width, height: Self.canvasSize.height)
@@ -334,13 +340,14 @@ struct ArrangementCanvasView: View {
         // **AR3.** The SAME proposal that was on screen. Nothing is recomputed
         // here, so a drop can only ever commit what the user was looking at.
         //
-        // `isCommittable`, not `lines.isEmpty`: a proposal carries guides at
-        // rest, so an empty guide list says nothing about whether anything
-        // moved. It is `isValid && changesArrangement` — the invalid drop
-        // springs back (AR7) and the no-op would be refused by the preview
-        // session with a message nobody could act on.
-        if finished.proposal.isCommittable {
-          onPropose(finished.proposal.arrangement)
+        // `commitment`, not `arrangement`: a drop into open space renders under
+        // the pointer and lands on the edge its guide has been naming, so the
+        // two differ for exactly that case and the landing is the one to apply.
+        // Everything else is unchanged: an overlap has no landing and springs
+        // back (AR7), and a no-op commits nothing rather than being refused by
+        // the preview session with a message nobody could act on.
+        if let commitment = finished.proposal.commitment {
+          onPropose(commitment)
         } else if !finished.proposal.isValid {
           onRefuse(finished.proposal.problems)
         }

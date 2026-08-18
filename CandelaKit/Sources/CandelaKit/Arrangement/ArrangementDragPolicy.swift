@@ -1,6 +1,28 @@
 import CoreGraphics
 import Foundation
 
+/// Where a drop goes when the position under the pointer is not one the
+/// display can stay in.
+///
+/// Kept apart from the proposal's own `arrangement` because the two answer
+/// different questions at the same instant: `arrangement` is where the display
+/// IS, which has to track the pointer or the user finds out only on release,
+/// and this is where it LANDS. One `propose` call returns both, so they cannot
+/// drift, which is what AR3 is actually protecting.
+public struct ArrangementLanding: Sendable, Equatable {
+  /// A whole layout, legal by construction: `ArrangementAttachPolicy` returns
+  /// only placements whose arrangement has no problems.
+  public let arrangement: DisplayArrangement
+  /// The edge it comes to rest against, drawn while the drag is still running
+  /// so the landing is visible before the release rather than after it.
+  public let line: SnapLine
+
+  public init(arrangement: DisplayArrangement, line: SnapLine) {
+    self.arrangement = arrangement
+    self.line = line
+  }
+}
+
 /// What a drag is asking for, at one instant.
 ///
 /// **AR3.** It carries everything both ends of a drag need — what to draw, what
@@ -27,19 +49,25 @@ public struct ArrangementProposal: Sendable, Equatable {
   /// the middle display of a row strands the far one, and the user has to see
   /// which displays they broke.
   public let problems: [ArrangementProblem]
+  /// Where a release puts the display when `arrangement` itself cannot be
+  /// committed. `nil` for a drop with nothing to salvage, which is an overlap
+  /// (AR7 springs those back) and a layout of one display.
+  public let landing: ArrangementLanding?
 
   public init(
     arrangement: DisplayArrangement,
     baseline: DisplayArrangement,
     movedID: CGDirectDisplayID,
     lines: [SnapLine],
-    problems: [ArrangementProblem]
+    problems: [ArrangementProblem],
+    landing: ArrangementLanding? = nil
   ) {
     self.arrangement = arrangement
     self.baseline = baseline
     self.movedID = movedID
     self.lines = lines
     self.problems = problems
+    self.landing = landing
   }
 
   public var isValid: Bool { problems.isEmpty }
@@ -49,9 +77,22 @@ public struct ArrangementProposal: Sendable, Equatable {
   /// screen — so validity alone never tells a caller there is something to do.
   public var changesArrangement: Bool { arrangement != baseline }
 
-  /// The one question a drop has to ask. Both halves are required: an invalid
-  /// proposal springs back (AR7) and a no-op is refused by the preview session.
-  public var isCommittable: Bool { isValid && changesArrangement }
+  /// What a release should apply, or `nil` when it should apply nothing.
+  ///
+  /// The landing wins when there is one, because it exists only for drops the
+  /// rendered arrangement cannot answer for. A landing equal to the baseline is
+  /// no commitment at all: `ArrangementPreviewSession.begin` refuses a no-op
+  /// with `.illegalArgument`, and a drop that resolves back to where the
+  /// display started is exactly that.
+  public var commitment: DisplayArrangement? {
+    if let landing { return landing.arrangement == baseline ? nil : landing.arrangement }
+    return isValid && changesArrangement ? arrangement : nil
+  }
+
+  /// The one question a drop has to ask. An overlap still springs back (AR7),
+  /// and a no-op is still refused by the preview session; what changed is that
+  /// a drop into open space now has somewhere to go.
+  public var isCommittable: Bool { commitment != nil }
 }
 
 /// The drag decision (drag-canvas §2.4). Pure, and the only place a dragged
@@ -107,13 +148,55 @@ public enum ArrangementDragPolicy {
       moved, id: id, against: baseline.tiles, threshold: threshold
     )
 
+    // An insert is decided from the PRE-snap rect and beats ordinary snapping,
+    // because ordinary snapping cannot express one: it abuts the near display
+    // and lands on top of the far one, which AR7 then springs back. An insert
+    // whose own result is illegal falls through to the ordinary path instead of
+    // being reported, so displays the user did not grab move only when the
+    // layout that results is one they can keep.
+    if let insertion = ArrangementInsertPolicy.insertion(
+      dragging: id, freeRect: moved, snappedRect: snapped.rect, into: baseline
+    ), ArrangementRules.problems(in: insertion.arrangement).isEmpty {
+      return ArrangementProposal(
+        arrangement: insertion.arrangement,
+        baseline: baseline,
+        movedID: id,
+        lines: insertion.lines,
+        problems: []
+      )
+    }
+
     let arrangement = baseline.moving(id, to: snapped.rect.origin)
+    let problems = ArrangementRules.problems(in: arrangement)
+
+    // A drop that leaves a display touching nothing is refused today, and the
+    // refusal says where the display may not be without saying where it may.
+    // A landing answers that. Overlaps still spring back under AR7: a display
+    // dropped squarely on another names no particular layout, and the insert
+    // above has already taken the overlap case that does.
+    var landing: ArrangementLanding?
+    if !problems.isEmpty, problems.allSatisfy(\.isDisconnection),
+       let attachment = ArrangementAttachPolicy.attach(
+         moved, id: id, in: baseline, threshold: threshold
+       )
+    {
+      landing = ArrangementLanding(
+        arrangement: baseline.moving(id, to: attachment.rect.origin),
+        line: attachment.line
+      )
+    }
+
+    // The rendered arrangement stays where the pointer is even when there is a
+    // landing, and it keeps its problems: the display is not legally there, and
+    // saying so is what the red tile is for. The landing rides alongside as the
+    // answer to "so where does it go", drawn as its own guide.
     return ArrangementProposal(
       arrangement: arrangement,
       baseline: baseline,
       movedID: id,
       lines: snapped.lines,
-      problems: ArrangementRules.problems(in: arrangement)
+      problems: problems,
+      landing: landing
     )
   }
 }
