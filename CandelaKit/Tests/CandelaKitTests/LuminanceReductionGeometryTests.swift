@@ -1,4 +1,4 @@
-import CandelaKit
+@testable import CandelaKit
 import CoreGraphics
 import Testing
 
@@ -16,8 +16,8 @@ import Testing
 //
 // Nothing downstream can see this: the delivered size matches the request, and
 // `panelNativeGrid` re-bins a padded grid as faithfully as a full one.
-@Suite("Luminance capture geometry") @MainActor
-struct LuminanceSamplerGeometryTests {
+@Suite("Luminance capture geometry")
+struct LuminanceReductionGeometryTests {
 
   // MARK: - The property that matters
 
@@ -59,7 +59,7 @@ struct LuminanceSamplerGeometryTests {
   @Test("No panel is padded by a whole cell, so no row or column can go blank")
   func theRequestNeverLeavesAFullCellOfPadding() {
     for display in Self.displays {
-      let request = LuminanceSampler.requestedSize(
+      let request = LuminanceReduction.requestedSize(
         displayWidth: display.width, displayHeight: display.height)
       let pad = padding(
         displayWidth: display.width, displayHeight: display.height, request: request)
@@ -90,15 +90,15 @@ struct LuminanceSamplerGeometryTests {
 
   @Test("The rig's panels request the sizes measured on the hardware")
   func theRequestsMatchWhatWasMeasured() {
-    #expect(LuminanceSampler.requestedSize(displayWidth: 3440, displayHeight: 1440) == (24, 10))
-    #expect(LuminanceSampler.requestedSize(displayWidth: 1440, displayHeight: 2560) == (14, 24))
-    #expect(LuminanceSampler.requestedSize(displayWidth: 1800, displayHeight: 1169) == (24, 16))
+    #expect(LuminanceReduction.requestedSize(displayWidth: 3440, displayHeight: 1440) == (24, 10))
+    #expect(LuminanceReduction.requestedSize(displayWidth: 1440, displayHeight: 2560) == (14, 24))
+    #expect(LuminanceReduction.requestedSize(displayWidth: 1800, displayHeight: 1169) == (24, 16))
   }
 
   @Test("The long edge stays at grid resolution, so the sample size does not grow")
   func theLongEdgeIsAlwaysTwentyFour() {
     for display in Self.displays {
-      let (w, h) = LuminanceSampler.requestedSize(
+      let (w, h) = LuminanceReduction.requestedSize(
         displayWidth: display.width, displayHeight: display.height)
       #expect(max(w, h) == max(PanelGrid.cols, PanelGrid.rows), "\(display.name) requested \(w)x\(h)")
     }
@@ -109,15 +109,15 @@ struct LuminanceSamplerGeometryTests {
   @Test("A zero-sized reading falls back to a square request rather than an uncapturable one")
   func aZeroSizedDisplayFallsBackToASquare() {
     let long = max(PanelGrid.cols, PanelGrid.rows)
-    #expect(LuminanceSampler.requestedSize(displayWidth: 0, displayHeight: 1440) == (long, long))
-    #expect(LuminanceSampler.requestedSize(displayWidth: 3440, displayHeight: 0) == (long, long))
-    #expect(LuminanceSampler.requestedSize(displayWidth: -1, displayHeight: -1) == (long, long))
+    #expect(LuminanceReduction.requestedSize(displayWidth: 0, displayHeight: 1440) == (long, long))
+    #expect(LuminanceReduction.requestedSize(displayWidth: 3440, displayHeight: 0) == (long, long))
+    #expect(LuminanceReduction.requestedSize(displayWidth: -1, displayHeight: -1) == (long, long))
   }
 
   @Test("An extreme aspect never rounds an edge to zero")
   func neitherEdgeCanRoundToZero() {
     for (w, h) in [(10_000, 1), (1, 10_000), (100_000, 3), (3, 100_000)] {
-      let (rw, rh) = LuminanceSampler.requestedSize(displayWidth: w, displayHeight: h)
+      let (rw, rh) = LuminanceReduction.requestedSize(displayWidth: w, displayHeight: h)
       #expect(rw >= 1 && rh >= 1, "\(w)x\(h) requested \(rw)x\(rh)")
     }
   }
@@ -131,7 +131,7 @@ struct LuminanceSamplerGeometryTests {
     let transform = PanelSpaceTransform(
       displaySize: CGSize(width: 1440, height: 2560), rotation: .twoSeventy)
 
-    let (fixedCols, fixedRows) = LuminanceSampler.requestedSize(
+    let (fixedCols, fixedRows) = LuminanceReduction.requestedSize(
       displayWidth: 1440, displayHeight: 2560)
     let lit = [Double](repeating: 1.0, count: fixedCols * fixedRows)
     let fixed = transform.panelNativeGrid(
