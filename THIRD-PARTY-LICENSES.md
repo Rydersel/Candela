@@ -20,26 +20,23 @@ Silicon and Intel, its media-key handling, its software-dimming approach and its
 HDR toggle were transplanted or adapted here, and its behaviour is the baseline
 this app is measured against.
 
-Source files carrying MonitorControl attribution:
+Source files carrying MonitorControl's copyright header, because they contain
+its code:
 
 | File | What came from upstream |
 |---|---|
 | `CandelaKit/Sources/CandelaKit/DDC/Arm64DDC.swift` | the Apple Silicon DDC/CI transport |
 | `CandelaKit/Sources/CandelaKit/DDC/IntelDDC.swift` | the Intel DDC/CI transport (see the note below) |
 | `CandelaKit/Sources/CandelaKit/HDR/MonitorPanelService.swift` | the MonitorPanel HDR toggle (`HDRControl`) |
-| `CandelaKit/Sources/CandelaKit/Brightness/DisplayServicesShim.swift` | the private DisplayServices signatures |
 | `CandelaKit/Sources/CandelaKit/Brightness/BrightnessController.swift` | the combined-dimming split (attributed inline, at the function) |
-| `CandelaKit/Sources/CandelaKit/Brightness/BrightnessSync.swift` | brightness fan-out across displays |
 | `CandelaKit/Sources/CandelaKit/Brightness/DimmingMath.swift` | the dimming curve |
-| `CandelaKit/Sources/CandelaKit/Commands/DDCCommandApplier.swift` | per-command min/max/curve application |
-| `CandelaKit/Sources/CandelaKit/Audio/AudioRoutingPolicy.swift` | volume-key routing decisions |
 | `CandelaKit/Sources/CandelaKit/Input/KeyRouter.swift` | the modifier semantics of `MediaKeyTapManager.handle` |
 | `Candela/AppKitIslands/GammaController.swift` | the gamma activity enforcer and per-channel scaling |
-| `Candela/AppKitIslands/ShadeOverlay.swift` | the shade-window lifecycle |
+| `Candela/AppKitIslands/ShadeOverlay.swift` | the per-display shade lifecycle (`getShade`, `createShadeOnDisplay`, `updateShade`, `destroyShade`) |
+| `Candela/AppKitIslands/OverlayWindow.swift` | the overlay window recipe, moved out of `ShadeOverlay` (`createShadeOnDisplay`) |
+| `Candela/AppKitIslands/VolumeFeedbackSound.swift` | the feedback sound and the global-prefs read (`playVolumeChangedSound`, `getSystemSettings`) |
 | `Candela/AppKitIslands/BrightnessHUD.swift` | the custom HUD |
 | `Candela/AppKitIslands/MediaKeyEventTap.swift` | the event tap (and MediaKeyTap below) |
-| `Candela/AppKitIslands/VolumeFeedbackSound.swift` | the volume feedback sound |
-| `Candela/OledCare/OledOverlay.swift` | the overlay window setup, via `ShadeOverlay` |
 
 ```
 MIT License

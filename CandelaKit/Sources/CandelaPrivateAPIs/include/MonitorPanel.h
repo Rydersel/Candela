@@ -1,9 +1,8 @@
-// Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
 // include/MonitorPanel.h — private MonitorPanel.framework interfaces.
 // Loaded via dlopen + NSClassFromString at runtime; never linked.
-// Copied from the fork's Bridging-Header.h:29-41. Do not add selectors
-// that are not verified to exist; void-returning undeclared selectors
-// crash through perform().
+//
+// Do not add selectors that are not verified to exist; void-returning
+// undeclared selectors crash through perform().
 //
 // Instances are messaged through these protocols via unsafeBitCast, which is
 // only valid because they are @objc protocols (single refcounted pointer

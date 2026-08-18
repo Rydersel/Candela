@@ -1,7 +1,3 @@
-//  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
-//  Signatures transplanted from the MonitorControl project (MIT):
-//  Support/Bridging-Header.h:16-17.
-//
 // dlsym-loaded shims for the private DisplayServices.framework C API
 // (spec §4: no linker flags against private frameworks, no unsafeFlags).
 

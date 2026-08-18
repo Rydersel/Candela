@@ -1,9 +1,3 @@
-//  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
-//  The window setup is transplanted from the MonitorControl project (MIT), via
-//  `ShadeOverlay`. The header is here rather than only in the prose below
-//  because the attribution audit (#45) reads headers: derived-of-transplanted is
-//  still transplanted.
-
 import AppKit
 import CandelaKit
 import os
@@ -11,11 +5,12 @@ import os
 /// OLED care's own overlay windows: one black, full-screen window per enrolled
 /// display, whose content-view alpha carries the care dim.
 ///
-/// The window setup mirrors `ShadeOverlay`, transplanted from MonitorControl
-/// (MIT). Deliberately NOT the same windows, though: the brightness engine owns
-/// those and clears them wholesale on topology changes (`removeAllShades()`), on
-/// a schedule that has nothing to do with the dimming state machine's. Sharing
-/// them would let either owner erase the other's work.
+/// The window configuration comes from `OverlayWindow`, shared with
+/// `ShadeOverlay`. The WINDOWS are deliberately not shared: the brightness
+/// engine owns the shades and clears them wholesale on topology changes
+/// (`removeAllShades()`), on a schedule that has nothing to do with the dimming
+/// state machine's. Sharing instances would let either owner erase the other's
+/// work, so nothing below (storage, close paths, lifetime) is shared either.
 ///
 /// The ID arriving here is the display OLED care is enrolled on. Mirror
 /// resolution is NOT done here — OC13 suspends care on a mirror participant
@@ -79,8 +74,8 @@ final class OledOverlay {
 
   /// `alpha` nil removes the overlay; otherwise it is clamped to 0...1 and
   /// applied to the content view (the window itself stays opaque with a clear
-  /// background — an alpha-faded *window* gets different compositor treatment
-  /// and reads washed out, per `ShadeOverlay`).
+  /// background; an alpha-faded *window* gets different compositor treatment
+  /// and reads washed out, per `OverlayWindow`).
   ///
   /// Returns false when the requested state could not be produced — no
   /// `NSScreen` matches the display, so no overlay exists to carry the dim.
@@ -126,32 +121,21 @@ final class OledOverlay {
     // whether a mask came with it, so this method cannot unilaterally discard
     // one. Collapsing a uniform mask back to a scalar is the caller's job,
     // where both values are set together (`OledCareCoordinator.render`).
+    // `OverlayWindow.clampedAlpha` and not a bare clamp: a NaN alpha would make
+    // `AppliedState` compare unequal to ITSELF, so the change-only-write guard
+    // below would miss every time and `apply` would write to the window server
+    // on every tick, silently. Unreachable from the current callers, which
+    // sanitise at `OledDimConfig` construction; guarded anyway because the
+    // failure is invisible, since a per-tick write looks exactly like a working
+    // overlay.
     let state = AppliedState(
-      alpha: Self.sanitized(alpha), blackout: blackout, mask: mask)
+      alpha: OverlayWindow.clampedAlpha(alpha), blackout: blackout, mask: mask)
     guard !existed || self.lastApplied[displayID] != state else {
       return true
     }
     self.lastApplied[displayID] = state
     self.write(state, to: window)
     return true
-  }
-
-  /// A clamp alone is not enough: `min(max(NaN, 0), 1)` is NaN in Swift, since
-  /// every comparison against NaN is false and both functions fall through to
-  /// the original value. A NaN alpha would then make `AppliedState` compare
-  /// unequal to itself, so the change-only-write guard below would miss every
-  /// time and `apply` would write to the window server on every tick, silently.
-  ///
-  /// Unreachable from the current callers, which sanitise at `OledDimConfig`
-  /// construction. Kept because the failure is invisible: a per-tick write looks
-  /// exactly like a working overlay.
-  ///
-  /// Non-finite resolves to 0, the transparent end. The overlay is the mechanism
-  /// that can darken a panel, so its one unforced choice belongs on the side
-  /// that cannot black out a display nobody asked to dim.
-  private static func sanitized(_ alpha: Double) -> Double {
-    guard alpha.isFinite else { return 0 }
-    return min(max(alpha, 0), 1)
   }
 
   /// Re-asserts the overlay's last applied state: the recovery lever for an
@@ -276,7 +260,7 @@ final class OledOverlay {
   /// response.
   func repinFrames() {
     for (displayID, window) in self.windows {
-      guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
+      guard let screen = OverlayWindow.screen(for: displayID) else {
         // Display gone, or not back yet. Leave the window alone rather than
         // guessing a frame; the coordinator decides whether it survives at all.
         continue
@@ -340,24 +324,20 @@ final class OledOverlay {
     if let existing = self.windows[displayID] {
       return existing
     }
-    guard let screen = NSScreen.screens.first(where: { $0.displayID == displayID }) else {
+    guard let screen = OverlayWindow.screen(for: displayID) else {
       return nil
     }
     // An `NSPanel` with `.nonactivatingPanel`, not a plain `NSWindow`: the
     // blackout overlay accepts clicks (OC15), and a click-accepting window in
     // an accessory app would otherwise activate Candela and take key away from
     // whatever the user was in. Same shape as `ConfirmationPanel`, the repo's
-    // only other click-receiving window. `.borderless` is the zero mask —
-    // named for what it means, since the mask is otherwise empty.
-    let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 10, height: 1),
-                        styleMask: [.borderless, .nonactivatingPanel],
+    // only other click-receiving window.
+    let panel = NSPanel(contentRect: OverlayWindow.seedRect,
+                        styleMask: OverlayWindow.styleMask.union(.nonactivatingPanel),
                         backing: .buffered,
                         defer: false)
-    panel.title = "Candela OLED Care Overlay for Display \(displayID)"
-    panel.isReleasedWhenClosed = false
-    panel.isMovableByWindowBackground = false
-    // Nothing here takes input — the blackout window swallows clicks and hosts
-    // no controls — so it should never become key. Mouse events still arrive at
+    // Nothing here takes input (the blackout window swallows clicks and hosts
+    // no controls), so it should never become key. Mouse events still arrive at
     // the window under the cursor regardless of key state.
     panel.becomesKeyOnlyIfNeeded = true
     // Not a floating panel, so this is already the default; stated because
@@ -365,19 +345,11 @@ final class OledOverlay {
     // overlay that vanished on deactivation would be invisible exactly when it
     // is meant to be dimming.
     panel.hidesOnDeactivate = false
-    // The window is clear; the black lives in the content view's layer.
-    panel.backgroundColor = .clear
-    panel.ignoresMouseEvents = true
-    // Above the screen saver and above the HUD — anything that could paint over
-    // the overlay would escape the dimming.
-    panel.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
-    // `.fullScreenAuxiliary` keeps the overlay dimming over full-screen apps
-    // instead of being dropped when a space goes full-screen.
-    panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-    panel.setFrame(screen.frame, display: true)
-    panel.contentView?.wantsLayer = true
-    panel.contentView?.alphaValue = 0
-    panel.contentView?.layer?.backgroundColor = .black
+    // Ordering front is `write`'s job here, not creation's: the overlay reaches
+    // the screen when it first carries a state.
+    OverlayWindow.configure(
+      panel, title: "Candela OLED Care Overlay for Display \(displayID)",
+      covering: screen.frame)
     self.windows[displayID] = panel
     // A live overlay supersedes the closed one this display may still be
     // watched for — `verifyPresence` answers from the live window from here on,
