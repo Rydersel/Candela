@@ -328,8 +328,12 @@ func scoreJointly(
 
 // MARK: - Load
 
-guard FileManager.default.fileExists(atPath: directory.path) else {
-  print("no such log directory: \(directory.path)")
+var isDirectory: ObjCBool = false
+guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory),
+  isDirectory.boolValue
+else {
+  print("not a log directory: \(directory.path)")
+  print("--log takes the DIRECTORY the capture wrote, not one of its .jsonl files.")
   exit(2)
 }
 let (records, skipped) = try ModelReplayLog.read(directory: directory)
@@ -350,6 +354,10 @@ guard !records.isEmpty else {
 // pass, because each control recomputes from each record's OWN recorded
 // metadata. Splitting preserves the data and makes the split visible; merging
 // would have destroyed it silently.
+/// The chrome coverage limit every rung from V2 onward uses. Named once so the
+/// ranking filter and the admission rule cannot drift apart.
+let ladderChromeLimit = 0.5
+
 var byDisplay: [String: [ModelReplayRecord]] = [:]
 for record in records {
   let shape = record.display
@@ -434,8 +442,15 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
   // was invisible: mutating a record at index 60 left the control printing
   // "yes" while every rung scored on 154 records the harness and the shipped
   // model disagreed about. The release binary makes the wider sample free.
-  let stride = max(1, raw.count / 60)
-  let sampled = Swift.stride(from: 0, to: raw.count, by: stride).map { raw[$0] }
+  let step = max(1, raw.count / 60)
+  var indices = Array(Swift.stride(from: 0, to: raw.count, by: step))
+  // The last record is always included: `to:` skips it on an even count, and a
+  // divergence that begins in the final records is exactly the shape that
+  // survives a head sample.
+  if let last = indices.last, last != raw.count - 1, raw.count > 0 {
+    indices.append(raw.count - 1)
+  }
+  let sampled = indices.map { raw[$0] }
   for record in sampled {
     let prepared = prepare(record)
     for candidate in probes {
@@ -500,7 +515,6 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
   // and a tiled desktop legitimately cannot. Failing a panel for that dropped
   // the rotated Dell and then reported an app with 45 windows on it as having
   // no coverage.
-  _ = orderTested
   if orderTested == 0 {
     print("  note:    window order not exercised by this log (no differing-owner overlap)")
   } else if orderBlind == orderTested {
@@ -647,7 +661,7 @@ func passes(
   // different quantities: measured on the archived Dell holdout the reference
   // came out at 0/24 while an honestly fitted rung reached 6/24. Gated first,
   // that printed a rung which beat the bar by six cells as
-  // "fail (ranking UNREACHABLE)" — and the run card tells the reader to trust
+  // "fail (ranking UNREACHABLE)", and the run card tells the reader to trust
   // that line above the others.
   func signed(_ value: Int) -> String { value >= 0 ? "+\(value)" : "\(value)" }
   if decile - baselineDecile >= 3 { return (true, "PASS") }
@@ -822,7 +836,11 @@ for group in fitGroups {
       // the menu bar's, squeezing out real app layers and printing as
       // UNIDENTIFIABLE every run. That biases the ladder toward no-go.
       let fraction = window.coverage.reduce(0, +) / Double(PanelGrid.cellCount)
-      guard fraction > 0, fraction < 1 else { continue }
+      // The LADDER's limit, not merely "less than the whole display". A chrome
+      // layer landing between the two bounds would otherwise take a ranking slot
+      // it can never be admitted into, which is the dead-slot defect one data
+      // shape away.
+      guard fraction > 0, fraction < ladderChromeLimit else { continue }
       layerWeight[window.layer, default: 0] += window.coverage.reduce(0, +) * record.elapsed
     }
   }
@@ -851,7 +869,7 @@ v1.compositing = .topmostWins
 // own luminance. Chrome enters here rather than at the end of the ladder,
 // because the layer table has nothing else to fit on an ordinary desktop.
 var v2 = v1
-v2.chromeCoverageLimit = 0.5
+v2.chromeCoverageLimit = ladderChromeLimit
 for layer in layers { v2.layerPriors[layer] = 0.5 }
 v2 = refine(
   v2,
