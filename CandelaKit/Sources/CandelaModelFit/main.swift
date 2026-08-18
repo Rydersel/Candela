@@ -211,6 +211,31 @@ func score(
   return pearson(measured, modelled) ?? -1
 }
 
+/// Mean per-display Pearson.
+///
+/// Parameters are fitted JOINTLY across panels, because an app's luminance is a
+/// property of the app and not of the display it happens to be on. Fitting one
+/// panel at a time made an app prior perfectly confounded with the appearance
+/// prior whenever that panel ran a single app, which is exactly the rig's
+/// current state: Brave on the Dell, Ghostty on the MAG.
+///
+/// The maps themselves are never pooled. Summing two panels' exposure into one
+/// 240-cell grid would invent a display that does not exist.
+func scoreJointly(
+  _ groups: [[Prepared]], _ parameters: ExposureModelParameters, includeChrome: Bool = false
+) -> Double {
+  var total = 0.0
+  var counted = 0
+  for group in groups where !group.isEmpty {
+    let value = score(group, parameters, includeChrome: includeChrome)
+    if value > -1 {
+      total += value
+      counted += 1
+    }
+  }
+  return counted > 0 ? total / Double(counted) : -1
+}
+
 // MARK: - Load
 
 let (records, skipped) = try ModelReplayLog.read(directory: directory)
@@ -279,10 +304,10 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
 func refine(
   _ start: ExposureModelParameters, keys: [(get: (ExposureModelParameters) -> Double,
     set: (inout ExposureModelParameters, Double) -> Void)],
-  on records: [Prepared], includeChrome: Bool = false, passes: Int = 3
+  on groups: [[Prepared]], includeChrome: Bool = false, passes: Int = 3
 ) -> ExposureModelParameters {
   var best = start
-  var bestScore = score(records, best, includeChrome: includeChrome)
+  var bestScore = scoreJointly(groups, best, includeChrome: includeChrome)
   guard !keys.isEmpty else { return best }
   for pass in 0..<passes {
     let step = 0.1 / pow(2.0, Double(pass))
@@ -294,7 +319,7 @@ func refine(
         let candidateValue = min(1, max(0, centre + offset * step))
         var candidate = best
         key.set(&candidate, candidateValue)
-        let candidateScore = score(records, candidate, includeChrome: includeChrome)
+        let candidateScore = scoreJointly(groups, candidate, includeChrome: includeChrome)
         if candidateScore > localScore {
           localScore = candidateScore
           localBest = candidateValue
@@ -329,6 +354,14 @@ func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelP
 
 // MARK: - Run
 
+struct DisplayRun {
+  let key: String
+  let shape: ModelReplayRecord.Display
+  let fit: [Prepared]
+  let hold: [Prepared]
+}
+
+var runs: [DisplayRun] = []
 for (key, raw) in byDisplay.sorted(by: { $0.value.count > $1.value.count }) {
   let shape = raw[0].display
   print("\n=== \(key)  \(shape.pixelWidth)x\(shape.pixelHeight) rot \(shape.rotation.rawValue)  \(raw.count) records")
@@ -336,84 +369,100 @@ for (key, raw) in byDisplay.sorted(by: { $0.value.count > $1.value.count }) {
     print("  controls failed; refusing to score variants on this log")
     continue
   }
-
   let prepared = raw.map(prepare)
-  let split = max(1, Int(Double(prepared.count) * fitFraction))
-  let fit = Array(prepared.prefix(split))
-  let hold = Array(prepared.suffix(from: min(split, prepared.count - 1)))
-  print("  fit \(fit.count) records, holdout \(hold.count) records")
+  let split = max(1, min(prepared.count - 1, Int(Double(prepared.count) * fitFraction)))
+  print("  fit \(split) records, holdout \(prepared.count - split) records")
+  runs.append(
+    DisplayRun(
+      key: key, shape: shape, fit: Array(prepared.prefix(split)),
+      hold: Array(prepared.suffix(from: split))))
+}
 
-  // Which layers and apps are actually worth a parameter here.
-  var layerWeight: [Int: Double] = [:]
-  var appWeight: [String: Double] = [:]
-  for record in prepared {
+guard !runs.isEmpty else {
+  print("\nno display passed its controls")
+  exit(1)
+}
+
+let fitGroups = runs.map(\.fit)
+
+// Which layers and apps are worth a parameter, measured over every panel.
+var layerWeight: [Int: Double] = [:]
+var appWeight: [String: Double] = [:]
+for run in runs {
+  for record in run.fit + run.hold {
     for window in record.windows {
       let mass = window.coverage.reduce(0, +) * record.elapsed
       layerWeight[window.layer, default: 0] += mass
       appWeight[window.owner, default: 0] += mass
     }
   }
-  let layers = layerWeight.filter { $0.key != 0 }.sorted { $0.value > $1.value }
-    .prefix(3).map(\.key)
-  let apps = appWeight.sorted { $0.value > $1.value }.prefix(topApps).map(\.key)
+}
+let layers = layerWeight.filter { $0.key != 0 }.sorted { $0.value > $1.value }.prefix(3).map(\.key)
+let apps = appWeight.sorted { $0.value > $1.value }.prefix(topApps).map(\.key)
 
-  print("  fitted layers: \(layers)")
-  print("  fitted apps:   \(apps)")
-  print("\n  --- holdout scores ---")
+print("\n=== joint fit across \(runs.count) panels")
+print("  layers: \(layers)")
+print("  apps:   \(apps)")
 
-  // V0: the shipped model.
-  report("V0 baseline", hold, .baseline, freeParameters: 0)
+var v1 = ExposureModelParameters.baseline
+v1.compositing = .topmostWins
 
-  // V1: compositing only, no new parameters.
-  var v1 = ExposureModelParameters.baseline
-  v1.compositing = .topmostWins
-  report("V1 z-order only", hold, v1, freeParameters: 0)
+var v2 = v1
+for layer in layers { v2.layerPriors[layer] = 0.5 }
+v2 = refine(
+  v2,
+  keys: layers.map { layer in
+    (get: { $0.layerPriors[layer] ?? 0.5 }, set: { $0.layerPriors[layer] = $1 })
+  }, on: fitGroups)
 
-  // V2: layer priors.
-  var v2 = v1
-  for layer in layers { v2.layerPriors[layer] = 0.5 }
-  v2 = refine(
-    v2,
-    keys: layers.map { layer in
-      (get: { $0.layerPriors[layer] ?? 0.5 }, set: { $0.layerPriors[layer] = $1 })
-    }, on: fit)
-  report("V2 + layer priors", hold, v2, freeParameters: layers.count)
+let v3 = refine(
+  v2,
+  keys: [
+    (get: { $0.lightAppearancePrior }, set: { $0.lightAppearancePrior = $1 }),
+    (get: { $0.darkAppearancePrior }, set: { $0.darkAppearancePrior = $1 }),
+  ], on: fitGroups)
 
-  // V3: refit the appearance priors too.
-  var v3 = refine(
-    v2,
-    keys: [
-      (get: { $0.lightAppearancePrior }, set: { $0.lightAppearancePrior = $1 }),
-      (get: { $0.darkAppearancePrior }, set: { $0.darkAppearancePrior = $1 }),
-    ], on: fit)
-  report("V3 + refitted appearance", hold, v3, freeParameters: layers.count + 2)
+// Spread the starting values rather than sharing one. Coordinate descent from a
+// single shared start can sit still in a flat region and report "no app
+// differs", which is a statement about the optimiser rather than the data.
+var v4 = v3
+for (offset, app) in apps.enumerated() {
+  v4.appPriors[app] = Double(offset + 1) / Double(apps.count + 1)
+}
+v4 = refine(
+  v4,
+  keys: apps.map { app in
+    (get: { $0.appPriors[app] ?? 0.5 }, set: { $0.appPriors[app] = $1 })
+  }, on: fitGroups, passes: 4)
 
-  // V4: app priors.
-  var v4 = v3
-  for app in apps { v4.appPriors[app] = v3.darkAppearancePrior }
-  v4 = refine(
-    v4,
-    keys: apps.map { app in
-      (get: { $0.appPriors[app] ?? 0.5 }, set: { $0.appPriors[app] = $1 })
-    }, on: fit)
-  report("V4 + app priors", hold, v4, freeParameters: layers.count + 2 + apps.count)
+var v5 = v4
+v5.appPriors["chrome"] = v4.lightAppearancePrior
+v5 = refine(
+  v5, keys: [(get: { $0.appPriors["chrome"] ?? 0.5 }, set: { $0.appPriors["chrome"] = $1 })],
+  on: fitGroups, includeChrome: true)
 
-  // V5: admit menu-bar-sized chrome, which the shipped window source discards
-  // and the measured capture contains. Its own prior, fitted.
-  var v5 = v4
-  v5.appPriors["chrome"] = v4.lightAppearancePrior
-  v5 = refine(
-    v5, keys: [(get: { $0.appPriors["chrome"] ?? 0.5 }, set: { $0.appPriors["chrome"] = $1 })],
-    on: fit, includeChrome: true)
-  report(
-    "V5 + menu-bar chrome", hold, v5, freeParameters: layers.count + 3 + apps.count,
-    includeChrome: true)
+let ladder:
+  [(String, ExposureModelParameters, Int, Bool)] = [
+    ("V0 baseline", .baseline, 0, false),
+    ("V1 z-order only", v1, 0, false),
+    ("V2 + layer priors", v2, layers.count, false),
+    ("V3 + refitted appearance", v3, layers.count + 2, false),
+    ("V4 + app priors", v4, layers.count + 2 + apps.count, false),
+    ("V5 + menu-bar chrome", v5, layers.count + 3 + apps.count, true),
+  ]
 
-  print("\n  fitted V4: light \(String(format: "%.3f", v4.lightAppearancePrior)) dark \(String(format: "%.3f", v4.darkAppearancePrior))")
-  for (app, value) in v4.appPriors.sorted(by: { $0.key < $1.key }) {
-    print("    app \(app): \(String(format: "%.3f", value))")
+for run in runs {
+  print("\n--- holdout scores: \(run.key.prefix(8))  (\(run.hold.count) records) ---")
+  for (label, parameters, free, chrome) in ladder {
+    report(label, run.hold, parameters, freeParameters: free, includeChrome: chrome)
   }
-  for (layer, value) in v4.layerPriors.sorted(by: { $0.key < $1.key }) {
-    print("    layer \(layer): \(String(format: "%.3f", value))")
-  }
+}
+
+print("\nfitted parameters (joint):")
+print("  light \(String(format: "%.3f", v5.lightAppearancePrior))  dark \(String(format: "%.3f", v5.darkAppearancePrior))")
+for (app, value) in v5.appPriors.sorted(by: { $0.value > $1.value }) {
+  print("    app \(app): \(String(format: "%.3f", value))")
+}
+for (layer, value) in v5.layerPriors.sorted(by: { $0.key < $1.key }) {
+  print("    layer \(layer): \(String(format: "%.3f", value))")
 }
