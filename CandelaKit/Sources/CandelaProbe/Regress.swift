@@ -1,3 +1,4 @@
+import ApplicationServices
 import CandelaKit
 import CoreGraphics
 import Foundation
@@ -12,9 +13,10 @@ import Foundation
 /// different files.
 ///
 /// This file is the driver half. It shells out to the unified log, the
-/// defaults domain, the media-key poster and the accessibility API, so none of
-/// it is unit-testable; the judgement it feeds lives in `AppRegression`, where
-/// every verdict is red-tested including its inconclusive third state.
+/// defaults domain and the media-key poster, and it drives the accessibility
+/// layer through the C API in process, so none of it is unit-testable; the
+/// judgement it feeds lives in `AppRegression`, where every verdict is
+/// red-tested including its inconclusive third state.
 ///
 /// The one rule the whole command encodes: a check whose failure mode is
 /// silence is not a check. Every branch that cannot run reports a named skip
@@ -216,16 +218,27 @@ enum Regress {
     //    four seconds [MEASURED].
     var answeredCount = 0
     var answeredSpan = ""
+    var queryFailure: String?
     for (interval, span) in [(300.0, "5 minutes"), (3600.0, "1 hour"), (43200.0, "12 hours")] {
       let window = instruments.logWindow(since: Date().addingTimeInterval(-interval))
-      answeredCount = window.count
       answeredSpan = span
+      // A query that FAILED and a quiet app both come back empty, so the tool's
+      // own exit status is read before the emptiness is read into anything.
+      if window.queryFailed {
+        queryFailure = window.failureReason
+        break
+      }
+      answeredCount = window.count
       if !window.isEmpty { break }
     }
-    let logOutcome = annotate(
+    let logOutcome: PlatformConformance.Outcome = queryFailure.map {
+      .fail("the log query itself failed over the last \(answeredSpan): \($0)")
+    } ?? annotate(
       AppRegression.logWindowControl(lineCount: answeredCount),
       with: "window: the last \(answeredSpan)")
     checks.append(plainCheck(name: "regress.instrument.log", outcome: logOutcome))
+    // Everything that reads an EMPTY window as evidence depends on this: until
+    // one window has come back non-empty, an empty one proves nothing.
     let logProven = isPass(logOutcome)
 
     // 3. Does the gamma table answer on every online display? The software
@@ -251,7 +264,8 @@ enum Regress {
     //    the log query. When it does not pass, every driven check reports
     //    inconclusive rather than fail.
     let target = displays.first { $0.persistenceKey != nil && !$0.isBuiltIn }
-    let keysCheck = keysInstrumentCheck(instruments: instruments, target: target)
+    let keysCheck = keysInstrumentCheck(
+      instruments: instruments, target: target, logProven: logProven)
     checks.append(keysCheck)
     let keysProven = isPass(keysCheck.outcome)
 
@@ -282,7 +296,7 @@ enum Regress {
   }
 
   private static func keysInstrumentCheck(
-    instruments: RegressInstruments, target: Display?
+    instruments: RegressInstruments, target: Display?, logProven: Bool
   ) -> PlatformConformance.Check {
     let name = "regress.instrument.keys"
     guard let target else {
@@ -290,45 +304,65 @@ enum Regress {
         name: name,
         reason: "no DDC-capable external display is attached, so no key post can produce a DDC write")
     }
-    guard let script = instruments.mediaKeyScript else {
+    guard instruments.mediaKeyScript != nil else {
       return plainCheck(name: name, outcome: .fail(
         "the media-key poster was not found: \(instruments.mediaKeySearchDescription); pass --tools <dir>"
       ))
     }
 
-    // The control is a QUIET pre-window. Brightness sync amplifies the
-    // built-in's ambient auto-brightness into DDC traffic on every external,
-    // and those writes would be read as the ones this check drove.
-    let quietStart = Date()
-    Thread.sleep(forTimeInterval: 3)
-    let preWindow = instruments.logWindow(since: quietStart)
-    let preWrites = AppRegression.ddcWriteValues(fromLogLines: preWindow).count
-    let control: Control = preWrites == 0
-      ? .fired("a quiet 3 s pre-window carried no DDC writes, so the writes below are the posted keys")
-      : .didNotFire(
-        "the 3 s pre-window already carried \(preWrites) DDC writes, so a write in the drive window would not be attributable to the posted keys; brightness sync fans the built-in's ambient auto-brightness out to every external, so turn it off before this run")
+    // The control is a QUIET pre-window, and a quiet window only means
+    // anything once the query has been shown able to return a line at all.
+    // Brightness sync amplifies the built-in's ambient auto-brightness into
+    // DDC traffic on every external, and those writes would be read as the
+    // ones this check drove.
+    let control: Control
+    if !logProven {
+      control = .didNotFire(
+        "the log query has not been shown able to return a line (see regress.instrument.log), so an empty pre-window is not evidence of a quiet app")
+    } else {
+      let quietStart = Date()
+      Thread.sleep(forTimeInterval: 3)
+      let preWindow = instruments.logWindow(since: quietStart)
+      let preWrites = AppRegression.ddcWriteValues(fromLogLines: preWindow.lines).count
+      if preWindow.queryFailed {
+        control = .didNotFire(
+          "the pre-window query failed, so its emptiness is the query's and not the app's: \(preWindow.failureReason)")
+      } else if preWrites > 0 {
+        control = .didNotFire(
+          "the 3 s pre-window already carried \(preWrites) DDC writes, so a write in the drive window would not be attributable to the posted keys; brightness sync fans the built-in's ambient auto-brightness out to every external, so turn it off before this run")
+      } else {
+        control = .fired(
+          "the log query is proven live and a quiet 3 s pre-window carried no DDC writes, so the writes below are the posted keys")
+      }
+    }
 
     return controlledCheck(name: name, control: control) {
       let start = Date()
       instruments.warpPointer(toCenterOf: target.id)
-      // Down then up: the pair leaves the panel where it found it on the 1/16
-      // key grid, so the instrument does not move the rig it measures.
+      // brightnessDown then brightnessUp: the pair leaves the panel where it
+      // found it on the 1/16 key grid, so the instrument does not move the rig
+      // it measures.
       let down = instruments.postMediaKey("brightnessDown", count: 1)
       Thread.sleep(forTimeInterval: 1)
       let up = instruments.postMediaKey("brightnessUp", count: 1)
       Thread.sleep(forTimeInterval: 2)
       guard down, up else {
-        return .fail("the media-key poster failed to run (\(script)); down=\(down) up=\(up)")
+        return .fail(
+          "the media-key poster failed to run (brightnessDown ran: \(down), brightnessUp ran: \(up)): \(instruments.lastPosterError ?? "no reason reported")"
+        )
       }
       let window = instruments.logWindow(since: start)
-      let writes = AppRegression.ddcWriteValues(fromLogLines: window)
+      guard !window.queryFailed else {
+        return .fail("the drive window's log query failed: \(window.failureReason)")
+      }
+      let writes = AppRegression.ddcWriteValues(fromLogLines: window.lines)
       guard writes.count >= 2 else {
         return .fail(
-          "two brightness keys aimed at \(target.name) produced \(writes.count) DDC writes in a \(window.count)-line window; the Accessibility grant, the app's event tap or the DDC path is down"
+          "brightnessDown then brightnessUp aimed at \(target.name) produced \(writes.count) DDC writes in a \(window.count)-line window; the Accessibility grant, the app's event tap or the DDC path is down"
         )
       }
       return .pass(
-        "two brightness keys aimed at \(target.name) produced \(writes.count) DDC writes (values \(writes.map(String.init).joined(separator: ", ")))"
+        "brightnessDown then brightnessUp aimed at \(target.name) produced \(writes.count) DDC writes (values \(writes.map(String.init).joined(separator: ", ")))"
       )
     }
   }
@@ -360,21 +394,26 @@ enum Regress {
 
     // The control is the READER, not the app: it has to be shown answering
     // both ways in the same walk before either answer is believed. Present is
-    // demonstrated by any element carrying any identifier, absent by the
-    // window's own close button, which carries none.
+    // demonstrated by any element carrying a present identifier, absent by the
+    // window's own close button, which carries none. An unreadable answer
+    // counts as neither.
     let control: Control
-    if audit.walked == 0 {
+    switch audit.closeButtonIdentifier {
+    case _ where audit.walked == 0:
       control = .didNotFire("the accessibility walk reached zero elements, so nothing was read")
-    } else if audit.identifiersSeen == 0 {
+    case _ where audit.identifiersSeen == 0:
       control = .didNotFire(
-        "not one of the \(audit.walked) elements walked carries any accessibility identifier, so the reader was never shown a present one and present cannot be told from absent")
-    } else if !audit.closeButtonFound {
+        "not one of the \(audit.walked) elements walked carries a readable accessibility identifier (\(audit.identifiersUnreadable) answered unreadably), so the reader was never shown a present one and present cannot be told from absent")
+    case _ where !audit.closeButtonFound:
       control = .didNotFire(
         "the window's close button was not found, so the reader was never shown an element that must have no identifier")
-    } else if let carried = audit.closeButtonIdentifier {
+    case let .text(carried):
       control = .didNotFire(
         "the window's close button carries the identifier \(carried), so an absent reading can no longer be told from a present one on this platform")
-    } else {
+    case let .unreadable(reason):
+      control = .didNotFire(
+        "the window's close button's identifier came back unreadable (\(reason)), so the absent half of the reader is unproven")
+    default:
       control = .fired(
         "\(audit.identifiersSeen) of \(audit.walked) walked elements carry an identifier and the close button carries none, so the reader answers both ways")
     }
@@ -382,7 +421,7 @@ enum Regress {
     return controlledCheck(name: name, control: control) {
       guard let value = audit.targetValue else {
         return .fail(
-          "no element in the settings window carries the accessibility identifier \(wanted) (\(audit.walked) elements walked on the General pane); the running build predates the identifier pass, or the composer no longer emits the bare pref name for an app-level pref"
+          "no element in the settings window carries the accessibility identifier \(wanted) (\(audit.walked) elements walked on the General pane); three causes to tell apart: the running build predates the identifier pass, the composer no longer emits the bare pref name for an app-level pref, or the reader cannot see identifiers set through SwiftUI on this build"
         )
       }
       return .pass("the General pane's \(wanted) control carries that identifier, reading \(value)")
@@ -421,14 +460,23 @@ enum Regress {
 // MARK: - The instruments
 
 /// Everything the regress checks measure the world with. Each one is a shell
-/// out or a CoreGraphics call, and each one reports its own failure rather
-/// than returning a plausible default: an instrument that answers with
-/// something else is the failure mode this whole command is built against.
+/// out, a CoreGraphics call or a direct accessibility read, and each one
+/// reports its own failure rather than returning a plausible default: an
+/// instrument that answers with something else is the failure mode this whole
+/// command is built against.
+///
+/// `ApplicationServices` is a C framework, so the accessibility layer lives in
+/// process without breaking the rule that keeps AppKit and SwiftUI out of the
+/// engine and the probe.
 final class RegressInstruments {
   let toolsDir: String
-  /// The last osascript failure, so a check's detail can name the cause
-  /// instead of reporting a control as merely missing.
+  /// Why the last accessibility call did not answer, so a check's detail can
+  /// name the cause instead of reporting a control as merely missing.
   private(set) var lastAXError: String?
+  /// Why the last media-key post did not run, carrying the script's own
+  /// stderr: "the poster failed" on its own is the silence this command
+  /// refuses everywhere else.
+  private(set) var lastPosterError: String?
 
   init(toolsDir: String) {
     self.toolsDir = toolsDir
@@ -491,12 +539,35 @@ final class RegressInstruments {
   /// zero-line control would then be a check that cannot fail.
   private static let recordTag = "[com.rydersel.Candela:"
 
+  /// One window read, with the query's own outcome attached. An empty `lines`
+  /// from a query that FAILED and an empty `lines` from a quiet app are the
+  /// same value and mean opposite things, so the caller is handed both halves
+  /// and every caller here checks `queryFailed` before reading anything into
+  /// the emptiness.
+  struct LogWindow {
+    let lines: [String]
+    let status: Int32
+    let standardError: String
+
+    var queryFailed: Bool { status != 0 }
+    var count: Int { lines.count }
+    var isEmpty: Bool { lines.isEmpty }
+    /// The stderr on one line, for a detail string; the command name when the
+    /// tool failed silently, so a failure is never reported as no reason.
+    var failureReason: String {
+      let text = standardError
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .replacingOccurrences(of: "\n", with: "; ")
+      return text.isEmpty ? "/usr/bin/log exited \(status) with nothing on stderr" : text
+    }
+  }
+
   /// `/usr/bin/log` by absolute path (a bare `log` is a shell builtin here
   /// that prints its complaint to stderr and exits 0, which is indistinguish-
   /// able from an app that logged nothing). `--info --debug` because most of
   /// our lines are below default level, and the process filter because
   /// `swift test` logs into this same subsystem from the test helper.
-  func logWindow(since: Date) -> [String] {
+  func logWindow(since: Date) -> LogWindow {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
@@ -505,10 +576,14 @@ final class RegressInstruments {
       "--style", "compact",
       "--predicate", "subsystem == \"com.rydersel.Candela\" AND process == \"Candela\"",
     ])
-    return result.out
-      .split(separator: "\n")
-      .map(String.init)
-      .filter { $0.contains(Self.recordTag) }
+    return LogWindow(
+      lines: result.out
+        .split(separator: "\n")
+        .map(String.init)
+        .filter { $0.contains(Self.recordTag) },
+      status: result.status,
+      standardError: result.err
+    )
   }
 
   // MARK: Gamma
@@ -573,8 +648,21 @@ final class RegressInstruments {
   /// Posts a real system-defined media key through the committed script. It
   /// imports AppKit, which the probe must not, so this stays a shell out.
   func postMediaKey(_ name: String, count: Int) -> Bool {
-    guard let script = mediaKeyScript else { return false }
-    return Self.execute("/usr/bin/swift", [script, name, String(count)]).status == 0
+    guard let script = mediaKeyScript else {
+      lastPosterError = mediaKeySearchDescription
+      return false
+    }
+    let result = Self.execute("/usr/bin/swift", [script, name, String(count)])
+    guard result.status != 0 else {
+      lastPosterError = nil
+      return true
+    }
+    let stderr = result.err
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .replacingOccurrences(of: "\n", with: "; ")
+    lastPosterError = "\(script) \(name) exited \(result.status): "
+      + (stderr.isEmpty ? "nothing on stderr" : stderr)
+    return false
   }
 
   /// Brightness keys target the display under the pointer, so aiming is how a
@@ -597,6 +685,72 @@ final class RegressInstruments {
 
   // MARK: The accessibility layer
 
+  /// One attribute read, with absent kept distinct from present-but-empty and
+  /// from unreadable.
+  ///
+  /// This layer went through System Events first and had to be rebuilt on the
+  /// C API, because AppleScript answers accessibility questions with something
+  /// else: its `description` is the ROLE description rather than
+  /// `AXDescription`, and its attribute lookup resolves against the attribute
+  /// NAMES list, which omits `AXDescription` on elements that have a value. A
+  /// System Events walk of this app's sidebar therefore reports every row as
+  /// carrying no description, while a direct read returns all of them. One
+  /// route says a label exists where none does and the other says none exists
+  /// where one does; only `AXUIElementCopyAttributeValue` by name separates
+  /// absent from present-but-empty, which is the whole question here.
+  enum Reading: Equatable {
+    case absent
+    case empty
+    case text(String)
+    case unreadable(String)
+
+    /// The value when the attribute is present and non-empty. Deliberately nil
+    /// for `.unreadable`: an uncoercible answer is not a present identifier.
+    var presentText: String? {
+      if case let .text(value) = self { return value }
+      return nil
+    }
+
+    var describedForDetail: String {
+      switch self {
+      case .absent: "(absent)"
+      case .empty: "(empty)"
+      case let .text(value): value
+      case let .unreadable(reason): "(unreadable: \(reason))"
+      }
+    }
+  }
+
+  private func read(_ element: AXUIElement, _ attribute: String) -> Reading {
+    var value: CFTypeRef?
+    let status = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+    if status == .attributeUnsupported || status == .noValue { return .absent }
+    guard status == .success else { return .unreadable("AX error \(status.rawValue)") }
+    if let text = value as? String { return text.isEmpty ? .empty : .text(text) }
+    if let number = value as? NSNumber { return .text(number.stringValue) }
+    return .unreadable("the attribute answered with a non-string value")
+  }
+
+  private func children(_ element: AXUIElement) -> [AXUIElement] {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value)
+      == .success, let kids = value as? [AXUIElement]
+    else { return [] }
+    return kids
+  }
+
+  private func canPress(_ element: AXUIElement) -> Bool {
+    var names: CFArray?
+    AXUIElementCopyActionNames(element, &names)
+    return ((names as? [String]) ?? []).contains(kAXPressAction as String)
+  }
+
+  /// The two windows Candela owns that are not the settings window. Both come
+  /// and go mid-session and both shift every window index.
+  private static let decoyWindowNames = [
+    "Candela Gamma Activity Enforcer", "Candela OLED Care Overlay",
+  ]
+
   /// Binding the settings window, and the three separate traps it has to
   /// survive.
   ///
@@ -613,46 +767,47 @@ final class RegressInstruments {
   /// selector that matches nothing reports every control missing, which reads
   /// exactly like a real defect in the app and has already cost one issue
   /// filed against a defect that did not exist.
-  private static let bindSettingsWindow = """
-      set candidates to (every window whose role is "AXWindow" and name does not start with "Candela Gamma Activity Enforcer" and name does not start with "Candela OLED Care Overlay")
-      if (count of candidates) is not 1 then
-        set seen to ""
-        repeat with candidate in windows
-          set nm to "(unnamed)"
-          try
-            set nm to name of candidate as text
-          end try
-          set seen to seen & " [" & nm & "]"
-        end repeat
-        error "the settings window is not uniquely identified: " & (count of candidates) & " candidates:" & seen
-      end if
-      set w to item 1 of candidates
-    """
-
-  private func osascript(_ body: String) -> String? {
-    let script = """
-    tell application "System Events"
-      tell process "Candela"
-    \(Self.bindSettingsWindow)
-    \(body)
-      end tell
-    end tell
-    """
-    let result = Self.execute("/usr/bin/osascript", ["-e", script])
-    guard result.status == 0 else {
-      lastAXError = result.err
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .replacingOccurrences(of: "\n", with: "; ")
+  func settingsWindow() -> AXUIElement? {
+    guard AXIsProcessTrusted() else {
+      lastAXError = "this shell has no Accessibility grant, so every accessibility read would come back empty"
+      return nil
+    }
+    guard let pid = runningPIDs().first.flatMap(Int32.init) else {
+      lastAXError = "no Candela process to read an accessibility tree from"
+      return nil
+    }
+    let application = AXUIElementCreateApplication(pid)
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value)
+      == .success, let windows = value as? [AXUIElement]
+    else {
+      lastAXError = "the app published no windows attribute; open Settings first"
+      return nil
+    }
+    let realWindows = windows.filter {
+      read($0, kAXRoleAttribute as String).presentText == "AXWindow"
+    }
+    let candidates = realWindows.filter { window in
+      let name = read(window, kAXTitleAttribute as String).presentText ?? ""
+      return !Self.decoyWindowNames.contains { name.hasPrefix($0) }
+    }
+    guard candidates.count == 1 else {
+      let seen = realWindows
+        .map { "[\(read($0, kAXTitleAttribute as String).describedForDetail)]" }
+        .joined(separator: " ")
+      lastAXError = candidates.isEmpty
+        ? "no settings window is open (\(realWindows.count) windows, \(windows.count - realWindows.count) non-window elements in the windows attribute): \(seen)"
+        : "the settings window is not uniquely identified: \(candidates.count) candidates: \(seen)"
       return nil
     }
     lastAXError = nil
-    return result.out.trimmingCharacters(in: .whitespacesAndNewlines)
+    return candidates[0]
   }
 
-  /// Identifiers are composed from pref names and persistence keys, so a quote
-  /// or a backslash in one means the composer has changed shape rather than
-  /// that a control needs escaping. Refuse rather than build a script that
-  /// would silently address something else.
+  /// Identifiers are composed from pref names, command names, persistence keys
+  /// and slot numbers, so a quote or a backslash in one means the composer has
+  /// changed shape rather than that a control needs escaping. Refuse the match
+  /// rather than address something the caller did not mean.
   private func isAddressable(_ identifier: String) -> Bool {
     if identifier.contains("\"") || identifier.contains("\\") {
       lastAXError = "the identifier \(identifier) carries a quote or a backslash and cannot be addressed"
@@ -662,18 +817,21 @@ final class RegressInstruments {
   }
 
   func settingsWindowName() -> String? {
-    osascript("    return name of w")
+    settingsWindow().flatMap { read($0, kAXTitleAttribute as String).presentText }
   }
 
   /// `open -b` reaches the reopen handler on a RUNNING app, which is what
   /// opens the settings scene. The window is then polled for rather than
-  /// assumed: the call returns long before the scene exists.
+  /// assumed: the call returns long before the scene exists. The bound is a
+  /// real ten seconds, measured off a deadline rather than counted in sleeps,
+  /// because the per-poll cost is not a constant.
   func openSettingsWindow() -> Bool {
     Self.execute("/usr/bin/open", ["-b", "com.rydersel.Candela"])
-    for _ in 0 ..< 20 {
-      if settingsWindowName() != nil { return true }
-      Thread.sleep(forTimeInterval: 0.5)
-    }
+    let deadline = Date().addingTimeInterval(10)
+    repeat {
+      if settingsWindow() != nil { return true }
+      Thread.sleep(forTimeInterval: 0.25)
+    } while Date() < deadline
     return false
   }
 
@@ -681,149 +839,150 @@ final class RegressInstruments {
   /// instrument needs, including both halves of its own control.
   struct AXAudit {
     let walked: Int
+    /// Elements carrying a present, non-empty identifier. An unreadable one is
+    /// counted separately and never as present.
     let identifiersSeen: Int
-    /// The value of the element carrying the wanted identifier, or nil when
-    /// no element carries it.
+    let identifiersUnreadable: Int
+    /// The value of the element carrying the wanted identifier, or nil when no
+    /// element carries it.
     let targetValue: String?
     let closeButtonFound: Bool
-    /// Non-nil only when the close button carries an identifier, which would
-    /// mean an absent reading can no longer be distinguished.
-    let closeButtonIdentifier: String?
+    /// Non-nil only when the close button carries a present identifier, which
+    /// would mean an absent reading can no longer be distinguished. An
+    /// unreadable close-button identifier reports here as unreadable, so the
+    /// control refuses to fire on it.
+    let closeButtonIdentifier: Reading?
+  }
+
+  private func walk(_ element: AXUIElement, depth: Int, visit: (AXUIElement) -> Void) {
+    guard depth <= 24 else { return }
+    visit(element)
+    for kid in children(element) { walk(kid, depth: depth + 1, visit: visit) }
   }
 
   func axIdentifierAudit(identifier: String) -> AXAudit? {
     guard isAddressable(identifier) else { return nil }
-    // The list is materialised before the walk: iterating `entire contents`
-    // directly hands back references that cannot always be resolved.
-    let body = """
-        set els to entire contents of w
-        set walked to 0
-        set carriers to 0
-        set target to "(absent)"
-        set closeSeen to "no"
-        set closeIdentifier to "(absent)"
-        repeat with el in els
-          set walked to walked + 1
-          set thisIdentifier to "(absent)"
-          try
-            set thisIdentifier to (value of attribute "AXIdentifier" of el) as text
-          end try
-          if thisIdentifier is not "(absent)" and thisIdentifier is not "missing value" then
-            set carriers to carriers + 1
-            if thisIdentifier is "\(identifier)" then
-              set target to "(unreadable)"
-              try
-                set target to (value of el) as text
-              end try
-            end if
-          end if
-          set thisSubrole to ""
-          try
-            set thisSubrole to (value of attribute "AXSubrole" of el) as text
-          end try
-          if thisSubrole is "AXCloseButton" then
-            set closeSeen to "yes"
-            set closeIdentifier to thisIdentifier
-          end if
-        end repeat
-        return "walked=" & walked & ";carriers=" & carriers & ";target=" & target & ";close=" & closeSeen & ";closeIdentifier=" & closeIdentifier
-    """
-    guard let output = osascript(body) else { return nil }
-    var fields: [String: String] = [:]
-    for pair in output.split(separator: ";") {
-      let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
-      if parts.count == 2 { fields[parts[0]] = parts[1] }
+    guard let window = settingsWindow() else { return nil }
+    var walked = 0
+    var carriers = 0
+    var unreadableIdentifiers = 0
+    var targetValue: String?
+    var closeButtonFound = false
+    var closeButtonIdentifier: Reading?
+    walk(window, depth: 0) { element in
+      walked += 1
+      let carried = read(element, kAXIdentifierAttribute as String)
+      switch carried {
+      case .text: carriers += 1
+      case .unreadable: unreadableIdentifiers += 1
+      case .absent, .empty: break
+      }
+      if carried.presentText == identifier {
+        targetValue = read(element, kAXValueAttribute as String).describedForDetail
+      }
+      if read(element, kAXSubroleAttribute as String).presentText == "AXCloseButton" {
+        closeButtonFound = true
+        closeButtonIdentifier = carried
+      }
     }
-    guard let walked = fields["walked"].flatMap(Int.init),
-          let carriers = fields["carriers"].flatMap(Int.init)
-    else {
-      lastAXError = "the accessibility walk returned an unparseable line: \(output)"
-      return nil
-    }
-    let closeIdentifier = fields["closeIdentifier"]
     return AXAudit(
       walked: walked,
       identifiersSeen: carriers,
-      targetValue: fields["target"] == "(absent)" ? nil : fields["target"],
-      closeButtonFound: fields["close"] == "yes",
-      closeButtonIdentifier: closeIdentifier == "(absent)" || closeIdentifier == "missing value"
-        ? nil : closeIdentifier
+      identifiersUnreadable: unreadableIdentifiers,
+      targetValue: targetValue,
+      closeButtonFound: closeButtonFound,
+      closeButtonIdentifier: closeButtonIdentifier
     )
+  }
+
+  /// Locates one element by its accessibility identifier, refusing an
+  /// ambiguous match rather than binding the first: two controls answering to
+  /// one identifier means the composer is colliding, and driving either of
+  /// them would record a measurement of the wrong control.
+  private func element(carrying identifier: String) -> AXUIElement? {
+    guard isAddressable(identifier), let window = settingsWindow() else { return nil }
+    var matches: [AXUIElement] = []
+    walk(window, depth: 0) { element in
+      if read(element, kAXIdentifierAttribute as String).presentText == identifier {
+        matches.append(element)
+      }
+    }
+    guard matches.count == 1 else {
+      lastAXError = matches.isEmpty
+        ? "no element carries the accessibility identifier \(identifier)"
+        : "\(matches.count) elements carry the accessibility identifier \(identifier); refusing rather than guessing"
+      return nil
+    }
+    return matches[0]
   }
 
   /// A control's value, located by its accessibility identifier rather than by
   /// its display string: a label is user-visible copy that can be reworded,
   /// and a selector written against one silently matches nothing the day it is.
   func axRead(identifier: String) -> String? {
-    axIdentifierAudit(identifier: identifier)?.targetValue
+    guard let element = element(carrying: identifier) else { return nil }
+    return read(element, kAXValueAttribute as String).presentText
   }
 
   /// Sets a checkbox or switch, then READS IT BACK. A toggle that silently
   /// failed and a toggle that worked look identical from the caller's side,
   /// and three measurements in one session were invalidated by exactly that.
   func axToggle(identifier: String, to desired: Bool) -> Bool {
-    guard isAddressable(identifier) else { return false }
-    let body = """
-        set els to entire contents of w
-        repeat with el in els
-          set thisIdentifier to "(absent)"
-          try
-            set thisIdentifier to (value of attribute "AXIdentifier" of el) as text
-          end try
-          if thisIdentifier is "\(identifier)" then
-            set before to (value of el) as text
-            if before is not "\(desired ? "1" : "0")" then
-              click el
-              delay 1.2
-            end if
-            return "before=" & before & ";after=" & ((value of el) as text)
-          end if
-        end repeat
-        error "no element carries the accessibility identifier \(identifier)"
-    """
-    guard let output = osascript(body) else { return false }
-    guard let after = output.split(separator: ";")
-      .first(where: { $0.hasPrefix("after=") })?
-      .dropFirst("after=".count)
-    else {
-      lastAXError = "the toggle returned an unparseable line: \(output)"
+    guard let element = element(carrying: identifier) else { return false }
+    let wanted = desired ? "1" : "0"
+    let before = read(element, kAXValueAttribute as String)
+    if before.presentText != wanted {
+      guard canPress(element) else {
+        lastAXError = "the control carrying \(identifier) publishes no press action"
+        return false
+      }
+      let result = AXUIElementPerformAction(element, kAXPressAction as CFString)
+      guard result == .success else {
+        lastAXError = "pressing \(identifier) failed (AX error \(result.rawValue))"
+        return false
+      }
+      Thread.sleep(forTimeInterval: 1.2)
+    }
+    let after = read(element, kAXValueAttribute as String)
+    guard after.presentText == wanted else {
+      lastAXError = "the toggle for \(identifier) read back \(after.describedForDetail), wanted \(wanted)"
       return false
     }
-    let landed = String(after) == (desired ? "1" : "0")
-    if !landed {
-      lastAXError = "the toggle for \(identifier) read back \(after), wanted \(desired ? 1 : 0)"
-    }
-    return landed
+    lastAXError = nil
+    return true
   }
 
-  /// Clicks a sidebar row by the accessibility description it publishes, then
+  /// Presses a sidebar row by the accessibility description it publishes, then
   /// reads the window title back. The index table is a property of the current
   /// build and one of its rows is an inert header that leaves the title on the
   /// previous pane rather than erroring, so the title is the only answer worth
   /// trusting.
   func axNavigateSidebar(rowNamed row: String) -> Bool {
-    guard isAddressable(row) else { return false }
-    let body = """
-        set els to entire contents of w
-        repeat with el in els
-          set thisDescription to ""
-          try
-            set thisDescription to (value of attribute "AXDescription" of el) as text
-          end try
-          if thisDescription is "\(row)" then
-            click el
-            delay 1.2
-            return "clicked"
-          end if
-        end repeat
-        error "no sidebar row publishes the accessibility description \(row)"
-    """
-    guard osascript(body) == "clicked" else { return false }
-    let title = settingsWindowName()
-    if title != row {
-      lastAXError = "the row \(row) was clicked and the window title reads \(title ?? "(unreadable)")"
+    guard isAddressable(row), let window = settingsWindow() else { return false }
+    var matches: [AXUIElement] = []
+    walk(window, depth: 0) { element in
+      if read(element, kAXDescriptionAttribute as String).presentText == row, canPress(element) {
+        matches.append(element)
+      }
+    }
+    guard matches.count == 1 else {
+      lastAXError = matches.isEmpty
+        ? "no pressable sidebar row publishes the accessibility description \(row)"
+        : "\(matches.count) pressable elements publish the accessibility description \(row); refusing rather than guessing"
       return false
     }
+    let result = AXUIElementPerformAction(matches[0], kAXPressAction as CFString)
+    guard result == .success else {
+      lastAXError = "pressing the \(row) row failed (AX error \(result.rawValue))"
+      return false
+    }
+    Thread.sleep(forTimeInterval: 1.2)
+    let title = settingsWindowName()
+    guard title == row else {
+      lastAXError = "the \(row) row was pressed and the window title reads \(title ?? "(unreadable)")"
+      return false
+    }
+    lastAXError = nil
     return true
   }
 }
