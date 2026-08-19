@@ -19,13 +19,41 @@ import Testing
 struct ResolutionRowTests {
   // MARK: - Size labels
 
-  /// The ordinary case, and the one every row on a laptop panel takes: a size,
+  /// The ordinary case, and the one most rows on a laptop panel take: a size,
   /// and nothing else. The tags that name the mode's kind belong to the All
   /// Sizes page, which is where the duplicates that need telling apart are.
   @Test func aSizeIsNamedWithNothingAppended() throws {
     let catalog = BuiltInFixtures.catalog()
+    let row = try #require(catalog.rows.first { $0.mode.logicalWidth == 1800 })
+    #expect(DisplaySizeRows.sizeItemLabel(row, in: catalog) == "1800 × 1169")
+  }
+
+  /// The size macOS itself calls Default (the looks-like size whose
+  /// framebuffer IS the panel) says so, in System Settings' own word. It is
+  /// the built-in's counterpart to Recommended, which this panel can never
+  /// carry because no physical size is ever filed for it.
+  @Test func theDefaultSizeIsMarkedOnTheBuiltIn() throws {
+    let catalog = BuiltInFixtures.catalog()
     let row = try #require(catalog.rows.first { $0.mode.logicalWidth == 1512 })
-    #expect(DisplaySizeRows.sizeItemLabel(row, in: catalog) == "1512 × 982")
+    #expect(
+      DisplaySizeRows.sizeItemLabel(row, in: catalog)
+        == "1512 × 982 (\(DisplayModeCopy.defaultSize))")
+  }
+
+  /// The trap the gate exists for, pinned with the exact geometry that springs
+  /// it: on a standard-PPI external the native flag rides the HiDPI twin
+  /// (logical 1720 x 720 on a 3440 x 1440 panel), which is NOT what System
+  /// Settings calls Default there. An ungated rule would badge that row
+  /// confidently; no row on an external may carry the word.
+  @Test func anExternalNeverCarriesTheDefaultMark() {
+    let catalog = BuiltInFixtures.externalWithNativeFlagOnTheHiDPITwin()
+    let marked = catalog.rows.filter {
+      DisplaySizeRows.sizeItemLabel($0, in: catalog).contains(DisplayModeCopy.defaultSize)
+    }
+    #expect(marked.isEmpty)
+    // The control: the twin IS in the rows this asked about, so the emptiness
+    // is the gate holding rather than curation having dropped the row.
+    #expect(catalog.rows.contains { $0.mode.logicalWidth == 1720 })
   }
 
   /// The one mark this pop-up owes the reader on a laptop panel: choosing a
@@ -61,11 +89,16 @@ struct ResolutionRowTests {
   /// mark a size once a verdict names one, so the emptiness asserted there is
   /// about the verdict rather than about the label builder being inert.
   @Test func aRecommendedSizeIsMarkedWhenTheModelNamesOne() throws {
-    let catalog = BuiltInFixtures.catalog(recommending: (width: 1512, height: 982))
-    let row = try #require(catalog.rows.first { $0.mode.logicalWidth == 1512 })
+    // 1800, not 1512: the fixture fakes a density verdict onto a built-in
+    // catalog, and 1512 is the Default size, so recommending it would test the
+    // two marks' concatenation instead of the verdict. In production the two
+    // are exclusive by construction (Recommended needs a density verdict,
+    // which only discovery-visible externals get; Default needs isBuiltIn).
+    let catalog = BuiltInFixtures.catalog(recommending: (width: 1800, height: 1169))
+    let row = try #require(catalog.rows.first { $0.mode.logicalWidth == 1800 })
     #expect(
       DisplaySizeRows.sizeItemLabel(row, in: catalog)
-        == "1512 × 982 (\(DisplayModeCopy.recommended))")
+        == "1800 × 1169 (\(DisplayModeCopy.recommended))")
   }
 
   /// SS14 keeps synthesized stops away from the built-in, and the catalog
@@ -156,6 +189,27 @@ private enum BuiltInFixtures {
           recommendation: $0, abstention: nil, bestInBand: $0, ideal: nil,
           currentPlacement: nil)
       })
+  }
+
+  /// The external whose geometry springs the default-mark trap: the native
+  /// flag on the HiDPI twin of the panel's own size, exactly as the MAG
+  /// publishes it.
+  static func externalWithNativeFlagOnTheHiDPITwin() -> DisplayModeCoordinator.Catalog {
+    let twin = mode(10, 1720, 720, 3440, 1440, hz: 175, isNative: true)
+    let panelSize = mode(11, 3440, 1440, 3440, 1440, hz: 175)
+    let all = [twin, panelSize]
+    return DisplayModeCoordinator.Catalog(
+      display: ConfiguredDisplay(
+        id: 2,
+        identity: DisplayConfigIdentity(vendor: 0x3669, model: 0x3DD0, serial: 0, isBuiltIn: false),
+        name: "MAG 341C OLED", isBuiltIn: false),
+      rows: DisplayModeCatalog.curated(all, nativePixelWidth: 3440, nativePixelHeight: 1440),
+      all: all,
+      current: panelSize,
+      distinctLogicalSizes: 2,
+      nativePixels: DisplayModeCoordinator.PixelSize(width: 3440, height: 1440),
+      withheldForWireTiming: 0,
+      density: nil)
   }
 
   private static func mode(

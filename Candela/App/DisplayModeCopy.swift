@@ -85,6 +85,10 @@ enum DisplayModeCopy {
   /// scale, and RM11 fixes this word.
   static var recommended: String { "Recommended" }
 
+  /// The built-in panel's counterpart to `recommended`: the size macOS calls
+  /// Default in its own Displays pane, so the two windows use one word.
+  static var defaultSize: String { "Default" }
+
   /// The hub's one-line suggestion: the size and the reason in one sentence.
   ///
   /// Two second sentences, picked by the caller from the curated row this

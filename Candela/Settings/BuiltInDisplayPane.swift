@@ -46,6 +46,13 @@ struct BuiltInDisplayPane: View {
   var body: some View {
     let _ = model.prefsRevision
     Form {
+      // The same opening every external page gets, in the variant that drops
+      // the external-only facts. Conditional on the slot rather than assumed:
+      // in clamshell the built-in departs while this pane can still be the
+      // restored selection for one frame.
+      if let state = model.builtIn {
+        DisplayHeroView(state: state, variant: .builtIn)
+      }
       Section("Keyboard") {
         SettingRow("When off, the brightness keys skip the built-in display.") {
           Toggle("Control this display with the keyboard", isOn: Binding(
