@@ -162,6 +162,9 @@ struct ArrangementPane: View {
           name: displayName,
           isVirtual: { virtualIDs.contains($0) },
           isSynthesisPair: { panels[$0] != nil },
+          // The map holds a committed drop's layout until this clears, so the
+          // drop animates into its result instead of back to where it started.
+          isApplying: coordinator.isApplying,
           selection: reconciledSelection,
           onPropose: { coordinator.apply($0) },
           onRefuse: { problems in

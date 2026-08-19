@@ -40,6 +40,13 @@ struct ArrangementCanvasView: View {
   /// owns the desktop, so it is the member of the pair a layout can move (AR6).
   /// Asked, not decided, for `name`'s reason.
   var isSynthesisPair: (CGDirectDisplayID) -> Bool = { _ in false }
+  /// Whether the coordinator has a reconfiguration in flight.
+  ///
+  /// The map holds the layout a committed drop asked for until this goes back
+  /// to false. `ArrangementCoordinator.apply` enqueues, so `arrangement` is the
+  /// PRE-drop layout for as long as the reconfiguration takes; without this the
+  /// drop would render its own undoing. See `settling`.
+  var isApplying: Bool = false
   @Binding var selection: CGDirectDisplayID?
   /// Called ONLY with a valid layout that differs from the current one. Starts
   /// the preview and its countdown.
@@ -50,6 +57,20 @@ struct ArrangementCanvasView: View {
   let onRefuse: ([ArrangementProblem]) -> Void
 
   @State private var drag: TileDrag?
+  /// The layout a committed drop is animating INTO, held while the apply is in
+  /// flight and cleared by the first honest answer that arrives.
+  ///
+  /// Without it, `drag = nil` on release swaps the map straight back to
+  /// `arrangement`, which is still the layout the drag STARTED from, so the
+  /// tile the user just dropped slides back to where they picked it up and only
+  /// then jumps forward when the apply lands. A drop has to move toward its
+  /// result rather than away from it.
+  ///
+  /// Showing the requested layout while the request is outstanding is the same
+  /// thing the countdown does, so it is not a claim about achieved state. Both
+  /// `arrangement` changing and `isApplying` going false clear it, and an apply
+  /// that fails corrects the map as it finishes rather than leaving it lying.
+  @State private var settling: DisplayArrangement?
   @FocusState private var focused: CGDirectDisplayID?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -93,13 +114,19 @@ struct ArrangementCanvasView: View {
 
   // MARK: - Derived state
 
+  /// What the map draws from when no drag is running. Everything that used to
+  /// read `arrangement` directly reads this instead, so a drag begun during the
+  /// settle is measured from the layout on screen rather than from the one the
+  /// coordinator has not caught up to yet.
+  private var resting: DisplayArrangement { settling ?? arrangement }
+
   /// Rendered, never mirrored: there is no copy of the layout to fall out of
   /// step with the proposal.
-  private var displayed: DisplayArrangement { drag?.proposal.arrangement ?? arrangement }
+  private var displayed: DisplayArrangement { drag?.proposal.arrangement ?? resting }
   private var transform: CanvasTransform { drag?.transform ?? restingTransform }
 
   private var restingTransform: CanvasTransform {
-    CanvasTransform.fitting(arrangement.bounds, in: Self.canvasSize, margin: Self.margin)
+    CanvasTransform.fitting(resting.bounds, in: Self.canvasSize, margin: Self.margin)
   }
 
   /// How much EVERY tile says, decided once from the tiles as they are about to
@@ -171,6 +198,17 @@ struct ArrangementCanvasView: View {
     .onTapGesture { selection = nil }
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Display arrangement")
+    // Either signal ends the settle, and both are positive: the coordinator has
+    // re-read the layout, or it has finished the work. No timer, because a
+    // deadline long enough for a slow reconfiguration is also long enough to
+    // show a failed one as though it worked.
+    .onChange(of: arrangement) { _, _ in
+      withAnimation(motion) { settling = nil }
+    }
+    .onChange(of: isApplying) { _, applying in
+      guard !applying else { return }
+      withAnimation(motion) { settling = nil }
+    }
   }
 
   // MARK: - Tile
@@ -241,10 +279,15 @@ struct ArrangementCanvasView: View {
       onPropose(displayed.makingMain(tile.id))
     }
     .position(x: rect.midX, y: rect.midY)
-    // No implicit animation while dragging — the tile must track the pointer,
+    // No implicit animation while dragging: the tile must track the pointer,
     // not lag behind it on a spring.
-    .animation(isDragging ? nil : motion, value: rect.midX)
-    .animation(isDragging ? nil : motion, value: rect.midY)
+    //
+    // Keyed on the whole rect rather than on midX and midY separately, because
+    // the transform is refitted to the new layout's bounds whenever a drop
+    // changes them, and that resizes every tile. With only the centres keyed,
+    // tiles slid to their new positions while snapping to their new sizes in
+    // the same frame. `CanvasRect` is `Equatable`, so this is one comparison.
+    .animation(isDragging ? nil : motion, value: rect)
     .zIndex(isDragging ? 2 : (selection == tile.id ? 1 : 0))
   }
 
@@ -289,7 +332,7 @@ struct ArrangementCanvasView: View {
   /// which display is main (the plan re-anchors on it). Fall back to the
   /// resting layout's main so the badge does not vanish under the pointer.
   private func isMain(_ id: CGDirectDisplayID) -> Bool {
-    (displayed.mainDisplayID ?? arrangement.mainDisplayID) == id
+    (displayed.mainDisplayID ?? resting.mainDisplayID) == id
   }
 
   private func accessibilityValue(_ tile: ArrangementTile) -> String {
@@ -316,10 +359,10 @@ struct ArrangementCanvasView: View {
         selection = tile.id
         let base = drag ?? TileDrag(
           id: tile.id,
-          baseline: arrangement,
+          baseline: resting,
           transform: restingTransform,
           proposal: ArrangementProposal(
-            arrangement: arrangement, baseline: arrangement,
+            arrangement: resting, baseline: resting,
             movedID: tile.id, lines: [], problems: []
           )
         )
@@ -353,14 +396,22 @@ struct ArrangementCanvasView: View {
         // the preview session with a message nobody could act on.
         if let commitment = finished.proposal.commitment {
           onPropose(commitment)
-        } else if !finished.proposal.isValid {
-          onRefuse(finished.proposal.problems)
+          // Set in the SAME transaction that clears the drag, so the map never
+          // renders a frame of the pre-drop layout in between. The tiles then
+          // animate from where the pointer left them to where the drop puts
+          // them, which for an insert is the first and only time the displays
+          // the user did not grab move.
+          withAnimation(motion) {
+            settling = commitment
+            drag = nil
+          }
+        } else {
+          if !finished.proposal.isValid { onRefuse(finished.proposal.problems) }
+          // On refusal the tile animates home from wherever it was, which is the
+          // honest report that the position was not legal. macOS would silently
+          // "fix" it to somewhere of its own choosing instead.
+          withAnimation(motion) { drag = nil }
         }
-        // Cleared either way. On success the coordinator's preview replaces the
-        // live layout; on refusal the tile animates home from wherever it was,
-        // which is the honest report that the position was not legal. macOS
-        // would silently "fix" it to somewhere of its own choosing instead.
-        withAnimation(motion) { drag = nil }
       }
   }
 
