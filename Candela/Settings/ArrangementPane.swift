@@ -437,6 +437,7 @@ struct ArrangementPane: View {
             actions.prefDidChange(.restoreArrangement)
           }
         ))
+        .prefIdentifier(.restoreArrangement)
       }
       // The restore notice's mirror hooks hang HERE, on the one row of this
       // section that is always present: hooks on the notice's own container would
