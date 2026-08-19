@@ -431,11 +431,14 @@ jobs:
           echo "Newest ledger record: $record"
           echo "found=true" >> "$GITHUB_OUTPUT"
 
-          # The delimiter form, not `record=$record`. The value is a filename
-          # read off disk, and a filename containing a newline would otherwise
-          # write a second line into $GITHUB_OUTPUT and set an output this step
-          # never meant to set. The delimiter is generated per run so it cannot
-          # be guessed by whoever named the file.
+          # The delimiter form, not `record=$record`. Defence in depth rather
+          # than a hole being closed: `ls -1 | sort | tail -n 1` can only ever
+          # yield a single newline-free line, so nothing today can write a
+          # second line into $GITHUB_OUTPUT and set an output this step never
+          # meant to set. The form is what keeps that true if the selection
+          # above is ever rewritten to obtain the filename some other way. The
+          # delimiter is generated per run so it cannot be guessed by whoever
+          # named the file.
           delim="RECORD_EOF_${RANDOM}${RANDOM}"
           {
             echo "record<<$delim"
