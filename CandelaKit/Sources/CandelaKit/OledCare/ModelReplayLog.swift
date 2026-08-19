@@ -18,8 +18,15 @@ public struct ModelReplayRecord: Codable, Equatable, Sendable {
   public struct Display: Codable, Equatable, Sendable {
     public var persistenceKey: String
     public var displayID: UInt32
-    /// As macOS reports it, so already rotated. The Dell is a 3840x2160 panel
-    /// mounted at 270 degrees and appears here as 2160x3840.
+    /// **Points, not pixels, whatever the names say.** What macOS reports for
+    /// the display, so already rotated: the Dell is a manufactured 3840x2160
+    /// panel mounted at 270 degrees and records here as 1440x2560 points.
+    ///
+    /// Nothing downstream is wrong, because window bounds, display bounds and
+    /// `PanelSpaceTransform` all live in that same point space; the log was
+    /// merely describing itself in the wrong unit. The names stay: the capture
+    /// tool builds this by argument label, so renaming is a coordinated change
+    /// across two targets plus a format bump, and it buys only the label.
     public var pixelWidth: Int
     public var pixelHeight: Int
     public var rotation: DisplayRotation
@@ -185,9 +192,12 @@ public struct ModelReplayRecord: Codable, Equatable, Sendable {
 
 /// Append-only JSON Lines writer with file rotation.
 ///
-/// One line per sample so a crash costs at most a torn final line, which the
-/// reader discards. Inspectable with `grep` and `python3`, which matters more
-/// on a probe instrument than the bytes a binary format would save.
+/// One line per sample so a crash costs at most a torn line, which the reader
+/// discards. Torn LINE, not torn final line: a write that fails part way leaves
+/// an unterminated tail mid-file, and `append` seals it so the next record does
+/// not concatenate onto it. Inspectable with `grep` and `python3`, which
+/// matters more on a probe instrument than the bytes a binary format would
+/// save.
 public final class ModelReplayLog {
   /// 1/255 is 0.0039, so five places is already past what an 8-bit capture can
   /// express. Consequence: both replay controls compare within a tolerance and
@@ -200,22 +210,76 @@ public final class ModelReplayLog {
     return (value * scale).rounded() / scale
   }
 
+  /// Rotate on BYTES, not only on a record count.
+  ///
+  /// A record-count cap is a proxy for disk, and the proxy drifted the moment
+  /// the capture oversample went to 16 cells per grid-cell edge. A record used
+  /// to be about 11.5 KB; it now carries the whole capture grid, one JSON
+  /// number per cell, and MEASURED here it is 493 KB on the MAG (a 384x161
+  /// request) and 660 KB on the rotated Dell (216x384). The old defaults of
+  /// 2000 records across 5 files were sized as 110 MB and would now retain
+  /// about 6 GB, with each whole-file read in the fit landing over a gigabyte
+  /// in one allocation.
+  ///
+  /// Bytes cap the thing that actually matters and stay correct through the
+  /// next change to the capture shape. The arithmetic:
+  ///
+  /// - a file closes once it passes `bytesPerFile`, so it overshoots by at
+  ///   most one record. The ceiling for a record is the square case, 384x384
+  ///   cells, about 1.2 MB; no panel here is square, so this is a bound rather
+  ///   than an expectation.
+  /// - retained <= `filesKept * (bytesPerFile + 1.2 MB)`
+  ///   = 16 * (32 + 1.2) MB = **531 MB**, whatever the panel geometry.
+  /// - at the Dell's 660 KB that is about 48 records per file and 780 retained,
+  ///   comfortably more than the roughly 450 a 150-minute three-panel session
+  ///   at the default 60 second interval produces.
+  public static let defaultBytesPerFile = 32 * 1024 * 1024
+  public static let defaultFilesKept = 16
+  /// Still a cap, and it binds first for a SMALL record: a 7.6 KB record (the
+  /// 24x10 grids the tests build) reaches 2000 lines at 15 MB, well under the
+  /// byte cap. Whichever limit is reached first rotates.
+  public static let defaultSamplesPerFile = 2000
+
+  /// The bound the defaults promise, so a change to any of them fails a test
+  /// rather than quietly costing gigabytes.
+  public static let recordBytesCeiling = 1_250_000
+  public static var retainedBytesCeiling: Int {
+    defaultFilesKept * (defaultBytesPerFile + recordBytesCeiling)
+  }
+
   public let directory: URL
   public let samplesPerFile: Int
   public let filesKept: Int
+  public let bytesPerFile: Int
+
+  /// Records whose bytes reached the disk only in part, so the loss is stated
+  /// rather than inferred from a line the reader could not parse.
+  public private(set) var partialWrites = 0
 
   private var written = 0
+  private var writtenBytes = 0
   private var fileIndex = 0
+  /// Set at init and after a rotation, so the first append of a run always
+  /// opens a NEW file. Resuming INTO the last file was the whole of the
+  /// never-rotates defect: `written` is 0 on a fresh process, so the count cap
+  /// could not fire, and a tool the operator is told to restart after every
+  /// wallpaper or appearance change restarts often.
+  private var needsNewFile = true
 
-  public init(directory: URL, samplesPerFile: Int = 2000, filesKept: Int = 5) throws {
+  public init(
+    directory: URL, samplesPerFile: Int = ModelReplayLog.defaultSamplesPerFile,
+    filesKept: Int = ModelReplayLog.defaultFilesKept,
+    bytesPerFile: Int = ModelReplayLog.defaultBytesPerFile
+  ) throws {
     self.directory = directory
     self.samplesPerFile = max(1, samplesPerFile)
     self.filesKept = max(1, filesKept)
+    self.bytesPerFile = max(1, bytesPerFile)
     try FileManager.default.createDirectory(
       at: directory, withIntermediateDirectories: true)
-    // Resume after the highest existing index rather than overwriting, so a
-    // restart (which MP6 requires after a wallpaper change) does not discard
-    // what the previous run collected.
+    // Resume AFTER the highest existing index, never into it, so a restart
+    // (which MP6 requires after a wallpaper change) neither discards what the
+    // previous run collected nor grows a file the caps can no longer reach.
     fileIndex = (try? Self.existingIndices(in: directory).max()).flatMap { $0 } ?? 0
   }
 
@@ -232,26 +296,48 @@ public final class ModelReplayLog {
   }
 
   public func append(_ record: ModelReplayRecord) throws {
-    if written >= samplesPerFile || fileIndex == 0 {
+    if needsNewFile || written >= samplesPerFile || writtenBytes >= bytesPerFile {
       fileIndex += 1
       written = 0
+      writtenBytes = 0
+      needsNewFile = false
     }
     let encoder = JSONEncoder()
     var line = try encoder.encode(record.roundedForLog())
     line.append(0x0A)
 
     let target = url(for: fileIndex)
-    if let handle = FileHandle(forWritingAtPath: target.path) {
+    // Updating, not writing: the seal check below has to READ the last byte,
+    // and a write-only handle cannot.
+    if let handle = FileHandle(forUpdatingAtPath: target.path) {
       defer { try? handle.close() }
-      try handle.seekToEnd()
+      let end = try handle.seekToEnd()
+      // Seal an unterminated tail before appending. A write that throws part
+      // way (a full disk is the realistic one) lands bytes without its closing
+      // newline, and the next append would concatenate onto them: one
+      // unparseable line spanning two records, so the good record is lost
+      // along with the torn one. A lone newline costs one line and keeps the
+      // damage to the record that actually suffered it.
+      if end > 0, try Self.lastByte(of: handle, fileLength: end) != 0x0A {
+        partialWrites += 1
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data([0x0A]))
+        writtenBytes += 1
+      }
       try handle.write(contentsOf: line)
     } else {
       try line.write(to: target)
     }
     written += 1
+    writtenBytes += line.count
     // After the write, not before: pruning first would keep `filesKept` old
     // files and then add one, leaving the cap permanently off by one.
     pruneOldFiles()
+  }
+
+  private static func lastByte(of handle: FileHandle, fileLength: UInt64) throws -> UInt8? {
+    try handle.seek(toOffset: fileLength - 1)
+    return try handle.read(upToCount: 1)?.first
   }
 
   private func pruneOldFiles() {
@@ -261,15 +347,85 @@ public final class ModelReplayLog {
     }
   }
 
+  /// What a read could not use, by cause.
+  ///
+  /// One counter could not tell "your log is from a newer tool" from "your log
+  /// is damaged", and it charged a whole unreadable FILE the same single unit
+  /// as one torn line. Both matter on the artifact that produces a verdict: a
+  /// version mismatch is a tool to rebuild, damage is a capture to rerun, and a
+  /// missing file is an unknown number of records rather than one.
+  public struct ReadLosses: Equatable, Sendable, CustomStringConvertible {
+    /// Lines that are not decodable records: a torn write, a truncated
+    /// multi-byte character, anything else the JSON decoder refuses.
+    public var damagedLines = 0
+    /// Lines that decoded far enough to state a format version this tool does
+    /// not read. Refused rather than misread.
+    public var versionMismatchLines = 0
+    /// Files that could not be opened at all. Their records are lost and their
+    /// COUNT is unknown, which is why this is not folded into a line total.
+    /// Reachable in the documented workflow: the fit is polled during capture,
+    /// indices are enumerated before the files are opened, and pruning deletes
+    /// files between those two moments.
+    public var unreadableFiles = 0
+    /// The versions actually seen, so the operator is told which tool wrote it.
+    public var mismatchedVersions: Set<Int> = []
+
+    public init() {}
+
+    /// Lines only. `unreadableFiles` deliberately does not count here: adding
+    /// an unknown quantity to a known one produces a number that reads as
+    /// precise and is not.
+    public var lostLines: Int { damagedLines + versionMismatchLines }
+
+    public var isEmpty: Bool { lostLines == 0 && unreadableFiles == 0 }
+
+    /// Written to read inside a sentence, because the fit interpolates this
+    /// straight into its "records N, skipped ..." line.
+    public var description: String {
+      guard !isEmpty else { return "0" }
+      func count(_ n: Int, _ one: String, _ many: String) -> String {
+        "\(n) \(n == 1 ? one : many)"
+      }
+      var parts: [String] = []
+      if damagedLines > 0 {
+        parts.append(count(damagedLines, "damaged line", "damaged lines"))
+      }
+      if versionMismatchLines > 0 {
+        let seen = mismatchedVersions.sorted().map(String.init).joined(separator: ", ")
+        parts.append(
+          count(versionMismatchLines, "line", "lines") + " from format \(seen) "
+            + "(this tool reads \(ModelReplayRecord.formatVersion))")
+      }
+      if unreadableFiles > 0 {
+        parts.append(
+          count(unreadableFiles, "unreadable file", "unreadable files")
+            + ", holding an unknown number of records")
+      }
+      return parts.joined(separator: "; ")
+    }
+  }
+
+  /// Just enough of a line to ask which format wrote it, WITHOUT the full
+  /// decode succeeding. Version was checked after the decode, so a record from
+  /// a newer tool that added a required field failed to decode and was booked
+  /// as damage: the two diagnoses that lead to opposite actions looked
+  /// identical.
+  private struct VersionEnvelope: Decodable {
+    var v: Int
+  }
+
   /// Every record in a log directory, oldest first. A line that fails to decode
   /// is skipped and counted rather than aborting the read: the last line of an
   /// interrupted run is expected to be torn, and one bad line should not throw
-  /// away a week of samples.
-  public static func read(directory: URL) throws -> (records: [ModelReplayRecord], skipped: Int) {
+  /// away a week of samples. What was skipped comes back broken out by cause;
+  /// see `ReadLosses`, whose description is written to be printed as it stands.
+  public static func read(directory: URL) throws -> (
+    records: [ModelReplayRecord], skipped: ReadLosses
+  ) {
     let indices = try existingIndices(in: directory).sorted()
     let decoder = JSONDecoder()
     var records: [ModelReplayRecord] = []
-    var skipped = 0
+    var losses = ReadLosses()
     for index in indices {
       let path = directory.appendingPathComponent(String(format: "replay-%05d.jsonl", index))
       // Read BYTES and split on newline, rather than decoding the file as one
@@ -277,24 +433,33 @@ public final class ModelReplayLog {
       // file fail to decode, so `continue` discarded every record in it and
       // reported `skipped 0`: the count actively misdirected the diagnosis, and
       // an interrupted capture is the ordinary way to produce that tear.
-      guard let bytes = try? Data(contentsOf: path) else {
-        skipped += 1
+      //
+      // Mapped, not slurped: the kernel pages a file in as the split walks it,
+      // so a full file is never one anonymous allocation. That is what keeps
+      // the byte cap on a file a memory bound too and not just a disk one.
+      guard let bytes = try? Data(contentsOf: path, options: .mappedIfSafe) else {
+        losses.unreadableFiles += 1
         continue
       }
       for line in bytes.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true) {
         let data = Data(line)
         guard !data.isEmpty else { continue }
-        guard let record = try? decoder.decode(ModelReplayRecord.self, from: data) else {
-          skipped += 1
+        guard let envelope = try? decoder.decode(VersionEnvelope.self, from: data) else {
+          losses.damagedLines += 1
           continue
         }
-        guard record.v == ModelReplayRecord.formatVersion else {
-          skipped += 1
+        guard envelope.v == ModelReplayRecord.formatVersion else {
+          losses.versionMismatchLines += 1
+          losses.mismatchedVersions.insert(envelope.v)
+          continue
+        }
+        guard let record = try? decoder.decode(ModelReplayRecord.self, from: data) else {
+          losses.damagedLines += 1
           continue
         }
         records.append(record)
       }
     }
-    return (records, skipped)
+    return (records, losses)
   }
 }
