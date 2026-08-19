@@ -1447,6 +1447,14 @@ final class AppModel {
         mirrorTopology: mirrorTopology,
         wireSiblings: [volume, contrast]
       )
+      // SS9's missing half, wired at the one construction site for externals:
+      // the engine owns the only door that can engage HDR, and the synthesis
+      // pairing that must veto it lives here. Weak, like every other closure
+      // this object hands to something it owns.
+      let displayID = entry.display.id
+      controller.isShowingSynthesizedSize = { [weak self] in
+        self?.synthesis.isEngaged(displayID: displayID) ?? false
+      }
       let state = DisplayState(
         display: entry.display, controller: controller, volume: volume, contrast: contrast,
         writer: entry.writer

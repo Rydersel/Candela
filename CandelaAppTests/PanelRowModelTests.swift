@@ -313,4 +313,39 @@ struct PanelRowModelTests {
     let visible = PanelView.visibleDisplays(model.displays, prefs: domain.prefs)
     #expect(visible.map(\.display.persistenceKey) == ["row-model-shown"])
   }
+
+  // MARK: - The HDR button's refusal (SS9's missing half, #194)
+
+  @Test func theHDRButtonExplainsItselfWhileASynthesizedSizeIsShowing() {
+    let reason = PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: true, isHDREngaged: false
+    )
+    #expect(reason == SynthesisCopy.hdrBlockedBySynthesizedSize)
+  }
+
+  @Test func theHDRButtonIsUnrefusedWithNoSizeEngaged() {
+    #expect(PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: false, isHDREngaged: false
+    ) == nil)
+    #expect(PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: false, isHDREngaged: true
+    ) == nil)
+  }
+
+  /// The exit direction is never refused, so the one control that can take a
+  /// display out of the HDR-over-a-size combination is never the greyed one.
+  @Test func theHDRExitIsOfferedEvenWithASizeEngaged() {
+    #expect(PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: true, isHDREngaged: true
+    ) == nil)
+  }
+
+  /// The sentence is the mirror of SS9's own refusal, and it names neither the
+  /// mechanism nor a display: the panel row it sits under has the name.
+  @Test func theRefusalNamesTheMoveThatClearsIt() {
+    let copy = SynthesisCopy.hdrBlockedBySynthesizedSize
+    #expect(copy.contains("HDR"))
+    #expect(copy.contains(AppInfo.productName))
+    #expect(!copy.contains("—"))
+  }
 }

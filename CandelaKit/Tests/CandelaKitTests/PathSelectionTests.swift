@@ -445,6 +445,66 @@ struct PathSelectionTests {
     #expect(h.shade.removed.contains(Harness.displayID))
   }
 
+  // MARK: SS9's missing half (#194)
+
+  /// A synthesized size is a mirror set standing on this display, and HDR takes
+  /// the data cable away. SS9 refuses the engage in one direction; this is the
+  /// other, and without it the panel ends up in HDR as a mirror slave with the
+  /// pairing still up.
+  @Test func alwaysOnIsRefusedWhileASynthesizedSizeIsShowing() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    h.controller.isShowingSynthesizedSize = { true }
+
+    await h.controller.setHDRMode(.alwaysOn)
+
+    #expect(await h.hdr!.recordedSetCalls().isEmpty)
+    #expect(h.controller.hdrMode == .off)
+    #expect(!h.controller.isHDREngaged)
+
+    // The control: the same call on the same harness with nothing engaged.
+    // Without it a refusal that fired unconditionally, or an engage arm broken
+    // for an unrelated reason, would read identically to the assertion above.
+    h.controller.isShowingSynthesizedSize = { false }
+    await h.controller.setHDRMode(.alwaysOn)
+    #expect(await h.hdr!.recordedSetCalls() == [true])
+    #expect(h.controller.isHDREngaged)
+  }
+
+  /// The exit is never refused. It is the way OUT of the combination the
+  /// refusal exists to prevent, so a size engaged over HDR that arrived from
+  /// System Settings must still be droppable from inside the app.
+  @Test func offIsNotRefusedWhileASynthesizedSizeIsShowing() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    await h.hdr!.setHDR(displayID: Harness.displayID, enabled: true) // System Settings
+    await h.controller.noteHDRStateMayHaveChanged()
+    h.controller.isShowingSynthesizedSize = { true }
+    #expect(h.controller.isHDREngaged)
+
+    await h.controller.setHDRMode(.off)
+
+    #expect(!h.controller.isHDREngaged)
+  }
+
+  /// Refusing a request that would merely RECORD a state System Settings has
+  /// already produced would leave the app's mirror lying about a display that
+  /// is in HDR. The refusal is about preventing a transition, not about
+  /// disagreeing with the hardware.
+  @Test func alwaysOnOverAlreadyLiveHDRIsRecordedRatherThanRefused() async {
+    let h = Harness(settle: .milliseconds(5))
+    await h.prime()
+    await h.hdr!.setHDR(displayID: Harness.displayID, enabled: true) // System Settings
+    await h.controller.noteHDRStateMayHaveChanged()
+    h.controller.isShowingSynthesizedSize = { true }
+    #expect(h.controller.hdrMode == .off) // Candela never set a mode
+
+    await h.controller.setHDRMode(.alwaysOn)
+
+    #expect(h.controller.hdrMode == .alwaysOn)
+    #expect(h.controller.isHDREngaged)
+  }
+
   /// #83. `.off` must DISENGAGE HDR that Candela never engaged. The engage arm
   /// already handles the mirror case (an externally live HDR with mode `.off`);
   /// the exit assumed Candela set it, so `mode != previous` returned early and

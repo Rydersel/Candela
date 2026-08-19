@@ -339,6 +339,17 @@ public final class BrightnessController: PendingWireDraining {
   /// it is a restore, not a dim, and must never be suspected as interference.
   @ObservationIgnored public var preGammaApplyHook: (@MainActor () -> Void)?
 
+  /// True while this display's picture is coming from a size Candela renders
+  /// rather than from a mode the panel published (SS4). Injected because the
+  /// pairing lives a layer up, in the app's synthesis coordinator, while the
+  /// only door that can engage HDR is here.
+  ///
+  /// It gates the engage arm of `setHDRMode`, which is the half SS9 left open:
+  /// SS9 refuses a synthesis engage while HDR is on, and nothing refused the
+  /// reverse. Defaulting to false keeps every existing caller and every test
+  /// on the pre-gate behaviour.
+  @ObservationIgnored public var isShowingSynthesizedSize: @MainActor () -> Bool = { false }
+
   /// Expected-native echo slot (Task 7 contract; reviews I9/I15). One lock
   /// backs all three nonisolated poller accessors:
   /// - `value`/`generation`: every local native-leg write stores its value at
@@ -947,6 +958,27 @@ public final class BrightnessController: PendingWireDraining {
     // machinery — the built-in is constitutively native already, and a call
     // here would persist a meaningless mode under the builtIn prefs key.
     guard role == .external else { return }
+    // SS9's missing half. HDR takes the data cable away, and a synthesized size
+    // is a mirror set standing on that same display, so engaging one over the
+    // other leaves a combination nothing in the app has measured: the panel in
+    // HDR as a mirror slave with the pairing still up.
+    //
+    // Only the ENGAGE arm, and only while HDR is not already live. A request
+    // that would merely record a state System Settings has already produced is
+    // not the thing being prevented, and refusing it would leave the mirror
+    // lying about a display that IS in HDR. The exit is never refused at all:
+    // it is the way out of exactly this state.
+    //
+    // The UI is expected to disable its engage control while a size is up, so a
+    // click racing a teardown is the only way to reach this. That expectation is
+    // what makes the refusal quiet rather than reported; the guard does not
+    // depend on it holding.
+    if mode == .alwaysOn, !cachedHDRActive, isShowingSynthesizedSize() {
+      pathLog.error(
+        "setHDRMode(.alwaysOn) refused: a synthesized size is engaged display=\(self.displayID)"
+      )
+      return
+    }
     let previous = hdrMode
     // #83: `.off` is actionable whenever HDR is LIVE, not only when Candela's
     // own mode says Candela engaged it. HDR turned on in System Settings leaves
