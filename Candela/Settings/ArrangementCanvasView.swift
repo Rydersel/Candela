@@ -15,11 +15,16 @@ import SwiftUI
 /// `ArrangementSnapper`, every validity question through `ArrangementRules`, and
 /// the whole drag decision through `ArrangementDragPolicy` — the app target owns
 /// the gesture plumbing and nothing else.
-
 @MainActor
 struct ArrangementCanvasView: View {
-  /// The live layout, owned by `ArrangementCoordinator` and read from
-  /// `CGDisplayBounds` over the ONLINE display list (AR1). Never mutated here.
+  /// The layout to draw, owned by `ArrangementPane`. Never mutated here.
+  ///
+  /// Usually the live layout, read from `CGDisplayBounds` over the ONLINE
+  /// display list (AR1). NOT always: while the coordinator has a reconfiguration
+  /// in flight the pane hands its settle down here instead, so this is then the
+  /// layout a change REQUESTED rather than one the machine has reached. See
+  /// `isApplying`, which is how that case is told apart, and what the gesture
+  /// routes key on.
   let arrangement: DisplayArrangement
   /// The user's name for a display, or "" when nothing can name it. Resolution
   /// belongs to the surface, so the canvas asks rather than deciding.
@@ -43,17 +48,19 @@ struct ArrangementCanvasView: View {
   var isSynthesisPair: (CGDirectDisplayID) -> Bool = { _ in false }
   /// Whether the coordinator has a reconfiguration in flight.
   ///
-  /// While it is, `arrangement` is the layout a change REQUESTED and not one the
-  /// machine has reached: `ArrangementPane` holds the request there so a
-  /// committed change animates into its result rather than back into the layout
-  /// it started from. That settle is the pane's and not this view's, because
-  /// "a layout has been asked for and the apply is outstanding" is a fact about
-  /// the coordinator; while a map widget owned it, the pane's own button was the
-  /// one route that never got the behaviour.
+  /// It is what makes `arrangement` above readable: the pane holds its request
+  /// there while an apply is outstanding, so a committed change animates into
+  /// its result rather than back into the layout it started from. That settle is
+  /// the pane's and not this view's, because "a layout has been asked for and
+  /// the apply is outstanding" is a fact about the coordinator; while a map
+  /// widget owned it, the pane's own button was the one route that never got the
+  /// behaviour.
   ///
   /// What the flag buys HERE is about the gesture rather than about the settle:
-  /// a request the coordinator refuses is never achieved, so no NEW gesture may
-  /// be measured from it. See `dragGesture` and `nudge`.
+  /// a request the coordinator refuses is never achieved, so no NEW request may
+  /// be composed from it. That is every route this view owns, not only the
+  /// pointer ones: `dragGesture`, `nudge`, the tile's context-menu item and its
+  /// VoiceOver custom action all build from `displayed` and all refuse on this.
   var isApplying: Bool = false
   @Binding var selection: CGDirectDisplayID?
   /// Asks for a layout. The pane starts the preview and its countdown, and
@@ -180,10 +187,22 @@ struct ArrangementCanvasView: View {
   /// ordinary snap guide carries, so `kind` distinguishes snapping from
   /// aligning and never a rendered position from a committed one. Only the
   /// proposal knows which list a line came out of.
+  ///
+  /// **A landing draws its guide only when the release will commit it.** The
+  /// landing that resolves back to the layout the drag started from is no
+  /// commitment at all, and drawing its line promises an outcome the release
+  /// cannot deliver: drag one of two abutting displays straight away from its
+  /// neighbour, past the snap threshold and near no other edge, and the nearest
+  /// legal position the attach policy can rank is the display's own original
+  /// one. The solid guide said the drop would succeed; the tile then sprang home
+  /// and the pane called the layout invalid. Keyed on `commitment` for that
+  /// reason, which is what the release itself keys on, so the two cannot
+  /// disagree about whether anything is going to happen.
   private var guideLines: [Guide] {
     guard let drag else { return [] }
     let snaps = drag.proposal.lines.map { (line: $0, isLanding: false) }
-    let landing = (drag.proposal.landing?.lines ?? []).map { (line: $0, isLanding: true) }
+    let committed = drag.proposal.commitment == nil ? [] : (drag.proposal.landing?.lines ?? [])
+    let landing = committed.map { (line: $0, isLanding: true) }
     return (snaps + landing).enumerated().map {
       Guide(id: $0.offset, line: $0.element.line, isLanding: $0.element.isLanding)
     }
@@ -193,12 +212,20 @@ struct ArrangementCanvasView: View {
   /// the middle display of a row strands the far one, and the user has to see
   /// which displays they broke rather than only which one they are holding.
   ///
-  /// A drop with a landing reddens nothing. The position under the pointer is
-  /// not legal and the proposal says so, but the release is going to succeed:
-  /// the guide names where the display goes. Red is reserved for the drop that
-  /// really will spring back, or it stops meaning anything.
+  /// A drop that is going to COMMIT reddens nothing. The position under the
+  /// pointer is not legal and the proposal says so, but the release will
+  /// succeed: the guide names where the display goes. Red is reserved for the
+  /// drop that really will spring back, or it stops meaning anything (AR15).
+  ///
+  /// Keyed on `commitment`, not on whether a landing exists, because those two
+  /// disagree in exactly the case an ordinary gesture reaches: a landing that
+  /// resolves back to the baseline commits nothing. Dragging one of two abutting
+  /// displays straight away from its neighbour and letting go near no other edge
+  /// used to draw a solid landing guide and no red, which AR15 defines as "this
+  /// release will succeed", and then sprang the tile home and named displays
+  /// that had never moved as the reason the layout was invalid.
   private var invalidIDs: Set<CGDirectDisplayID> {
-    guard let drag, !drag.proposal.isValid, drag.proposal.landing == nil else { return [] }
+    guard let drag, !drag.proposal.isValid, drag.proposal.commitment == nil else { return [] }
     return Set(drag.proposal.problems.flatMap { problem -> [CGDirectDisplayID] in
       switch problem {
       case let .overlap(lhs, rhs): [lhs, rhs]
@@ -285,8 +312,14 @@ struct ArrangementCanvasView: View {
     .onKeyPress(.upArrow) { nudge(tile.id, .up) }
     .onKeyPress(.downArrow) { nudge(tile.id, .down) }
     .contextMenu {
+      // Greyed while an apply is outstanding, for the reason the drag and the
+      // nudge are refused: this composes from `displayed`, which is the pane's
+      // settle during one, so a request built here would carry the relative
+      // geometry of a layout that has only been ASKED for. If the first apply is
+      // then refused by AR12's four-way gate, this one can succeed and put the
+      // machine into the very layout the gate just turned down.
       Button("Use as Main Display") { onPropose(displayed.makingMain(tile.id)) }
-        .disabled(displayed.mainDisplayID == tile.id)
+        .disabled(isApplying || displayed.mainDisplayID == tile.id)
     }
     .accessibilityElement(children: .ignore)
     // Name AND resolution, unconditionally — the label never follows what the
@@ -299,7 +332,13 @@ struct ArrangementCanvasView: View {
     // The same action as the button and the context menu, reachable from the
     // rotor — AR9's whole argument is that setting the main display must not
     // depend on a pointer gesture.
+    //
+    // A custom action carries no greyed state a rotor user can read, so the
+    // refusal is a guard rather than a `.disabled`. Same fact as the context
+    // menu above and for the same reason: `displayed` is the pane's settle while
+    // an apply is outstanding.
     .accessibilityAction(named: Text("Use as Main Display")) {
+      guard !isApplying else { return }
       onPropose(displayed.makingMain(tile.id))
     }
     .position(x: rect.midX, y: rect.midY)
@@ -396,13 +435,21 @@ struct ArrangementCanvasView: View {
         // A NEW drag is refused while a reconfiguration is outstanding, because
         // it would be baselined on a layout that has only been ASKED for: the
         // refusal paths leave such a request unachieved, so a move measured from
-        // it would fold a layout that never happened into this drop. The pane
-        // greys "Use as Main Display" over the same fact and says so in words.
+        // it would fold a layout that never happened into this drop. Every route
+        // that composes from `displayed` is refused on the same fact: the nudge,
+        // the context-menu item and the VoiceOver action below.
+        //
         // A drag already in progress is left alone: freezing a tile under the
         // pointer mid gesture is worse than letting it finish, and its release
         // goes through the same commit path it always did.
-        guard drag != nil || !isApplying else { return }
+        //
+        // Selecting comes FIRST, so a refused gesture is not silently inert: a
+        // drag that neither moves the tile nor marks it leaves nothing on screen
+        // to say the app noticed the pointer at all. Selecting cannot ask for a
+        // layout, so it is safe on the refused path too, and the guard below
+        // still keeps the gesture from moving anything.
         selection = tile.id
+        guard drag != nil || !isApplying else { return }
         let base = drag ?? TileDrag(
           id: tile.id,
           baseline: arrangement,
@@ -484,10 +531,15 @@ struct ArrangementCanvasView: View {
   /// A nudge is refused outright while an apply is outstanding, for the reason a
   /// new drag is: `displayed` is then the layout a change REQUESTED, and a
   /// request the coordinator refuses is never achieved, so a move measured from
-  /// it would carry a layout that never happened into the next one. The pane
-  /// greys "Use as Main Display" over the same fact and says so in words.
+  /// it would carry a layout that never happened into the next one.
+  ///
+  /// That refusal returns `.handled`, unlike the end-of-walk one above. The key
+  /// HAS a meaning on this tile and is only temporarily unavailable, so letting
+  /// it fall through scrolls the settings page instead: the user presses an
+  /// arrow to move a display and the pane slides away under them, which reads as
+  /// the app doing something else rather than as the app waiting.
   private func nudge(_ id: CGDirectDisplayID, _ direction: ArrangementDirection) -> KeyPress.Result {
-    guard !isApplying else { return .ignored }
+    guard !isApplying else { return .handled }
     guard let moved = ArrangementDockPolicy.move(id, direction, in: displayed) else {
       return .ignored
     }

@@ -229,31 +229,32 @@ struct ArrangementPane: View {
           .padding(.horizontal, 16)
 
           ArrangementCanvasView(
-          arrangement: displayedArrangement,
-          name: displayName,
-          isVirtual: { virtualIDs.contains($0) },
-          isSynthesisPair: { panels[$0] != nil },
-          // Not for the settle, which is this pane's: the canvas refuses to
-          // SEED a new drag or nudge from a layout that has only been requested,
-          // because a refused request is never achieved.
-          isApplying: coordinator.isApplying,
-          selection: reconciledSelection,
-          onPropose: { propose($0) },
-          onRefuse: { problems in
-            // The sentence below is a conditional child of a `Form` row: a keyed
-            // `.animation` on a `Group` around it animates nothing, and on the
-            // always-present `VStack` inside the row it fades the sentence in but
-            // snaps it out (measured 2026-08-17), so the write carries the
-            // transaction instead. `refusal` is this view's own state and needs no
-            // mirror: the mirror shape exists to get a coordinator's write inside
-            // a `withAnimation`, and this write is already inside the view. The
-            // whole value moves, so a second refusal with a longer sentence
-            // animates its height rather than snapping to it.
-            withAnimation(Motion.notice(reduceMotion: reduceMotion)) {
-              refusal = problems
+            arrangement: displayedArrangement,
+            name: displayName,
+            isVirtual: { virtualIDs.contains($0) },
+            isSynthesisPair: { panels[$0] != nil },
+            // Not for the settle, which is this pane's: the canvas refuses to
+            // compose a new request from a layout that has only been requested,
+            // because a refused request is never achieved. That covers the drag,
+            // the arrow keys, the tile's context menu and its VoiceOver action.
+            isApplying: coordinator.isApplying,
+            selection: reconciledSelection,
+            onPropose: { propose($0) },
+            onRefuse: { problems in
+              // The sentence below is a conditional child of a `Form` row: a keyed
+              // `.animation` on a `Group` around it animates nothing, and on the
+              // always-present `VStack` inside the row it fades the sentence in but
+              // snaps it out (measured 2026-08-17), so the write carries the
+              // transaction instead. `refusal` is this view's own state and needs no
+              // mirror: the mirror shape exists to get a coordinator's write inside
+              // a `withAnimation`, and this write is already inside the view. The
+              // whole value moves, so a second refusal with a longer sentence
+              // animates its height rather than snapping to it.
+              withAnimation(Motion.notice(reduceMotion: reduceMotion)) {
+                refusal = problems
+              }
+              refusalToken &+= 1
             }
-            refusalToken &+= 1
-          }
           )
           .frame(maxWidth: .infinity, alignment: .center)
         }
@@ -333,14 +334,27 @@ struct ArrangementPane: View {
   /// longer the one on screen.
   private func propose(_ next: DisplayArrangement) {
     coordinator.apply(next)
-    // A proposal equal to what is already showing arms nothing. The coordinator
-    // drops it at its own no-op guard before anything is applied, so
-    // `isApplying` never rises and nothing would ever clear a settle set here,
-    // leaving the map holding a request forever. The reachable case is the
-    // canvas's VoiceOver "Use as Main Display" action, which has no `.disabled`
-    // guard the way the context-menu button does, so a rotor user can invoke it
-    // on the display that is already main.
-    guard next != displayedArrangement else { return }
+    // A proposal equal to what is already showing arms nothing.
+    //
+    // `isApplying` DOES rise for one: `ArrangementCoordinator.apply` raises it
+    // synchronously and unconditionally before it enqueues anything. What makes
+    // the guard load-bearing is that it comes straight back down again.
+    // `performApply` reaches its no-op `return` with no `await` in front of it,
+    // so the whole true-then-false transition can complete before SwiftUI
+    // evaluates a body; `onChange` compares against the value captured at the
+    // last evaluation, so it may never fire, and a settle set here would then be
+    // held for the life of the pane. `displayedArrangement` would go on ignoring
+    // the coordinator, and connecting a second display would leave the map
+    // drawing one tile.
+    //
+    // Compared on the ANCHORED form, which is the comparison the coordinator's
+    // own guard makes. Raw equality is narrower, and the gap is reachable with a
+    // single display attached: dragging the only tile anywhere produces a pure
+    // unanchored translation, which passes here and is dropped there, on that
+    // same no-await path. Two guards that disagree about what a no-op is are
+    // exactly one guard too many.
+    guard (next.anchored(preservingMainOf: displayedArrangement) ?? next) != displayedArrangement
+    else { return }
     withAnimation(Motion.settle(reduceMotion: reduceMotion)) { settling = next }
   }
 
@@ -352,6 +366,12 @@ struct ArrangementPane: View {
   /// What the button will do, or why it will not — never a bare grey button.
   /// Ordered by which fact outlives the others: `isApplying` is transient, so
   /// the structural reasons are stated first.
+  ///
+  /// A consequence of that order worth naming, because it has been read the
+  /// other way: the waiting sentence is reached only with a display selected
+  /// that is not already main. It explains THIS button, and it is not a general
+  /// account of why the canvas refuses a gesture. Nothing in the canvas may lean
+  /// on it to put a refusal into words.
   private var mainDisplayCaption: SettingsCaption {
     guard let id = reconciledSelection.wrappedValue else {
       // It said "click one to make it the main display", which is not what a
