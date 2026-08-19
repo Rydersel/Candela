@@ -41,11 +41,35 @@ while index < arguments.count {
     defer { index += 1 }
     return arguments[index]
   }
+  // Every value is parsed strictly. A malformed one used to fall back to the
+  // default in silence, so a run recorded as fitted at 0.6 could have been asked
+  // for `0,6` and run at 0.6 with nothing in the output saying which value it
+  // used. An unreadable flag is a run whose parameters are unknown.
   switch flag {
   case "--log": directory = URL(fileURLWithPath: value())
-  case "--fit-fraction": fitFraction = Double(value()) ?? 0.6
-  case "--top-apps": topApps = Int(value()) ?? 8
-  case "--objective": objective = value()
+  case "--fit-fraction":
+    let raw = value()
+    guard let parsed = Double(raw), parsed.isFinite, parsed > 0, parsed < 1 else {
+      print("--fit-fraction: expected a number strictly between 0 and 1, got \(raw)")
+      exit(2)
+    }
+    fitFraction = parsed
+  case "--top-apps":
+    let raw = value()
+    guard let parsed = Int(raw), parsed > 0 else {
+      print("--top-apps: expected a positive integer, got \(raw)")
+      exit(2)
+    }
+    topApps = parsed
+  case "--objective":
+    let raw = value()
+    // An unrecognised name used to run RMSE and label nothing, which is the same
+    // defect wearing a different flag.
+    guard raw == "rmse" || raw == "pearson" else {
+      print("--objective: expected rmse or pearson, got \(raw)")
+      exit(2)
+    }
+    objective = raw
   case "--fit-displays":
     fitDisplays = value().split(separator: ",").map(String.init)
   default:
@@ -113,6 +137,34 @@ func agreement(_ a: [Double], _ b: [Double], _ depth: Int) -> Int {
   Set(hottest(a, depth)).intersection(Set(hottest(b, depth))).count
 }
 
+/// How many of the top `depth` slots were filled by CELL INDEX rather than by
+/// value.
+///
+/// `hottest` breaks ties by lowest index, and panel-native cell order is
+/// row-major, so a tie at the boundary hands the decile to the top rows: on a
+/// laptop that is the menu bar and the title bars, which is where the measured
+/// map is hot. Under `.summedCoverage` the V0 map saturates and the boundary
+/// tie swallows the whole decile: 8 distinct values across 240 cells on the
+/// built-in, 45 on the Dell, and in both cases every one of the 24 slots came
+/// from numbering. A model that predicts nothing then scores 14/24 against a
+/// chance value of 2.4, and a real model has to reach 17 to clear the plus-3
+/// gate. That is a fail-despite-being-better generator, so a decile decided
+/// this way is refused rather than scored.
+///
+/// The cutoff is the highest value that did NOT make the cut. Everything
+/// strictly above it is in the decile on its own merit; the remaining slots
+/// came out of the tie group sitting on the boundary.
+func indexDecidedSlots(_ values: [Double], _ depth: Int) -> Int {
+  guard values.count > depth, depth > 0 else { return 0 }
+  let cutoff = values.sorted(by: >)[depth]
+  return max(0, depth - values.filter { $0 > cutoff }.count)
+}
+
+func varies(_ values: [Double]) -> Bool {
+  guard let first = values.first else { return false }
+  return values.contains { $0 != first }
+}
+
 // MARK: - Prepared records
 //
 // Window coverage is the expensive part and does not depend on the parameters,
@@ -140,6 +192,18 @@ struct Prepared {
   let elapsed: Double
   let recordedBaseline: [Double]
   let key: String
+  /// Which image the backdrop came from. Recorded per sample and, until now,
+  /// never read: the wallpaper changed mid-log and no line said so.
+  let wallpaperPath: String
+
+  /// Names the backdrop for the split-composition report. A structureless
+  /// backdrop constrains nothing, so the reader has to be able to see one.
+  var backdropLabel: String {
+    guard let backdrop else { return "(refused)" }
+    let name = wallpaperPath.isEmpty ? "(unnamed)" : String(wallpaperPath.split(separator: "/").last ?? "")
+    guard let low = backdrop.min(), let high = backdrop.max() else { return name }
+    return high - low < 1e-6 ? "\(name) [flat]" : name
+  }
 
   /// `ExposureModel.admitted(_:)`, mirrored. Any drift between the two is a
   /// divergence the equivalence control will report, so this reads as closely
@@ -164,18 +228,45 @@ struct Prepared {
     return fraction > 0 && fraction < limit
   }
 
+  /// Admission is driven by the PARAMETERS, never by a separate flag. A
+  /// parallel boolean was its own divergence source: `.baseline` carries no
+  /// chrome limit, so the shipped model admitted none while this path appended
+  /// it anyway, and the equivalence control caught exactly one mismatch per
+  /// record. One switch, one meaning.
+  ///
+  /// Chrome is BEHIND every app window: it is what a window occludes, never the
+  /// reverse, so it goes last, matching `inputsIncludingChrome`, which is
+  /// `windows + chrome`.
+  func admitted(_ parameters: ExposureModelParameters) -> [PreparedWindow] {
+    (windows + chrome).filter { admits($0, parameters) }
+  }
+
+  /// Coverage each admitted window actually contributes under topmost-wins.
+  ///
+  /// That is the only mass a prior on it can move, so it is the only honest
+  /// basis for ranking which apps and layers are worth a free parameter.
+  /// Ranking on RAW coverage credits a permanently buried window for area a
+  /// nearer window owns, so a window nobody can see can take a slot from a
+  /// visible app.
+  func visibleMass(_ parameters: ExposureModelParameters) -> [(owner: String, layer: Int, mass: Double)] {
+    var remaining = [Double](repeating: 1, count: PanelGrid.cellCount)
+    var claimed: [(owner: String, layer: Int, mass: Double)] = []
+    for window in admitted(parameters) {
+      var mass = 0.0
+      for cell in 0..<PanelGrid.cellCount {
+        let claim = min(window.coverage[cell], remaining[cell])
+        guard claim > 0 else { continue }
+        mass += claim
+        remaining[cell] = max(0, remaining[cell] - claim)
+      }
+      claimed.append((window.owner, window.layer, mass))
+    }
+    return claimed
+  }
+
   func modelled(_ parameters: ExposureModelParameters) -> [Double] {
     let prior = dark ? parameters.darkAppearancePrior : parameters.lightAppearancePrior
-    // Admission is driven by the PARAMETERS, never by a separate flag. A
-    // parallel boolean was its own divergence source: `.baseline` carries no
-    // chrome limit, so the shipped model admitted none while this path appended
-    // it anyway, and the equivalence control caught exactly one mismatch per
-    // record. One switch, one meaning.
-    //
-    // Chrome is BEHIND every app window: it is what a window occludes, never
-    // the reverse, so it goes last, matching `inputsIncludingChrome`, which is
-    // `windows + chrome`.
-    let all = (windows + chrome).filter { admits($0, parameters) }
+    let all = admitted(parameters)
     switch parameters.compositing {
     case .summedCoverage:
       var coverage = [Double](repeating: 0, count: PanelGrid.cellCount)
@@ -204,6 +295,18 @@ struct Prepared {
       }
     }
   }
+}
+
+/// `ExposureModel.usableWallpaper`, mirrored: taken whole or refused whole.
+///
+/// The fast path took the recorded array raw while the shipped model validates
+/// it, so a malformed wallpaper would be used by the harness and refused by the
+/// model, or would index-crash on a short array. This mirror is documented as
+/// exact and this was the one place it was not.
+func usableWallpaper(_ cells: [Double]?) -> [Double]? {
+  guard let cells, cells.count == PanelGrid.cellCount else { return nil }
+  guard cells.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= 1 }) else { return nil }
+  return cells
 }
 
 func prepare(_ record: ModelReplayRecord) -> Prepared {
@@ -243,9 +346,11 @@ func prepare(_ record: ModelReplayRecord) -> Prepared {
         coverage: transform.coverage(ofDisplayRect: $0.bounds))
     }
   return Prepared(
-    windows: windows, chrome: chrome, backdrop: record.wallpaper, dark: record.appearanceIsDark,
+    windows: windows, chrome: chrome, backdrop: usableWallpaper(record.wallpaper),
+    dark: record.appearanceIsDark,
     measured: record.measuredPanel, elapsed: record.elapsed,
-    recordedBaseline: record.modelledBaseline, key: record.display.persistenceKey)
+    recordedBaseline: record.modelledBaseline, key: record.display.persistenceKey,
+    wallpaperPath: record.wallpaperPath)
 }
 
 /// Accumulated (measured, modelled) maps over a set of records, in the same
@@ -265,7 +370,8 @@ func accumulate(
   return (measured, modelled)
 }
 
-/// Higher is better, for both objectives.
+/// Higher is better, for both objectives. `nil` means this group carries no
+/// information at all, which is a property of the DATA.
 ///
 /// **Pearson cannot fit absolute luminance, and that is not a subtlety.** It is
 /// invariant under `y -> a*y + b`, so scaling and offsetting every prior leaves
@@ -281,10 +387,18 @@ func accumulate(
 /// mean only so the number reads comparably across panels.
 func score(
   _ records: [Prepared], _ parameters: ExposureModelParameters
-) -> Double {
+) -> Double? {
   if objective == "pearson" {
     let (measured, modelled) = accumulate(records, parameters)
-    return pearson(measured, modelled) ?? -.infinity
+    // A flat MEASURED map is a property of the data: this group can say nothing
+    // about any candidate, so it drops out for everyone alike.
+    guard varies(measured) else { return nil }
+    // A flat MODELLED map is a property of the PARAMETERS. Returning nothing
+    // for it let a candidate that degenerated one panel drop that panel out of
+    // the mean and win on the rest, which is the incentive the sentinel fix
+    // never touched. Zero modelled variance is the worst correlation there is,
+    // so it scores as one.
+    return pearson(measured, modelled) ?? -1
   }
   // Fit on PER-RECORD residuals, not on the accumulated map.
   //
@@ -307,7 +421,7 @@ func score(
       count += 1
     }
   }
-  guard count > 0, total > 0 else { return -.infinity }
+  guard count > 0, total > 0 else { return nil }
   let mean = total / Double(count)
   return -((squared / Double(count)).squareRoot() / mean)
 }
@@ -334,11 +448,9 @@ func scoreJointly(
   // across 2 panels" while one panel contributed nothing, ever, and the
   // objective rewarded a candidate for breaking a group out of the average.
   for group in groups where !group.isEmpty {
-    let value = score(group, parameters)
-    if value.isFinite {
-      total += value
-      counted += 1
-    }
+    guard let value = score(group, parameters), value.isFinite else { continue }
+    total += value
+    counted += 1
   }
   return counted > 0 ? total / Double(counted) : -.infinity
 }
@@ -383,12 +495,22 @@ for record in records {
     default: []
   ].append(record)
 }
+// Dictionary order is not stable between runs of the same binary on the same
+// log, so every ranking and every printed list breaks ties on the key. Without
+// it the panel sections came out in a different order run to run and a
+// run-to-run diff was noise.
+let orderedDisplays = byDisplay.map { (key: $0.key, records: $0.value) }
+  .sorted {
+    $0.records.count == $1.records.count
+      ? $0.key < $1.key : $0.records.count > $1.records.count
+  }
+
 let identities = Set(records.map(\.display.persistenceKey))
 if byDisplay.count > identities.count {
   print(
     "\nNOTE: \(identities.count) panel identities produced \(byDisplay.count) geometry groups.")
   print("A panel changed size or rotation mid-log; its records are scored separately.")
-  for (key, group) in byDisplay.sorted(by: { $0.value.count > $1.value.count }) {
+  for (key, group) in orderedDisplays {
     print("  \(key.prefix(8))  \(key.split(separator: "|").last ?? "")  \(group.count) records")
   }
 }
@@ -429,19 +551,35 @@ func verifyPrepared(_ raw: [ModelReplayRecord]) -> Bool {
   // and nobody read the warning.
   var mismatches = 0
   var probes: [ExposureModelParameters] = [.baseline]
+  // Priors drawn from the log's own owners and layers, so a probe cannot miss
+  // for want of an app that happens not to be on this panel.
+  let probeOwners = Set(raw.flatMap { $0.windows.map(\.owner) + $0.chrome.map(\.owner) }).sorted()
+  // EVERY layer, not chrome's alone. Both implementations resolve
+  // `appPriors[owner] ?? layerPriors[layer] ?? appearancePrior`, and the layer
+  // table used to be seeded only from chrome, whose owners on this rig all
+  // carry an app prior already. The app branch therefore short-circuited every
+  // window and the layer branch was never reached on either side: a lookup
+  // deliberately keyed wrong still printed `yes` on all three panels. Ladder
+  // rungs V2 and V3 consist of nothing but layer priors, so two whole rungs ran
+  // with no working control.
+  let probeLayers = Set(raw.flatMap { $0.windows.map(\.layer) + $0.chrome.map(\.layer) }).sorted()
   for compositing in [ExposureModelParameters.Compositing.summedCoverage, .topmostWins] {
-    var probe = ExposureModelParameters.baseline
-    probe.compositing = compositing
-    probe.chromeCoverageLimit = compositing == .topmostWins ? ladderChromeLimit : 0.08
-    // Priors drawn from the log's own owners and layers, so the probe cannot
-    // miss for want of an app that happens not to be on this panel.
-    for (index, owner) in Set(raw.flatMap { $0.windows.map(\.owner) }).sorted().enumerated() {
-      probe.appPriors[owner] = Double(index % 5) / 4.0
+    var layersOnly = ExposureModelParameters.baseline
+    layersOnly.compositing = compositing
+    layersOnly.chromeCoverageLimit = compositing == .topmostWins ? ladderChromeLimit : 0.08
+    for (index, layer) in probeLayers.enumerated() {
+      layersOnly.layerPriors[layer] = Double(index % 4) / 3.0
     }
-    for (index, layer) in Set(raw.flatMap { $0.chrome.map(\.layer) }).sorted().enumerated() {
-      probe.layerPriors[layer] = Double(index % 4) / 3.0
+    // No app priors at all, so every admitted window resolves THROUGH the layer
+    // table and a wrong key changes the answer.
+    probes.append(layersOnly)
+    // And again with app priors, so the precedence between the two branches is
+    // exercised rather than only one of them.
+    var withApps = layersOnly
+    for (index, owner) in probeOwners.enumerated() {
+      withApps.appPriors[owner] = Double(index % 5) / 4.0
     }
-    probes.append(probe)
+    probes.append(withApps)
   }
   // Order sensitivity is a property of the CODE, not of a log: two windows that
   // do not overlap are legitimately order-invariant, and a desktop of tiled
@@ -606,6 +744,21 @@ func sensitivity(
   return moved
 }
 
+/// Sensitivity is a change IN the objective, so what counts as "moved" has to be
+/// measured against the objective's own size.
+///
+/// The old test was an absolute 1e-6, finer than the 5 decimal places the value
+/// printed at, so anything in [1e-6, 5e-6) printed `0.00000` with no label. On
+/// the verdict run `layer 24` had sensitivity 4.92e-6 and published a fitted
+/// luminance of 0.475 unlabelled, while `layer 20` at exactly 0.0 was labelled.
+/// The objective is a normalised RMSE around 1.2, so that is four parts per
+/// million under a plus or minus 0.25 swing of the parameter: nothing.
+let identifiabilityFraction = 1e-3
+
+func identifiabilityThreshold(_ base: Double) -> Double {
+  base.isFinite ? max(1e-9, abs(base) * identifiabilityFraction) : 1e-9
+}
+
 /// MP2 as amended 2026-08-18. Three conditions, all required.
 ///
 /// The previous predicate was `multiple >= 2.7 && top10 >= 5`, and it was broken
@@ -618,7 +771,8 @@ func sensitivity(
 ///   measured 3.17x. Measured on tomorrow-shaped data is 4.48x, so the same
 ///   constant demanded 60%. The bar loosened and nobody chose that.
 /// - **A ranking half that is free at this accumulation length.** V0, the
-///   shipped model, already scores 5/10 here, where over #120's four days it
+///   shipped model, already scores 5/10 here, where over the paired comparison
+///   gate's four-day accumulation it
 ///   scored 1/10. Top-10 overlap is not portable across accumulation length, so
 ///   the bar collapsed to the peak criterion alone.
 ///
@@ -660,7 +814,7 @@ func ceilingDecile(_ hold: [Prepared], apps: [String], layers: [Int]) -> Int {
 
 func passes(
   modelledPeak: Double, measuredPeak: Double, decile: Int, baselineDecile: Int,
-  ceiling: Int, holdout: Int
+  ceiling: Int, holdout: Int, indexDecided: Int
 ) -> (ok: Bool, why: String) {
   guard holdout >= ExposureAccumulator.minimumSamplesForAnalysis else {
     return (false, "n<\(ExposureAccumulator.minimumSamplesForAnalysis)")
@@ -669,6 +823,17 @@ func passes(
   let ratio = modelledPeak / measuredPeak
   guard ratio >= 0.85, ratio <= 1.18 else {
     return (false, String(format: "peak %.3f", ratio))
+  }
+  // Refused, never scored. When the decile boundary sits inside a tie group,
+  // `hottest` fills the remaining slots by cell index, and row-major order puts
+  // those on the top rows where a laptop's menu bar and title bars live. Both
+  // sides count: the rung's own map and the V0 map the plus-3 gate measures it
+  // against.
+  guard indexDecided == 0 else {
+    return (
+      false,
+      "decile REFUSED: \(indexDecided)/24 slots decided by cell index rather than by value"
+    )
   }
   // The decile gate is decided FIRST, and the reference only ever explains a
   // failure. It can never veto a rung that cleared the bar.
@@ -694,12 +859,20 @@ func passes(
     "decile \(signed(decile - baselineDecile)), reference \(signed(ceiling - baselineDecile))")
 }
 
-/// Returns this rung's hottest-DECILE agreement so the next rung can be judged
-/// against the baseline rather than against an absolute number.
+/// This rung's hottest-DECILE agreement, so the next rung can be judged against
+/// the baseline rather than against an absolute number, plus how much of that
+/// decile the values did not decide.
+struct RungScore {
+  let decile: Int
+  /// Carried forward because the plus-3 gate measures every later rung against
+  /// the V0 decile: if that reference was index-decided, so is the comparison.
+  let indexDecided: Int
+}
+
 @discardableResult
 func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelParameters,
-  freeParameters: Int, baselineDecile: Int?, ceiling: Int,
-  fitGroups: [[Prepared]] = []) -> Int
+  freeParameters: Int, baseline: RungScore?, ceiling: Int,
+  fitGroups: [[Prepared]] = []) -> RungScore
 {
   let (measured, modelled) = accumulate(records, parameters)
   let p = pearson(measured, modelled) ?? .nan
@@ -712,33 +885,39 @@ func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelP
   // stays blocked whatever the gate says about the peak.
   let top1 = agreement(measured, modelled, 1)
   let top24 = agreement(measured, modelled, 24)
+  // Both maps, and the V0 map the gate compares against: a tie on either side
+  // is a slot `hottest` filled from the cell numbering.
+  let ownTies = max(indexDecidedSlots(measured, 24), indexDecidedSlots(modelled, 24))
+  let ties = max(ownTies, baseline?.indexDecided ?? 0)
 
   // Free parameters are counted as those the objective can actually move.
   // The printed count is what a reader uses to judge overfitting, and a prior
   // the data cannot constrain is not a degree of freedom that was spent.
+  let threshold = fitGroups.isEmpty
+    ? .infinity : identifiabilityThreshold(scoreJointly(fitGroups, parameters))
   var effective = -1
   if !fitGroups.isEmpty {
     var live = 0
-    for app in parameters.appPriors.keys
+    for app in parameters.appPriors.keys.sorted()
     where sensitivity(fitGroups, parameters, get: { $0.appPriors[app] ?? 0 },
-      set: { $0.appPriors[app] = $1 }) > 1e-6 { live += 1 }
-    for layer in parameters.layerPriors.keys
+      set: { $0.appPriors[app] = $1 }) > threshold { live += 1 }
+    for layer in parameters.layerPriors.keys.sorted()
     where sensitivity(fitGroups, parameters, get: { $0.layerPriors[layer] ?? 0 },
-      set: { $0.layerPriors[layer] = $1 }) > 1e-6 { live += 1 }
+      set: { $0.layerPriors[layer] = $1 }) > threshold { live += 1 }
     for probe in [
       (get: { (p: ExposureModelParameters) in p.lightAppearancePrior },
        set: { (p: inout ExposureModelParameters, v: Double) in p.lightAppearancePrior = v }),
       (get: { (p: ExposureModelParameters) in p.darkAppearancePrior },
        set: { (p: inout ExposureModelParameters, v: Double) in p.darkAppearancePrior = v }),
-    ] where sensitivity(fitGroups, parameters, get: probe.get, set: probe.set) > 1e-6 {
+    ] where sensitivity(fitGroups, parameters, get: probe.get, set: probe.set) > threshold {
       live += 1
     }
     effective = live
   }
 
-  let verdict = baselineDecile.map {
+  let verdict = baseline.map {
     passes(modelledPeak: multiple, measuredPeak: measuredMultiple, decile: top24,
-      baselineDecile: $0, ceiling: ceiling, holdout: records.count)
+      baselineDecile: $0.decile, ceiling: ceiling, holdout: records.count, indexDecided: ties)
   }
   // A prior resting on a clamp is a misspecification signal, not a fit.
   // Every fitted family, not just apps: V2 fits nothing BUT layer priors, so
@@ -748,35 +927,37 @@ func report(_ label: String, _ records: [Prepared], _ parameters: ExposureModelP
   // nothing, and the row never said WHICH prior it meant.
   var pinnedNames: [String] = []
   if !fitGroups.isEmpty {
-    for (app, value) in parameters.appPriors where value <= 0 || value >= 1 {
+    for (app, value) in parameters.appPriors.sorted(by: { $0.key < $1.key })
+    where value <= 0 || value >= 1 {
       if sensitivity(fitGroups, parameters, get: { $0.appPriors[app] ?? 0 },
-        set: { $0.appPriors[app] = $1 }) > 1e-6 { pinnedNames.append(app) }
+        set: { $0.appPriors[app] = $1 }) > threshold { pinnedNames.append(app) }
     }
-    for (layer, value) in parameters.layerPriors where value <= 0 || value >= 1 {
+    for (layer, value) in parameters.layerPriors.sorted(by: { $0.key < $1.key })
+    where value <= 0 || value >= 1 {
       if sensitivity(fitGroups, parameters, get: { $0.layerPriors[layer] ?? 0 },
-        set: { $0.layerPriors[layer] = $1 }) > 1e-6 { pinnedNames.append("layer \(layer)") }
+        set: { $0.layerPriors[layer] = $1 }) > threshold { pinnedNames.append("layer \(layer)") }
     }
     if parameters.darkAppearancePrior <= 0 || parameters.darkAppearancePrior >= 1,
       sensitivity(fitGroups, parameters, get: { $0.darkAppearancePrior },
-        set: { $0.darkAppearancePrior = $1 }) > 1e-6 { pinnedNames.append("dark") }
+        set: { $0.darkAppearancePrior = $1 }) > threshold { pinnedNames.append("dark") }
     // The light prior is the one the run card asks the operator to exercise, so
     // it is the one most likely to land on a clamp during the session. Its check
     // was dropped when this block was rewritten.
     if parameters.lightAppearancePrior <= 0 || parameters.lightAppearancePrior >= 1,
       sensitivity(fitGroups, parameters, get: { $0.lightAppearancePrior },
-        set: { $0.lightAppearancePrior = $1 }) > 1e-6 { pinnedNames.append("light") }
+        set: { $0.lightAppearancePrior = $1 }) > threshold { pinnedNames.append("light") }
   }
   let pinned = !pinnedNames.isEmpty
   print(
     String(
-      format: "  %-30@ params %2d/%-2d r %6.3f  rho %6.3f  peak %.2fx/%.2fx = %.2f  top1 %d/1  decile %2d/24  %@%@",
+      format: "  %-30@ params %2d/%-2d r %6.3f  rho %6.3f  peak %.2fx/%.2fx = %.2f  top1 %d/1  decile %2d/24 (idx %2d)  %@%@",
       label as NSString, effective >= 0 ? effective : freeParameters, freeParameters,
       p, s, multiple, measuredMultiple,
-      measuredMultiple > 0 ? multiple / measuredMultiple : .nan, top1, top24,
+      measuredMultiple > 0 ? multiple / measuredMultiple : .nan, top1, top24, ownTies,
       (verdict.map { $0.ok ? "PASS" : "fail (\($0.why))" } ?? "baseline") as NSString,
       (pinned ? "  [pinned at a clamp: \(pinnedNames.joined(separator: ", "))]" : "")
         as NSString))
-  return top24
+  return RungScore(decile: top24, indexDecided: ownTies)
 }
 
 // MARK: - Run
@@ -788,8 +969,58 @@ struct DisplayRun {
   let hold: [Prepared]
 }
 
+/// What each split actually contains, because the temporal cut can land on a
+/// change in the world and nothing else reports it.
+///
+/// It did here: the split landed on the appearance change, leaving the fit half
+/// with 0 light records and the holdout with 86 of 89. The light prior is then
+/// correctly labelled unidentifiable while driving 97 percent of the scored
+/// data at its unfitted default. Every ingredient was already present and no
+/// line assembled them.
+func describeSplit(_ label: String, _ records: [Prepared]) {
+  let dark = records.filter(\.dark).count
+  var backdrops: [String: Int] = [:]
+  for record in records { backdrops[record.backdropLabel, default: 0] += 1 }
+  let listed = backdrops.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
+    .map { "\($0.key) \($0.value)" }.joined(separator: ", ")
+  print("  \(label) \(records.count) records: dark \(dark), light \(records.count - dark)"
+    + "; backdrop \(listed)")
+}
+
+/// A parameter the fit half cannot see, driving most of the half it is scored
+/// on, is the shape that turns a same-condition comparison into a
+/// cross-condition generalisation claim without saying so.
+func warnUnidentifiable(_ fit: [Prepared], _ hold: [Prepared]) {
+  guard !hold.isEmpty else { return }
+  for (name, matches) in [
+    ("light appearance", { (record: Prepared) in !record.dark }),
+    ("dark appearance", { (record: Prepared) in record.dark }),
+  ] {
+    let inFit = fit.filter(matches).count
+    let inHold = hold.filter(matches).count
+    guard inFit == 0, inHold * 2 > hold.count else { continue }
+    print(String(
+      format: "  WARNING: the %@ prior is unfittable here (0 of %d fit records) while its "
+        + "condition drives %d of %d holdout records (%.0f%%). Every score below rests on its "
+        + "unfitted default.",
+      name, fit.count, inHold, hold.count, 100 * Double(inHold) / Double(hold.count)))
+  }
+  // The wallpaper changed mid-log, recorded per record and never read until
+  // now. A backdrop the fit half never saw is an untested input under the
+  // scores, and a structureless one constrains nothing at all.
+  let known = Set(fit.map(\.backdropLabel))
+  let unseen = hold.filter { !known.contains($0.backdropLabel) }
+  guard !unseen.isEmpty else { return }
+  var names: [String: Int] = [:]
+  for record in unseen { names[record.backdropLabel, default: 0] += 1 }
+  print(String(
+    format: "  WARNING: %d of %d holdout records (%.0f%%) use a backdrop the fit half never saw: %@",
+    unseen.count, hold.count, 100 * Double(unseen.count) / Double(hold.count),
+    names.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")))
+}
+
 var runs: [DisplayRun] = []
-for (key, raw) in byDisplay.sorted(by: { $0.value.count > $1.value.count }) {
+for (key, raw) in orderedDisplays {
   let shape = raw[0].display
   print("\n=== \(shape.persistenceKey)  \(shape.pixelWidth)x\(shape.pixelHeight) rot \(shape.rotation.rawValue)  \(raw.count) records")
   guard runControls(raw), verifyPrepared(raw) else {
@@ -798,11 +1029,12 @@ for (key, raw) in byDisplay.sorted(by: { $0.value.count > $1.value.count }) {
   }
   let prepared = raw.map(prepare)
   let split = max(1, min(prepared.count - 1, Int(Double(prepared.count) * fitFraction)))
-  print("  fit \(split) records, holdout \(prepared.count - split) records")
-  runs.append(
-    DisplayRun(
-      key: key, shape: shape, fit: Array(prepared.prefix(split)),
-      hold: Array(prepared.suffix(from: split))))
+  let fit = Array(prepared.prefix(split))
+  let hold = Array(prepared.suffix(from: split))
+  describeSplit("fit    ", fit)
+  describeSplit("holdout", hold)
+  warnUnidentifiable(fit, hold)
+  runs.append(DisplayRun(key: key, shape: shape, fit: fit, hold: hold))
 }
 
 guard !runs.isEmpty else {
@@ -831,52 +1063,66 @@ var appWeight: [String: Double] = [:]
 // decide which apps get free parameters is a softer form of the failure MP14
 // exists to prevent, and reading panels that --fit-displays removed lets an app
 // that never appears in the fit earn a parameter applied to the holdout.
+// Ranked through the LADDER's own parameterisation, so the table can never
+// offer a slot the admission rule refuses.
+//
+// Two defects lived in the loop this replaces. It credited every ordinary
+// window without checking the layer at all, and `admitted` only ever admits a
+// layer inside `includedLayers` or strictly BELOW its lower bound: anything
+// above is unreachable. `layer 2147483630` (Window Server, thousands of
+// instances and a huge coverage mass) therefore took a top-four slot in both
+// published runs, printed as unidentifiable, and displaced a layer that moves,
+// so V2 and V3 fitted one live lever out of four while declaring six free
+// parameters. It also ranked on RAW coverage, so a permanently buried window
+// could win a slot from a visible app under topmost-wins; the chrome loop had
+// already learned that lesson and this one had not inherited it.
+var ranking = ExposureModelParameters.baseline
+ranking.compositing = .topmostWins
+ranking.chromeCoverageLimit = ladderChromeLimit
+
 for group in fitGroups {
   for record in group {
-    for window in record.windows {
-      let mass = window.coverage.reduce(0, +) * record.elapsed
-      layerWeight[window.layer, default: 0] += mass
-      appWeight[window.owner, default: 0] += mass
-    }
-    // Chrome layers count toward the LAYER table only. Every ordinary window is
-    // layer 0, so without these the table is always empty and V2 is byte
-    // identical to V1 while printing as a rung that ran. On this rig exactly
-    // one chrome layer survives the coverage filter (the menu-bar strips, at
-    // fraction ~0.085); the Dock, Wallpaper and WindowServer backdrops sit at
-    // exactly 1.0 and are refused. The table can also pick up ordinary
-    // non-zero app layers such as 3 when any are present, which is why the
-    // rung is not purely about chrome.
-    for window in record.chrome {
-      // Only ADMISSIBLE coverage counts. Ranking by raw coverage let the Dock
-      // and the WindowServer backdrop, both at exactly 1.0 and therefore
-      // refused at every limit, take the top two of four slots on weight ~12x
-      // the menu bar's, squeezing out real app layers and printing as
-      // UNIDENTIFIABLE every run. That biases the ladder toward no-go.
-      let fraction = window.coverage.reduce(0, +) / Double(PanelGrid.cellCount)
-      // The LADDER's limit, not merely "less than the whole display". A chrome
-      // layer landing between the two bounds would otherwise take a ranking slot
-      // it can never be admitted into, which is the dead-slot defect one data
-      // shape away.
-      guard fraction > 0, fraction < ladderChromeLimit else { continue }
-      layerWeight[window.layer, default: 0] += window.coverage.reduce(0, +) * record.elapsed
+    // Chrome carries the LAYER table on an ordinary desktop: every app window
+    // is layer 0, so without it the table is empty and V2 is byte identical to
+    // V1 while printing as a rung that ran. `admitted` puts chrome behind the
+    // app windows, exactly where the model does.
+    for entry in record.visibleMass(ranking) {
+      let mass = entry.mass * record.elapsed
+      guard mass > 0 else { continue }
+      layerWeight[entry.layer, default: 0] += mass
+      appWeight[entry.owner, default: 0] += mass
     }
   }
 }
-let layers = layerWeight.filter { $0.key != 0 }.sorted { $0.value > $1.value }.prefix(4).map(\.key)
-// Apps with no coverage on these panels cannot be fitted, however often they
-// appear in the window list. `coverage` is already clipped to the display, so
-// an app living on another panel scores ~0 here.
+// Layer 0 carries every ordinary window, so a prior on it only restates the
+// appearance prior.
+let layers = layerWeight.filter { $0.key != 0 }
+  .sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
+  .prefix(4).map(\.key)
+// Apps with next to no visible coverage on these panels cannot be fitted,
+// however often they appear in the window list. `coverage` is already clipped
+// to the display, so an app living on another panel scores ~0 here.
 let heaviest = appWeight.values.max() ?? 0
-let apps = appWeight.filter { $0.value > heaviest * 0.01 }
-  .sorted { $0.value > $1.value }.prefix(topApps).map(\.key)
-let excluded = appWeight.filter { $0.value <= heaviest * 0.01 }
-  .sorted { $0.value > $1.value }.map(\.key)
+let appFloor = heaviest * 0.01
+let rankedApps = appWeight.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
+let carrying = rankedApps.filter { $0.value > appFloor }
+let apps = carrying.prefix(topApps).map(\.key)
+// The three lists partition every owner the fit split saw. They used not to: an
+// app above the floor but outside the top N appeared in neither and vanished
+// from the report entirely.
+let overflow = carrying.dropFirst(topApps).map(\.key)
+let tooLight = rankedApps.filter { $0.value <= appFloor }.map(\.key)
 
-print("\n=== joint fit across \(runs.count) panels")
+print("\n=== joint fit across \(fitGroups.count) of \(runs.count) panels")
 print("  layers: \(layers)")
 print("  apps:   \(apps)")
-if !excluded.isEmpty {
-  print("  excluded (no coverage on the FITTED panels): \(excluded)")
+if !overflow.isEmpty {
+  print("  above the floor but outside --top-apps \(topApps): \(overflow)")
+}
+if !tooLight.isEmpty {
+  // Named for what it measures. This said "no coverage on the FITTED panels",
+  // which reported an app at 0.99 percent of the heaviest as having none.
+  print("  under 1% of the heaviest app's visible mass: \(tooLight)")
 }
 
 var v1 = ExposureModelParameters.baseline
@@ -934,28 +1180,49 @@ for run in runs {
       + (fitted ? "" : "  [NOT FITTED: scored for information only]") + " ---")
   // V0 is the control and sets the ranking baseline. If V0 ever passes, the
   // instrument is reporting rather than measuring.
-  var baseline: Int?
+  var baseline: RungScore?
   let ceiling = ceilingDecile(run.hold, apps: apps, layers: layers)
   for (label, parameters, free) in ladder {
-    let decile = report(
+    let scored = report(
       label, run.hold, parameters, freeParameters: free,
-      baselineDecile: baseline, ceiling: ceiling, fitGroups: fitGroups)
+      baseline: baseline, ceiling: ceiling, fitGroups: fitGroups)
     if baseline == nil {
-      baseline = decile
-      print(
-        "  reference: \(ceiling)/24 decile from an objective-optimal fit ON THE HOLDOUT "
-          + "(\(ceiling - decile >= 0 ? "+" : "")\(ceiling - decile) vs baseline; the bar needs +3). "
-          + "Fitted on RMSE, not on the decile, so it is a reference and NOT an upper bound.")
+      baseline = scored
+      if scored.indexDecided > 0 {
+        // The reference is a decile count too, so it is not printed here: a
+        // number the line above has just declared meaningless would be read as
+        // evidence anyway.
+        print(
+          "  DECILE REFUSED on this panel: \(scored.indexDecided) of the baseline's 24 slots were "
+            + "filled by cell index rather than by value, so the plus-3 gate has no reference to "
+            + "measure against. No rung below can pass or fail on the decile here, and the "
+            + "objective-optimal reference is withheld for the same reason.")
+      } else {
+        print(
+          "  reference: \(ceiling)/24 decile from an objective-optimal fit ON THE HOLDOUT "
+            + "(\(ceiling - scored.decile >= 0 ? "+" : "")\(ceiling - scored.decile) vs baseline; the bar needs +3). "
+            + "Fitted on RMSE, not on the decile, so it is a reference and NOT an upper bound.")
+      }
     }
   }
 }
 
 let final = v4
+let finalObjective = scoreJointly(fitGroups, final)
+let finalThreshold = identifiabilityThreshold(finalObjective)
 print("\nfitted parameters (joint), with objective sensitivity:")
+print(String(
+  format: "  objective %.5f; a prior counts as identifiable only above %g of it (%.5f)",
+  finalObjective, identifiabilityFraction, finalThreshold))
 func line(_ name: String, _ value: Double, _ moved: Double) {
-  let verdict = moved < 1e-6 ? "  UNIDENTIFIABLE from this data" : ""
-  print(String(format: "    %-28@ %.3f   sensitivity %.5f%@",
-    name as NSString, value, moved, verdict as NSString))
+  let verdict = moved > finalThreshold ? "" : "  UNIDENTIFIABLE from this data"
+  // The relative figure is printed because that is the quantity the threshold
+  // is expressed in. An absolute 0.00000 said nothing about whether a prior had
+  // been fitted or merely left where it started.
+  let relative = finalObjective.isFinite && finalObjective != 0
+    ? moved / abs(finalObjective) : Double.nan
+  print(String(format: "    %-28@ %.3f   sensitivity %.5f (%.1e of the objective)%@",
+    name as NSString, value, moved, relative, verdict as NSString))
 }
 line("light appearance", final.lightAppearancePrior,
   sensitivity(fitGroups, final, get: { $0.lightAppearancePrior },
@@ -963,7 +1230,9 @@ line("light appearance", final.lightAppearancePrior,
 line("dark appearance", final.darkAppearancePrior,
   sensitivity(fitGroups, final, get: { $0.darkAppearancePrior },
     set: { $0.darkAppearancePrior = $1 }))
-for (app, value) in final.appPriors.sorted(by: { $0.value > $1.value }) {
+for (app, value) in final.appPriors
+  .sorted(by: { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value })
+{
   line("app \(app)", value,
     sensitivity(fitGroups, final, get: { $0.appPriors[app] ?? 0 },
       set: { $0.appPriors[app] = $1 }))
