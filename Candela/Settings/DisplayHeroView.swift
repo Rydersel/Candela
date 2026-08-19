@@ -18,11 +18,16 @@ import SwiftUI
 /// the shape IS the orientation. It also carries the mirroring state. A tile
 /// that only decorated would have been cut.
 ///
-/// **External displays only.** The built-in gets no hero (spec §4), which is
-/// what lets the HDR consequence line below read `.macOSDrivesBrightness` as
-/// "HDR is live": `BrightnessPathPolicy` puts an external display on `.native`
-/// for exactly one reason, and the built-in — which is constitutively native —
-/// never reaches this view.
+/// **Two variants since 2026-08-19.** The external one is the original; the
+/// built-in pane now opens with the same header at Ryder's request, in the
+/// `.builtIn` variant, which drops what is external fact rather than shared
+/// shape: the volume slider (the built-in's volume controller rides a no-op
+/// wire, so a visible slider would be a silently dead one) and the consequence
+/// caption (both of its sentences are about HDR routing and DDC readback,
+/// and on a constitutively native panel `.macOSDrivesBrightness` is normal
+/// life, not "HDR is live"). The tile, the identity block and the brightness
+/// slider are the shared shape, and the brightness slider drives the native
+/// path exactly as the menu bar's built-in row does.
 ///
 /// **It writes no pref** (no `PrefName`, no `DisplayPrefWriter`). The two
 /// sliders write through the engine's own controllers, which is the same path
@@ -34,7 +39,11 @@ import SwiftUI
 /// main-actor types (`AppModel`, the controllers, `PanelView.title`).
 @MainActor
 struct DisplayHeroView: View {
+  /// Which facts apply, not how it looks: see the header note.
+  enum Variant { case external, builtIn }
+
   let state: AppModel.DisplayState
+  var variant: Variant = .external
 
   @Environment(AppModel.self) private var model
 
@@ -287,7 +296,7 @@ struct DisplayHeroView: View {
   /// `hideVolumeSlider` is deliberately NOT read: that pref governs the menu
   /// bar's row, and this page is where you go to change it.
   @ViewBuilder private var volumeSlider: some View {
-    if state.volume.isAvailable {
+    if variant == .external, state.volume.isAvailable {
       let enabled = model.volumeSliderEnabled(state)
       ValueSliderRow(
         controller: state.volume,
@@ -347,6 +356,13 @@ struct DisplayHeroView: View {
   }
 
   private var consequence: BrightnessConsequence? {
+    // Both sentences below are external facts. The path projection reads
+    // `.macOSDrivesBrightness` as live HDR, which holds only where `.native`
+    // is reachable through exactly one door; the built-in lives there. And
+    // the readback sentence is about a DDC register the built-in does not
+    // have. The pane's own Brightness caption is the built-in's version of
+    // this line.
+    guard variant == .external else { return nil }
     // Reused, never re-derived: the same projection the tuning grid and the
     // diagnostics page gate on, so one page cannot give two answers about one
     // display. On an EXTERNAL display `.macOSDrivesBrightness` is reachable

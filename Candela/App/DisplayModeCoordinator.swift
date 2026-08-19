@@ -2330,4 +2330,27 @@ extension DisplayModeCoordinator.Catalog {
     return recommendation.logicalWidth == mode.logicalWidth
       && recommendation.logicalHeight == mode.logicalHeight
   }
+
+  /// Whether this size is the one macOS itself calls Default for the panel.
+  ///
+  /// Built-in only, deliberately. On a high-PPI panel the default is the
+  /// looks-like size whose framebuffer IS the panel (the HiDPI native-flagged
+  /// mode: 1512x982 on a 3024x1964 panel, measured 2026-08-19), so the flag
+  /// answers the question directly. On a standard-PPI external the same flag
+  /// rides the HiDPI twin (logical 1720x720 on the MAG), which is NOT what
+  /// System Settings calls Default there, so answering for externals would
+  /// badge the wrong row confidently. Externals have the density model's
+  /// Recommended instead; the built-in never does (no physical size is ever
+  /// filed for it), which is the gap this fills.
+  ///
+  /// The 1x fallback covers a non-Retina panel, where the only native-flagged
+  /// mode is the panel size itself and that IS the default.
+  func isDefaultSize(_ mode: DisplayMode) -> Bool {
+    guard display.isBuiltIn else { return false }
+    guard let anchor = all.first(where: { $0.isNative && $0.isHiDPI })
+      ?? all.first(where: \.isNative)
+    else { return false }
+    return anchor.logicalWidth == mode.logicalWidth
+      && anchor.logicalHeight == mode.logicalHeight
+  }
 }

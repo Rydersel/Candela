@@ -398,6 +398,7 @@ struct AllModesPage: View {
     let badge = rowBadge(
       // By SIZE, like the checkmark below and like the hub's pop-up.
       isRecommendedSize: catalog.isRecommendedSize(row.mode),
+      isDefaultSize: catalog.isDefaultSize(row.mode),
       isRevealed: applied.isRevealed,
       isSynthesized: applied.isSynthesized
     )
@@ -451,6 +452,11 @@ struct AllModesPage: View {
     // 1x modes, so this is ten wrong marks rather than an edge case.
     let badge = rowBadge(
       isRecommendedSize: catalog.isRecommendedSize(mode)
+        && !lowResolution.contains(mode.ioModeID),
+      // The twin exclusion applies to Default for Recommended's exact reason:
+      // "low resolution" beside the size macOS calls Default would be the
+      // same forbidden quality claim about the one mode nobody should pick.
+      isDefaultSize: catalog.isDefaultSize(mode)
         && !lowResolution.contains(mode.ioModeID),
       isRevealed: mode.isRevealed,
       // `catalog.all` is the display's own enumeration and holds no synthesized
@@ -581,10 +587,11 @@ struct AllModesPage: View {
   /// Only the curated list can carry the second: `catalog.all` is the display's
   /// own enumeration and holds no synthesized stop.
   static func rowBadge(
-    isRecommendedSize: Bool, isRevealed: Bool, isSynthesized: Bool
+    isRecommendedSize: Bool, isDefaultSize: Bool, isRevealed: Bool, isSynthesized: Bool
   ) -> String? {
     let marks = [
       isRecommendedSize ? DisplayModeCopy.recommended : nil,
+      isDefaultSize ? DisplayModeCopy.defaultSize : nil,
       isRevealed ? DisplayModeCopy.addedByApp : nil,
       isSynthesized ? SynthesisCopy.badge : nil,
     ].compactMap { $0 }

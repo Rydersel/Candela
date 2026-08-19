@@ -205,6 +205,12 @@ struct DisplaySizeRows: View {
     if catalog.isRecommendedSize(row.mode) {
       marks.append(DisplayModeCopy.recommended)
     }
+    // The built-in's counterpart to the mark above (it can never carry a
+    // Recommended: no physical size is ever filed for it, so the density
+    // model abstains). Same word as System Settings' own Displays pane.
+    if catalog.isDefaultSize(row.mode) {
+      marks.append(DisplayModeCopy.defaultSize)
+    }
     // Third, and the exception to the paragraph above: a synthesized row IS
     // marked here (SS5). "Added by Candela" is a note about where a mode came
     // from, which is why it stays on the All Sizes page; this one is a cost of
