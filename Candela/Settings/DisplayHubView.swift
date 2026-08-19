@@ -580,25 +580,23 @@ struct DisplayHubView: View {
         case .hidden:
           EmptyView()
         case .empty:
-          // Says what will happen rather than apologising: the state is normal
+          // States the fact rather than apologising: this is the normal state
           // straight after Forget, and it is also where a turn-on lands when
           // its seeding pin declined (a preview outstanding, a synthesized size
           // engaged). Silence there reads as the toggle having done nothing.
-          Text("Nothing pinned. The next resolution you keep here is remembered.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
+          // The pin button comes along, because otherwise the only route back
+          // to a pin is a toggle off and on.
+          HStack {
+            Text("Nothing pinned.").foregroundStyle(.secondary)
+            Spacer()
+            setToCurrentButton(isRedundant: false)
+          }
         case .pinned(let stored):
           HStack {
             Text(verbatim: "\(DisplayModeCopy.size(stored)) · \(DisplayModeCopy.refresh(stored.refreshHz))")
               .foregroundStyle(.secondary)
             Spacer()
-            // Disabled while a preview is outstanding: pinning a mode that is
-            // still under countdown would record one the user may yet revert.
-            // The coordinator's own queue re-checks (session-authoritative), so
-            // this disable is courtesy, not the guard.
-            Button("Set to Current") { coordinator.pinCurrentMode(on: displayID) }
-              .accessibilityLabel("Set to Current")
-              .disabled(pinnedMatchesCurrent(stored) || coordinator.preview?.displayID == displayID)
+            setToCurrentButton(isRedundant: pinnedMatchesCurrent(stored))
             // Never disabled, deliberately, and not for symmetry with the
             // button beside it: this is the way out of a pin that cannot be
             // honoured, and the reapply banner apologising for that pin is
@@ -614,6 +612,20 @@ struct DisplayHubView: View {
         }
       }
     }
+  }
+
+  /// Disabled while a preview is outstanding: pinning a mode that is still
+  /// under countdown would record one the user may yet revert. The
+  /// coordinator's own queue re-checks (session-authoritative), so this
+  /// disable is courtesy, not the guard.
+  ///
+  /// `isRedundant` is the pin-already-matches-current case, which is the usual
+  /// one once auto-tracking has run. There is no such thing with nothing
+  /// pinned, so the empty row passes false rather than computing it.
+  private func setToCurrentButton(isRedundant: Bool) -> some View {
+    Button("Set to Current") { coordinator.pinCurrentMode(on: displayID) }
+      .accessibilityLabel("Set to Current")
+      .disabled(isRedundant || coordinator.preview?.displayID == displayID)
   }
 
   /// Reads the SAME source the pin writes — live configurator first, catalog
