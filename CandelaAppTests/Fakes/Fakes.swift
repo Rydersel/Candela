@@ -87,6 +87,43 @@ final class FakeAudio: AudioDeviceProviding, @unchecked Sendable {
   func setOnDefaultOutputChange(_ handler: (@Sendable () -> Void)?) {}
 }
 
+/// A discovery seam whose answer a test sets between passes: the only route to
+/// a populated `AppModel` display list, and the only way to script a topology
+/// change that no cable arrangement can produce (a same-port panel swap always
+/// splits into a departure pass and an arrival pass on real hardware).
+@MainActor
+final class ScriptedDiscovery {
+  var topology: [(id: CGDirectDisplayID, key: String, name: String)] = []
+  /// One writer per persistence key, kept so a rebuild is not mistaken for a
+  /// rebind: a fresh writer every pass would make every controller look new.
+  private var writers: [String: FakeDDCWriter] = [:]
+
+  init(_ topology: [(id: CGDirectDisplayID, key: String, name: String)] = []) {
+    self.topology = topology
+  }
+
+  func discover(_: Set<CGDirectDisplayID>) -> AppModel.DiscoveredDisplays {
+    topology.map { entry in
+      let writer = writers[entry.key] ?? {
+        let fresh = FakeDDCWriter()
+        writers[entry.key] = fresh
+        return fresh
+      }()
+      return (
+        display: ExternalDisplay(id: entry.id, name: entry.name, persistenceKey: entry.key),
+        writer: writer,
+        // Nothing that drives this seam reads the facts; reconciliation decides
+        // on the persistence key alone.
+        facts: DisplayHardwareFacts(
+          transportUpstream: nil, transportDownstream: nil, manufacturerID: nil,
+          alphanumericSerialNumber: nil, numericSerialNumber: nil,
+          physicalWidthCm: nil, physicalHeightCm: nil, ioDisplayLocation: nil,
+          ioregMatchScore: 0)
+      )
+    }
+  }
+}
+
 enum TestFixtures {
   /// A prefs domain that cannot collide with the app's or another test's:
   /// unique suite per call, torn down by never being persisted anywhere the
@@ -124,12 +161,30 @@ enum TestFixtures {
 
   /// A hardware-free AppModel (AT3): every injectable seam filled with a
   /// fake, so no MonitorPanelService and no CoreAudioDeviceProvider is ever
-  /// constructed. Its display list is empty; derivation tests pass display
-  /// state arrays directly instead of seeding the model.
+  /// constructed. Its display list is empty until something refreshes it; the
+  /// `discovery` overload below is what fills one.
   @MainActor static func appModel(safeMode: Bool = false) -> AppModel {
     AppModel(
       shade: FakeShade(), gamma: FakeGamma(),
       hdrToggling: FakeHDR(), audioDevices: FakeAudio(),
       safeMode: safeMode)
+  }
+
+  /// The same hardware-free model with its discovery scripted, so a caller can
+  /// `await model.refresh()` into a known external topology.
+  ///
+  /// The BUILT-IN slot is not scripted and cannot be: `refreshBuiltIn` reads
+  /// `BuiltInDisplayDiscovery` directly, so whether `model.builtIn` is filled
+  /// depends on the machine running the suite. Nothing built on this may assert
+  /// on the built-in's presence, which is also why it is worth asserting that
+  /// the built-in never reaches `displays`.
+  @MainActor static func appModel(
+    discovery: ScriptedDiscovery, safeMode: Bool = false
+  ) -> AppModel {
+    AppModel(
+      shade: FakeShade(), gamma: FakeGamma(),
+      hdrToggling: FakeHDR(), audioDevices: FakeAudio(),
+      safeMode: safeMode,
+      discoverDisplays: { discovery.discover($0) })
   }
 }

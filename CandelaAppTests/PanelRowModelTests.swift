@@ -220,4 +220,86 @@ struct PanelRowModelTests {
     #expect(PanelView.showsContrastSlider(commandIsAvailable: true, showContrast: false) == false)
     #expect(PanelView.showsContrastSlider(commandIsAvailable: true, showContrast: true))
   }
+
+  // MARK: - Through the model, not beside it
+
+  /// Everything above hands the derivation an array the test built. These drive
+  /// a real refresh instead, so the states carry controllers the model itself
+  /// constructed and reconciled, and they can state properties an array cannot
+  /// reach.
+  ///
+  /// This one is the production call: `visibleDisplays(model)` reads the app's
+  /// own prefs domain, so the keys are deliberately ones no real display has
+  /// and no test writes to, and the assertion is about membership and order
+  /// rather than about any pref.
+  @Test func theModelsOwnDisplayListIsWhatThePanelOrders() async {
+    let discovery = ScriptedDiscovery([
+      (id: 2, key: "row-model-zed", name: "Zed"),
+      (id: 3, key: "row-model-alpha", name: "Alpha"),
+    ])
+    let model = TestFixtures.appModel(discovery: discovery)
+    await model.refresh()
+
+    let visible = PanelView.visibleDisplays(model)
+    #expect(visible.map(\.display.name) == ["Alpha", "Zed"])
+  }
+
+  /// The built-in occupies its own slot on the model and must never arrive in
+  /// the external list the panel orders. Stated as an absence rather than a
+  /// count, because whether this machine HAS a built-in is not something the
+  /// suite controls: `refreshBuiltIn` reads `BuiltInDisplayDiscovery` directly,
+  /// so a count would pass on a laptop and fail on a headless runner, or the
+  /// reverse.
+  @Test func theBuiltInSlotNeverLeaksIntoThePanelsExternalRows() async {
+    let discovery = ScriptedDiscovery([(id: 2, key: "row-model-only", name: "Only External")])
+    let model = TestFixtures.appModel(discovery: discovery)
+    await model.refresh()
+
+    #expect(model.displays.map(\.display.persistenceKey) == ["row-model-only"])
+    #expect(PanelView.visibleDisplays(model).contains { $0.display.persistenceKey == "builtIn" } == false)
+  }
+
+  /// A departure reaches the rows. Not reachable beside the model: the input
+  /// array is whatever the test passes, so dropping an element proves only that
+  /// the test dropped an element. Here the topology changes and the model's own
+  /// reconciliation is what removes the row.
+  @Test func aDepartedDisplayLeavesThePanelsRowsAndTheSurvivorKeepsItsController() async {
+    let discovery = ScriptedDiscovery([
+      (id: 2, key: "row-model-stays", name: "Stays"),
+      (id: 3, key: "row-model-goes", name: "Goes"),
+    ])
+    let model = TestFixtures.appModel(discovery: discovery)
+    await model.refresh()
+    #expect(PanelView.visibleDisplays(model).count == 2)
+    let survivor = model.displays.first { $0.display.persistenceKey == "row-model-stays" }?.controller
+
+    discovery.topology = [(id: 2, key: "row-model-stays", name: "Stays")]
+    await model.refresh()
+
+    let visible = PanelView.visibleDisplays(model)
+    #expect(visible.map(\.display.persistenceKey) == ["row-model-stays"])
+    // The survivor is the SAME row, not a rebuilt one: a refresh that rebuilt
+    // everything would also pass the membership check above.
+    #expect(survivor != nil)
+    #expect(visible.first?.controller === survivor)
+  }
+
+  /// Hiding runs off prefs, so this drives the model for its states and an
+  /// isolated domain for the answer: the production `visibleDisplays(model)`
+  /// reads the app's real domain, and a test may not write `hideDisplay` there.
+  @Test func hidingADisplayRemovesTheRowTheModelProduced() async {
+    let discovery = ScriptedDiscovery([
+      (id: 2, key: "row-model-shown", name: "Shown"),
+      (id: 3, key: "row-model-hidden", name: "Hidden"),
+    ])
+    let model = TestFixtures.appModel(discovery: discovery)
+    await model.refresh()
+    let domain = PrefsDomain()
+    #expect(PanelView.visibleDisplays(model.displays, prefs: domain.prefs).count == 2)
+
+    domain.edit("row-model-hidden") { $0.hideDisplay = true }
+
+    let visible = PanelView.visibleDisplays(model.displays, prefs: domain.prefs)
+    #expect(visible.map(\.display.persistenceKey) == ["row-model-shown"])
+  }
 }

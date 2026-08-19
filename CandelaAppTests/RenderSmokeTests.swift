@@ -58,14 +58,12 @@ struct RenderSmokeTests {
     expectPixels(render(PanelView().environment(model)), "empty PanelView")
   }
 
-  /// `PanelView` cannot be rendered WITH display rows: rows come from
-  /// `AppModel.displays`, which is `private(set)` and filled by discovery, and
-  /// the app-code change this suite is allowed to make is the derivation seam
-  /// (AT6), not an injection point on the model. What the rows are made of is
-  /// nameable, though, so the row body renders here directly over a fixture
-  /// display state: brightness, volume and contrast, the three slider rows a
-  /// display section draws. The header row and the two disclosure sections are
-  /// private to their files and stay uncovered.
+  /// The three slider rows a display section draws, over a fixture state and
+  /// without a model. This used to be the only way to get rows on screen at
+  /// all; the populated panel below now covers the real composition, and this
+  /// stays because it isolates the rows from everything the panel wraps them
+  /// in. The header row and the two disclosure sections are private to their
+  /// files and stay uncovered.
   @Test func aDisplaysSliderRowsRender() {
     let state = TestFixtures.displayState(name: "Smoke Panel", persistenceKey: "smoke-panel")
     let rows = VStack(alignment: .leading, spacing: 8) {
@@ -82,6 +80,46 @@ struct RenderSmokeTests {
     }
     .frame(width: 252)
     expectPixels(render(rows), "panel slider rows")
+  }
+
+  /// The panel WITH display rows, which the discovery seam finally makes
+  /// reachable (this suite used to record it as impossible).
+  ///
+  /// The premise is asserted before the render, and that is the point: with no
+  /// displays the panel still renders perfectly well as its empty state, so a
+  /// refresh that quietly produced nothing would leave every pixel assertion
+  /// below passing for the wrong reason. That is the vacuous pass this layer
+  /// exists to avoid, arriving through the back door.
+  ///
+  /// The comparison against the empty panel is the real assertion. A size floor
+  /// alone cannot tell "two displays drew their rows" from "the empty state
+  /// drew its one line of text", because both clear the floor comfortably.
+  @Test func thePopulatedPanelRendersItsDisplayRows() async {
+    let discovery = ScriptedDiscovery([
+      (id: 2, key: "smoke-panel-a", name: "Smoke Panel A"),
+      (id: 3, key: "smoke-panel-b", name: "Smoke Panel B"),
+    ])
+    let model = TestFixtures.appModel(discovery: discovery)
+    await model.refresh()
+    #expect(model.displays.count == 2, "the seam must have produced rows to render")
+
+    let populated = render(PanelView().environment(model))
+    expectPixels(populated, "populated PanelView")
+
+    // The baseline is a model refreshed through the SAME seam with nothing
+    // attached, never `TestFixtures.appModel()` unrefreshed. `refreshBuiltIn`
+    // reads the machine, so a refreshed model on a laptop also gains a built-in
+    // row: measured 2026-08-19, comparing refreshed against unrefreshed made
+    // this assertion pass on the built-in's height alone, and it went on
+    // passing with the external topology emptied. Refreshing both leaves the
+    // two display rows as the only difference between them.
+    let baseline = TestFixtures.appModel(discovery: ScriptedDiscovery([]))
+    await baseline.refresh()
+    let empty = render(PanelView().environment(baseline))
+    guard let populated, let empty else { return } // already recorded above
+    #expect(
+      populated.height > empty.height,
+      "two display rows must make the panel taller than the same panel without them")
   }
 
   // MARK: - The settings window

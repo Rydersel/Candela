@@ -16,39 +16,11 @@ import Testing
 @Suite("Panel swap reconciliation (#51)")
 @MainActor
 struct PanelSwapReconciliationTests {
-  /// A discovery seam whose answer the test sets between passes.
-  private final class ScriptedDiscovery {
-    var topology: [(id: CGDirectDisplayID, key: String, name: String)] = []
-    /// One writer per persistence key, kept so a rebuild is not mistaken for a
-    /// rebind: a fresh writer every pass would make every controller look new.
-    private var writers: [String: FakeDDCWriter] = [:]
-
-    func discover(_: Set<CGDirectDisplayID>) -> AppModel.DiscoveredDisplays {
-      topology.map { entry in
-        let writer = writers[entry.key] ?? {
-          let fresh = FakeDDCWriter()
-          writers[entry.key] = fresh
-          return fresh
-        }()
-        return (
-          display: ExternalDisplay(id: entry.id, name: entry.name, persistenceKey: entry.key),
-          writer: writer,
-          // Nothing here reads the facts; the reconciliation decides on the
-          // persistence key alone.
-          facts: DisplayHardwareFacts(
-            transportUpstream: nil, transportDownstream: nil, manufacturerID: nil,
-            alphanumericSerialNumber: nil, numericSerialNumber: nil,
-            physicalWidthCm: nil, physicalHeightCm: nil, ioDisplayLocation: nil,
-            ioregMatchScore: 0)
-        )
-      }
-    }
-  }
-
+  // The seam driver lives in `Fakes` now: the panel's render and row-model
+  // suites drive the same one, and two copies would be free to disagree about
+  // what a scripted topology means.
   private func model(_ discovery: ScriptedDiscovery) -> AppModel {
-    AppModel(
-      shade: FakeShade(), gamma: FakeGamma(), hdrToggling: FakeHDR(), audioDevices: FakeAudio(),
-      discoverDisplays: { [discovery] in discovery.discover($0) })
+    TestFixtures.appModel(discovery: discovery)
   }
 
   /// The positive control, and it has to come first: if a steady topology did
