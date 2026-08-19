@@ -19,8 +19,16 @@ struct ConformanceRecordTests {
     let record = report.runRecord(label: "regress", commit: "abc1234", timestamp: when)
     #expect(record.schema == 1)
     #expect(record.commit == "abc1234")
+    // All four outcome strings and the detail passthrough are pinned: they are
+    // the ledger's jq keys, so a typo ("skipped") or a detail/name swap has to
+    // fail here rather than reach a committed ledger row.
+    #expect(record.checks[0].outcome == "pass")
+    #expect(record.checks[0].detail == "fine")
     #expect(record.checks[0].control == "fired")
     #expect(record.checks[1].outcome == "inconclusive")
+    #expect(record.checks[1].detail == "control failed")
+    #expect(record.checks[2].outcome == "skip")
+    #expect(record.checks[2].detail == "no panel")
     #expect(record.checks[2].control == nil)
     #expect(record.inconclusive == 1 && record.passed == 1 && record.skipped == 1)
   }
@@ -41,6 +49,9 @@ struct ConformanceRecordTests {
   /// to diff like text: sorted keys, and a date that is a readable stamp
   /// rather than a float nobody can compare by eye.
   @Test func theEncodingIsStableForACommittedLedger() throws {
+    // The key-order walk below searches bare substrings, so no fixture value
+    // here may contain a key name; "p" and "cafe123" are chosen to collide with
+    // nothing.
     var report = PC.Report(platform: "p")
     report.checks = [.init(name: "a", outcome: .pass("fine"))]
     let json = try String(
