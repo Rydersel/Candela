@@ -36,6 +36,8 @@ usage: candela-probe [--display <id>] <subcommand>
   mute on|off                             DDC write of VCP 0x8D (1=mute, 2=unmute)
   vcp get <hex>|set <hex> <0-65535>       raw VCP prober
   modes                                   merged mode list, marking CGS-revealed entries
+  curated                                 what the default size picker shows, after curation
+  modeapply <ioModeID> [holdSeconds=5]    apply one mode by id at preview scope, then revert
   caps                                    DDC/CI capabilities string (VCP 0xF3) + volume verdict
   audio devices                           default CoreAudio output + native-volume check
   native get                              DisplayServicesGetBrightness per display
@@ -130,7 +132,13 @@ func applyGammaScale(_ scale: Float, to displayID: CGDirectDisplayID) -> Bool {
 }
 
 switch arguments.first {
-case "list", nil:
+case nil:
+  // Usage prints on ANY machine, with no hardware precondition: someone with
+  // nothing attached is exactly who needs to read it, and routing a bare
+  // invocation into `list` sent them "No DDC-capable external displays found"
+  // and exit 1 instead.
+  print(usage)
+case "list":
   requireDDCDisplays()
   for entry in found {
     // Column 2 is the persistence key: every per-display `defaults write`
