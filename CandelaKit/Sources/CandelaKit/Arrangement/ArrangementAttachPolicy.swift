@@ -22,7 +22,15 @@ public struct ArrangementAttachment: Sendable, Equatable {
 /// shown where it could have gone. Springing back is the right answer when the
 /// request is ambiguous, but a drop into open space is not ambiguous: every
 /// legal layout has the display touching something, so the question is only
-/// which edge, and the nearest one is the answer the gesture already implies.
+/// which edge.
+///
+/// The answer is NEAR, not nearest (AR15). Each candidate has its cross-axis
+/// coordinate tidied first, onto a lined-up edge or flush with the end the drop
+/// is nearest, and only the tidied candidates are ranked by distance. A drop
+/// well past the end of another display therefore lands hundreds of points from
+/// the strictly nearest legal position, deliberately: the strictly nearest one
+/// leaves the two displays meeting over a single point, which reads as a
+/// misfire. `aDropPastAnEdgeGoesFlushRatherThanClippingOneCorner` pins that.
 ///
 /// The search is over whole placements rather than one axis at a time, which is
 /// the difference from `ArrangementSnapper`. Deciding the axes independently is
@@ -32,14 +40,18 @@ public struct ArrangementAttachment: Sendable, Equatable {
 public enum ArrangementAttachPolicy {
   /// - Parameters:
   ///   - moving: the dragged display's rect where the user let go, before
-  ///     snapping. Distance is measured from here, so "nearest" means nearest to
-  ///     the gesture rather than to whatever magnetism did with it.
+  ///     snapping. Distance is measured from here, so the ranking is against the
+  ///     gesture rather than against whatever magnetism did with it.
   ///   - threshold: the same display-space snap threshold the drag uses. It does
   ///     not limit how far a display may attach: it only decides whether an
   ///     attachment that is already close to a lined-up edge tidies onto it.
-  /// - Returns: `nil` when nothing can be attached to, which is a layout of one
-  ///   display, or one where every position that touches something overlaps
-  ///   something else.
+  /// - Returns: a legal abutting position near where the user let go, tidied
+  ///   onto a lined-up edge, chosen by distance over the already-tidied
+  ///   candidates. `nil` when nothing can be attached to, which is a layout of
+  ///   one display, or one where every TIDIED candidate is illegal. That is
+  ///   narrower than "no legal abutting position exists": the candidates are
+  ///   four per other display, so a legal placement off that set is never
+  ///   considered and `nil` says only that the set is exhausted.
   public static func attach(
     _ moving: DisplayRect,
     id: CGDirectDisplayID,
@@ -50,9 +62,10 @@ public enum ArrangementAttachPolicy {
     guard !others.isEmpty, moving.width > 0, moving.height > 0 else { return nil }
 
     // Ranked once, then walked in order until one is legal, rather than ranked
-    // and checked once. The nearest placement can be blocked by a third display,
-    // and the answer is then the next nearest rather than a refusal: "nearest
-    // LEGAL position" is the whole contract, and validity is what makes it legal.
+    // and checked once. The closest tidied placement can be blocked by a third
+    // display, and the answer is then the next one out rather than a refusal:
+    // every position this returns is one the layout can actually be left in, and
+    // that is the contract callers rely on when they apply it unchecked.
     for candidate in candidates(moving, against: others, threshold: threshold)
       .sorted(by: { key($0, from: moving) < key($1, from: moving) })
     {
@@ -139,15 +152,17 @@ public enum ArrangementAttachPolicy {
         : other.start(on: axis)
     }
 
-    // The drop's own coordinate is already a legal one. `DisplayRect.touches`
-    // wants a shared boundary of nonzero length, which is the band
+    // The drop's own coordinate is already a legal one, and the ALGEBRA is the
+    // proof of it, checked independently twice. `DisplayRect.touches` wants a
+    // shared boundary of nonzero length, which is the band
     // `other.start - length + 1 ... other.end - 1`, and the `spansOverlap`
-    // guard above IS the statement that `moving.start` lies in it. A clamp onto
-    // that band and a filter holding the alignment candidates inside it were
-    // both written here and both provably never fired: checked exhaustively
-    // over 70,824 pairs, neither changed an answer once. Anything that loosens
-    // or removes the guard has to bring the band back with it, because then the
-    // drop's coordinate is no longer known to touch at all.
+    // guard above IS the statement that `moving.start` lies in it. So a clamp
+    // onto that band, and a filter holding the alignment candidates inside it,
+    // could not fire; both were written here and both came out. An exhaustive
+    // run over 70,824 pairs changed no answer either, which corroborates the
+    // argument rather than carrying it. Anything that loosens or removes the
+    // guard has to bring the band back with it, because then the drop's
+    // coordinate is no longer known to touch at all.
     // Named for what it is rather than for a clamp that no longer happens.
     let dropped = moving.start(on: axis)
 

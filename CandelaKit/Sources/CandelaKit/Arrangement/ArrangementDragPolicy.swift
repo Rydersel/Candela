@@ -194,6 +194,16 @@ public enum ArrangementDragPolicy {
       // it may. A landing answers that. Overlaps that are not an insert still
       // spring back under AR7: a display dropped squarely on another names no
       // particular layout.
+      //
+      // UNRESOLVED, and recorded rather than fixed. AR14 re-anchors the insert
+      // path on the display that was main; this branch does not. An attach
+      // landing that moves the main display off (0,0) therefore commits a layout
+      // whose `mainDisplayID` is nil, because AR5 derives main from the tile at
+      // the origin and no tile is there any more. The behaviour is INHERITED,
+      // not introduced: an ordinary legal drag of the main display already does
+      // exactly this, so the landing only follows the rule the drag already had.
+      // Whether either should re-anchor is a question about AR5 and AR14
+      // together, not about this branch, and it has not been answered.
       else if problems.allSatisfy(\.isDisconnection),
               let attachment = ArrangementAttachPolicy.attach(
                 moved, id: id, in: baseline, threshold: threshold

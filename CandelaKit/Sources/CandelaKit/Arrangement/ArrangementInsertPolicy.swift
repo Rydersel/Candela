@@ -54,8 +54,11 @@ public struct ArrangementInsertion: Sendable, Equatable {
 ///
 /// **This is one of AR7's two amendments** (invalid drops are refused and sprung
 /// back, never auto-corrected). The other is AR15's attach landing, which
-/// replaces a spring-back with a nearest legal position; anything calling the
-/// insert the only amendment is out of date. AR7's argument is that macOS
+/// replaces a spring-back with a legal abutting position near where the user let
+/// go, tidied onto a lined-up edge rather than held to the smallest possible
+/// move; anything calling the insert the only amendment is out of date, and
+/// anything calling that landing the NEAREST legal position is describing a rule
+/// AR15 retracted. AR7's argument is that macOS
 /// silently fixes overlaps to somewhere of its own choosing, so a silent
 /// correction teaches the user that the map lies. An insert is not silent, but
 /// after AR16 the reason is no longer that the result is drawn live: nothing
@@ -90,18 +93,32 @@ public enum ArrangementInsertPolicy {
     snappedRect: DisplayRect,
     into baseline: DisplayArrangement
   ) -> ArrangementInsertion? {
+    // A display that is not in the layout has nothing to insert. Without this
+    // the seam walk still runs over the other displays and hands back an
+    // insertion that pushes the far side and contains no dragged display at
+    // all, and an insertion is applied without being re-checked. Nothing in the
+    // app can reach it, because `ArrangementDragPolicy.propose` returns early on
+    // the same question, but this function is public and has to answer for
+    // itself.
+    guard baseline.tile(id) != nil else { return nil }
+
     let others = baseline.tiles.filter { $0.id != id }
     // A seam needs two displays that are not the one being dragged.
     guard others.count > 1 else { return nil }
 
     // Ranked once, then WALKED until one is legal, which is the shape
     // `ArrangementAttachPolicy.attach` already uses and for the same reason.
-    // Ranking once and taking the winner threw legal inserts away: a randomized
-    // probe found a lower-ranked seam giving a fully valid layout in 7.8% of
-    // the situations where any legal insert existed, and in every one of those
-    // the user saw a spring-back instead of the layout they had asked for.
+    // Ranking once and taking the winner threw legal inserts away: a lower-
+    // ranked seam can be the only one that yields a fully valid layout, and
+    // whenever it was, the user saw a spring-back instead of the layout they
+    // had asked for. The frequency that used to be quoted here came from a
+    // one-off randomized probe that was never committed, so it is left out
+    // rather than left looking reproducible; the reasoning does not need it,
+    // and `aLowerRankedSeamIsUsedWhenTheTopRankedOneIsIllegal` is the case.
     for seam in [SnapAxis.x, .y]
-      .flatMap({ candidateSeams(on: $0, freeRect: freeRect, others: others) })
+      .flatMap({
+        candidateSeams(on: $0, freeRect: freeRect, snappedRect: snappedRect, others: others)
+      })
       .sorted(by: { key($0, from: freeRect) < key($1, from: freeRect) })
     {
       let candidate = insertion(
@@ -203,6 +220,7 @@ public enum ArrangementInsertPolicy {
   private static func candidateSeams(
     on axis: SnapAxis,
     freeRect: DisplayRect,
+    snappedRect: DisplayRect,
     others: [ArrangementTile]
   ) -> [ArrangementSeam] {
     var result: [ArrangementSeam] = []
@@ -230,6 +248,16 @@ public enum ArrangementInsertPolicy {
         guard freeRect.spansOverlap(with: near.rect, on: axis.other),
               freeRect.spansOverlap(with: far.rect, on: axis.other)
         else { continue }
+        // Candidacy above is judged on the pre-snap rect, but the display LANDS
+        // on the snapped one, and snapping can have moved it by up to the
+        // threshold on the other axis. Where that move ends the shared span, the
+        // landing touches the near display at a corner or not at all while the
+        // guide still draws a solid line naming it, so the guide would be
+        // announcing a boundary the release does not use. AR13 rests on the
+        // guide being truthful, so the seam is dropped instead. The placed rect
+        // takes its other-axis coordinate from `snappedRect` unchanged, which is
+        // why this can be asked here rather than after the layout is built.
+        guard snappedRect.spansOverlap(with: near.rect, on: axis.other) else { continue }
 
         result.append(
           ArrangementSeam(
