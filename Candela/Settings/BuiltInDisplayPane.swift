@@ -58,7 +58,10 @@ struct BuiltInDisplayPane: View {
       displaySection
 
       Section("Brightness") {
-        SettingsCaption("macOS controls the built-in display's brightness directly, so there is nothing to set here. \(AppInfo.productName) reads its level to keep your other displays in step.")
+        // Renders nothing where the sensor or its symbols are missing, so on
+        // such a machine this section falls back to the caption alone.
+        AmbientBrightnessRow()
+        SettingsCaption("macOS controls the built-in display's brightness directly, so there is nothing else to set here. \(AppInfo.productName) reads its level to keep your other displays in step.")
       }
 
       Section("Menu Bar") {
