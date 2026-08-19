@@ -23,6 +23,9 @@
 public enum PrefName: String, Sendable, CaseIterable {
   // App-level — panel and menu-bar presentation
   case menuIcon, hideBuiltInDisplay, showContrast
+  // App-level: the panel's Keep Display Awake row, for a more minimal panel.
+  // Hide-shaped like `hideBuiltInDisplay`, so an absent key means shown.
+  case hideKeepAwake
   case enableSliderSnap, enableSliderPercent
   // App-level: where the on-screen indicator pills sit. Two keys rather than
   // one, decided up front because the choice is permanent: each KIND gets a
@@ -132,7 +135,11 @@ public enum PrefPropagation {
 
     case .showContrast, .enableSliderSnap, .enableSliderPercent,
          .hideVolumeSlider, .friendlyName, .isDisabled, .hideOsd,
-         .enableBrightnessSync:
+         .enableBrightnessSync, .hideKeepAwake:
+      // `hideKeepAwake` is presentation alone: it takes a row out of the panel
+      // and never touches the assertion. A session that hid the row while keep
+      // awake was ON keeps the display awake, which is why the Menu Bar pane's
+      // caption says so rather than leaving it to be discovered.
       // `isDisabled` carries no `.rearmTap` row deliberately: a display whose
       // keyboard control is off swallows its press (R1) rather than handing it
       // to macOS, so it must leave the watched set alone.

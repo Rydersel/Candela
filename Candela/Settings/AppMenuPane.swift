@@ -115,6 +115,19 @@ struct AppMenuPane: View {
           ))
         }
 
+        // The caption carries the consequence because the panel's own row cannot:
+        // a one-line row is what keeps the panel from resizing while its menu is
+        // open, so this is where the reach gets stated (A-21).
+        SettingRow("Keep Display Awake stops the display sleeping until you turn it off or quit. While it is on, OLED care's idle dimming, blackout and unfocused dimming do not start. Hiding the row here does not turn it off.") {
+          Toggle("Show Keep Display Awake in the menu bar", isOn: Binding(
+            get: { !prefs.hideKeepAwake },
+            set: { shown in
+              prefs.hideKeepAwake = !shown
+              actions.prefDidChange(.hideKeepAwake)
+            }
+          ))
+        }
+
         SettingRow("DDC-controlled displays only, and results vary by monitor.") {
           Toggle("Show a contrast slider", isOn: Binding(
             get: { prefs.showContrast },

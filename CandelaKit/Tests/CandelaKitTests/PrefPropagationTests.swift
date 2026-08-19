@@ -106,7 +106,10 @@ struct PrefPropagationTests {
     // values are the keys `DisplayPrefs` composes with `.<pk>`.
     #expect(PrefName.offerSyntheticSizes.rawValue == "offerSyntheticSizes")
     #expect(PrefName.storedSyntheticSize.rawValue == "storedSyntheticSize")
-    #expect(PrefName.allCases.count == 68)
+    // Keep awake's panel-row visibility: 68 -> 69. Hide-shaped like
+    // `hideBuiltInDisplay`, so an absent key means the row is shown.
+    #expect(PrefName.hideKeepAwake.rawValue == "hideKeepAwake")
+    #expect(PrefName.allCases.count == 69)
   }
 
   // MARK: - Rows

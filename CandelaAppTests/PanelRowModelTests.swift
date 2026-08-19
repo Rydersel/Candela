@@ -221,6 +221,17 @@ struct PanelRowModelTests {
     #expect(PanelView.showsContrastSlider(commandIsAvailable: true, showContrast: true))
   }
 
+  // MARK: - Keep awake row visibility
+
+  @Test func theKeepAwakeRowShowsUnlessTheMenuBarPrefHidesIt() {
+    let domain = PrefsDomain()
+    #expect(PanelView.showsKeepAwake(appPrefs: domain.prefs("app")))
+
+    domain.edit("app") { $0.hideKeepAwake = true }
+
+    #expect(PanelView.showsKeepAwake(appPrefs: domain.prefs("app")) == false)
+  }
+
   // MARK: - Through the model, not beside it
 
   /// Everything above hands the derivation an array the test built. These drive

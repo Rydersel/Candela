@@ -152,6 +152,10 @@ struct PanelView: View {
       .padding(.horizontal, 14)
       .padding(.vertical, 12)
       Divider()
+      if Self.showsKeepAwake(appPrefs: appPrefs) {
+        keepAwakeRow
+        Divider()
+      }
       footer
     }
     .frame(width: 280)
@@ -354,6 +358,53 @@ struct PanelView: View {
   /// and Display menu-bar panels all end with a settings row, and diverging
   /// from that purely to differ from the fork would trade a real convention
   /// for a cosmetic distinction.
+  /// The one control here that is not about a display: it holds a power
+  /// assertion for the app, so it sits outside the per-display stack rather
+  /// than inside a section that would imply it applies to that panel alone.
+  ///
+  /// ONE LINE, and its height never changes with its state. The first version
+  /// showed a caption while the toggle was on, which grew the panel while the
+  /// hosting `NSMenu` was already open and clipped the footer off the bottom
+  /// [MEASURED 2026-08-19, seen on screen]. `panelHoverReason` is the panel's
+  /// idiom for explaining a control and it takes the same precaution from the
+  /// other side: it reserves its caption's height whenever a reason exists, so
+  /// that hovering never resizes anything.
+  ///
+  /// The consequence this control carries, that OLED care's idle dim, blackout
+  /// and unfocused dim cannot engage while it is on (A-21), is therefore stated
+  /// in Settings > Menu Bar, next to the switch that hides this row.
+  private var keepAwakeRow: some View {
+    HStack(spacing: 0) {
+      // Label leading, control trailing, like the Resolution and Mirroring rows
+      // above it. A `Toggle` left to size itself centres its label and switch as
+      // one group, which is the only alignment in the panel that would not match
+      // its neighbours: measured on screen 2026-08-19, not reasoned about.
+      Label("Keep display awake", systemImage: "cup.and.saucer.fill")
+        .font(.system(size: 12))
+      Spacer(minLength: 8)
+      Toggle("", isOn: Binding(
+        get: { model.keepAwake.isOn },
+        set: { model.keepAwake.setOn($0) }
+      ))
+      .labelsHidden()
+      .toggleStyle(.switch)
+      .controlSize(.mini)
+      // The visible label is the `Label` above, which `labelsHidden` detached
+      // from the control: without this the switch announces as unnamed.
+      .accessibilityLabel("Keep display awake")
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 8)
+  }
+
+  /// Whether the panel draws the keep-awake row at all (the Menu Bar pane's
+  /// switch). Presentation only: a hidden row does not release an assertion an
+  /// earlier toggle took, so this asks nothing about `KeepAwake` itself.
+  @MainActor
+  static func showsKeepAwake(appPrefs: DisplayPrefs) -> Bool {
+    !appPrefs.hideKeepAwake
+  }
+
   private var footer: some View {
     HStack(spacing: 0) {
       FooterPillButton(systemImage: "gearshape", title: "Settings…") {
