@@ -530,10 +530,33 @@ struct DisplayHubView: View {
     return rates.map(DisplayMode.quantizedRefresh).filter { seen.insert($0).inserted }
   }
 
+  /// What the second line under the Remember toggle is showing.
+  ///
+  /// Nameable rather than inline in `body` so the app test bundle can assert
+  /// on it: the empty case is reachable by two routes that are awkward to
+  /// stage by hand (Forget, and a turn-on whose seeding pin declined), and a
+  /// row that silently rendered nothing in either would look exactly like the
+  /// toggle being broken.
+  enum PinnedRow: Equatable {
+    /// Remembering is off, so there is no promise on screen to describe.
+    case hidden
+    /// Remembering is on and nothing is pinned.
+    case empty
+    case pinned(DisplayModeDescriptor)
+  }
+
+  static func pinnedRow(isRemembering: Bool, stored: DisplayModeDescriptor?) -> PinnedRow {
+    guard isRemembering else { return .hidden }
+    guard let stored else { return .empty }
+    return .pinned(stored)
+  }
+
   /// The stored mode is visible while the toggle is on, and it tracks the
   /// resolution the user keeps. `Set to Current` stays as the explicit re-pin
   /// for a mode already on screen; it disables itself once the pin and the
   /// running mode agree, which auto-tracking now makes the usual state.
+  /// `Forget` is the way back out, and the only one that does not go through
+  /// wiping every setting in the app.
   private var rememberRow: some View {
     SettingRow("Restored when this display reconnects, not while you are using it.") {
       VStack(alignment: .leading, spacing: 6) {
@@ -550,23 +573,59 @@ struct DisplayHubView: View {
             actions.prefDidChange(.rememberDisplayMode, persistenceKey: persistenceKey)
           }
         ))
-        if coordinator.isRemembering(displayID),
-           let stored = coordinator.storedDescriptor(for: displayID) {
+        switch Self.pinnedRow(
+          isRemembering: coordinator.isRemembering(displayID),
+          stored: coordinator.storedDescriptor(for: displayID)
+        ) {
+        case .hidden:
+          EmptyView()
+        case .empty:
+          // States the fact rather than apologising: this is the normal state
+          // straight after Forget, and it is also where a turn-on lands when
+          // its seeding pin declined (a preview outstanding, a synthesized size
+          // engaged). Silence there reads as the toggle having done nothing.
+          // The pin button comes along, because otherwise the only route back
+          // to a pin is a toggle off and on.
+          HStack {
+            Text("Nothing pinned.").foregroundStyle(.secondary)
+            Spacer()
+            setToCurrentButton(isRedundant: false)
+          }
+        case .pinned(let stored):
           HStack {
             Text(verbatim: "\(DisplayModeCopy.size(stored)) · \(DisplayModeCopy.refresh(stored.refreshHz))")
               .foregroundStyle(.secondary)
             Spacer()
-            // Disabled while a preview is outstanding: pinning a mode that is
-            // still under countdown would record one the user may yet revert.
-            // The coordinator's own queue re-checks (session-authoritative), so
-            // this disable is courtesy, not the guard.
-            Button("Set to Current") { coordinator.pinCurrentMode(on: displayID) }
-              .accessibilityLabel("Set to Current")
-              .disabled(pinnedMatchesCurrent(stored) || coordinator.preview?.displayID == displayID)
+            setToCurrentButton(isRedundant: pinnedMatchesCurrent(stored))
+            // Never disabled, deliberately, and not for symmetry with the
+            // button beside it: this is the way out of a pin that cannot be
+            // honoured, and the reapply banner apologising for that pin is
+            // what sends people here. A recovery control that is unavailable
+            // in the state it exists to recover from is the D29 rule 3 shape.
+            // Clearing while a countdown stands is harmless: keeping the
+            // preview afterwards pins the mode the user just accepted, which
+            // is a fresh answer rather than the forgotten one coming back.
+            Button("Forget") { coordinator.forgetStoredMode(on: displayID) }
+              .accessibilityLabel("Forget the Pinned Resolution")
+              .help("Removes the pinned resolution. This display goes on remembering, so the next resolution you keep is pinned in its place.")
           }
         }
       }
     }
+  }
+
+  /// Disabled while a preview is outstanding: pinning a mode that is still
+  /// under countdown would record one the user may yet revert. The
+  /// coordinator's own queue re-checks (session-authoritative), so this
+  /// disable is courtesy, not the guard.
+  ///
+  /// `isRedundant` is the pin-already-matches-current case, which is the usual
+  /// one once auto-tracking has run. There is no such thing with nothing
+  /// pinned, so the empty row passes false rather than computing it.
+  private func setToCurrentButton(isRedundant: Bool) -> some View {
+    Button("Set to Current") { coordinator.pinCurrentMode(on: displayID) }
+      .accessibilityLabel("Set to Current")
+      .disabled(isRedundant || coordinator.preview?.displayID == displayID)
   }
 
   /// Reads the SAME source the pin writes — live configurator first, catalog
