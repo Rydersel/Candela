@@ -82,6 +82,17 @@ enum SynthesisCopy {
 
   /// Why a synthesized size did not engage. No `default:` arm anywhere below: a
   /// new reason is a compile error here rather than a silent generic sentence.
+  /// SS9's sentence read in the other direction, for the panel's HDR button
+  /// while a size is engaged. Deliberately the mirror image of `.hdrEngaged`
+  /// above: the two refusals guard one pairing from opposite ends, and a person
+  /// who has met one should recognise the other.
+  ///
+  /// A String rather than a `LocalizedStringKey` because the panel's hover
+  /// captions take verbatim text.
+  static var hdrBlockedBySynthesizedSize: String {
+    "Turn off the size \(AppInfo.productName) renders to use HDR."
+  }
+
   static func refusal(_ reason: SynthesisCoordinator.Refusal.Reason) -> LocalizedStringKey {
     switch reason {
     case .builtIn:

@@ -80,7 +80,13 @@ struct PanelView: View {
           // built their own before the derivations moved to plain inputs.
           let rowPrefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
           VStack(alignment: .leading, spacing: 8) {
-            DisplayHeaderRow(controller: state.controller, displayName: name)
+            DisplayHeaderRow(
+              controller: state.controller, displayName: name,
+              // Asked of the engine that owns the pairing, not of the catalog:
+              // a catalog refresh landing inside an engage window answers
+              // "not engaged" while the mirror is already up.
+              isShowingSynthesizedSize: model.synthesis.isEngaged(displayID: state.display.id)
+            )
             DisplaySliderRow(
               controller: state.controller, displayName: name,
               snapsToStops: snapsToStops, showsPercent: showsPercent
@@ -439,6 +445,24 @@ enum PanelMenu {
   }
 }
 
+extension PanelView {
+  /// Why the panel's HDR button cannot act, or nil when it can (SS9's missing
+  /// half, #194).
+  ///
+  /// Only the ENGAGE direction is refused. With HDR already live the button
+  /// offers the exit, and that is the one move that takes the display out of
+  /// the combination this refusal exists to prevent: greying it would be the
+  /// D29 rule 3 shape, a recovery control unavailable in the state it recovers
+  /// from. The same asymmetry is in `BrightnessController.setHDRMode`, which is
+  /// the guarantee; this is the explanation.
+  static func hdrRefusalReason(
+    isShowingSynthesizedSize: Bool, isHDREngaged: Bool
+  ) -> String? {
+    guard isShowingSynthesizedSize, !isHDREngaged else { return nil }
+    return SynthesisCopy.hdrBlockedBySynthesizedSize
+  }
+}
+
 /// Section header for one display: name, an "HDR" state badge, and a trailing
 /// HDR-mode toggle button. Everything is secondary-colored — the slider is
 /// the row's only emphasis, the way Control Center keeps section chrome quiet.
@@ -450,6 +474,7 @@ enum PanelMenu {
 private struct DisplayHeaderRow: View {
   let controller: BrightnessController
   let displayName: String
+  let isShowingSynthesizedSize: Bool
 
   @State private var isHovering = false
 
@@ -491,6 +516,25 @@ private struct DisplayHeaderRow: View {
       Spacer(minLength: 4)
       hdrModeButton
     }
+    // On the whole row rather than on the button: the modifier draws its caption
+    // in a leading-aligned column under the content it wraps, and the button's
+    // own slot is a few characters wide. Swallowing the row's hover costs
+    // nothing, because the only hoverable thing in it is the button and the
+    // button is disabled whenever a reason exists.
+    //
+    // The caption's height is reserved only while a reason exists, so this row
+    // grows by one line when a size engages. That is a reconfiguration, which
+    // ends menu tracking, so the panel is rebuilt at its new height before
+    // anyone sees it: not the case that clipped the footer during keep awake,
+    // where a control inside an OPEN panel changed the panel's own height.
+    .panelHoverReason(refusalReason)
+  }
+
+  private var refusalReason: String? {
+    PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: isShowingSynthesizedSize,
+      isHDREngaged: controller.isHDREngaged
+    )
   }
 
   /// Cycling control, not a menu: the panel is hosted in an `NSMenu` item, and
@@ -517,7 +561,7 @@ private struct DisplayHeaderRow: View {
     // controls visible so people learn what the app supports). `supportsHDR`
     // is observation-tracked, so the button enables live once the async
     // capability refresh lands.
-    .disabled(!controller.supportsHDR)
+    .disabled(!controller.supportsHDR || refusalReason != nil)
     // No `.help`: the panel delivers no tooltip at all (#130), on this ENABLED
     // control least of all, since measuring it here is what proved the cause is
     // menu tracking rather than the greying next door. The accessibility label
