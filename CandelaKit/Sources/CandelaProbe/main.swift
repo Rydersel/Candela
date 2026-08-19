@@ -50,6 +50,7 @@ usage: candela-probe [--display <id>] <subcommand>
   topology                                online displays: kind, identity, virtual verdict, DDC pool
   vd create <slot 1-3> <w> <h> [--hidpi] [--hold <s>]  create a virtual display, hold, destroy
   vd online <id>                          is that display in THIS process's online list
+  conform [--apply]                       assert the private-API platform assumptions; run after every macOS update
 """
 
 /// The DDC subcommands need a DDC-capable external display. The private-API
@@ -155,6 +156,69 @@ func freshProcessSaysDeparted(_ id: CGDirectDisplayID) -> Bool {
   let data = pipe.fileHandleForReading.readDataToEndOfFile()
   child.waitUntilExit()
   return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) == "0"
+}
+
+/// The one conformance check that must live in the probe: invariant 8 needs a
+/// process whose EXIT reverts the preview apply, and only this binary knows
+/// its own path. The child runs `modeapply` at preview scope through the real
+/// configurator, whose post-commit verification throws on a reassigned id, so
+/// "achieved the requested id" is checked by the same machinery the app
+/// trusts; the parent then watches the revert land after the child exits.
+func conformApplyPreview(
+  configurator: CoreGraphicsDisplayConfigurator,
+  applyDestructive: Bool,
+  limit: CGDirectDisplayID?
+) -> PlatformConformance.Check {
+  let name = "cgs.apply.preview"
+  guard applyDestructive else {
+    return .init(name: name, outcome: .skip("requires --apply (reconfigures a display for ~3 seconds)"))
+  }
+  // Externals first: the built-in is the panel someone is working on, and a
+  // preview bounce there is the most disruptive place to run one.
+  let candidates = configurator.displays().sorted { !$0.isBuiltIn && $1.isBuiltIn }
+  for display in candidates where limit == nil || display.id == limit {
+    let modes = configurator.modes(for: display.id)
+    // The largest revealed rung, so the bounce is the least visually violent
+    // one the panel offers. A display revealing nothing is cgs.reveals'
+    // business, not this check's.
+    guard let revealed = modes.filter(\.isRevealed)
+      .max(by: { $0.logicalWidth * $0.logicalHeight < $1.logicalWidth * $1.logicalHeight }),
+          let before = configurator.currentMode(for: display.id)
+    else { continue }
+    let child = Process()
+    child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+    child.arguments = ["--display", String(display.id), "modeapply", String(revealed.ioModeID), "2"]
+    let pipe = Pipe()
+    child.standardOutput = pipe
+    do { try child.run() } catch {
+      return .init(name: name, outcome: .fail("could not spawn the child probe: \(error)"))
+    }
+    let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    child.waitUntilExit()
+    guard child.terminationStatus == 0 else {
+      return .init(name: name, outcome: .fail(
+        "child apply of id \(revealed.ioModeID) exited \(child.terminationStatus)"))
+    }
+    guard output.split(separator: "\n").contains(where: {
+      $0.hasPrefix("after:") && $0.hasSuffix("id \(revealed.ioModeID)")
+    }) else {
+      return .init(name: name, outcome: .fail(
+        "child reported success but its achieved mode is not id \(revealed.ioModeID)"))
+    }
+    // The preview scope reverts at child exit; give the reconfiguration a
+    // bounded window to land rather than reading the first answer.
+    let deadline = Date().addingTimeInterval(5)
+    while Date() < deadline {
+      if configurator.currentMode(for: display.id)?.ioModeID == before.ioModeID {
+        return .init(name: name, outcome: .pass(
+          "revealed id \(revealed.ioModeID) achieved at preview scope on display \(display.id), then self-reverted to id \(before.ioModeID)"))
+      }
+      Thread.sleep(forTimeInterval: 0.1)
+    }
+    return .init(name: name, outcome: .fail(
+      "preview did not revert: display \(display.id) still off id \(before.ioModeID) five seconds after the child exited"))
+  }
+  return .init(name: name, outcome: .skip("no display offers a revealed mode to apply"))
 }
 
 switch arguments.first {
@@ -417,6 +481,25 @@ case "modeapply":
     print("apply FAILED: \(error)")
     exit(4)
   }
+case "conform":
+  // #82: does the platform still behave as this app assumes? Non-destructive
+  // by default; --apply adds the checks that reconfigure hardware (a preview
+  // mode apply, the rotation no-op calls, a same-value brightness write).
+  // The exit code is the interface: 0 only when something passed and nothing
+  // failed, so a run that demonstrated nothing exits non-zero.
+  let applyDestructive = arguments.contains("--apply")
+  let conformConfigurator = CoreGraphicsDisplayConfigurator()
+  var report = await PlatformConformance.run(
+    configurator: conformConfigurator,
+    ddcPanels: found.map { (name: $0.display.name, writer: $0.writer) },
+    applyDestructive: applyDestructive,
+    limitTo: displayFilter
+  )
+  report.checks.append(conformApplyPreview(
+    configurator: conformConfigurator, applyDestructive: applyDestructive, limit: displayFilter
+  ))
+  for line in report.lines() { print(line) }
+  exit(report.exitCode)
 case "caps":
   requireDDCDisplays()
   for entry in found {
