@@ -397,6 +397,18 @@ jobs:
           record="$(LC_ALL=C ls -1 "$dir"/*.json 2>/dev/null | LC_ALL=C sort | tail -n 1 || true)"
 
           if [ -z "$record" ]; then
+            # A ledger directory holding files that are not records is drift,
+            # not a bootstrap. If the naming convention moves, or a record lands
+            # under the wrong name, the glob above matches nothing and this step
+            # would otherwise announce "never verified" over a directory full of
+            # verification runs. That is the loudest possible wrong answer, so
+            # anything besides the README fails here instead.
+            strays="$(LC_ALL=C ls -1 "$dir" 2>/dev/null | grep -v '^README\.md$' || true)"
+            if [ -n "$strays" ]; then
+              echo "::error::$dir holds files that are neither run records nor its README, so the newest-record selection matched nothing: $(printf '%s' "$strays" | tr '\n' ' '). Either the <yyyy-MM-dd>-<sha7>.json convention has drifted or a record was written under the wrong name; under both readings the bootstrap message below would be a false report of a repository that has never been verified."
+              exit 1
+            fi
+
             echo "no hardware verification records yet"
             echo "$dir holds no run record, so nothing here can say when the invariant suite last ran on the rig. Produce the first one on the rig with: candela-probe regress --record $dir --commit \$(git rev-parse HEAD)"
             {
@@ -418,7 +430,18 @@ jobs:
 
           echo "Newest ledger record: $record"
           echo "found=true" >> "$GITHUB_OUTPUT"
-          echo "record=$record" >> "$GITHUB_OUTPUT"
+
+          # The delimiter form, not `record=$record`. The value is a filename
+          # read off disk, and a filename containing a newline would otherwise
+          # write a second line into $GITHUB_OUTPUT and set an output this step
+          # never meant to set. The delimiter is generated per run so it cannot
+          # be guessed by whoever named the file.
+          delim="RECORD_EOF_${RANDOM}${RANDOM}"
+          {
+            echo "record<<$delim"
+            echo "$record"
+            echo "$delim"
+          } >> "$GITHUB_OUTPUT"
 
       # The control the two suites above apply to themselves, applied to this
       # one: a step that reports on a file it never successfully read would go
