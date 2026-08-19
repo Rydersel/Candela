@@ -51,6 +51,7 @@ usage: candela-probe [--display <id>] <subcommand>
   vd create <slot 1-3> <w> <h> [--hidpi] [--hold <s>]  create a virtual display, hold, destroy
   vd online <id>                          is that display in THIS process's online list
   conform [--apply]                       assert the private-API platform assumptions; run after every macOS update
+  regress [--apply] [--json <path>] [--record <dir>] [--commit <sha>] [--tools <dir>] [--debug-app <path>]  assert the app-behaviour invariants against the deployed app
 """
 
 /// The DDC subcommands need a DDC-capable external display. The private-API
@@ -500,6 +501,34 @@ case "conform":
   ))
   for line in report.lines() { print(line) }
   exit(report.exitCode)
+case "regress":
+  // The other half of `conform`: that command asks whether the platform still
+  // behaves as this app assumes, this one asks whether the app still behaves
+  // as its own rulings say it must, against the build that is running. Same
+  // report type, same exit-code rule, separate baselines.
+  switch Regress.parseOptions(Array(arguments.dropFirst())) {
+  case let .failure(usage):
+    print(usage.message)
+    exit(2)
+  case let .success(options):
+    if options.jsonPath != nil || options.recordDir != nil {
+      // Said out loud rather than silently ignored: a flag that accepts a path
+      // and writes nothing is the same silence this command exists to refuse.
+      FileHandle.standardError.write(Data(
+        "regress: this build parses --json and --record but does not write the run record; the ledger leg lands with the panel-dump check\n".utf8))
+    }
+    let regressDisplays = online.map { display in
+      Regress.Display(
+        id: display.id,
+        name: display.name,
+        persistenceKey: found.first { $0.display.id == display.id }?.display.persistenceKey,
+        isBuiltIn: CGDisplayIsBuiltin(display.id) != 0
+      )
+    }
+    let report = Regress.run(options: options, displays: regressDisplays)
+    for line in report.lines(label: "regress") { print(line) }
+    exit(report.exitCode)
+  }
 case "caps":
   requireDDCDisplays()
   for entry in found {
