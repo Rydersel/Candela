@@ -1303,24 +1303,39 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //          published number means a different physical brightness on the
     //          far side of it. Only a write makes the two agree.
     //
-    //          Brightness only. Volume's assumed default is a hardware write
-    //          into the register the mute strand lives in, over displays step 1
-    //          may have deliberately left muted, and contrast's is the same
-    //          defect in a control that stands on its own; both belong to their
-    //          own issue rather than to this one.
+    //          All three commands, for the one reason: each republishes an
+    //          assumed default (brightness 1.0, contrast 75%, volume 12.5%)
+    //          that no door would otherwise send. The two DDC commands carry
+    //          their own refusals inside `reassertHardware` rather than here,
+    //          so a caller cannot forget them: it declines while the display is
+    //          muted, which is how a mute this reset deliberately carried
+    //          across the wipe survives (D29 rule 1), and it declines when the
+    //          command is unavailable or the display is forced to software.
+    //
+    //          The volume verdict is the exception that cannot live in the
+    //          engine: D24's answer is per display and observed here, not in
+    //          the controller. `.unknown` allows, exactly as it does for the
+    //          slider; only a capability string that parsed cleanly and omits
+    //          0x62 refuses, which spares the one panel in this setup that
+    //          would otherwise take a volume write into a register it does not
+    //          implement.
     //
     //          Externals only: `model.builtIn` is not in `displays`, macOS owns
     //          its brightness, and its controller seeded from a live native
     //          read, so its slider already agrees with its glass.
     //
     //          BEFORE step 6, for the reason step 6 states: DDC is unlocked
-    //          only while HDR is down. The write is submitted, not settled
+    //          only while HDR is down. The writes are submitted, not settled
     //          here: `restoreExternalHDR` opens by settling this display's
     //          three queues and declines to re-engage if it cannot, so a display
-    //          getting its HDR back cannot lock the register over a brightness
-    //          write still in the air.
+    //          getting its HDR back cannot lock the register over a write still
+    //          in the air.
     for state in model.displays {
       state.controller.reassertHardware()
+      state.contrast.reassertHardware()
+      if model.volumeSupport[state.display.persistenceKey] != .unsupported {
+        state.volume.reassertHardware()
+      }
     }
 
     // Through the seam's own closure, not `refreshTapConfig()` directly: the
