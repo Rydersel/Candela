@@ -158,4 +158,24 @@ struct RenderSmokeTests {
     .frame(width: 640, height: 520)
     expectPixels(render(page), "AllModesPage")
   }
+
+  /// The built-in display's page, which grew a Display section of its own.
+  ///
+  /// The catalog is absent here, and on a hardware-free fixture `model.builtIn`
+  /// is too, so what this covers is the state every visit to the page starts
+  /// in: the rest of the pane on screen and the resolution section correctly
+  /// not yet drawn. A populated catalog is unreachable from this bundle for
+  /// `AllModesPage`'s reason (`catalogs` is `private(set)` and the only honest
+  /// filler is a live display), so the section's own derivation is covered by
+  /// the row-model suite instead.
+  @Test func theBuiltInDisplayPaneRenders() {
+    let model = TestFixtures.appModel()
+    let pane = BuiltInDisplayPane(
+      selection: .constant(.display("builtIn")), path: .constant([])
+    )
+    .environment(model)
+    .environment(SettingsActions(model: model))
+    .frame(width: 640, height: 520)
+    expectPixels(render(pane), "BuiltInDisplayPane")
+  }
 }

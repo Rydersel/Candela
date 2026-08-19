@@ -85,6 +85,17 @@ struct DisplayHubView: View {
   private var coordinator: DisplayModeCoordinator { model.displayModes }
   private var synthesis: SynthesisCoordinator { model.synthesis }
   private var catalog: DisplayModeCoordinator.Catalog? { coordinator.catalogs[displayID] }
+  /// The shared apply path, with SO6's answering surface sampled from THIS
+  /// window's key state at the moment the row is built. The size pop-up builds
+  /// its own; this one is the recommendation callout's, which applies the very
+  /// same row through the very same countdown (PD9).
+  private var resolutionSelection: ResolutionSelection {
+    ResolutionSelection(
+      coordinator: coordinator,
+      displayID: displayID,
+      surface: controlActiveState == .key ? .settingsBanner : .floatingPanel
+    )
+  }
 
   var body: some View {
     // `DisplayPrefs` is plain UserDefaults and not observable, so this is what
@@ -223,27 +234,17 @@ struct DisplayHubView: View {
       // A nil catalog is "not enumerated yet", NOT "no modes" — rendering the
       // empty state for it flashes false copy on every pane switch.
       if let catalog {
-        if !catalog.rows.isEmpty {
-          SettingRow("Changes how big text and windows look.") {
-            sizePicker(catalog)
-          }
-          refreshPicker(catalog)
-          synthesizedRateRow(catalog)
-        } else if !catalog.all.isEmpty {
-          // Every size this panel reports is under the usability floor. The
-          // curated list is empty, the full one is not — so the sub-page below
-          // is the whole feature here, and saying "no resolutions" while
-          // holding dozens would be false.
-          SettingsCaption("Every size this display reports is too small to use as a desktop. All Sizes & Refresh Rates lists them anyway.")
-        } else {
-          SettingsCaption("\(AppInfo.productName) found no resolutions it can switch between on this display.")
-        }
+        // The size pop-up, the refresh picker and the empty states are shared
+        // with the built-in display's page, which offers the same choice over
+        // the same engine. What stays here is what only an external gets: the
+        // density model's callout, and SS14's synthesis opt-in.
+        DisplaySizeRows(catalog: catalog)
 
         recommendationCallout(catalog)
         moreSizesRows(catalog)
 
         if !catalog.all.isEmpty {
-          rememberRow
+          RememberResolutionRow(displayID: displayID, persistenceKey: persistenceKey)
         }
       }
 
@@ -305,7 +306,9 @@ struct DisplayHubView: View {
           // The SAME apply the picker uses, countdown and all (PD9): a
           // recommended mode is no safer than any other, and the keep/revert
           // window is the only wire-timing detector that exists.
-          Button(DisplayModeCopy.recommendationApply) { select(size: row, in: catalog) }
+          Button(DisplayModeCopy.recommendationApply) {
+            resolutionSelection.select(size: row, in: catalog)
+          }
             .accessibilityLabel(DisplayModeCopy.recommendationApply)
           Button(DisplayModeCopy.recommendationDismiss) {
             writer.write(.sizeRecommendationDismissed) { $0.sizeRecommendationDismissed = true }
@@ -313,167 +316,6 @@ struct DisplayHubView: View {
           .accessibilityLabel(DisplayModeCopy.recommendationDismiss)
           Spacer()
         }
-      }
-    }
-  }
-
-  /// The curated sizes as a dropdown.
-  ///
-  /// **The binding is one-way in practice, and deliberately so.** The getter
-  /// reads the catalog's CURRENT mode — never a `@State` mirror, which would
-  /// drift the moment a preview reverted, System Settings changed the mode, or
-  /// the display was replugged. The setter is the only writer, and it does not
-  /// assign anything: it calls `select(size:in:)`, so a choice still enters the
-  /// preview-with-countdown-revert flow instead of stranding someone on a mode
-  /// they cannot see. The popup therefore snaps back to the running mode until
-  /// the change lands, which is the truth: nothing is applied until the preview
-  /// is kept.
-  @ViewBuilder private func sizePicker(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
-    Picker("Size", selection: Binding(
-      get: { curatedSelection(in: catalog) },
-      set: { id in
-        guard let id, let row = catalog.rows.first(where: { $0.id == id }) else { return }
-        select(size: row, in: catalog)
-      }
-    )) {
-      // The size on screen is not always one we curated — a display left below
-      // the usability floor by System Settings is still running something, and a
-      // popup that named none of it would read as broken. Offered as an item so
-      // the closed control tells the truth; choosing it is the no-op that
-      // choosing the current size has always been.
-      if curatedSelection(in: catalog) == nil {
-        Text(verbatim: catalog.current.map(DisplayModeCopy.size) ?? "Unknown")
-          .tag(DisplayModeRow.ID?.none)
-      }
-      ForEach(catalog.rows) { row in
-        Text(verbatim: sizeItemLabel(row, in: catalog))
-          .tag(DisplayModeRow.ID?.some(row.id))
-      }
-    }
-  }
-
-  /// The row's OUTCOME, not its catalog entry (SO18): a size whose applied mode
-  /// cannot hold the rate now in use says so on the item.
-  ///
-  /// The Native/Scaled tags deliberately do NOT ride along: this picker is
-  /// deduplicated by logical size, so the distinction words belong to the
-  /// surfaces that show the duplicates (SO14/SO18, Task 14).
-  ///
-  /// **The revealed-source mark does not ride along.** Marks on one dropdown
-  /// item read as a badge queue, so this pop-up states the cost of the choice
-  /// (the caps warning) and the recommendation. "Added by Candela" belongs to
-  /// the All Sizes page, where a row has the width for it and where a mode we
-  /// found sits beside its published neighbour at the same size; see
-  /// `AllModesPage.rowBadge`.
-  ///
-  /// **"Rendered by Candela" does ride along** (SS5), because it is not the
-  /// same kind of statement: a synthesized size is one the display does not
-  /// have, and choosing it stands a virtual display up. That is a cost, like
-  /// the caps warning, and a cost belongs where the choice is made.
-  ///
-  /// **The density model's mark rides along too**, for the same reason: this
-  /// pop-up is where a size is chosen, and a suggestion nobody sees while
-  /// choosing is a suggestion the app did not make. One word is all of it: a
-  /// mark states the suggestion, and anything that has to be argued (the panel
-  /// measurement behind it, an apply button) belongs to a dismissible row that
-  /// this mark deliberately outlives.
-  ///
-  /// `currentHz` is `outcome`'s contract, not a hint: when the display has no
-  /// current mode the caps warning is SUPPRESSED entirely — a placeholder 0
-  /// would both disable the warning and name the wrong rate.
-  private func sizeItemLabel(_ row: DisplayModeRow, in catalog: DisplayModeCoordinator.Catalog) -> String {
-    var marks: [String] = []
-    // Never asked of a synthesized row, which `AllModesPage.recommendedRowModel`
-    // skips for the same reason: the question is "what rate does this size get
-    // in the display's own list", and a stop is not in that list. A stop whose
-    // logical size collided with a published 1x size would otherwise be
-    // answered about the OTHER size and print a rate this row never applies.
-    if !row.mode.isSynthesized,
-       let current = catalog.current,
-       let outcome = DisplayModeCatalog.outcome(
-         selectingWidth: row.mode.logicalWidth,
-         selectingHeight: row.mode.logicalHeight,
-         currentHz: current.refreshHz,
-         in: catalog.all
-       ),
-       outcome.lowersCurrentRate {
-      // First: what this choice costs outranks a note about the display.
-      marks.append("caps at \(DisplayModeCopy.refresh(outcome.appliedHz))")
-    }
-    // Second: a note about this PANEL rather than a cost of the choice. By
-    // SIZE, like `curatedSelection` above.
-    if catalog.isRecommendedSize(row.mode) {
-      marks.append(DisplayModeCopy.recommended)
-    }
-    // Third, and the exception to the paragraph above: a synthesized row IS
-    // marked here (SS5). "Added by Candela" is a note about where a mode came
-    // from, which is why it stays on the All Sizes page; this one is a cost of
-    // the choice, in the same family as the caps warning. Picking it stands a
-    // virtual display up, takes seconds, and shows in System Settings, so the
-    // pop-up where the choice is made is exactly where it has to be legible.
-    if row.mode.isSynthesized {
-      marks.append(SynthesisCopy.badge)
-    }
-
-    let base = DisplayModeCopy.size(row.mode)
-    guard !marks.isEmpty else { return base }
-    return "\(base) (\(marks.joined(separator: ", ")))"
-  }
-
-  /// The curated row the display is running, by SIZE — `ioModeID` would come up
-  /// empty whenever the user is at a size's slower refresh rate, since the row's
-  /// representative mode is that size's fastest. nil means the running size is
-  /// not one of ours.
-  private func curatedSelection(in catalog: DisplayModeCoordinator.Catalog) -> DisplayModeRow.ID? {
-    catalog.rows.first { catalog.isCurrentSize($0.mode) }?.id
-  }
-
-  /// Prospective (SO18): the rates offered are the SELECTED size's, read from
-  /// the size picker's own selection — which, because that binding snaps to the
-  /// running mode, is the current size until a choice lands. Quantized before
-  /// deduplication: `refreshRates(in:)` dedupes raw doubles and would list 60
-  /// twice the day float noise reached it, while NTSC's genuine 59.9 survives
-  /// quantization as its own entry.
-  ///
-  /// Absent entirely while a synthesized size is engaged, and `synthesizedRateRow`
-  /// takes its place. Two reasons, either of which is enough: the rates it would
-  /// list belong to a size that is not on the glass, and picking one would apply
-  /// a published mode to a display whose picture comes from somewhere else.
-  @ViewBuilder private func refreshPicker(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
-    if let current = catalog.current, catalog.engagedSyntheticSize == nil {
-      let selected = catalog.rows.first { $0.id == curatedSelection(in: catalog) }?.mode ?? current
-      let raw = DisplayModeCatalog.refreshRates(
-        in: catalog.all,
-        logicalWidth: selected.logicalWidth,
-        logicalHeight: selected.logicalHeight
-      )
-      let rates = dedupedQuantized(raw)
-      if rates.count > 1 {
-        Picker("Refresh rate", selection: Binding(
-          get: { DisplayMode.quantizedRefresh(current.refreshHz) },
-          set: { hz in select(refreshHz: hz, in: catalog) }
-        )) {
-          ForEach(rates, id: \.self) { hz in
-            Text(verbatim: DisplayModeCopy.refresh(hz)).tag(hz)
-          }
-        }
-      }
-    }
-  }
-
-  /// What the refresh picker's slot says while a synthesized size is engaged.
-  ///
-  /// The rate is not a property of the stop: the engage tail re-times the
-  /// display onto its own mode, so it keeps its own rate [MEASURED 2026-08-18],
-  /// and this states the rule rather than a figure. A row rather than nothing,
-  /// because a refresh control that simply vanished would read as the feature
-  /// having taken the rate away.
-  @ViewBuilder private func synthesizedRateRow(
-    _ catalog: DisplayModeCoordinator.Catalog
-  ) -> some View {
-    if catalog.engagedSyntheticSize != nil {
-      LabeledContent("Refresh rate") {
-        Text(verbatim: SynthesisCopy.keepsPanelRefresh).foregroundStyle(.secondary)
       }
     }
   }
@@ -523,162 +365,6 @@ struct DisplayHubView: View {
   /// a `PrefName`: a second write path would be a second ordering to get wrong.
   private func setMoreSizes(_ enabled: Bool, on display: ConfiguredDisplay) {
     Task { await synthesis.setOptIn(enabled, on: display) }
-  }
-
-  private func dedupedQuantized(_ rates: [Double]) -> [Double] {
-    var seen = Set<Double>()
-    return rates.map(DisplayMode.quantizedRefresh).filter { seen.insert($0).inserted }
-  }
-
-  /// What the second line under the Remember toggle is showing.
-  ///
-  /// Nameable rather than inline in `body` so the app test bundle can assert
-  /// on it: the empty case is reachable by two routes that are awkward to
-  /// stage by hand (Forget, and a turn-on whose seeding pin declined), and a
-  /// row that silently rendered nothing in either would look exactly like the
-  /// toggle being broken.
-  enum PinnedRow: Equatable {
-    /// Remembering is off, so there is no promise on screen to describe.
-    case hidden
-    /// Remembering is on and nothing is pinned.
-    case empty
-    case pinned(DisplayModeDescriptor)
-  }
-
-  static func pinnedRow(isRemembering: Bool, stored: DisplayModeDescriptor?) -> PinnedRow {
-    guard isRemembering else { return .hidden }
-    guard let stored else { return .empty }
-    return .pinned(stored)
-  }
-
-  /// The stored mode is visible while the toggle is on, and it tracks the
-  /// resolution the user keeps. `Set to Current` stays as the explicit re-pin
-  /// for a mode already on screen; it disables itself once the pin and the
-  /// running mode agree, which auto-tracking now makes the usual state.
-  /// `Forget` is the way back out, and the only one that does not go through
-  /// wiping every setting in the app.
-  private var rememberRow: some View {
-    SettingRow("Restored when this display reconnects, not while you are using it.") {
-      VStack(alignment: .leading, spacing: 6) {
-        Toggle("Remember this resolution", isOn: Binding(
-          get: { coordinator.isRemembering(displayID) },
-          set: { remembering in
-            // Only the flag is announced here. Turning it on ALSO pins the
-            // current mode (Task 11 seeding, inside `setRemembering`), and that
-            // write announces itself from inside the coordinator
-            // (`didStoreMode`) — naming `.storedDisplayMode` here as well would
-            // put the rule in two places, which is how it was lost the first
-            // time.
-            coordinator.setRemembering(remembering, for: displayID)
-            actions.prefDidChange(.rememberDisplayMode, persistenceKey: persistenceKey)
-          }
-        ))
-        switch Self.pinnedRow(
-          isRemembering: coordinator.isRemembering(displayID),
-          stored: coordinator.storedDescriptor(for: displayID)
-        ) {
-        case .hidden:
-          EmptyView()
-        case .empty:
-          // States the fact rather than apologising: this is the normal state
-          // straight after Forget, and it is also where a turn-on lands when
-          // its seeding pin declined (a preview outstanding, a synthesized size
-          // engaged). Silence there reads as the toggle having done nothing.
-          // The pin button comes along, because otherwise the only route back
-          // to a pin is a toggle off and on.
-          HStack {
-            Text("Nothing pinned.").foregroundStyle(.secondary)
-            Spacer()
-            setToCurrentButton(isRedundant: false)
-          }
-        case .pinned(let stored):
-          HStack {
-            Text(verbatim: "\(DisplayModeCopy.size(stored)) · \(DisplayModeCopy.refresh(stored.refreshHz))")
-              .foregroundStyle(.secondary)
-            Spacer()
-            setToCurrentButton(isRedundant: pinnedMatchesCurrent(stored))
-            // Never disabled, deliberately, and not for symmetry with the
-            // button beside it: this is the way out of a pin that cannot be
-            // honoured, and the reapply banner apologising for that pin is
-            // what sends people here. A recovery control that is unavailable
-            // in the state it exists to recover from is the D29 rule 3 shape.
-            // Clearing while a countdown stands is harmless: keeping the
-            // preview afterwards pins the mode the user just accepted, which
-            // is a fresh answer rather than the forgotten one coming back.
-            Button("Forget") { coordinator.forgetStoredMode(on: displayID) }
-              .accessibilityLabel("Forget the Pinned Resolution")
-              .help("Removes the pinned resolution. This display goes on remembering, so the next resolution you keep is pinned in its place.")
-          }
-        }
-      }
-    }
-  }
-
-  /// Disabled while a preview is outstanding: pinning a mode that is still
-  /// under countdown would record one the user may yet revert. The
-  /// coordinator's own queue re-checks (session-authoritative), so this
-  /// disable is courtesy, not the guard.
-  ///
-  /// `isRedundant` is the pin-already-matches-current case, which is the usual
-  /// one once auto-tracking has run. There is no such thing with nothing
-  /// pinned, so the empty row passes false rather than computing it.
-  private func setToCurrentButton(isRedundant: Bool) -> some View {
-    Button("Set to Current") { coordinator.pinCurrentMode(on: displayID) }
-      .accessibilityLabel("Set to Current")
-      .disabled(isRedundant || coordinator.preview?.displayID == displayID)
-  }
-
-  /// Reads the SAME source the pin writes — live configurator first, catalog
-  /// cache as fallback (T11 review): after a countdown expiry the cache still
-  /// names the reverted-away mode for a moment, and a comparison against it
-  /// would enable the button for a pin that would be refused, or worse,
-  /// disable it against a stale answer.
-  private func pinnedMatchesCurrent(_ stored: DisplayModeDescriptor) -> Bool {
-    guard let live = coordinator.configurator.currentMode(for: displayID) ?? catalog?.current
-    else { return false }
-    return live.descriptor == stored
-  }
-
-  // MARK: - Mode selection
-
-  /// Applies the chosen SIZE while keeping the refresh rate the display is
-  /// already running, when that size offers it. The rule itself lives on
-  /// `Catalog` — the panel applies the same one.
-  private func select(size row: DisplayModeRow, in catalog: DisplayModeCoordinator.Catalog) {
-    apply(catalog.modeKeepingCurrentRefreshRate(for: row), in: catalog)
-  }
-
-  private func select(refreshHz: Double, in catalog: DisplayModeCoordinator.Catalog) {
-    guard let current = catalog.current else { return }
-    let wanted = DisplayModeDescriptor(
-      logicalWidth: current.logicalWidth,
-      logicalHeight: current.logicalHeight,
-      pixelWidth: current.pixelWidth,
-      pixelHeight: current.pixelHeight,
-      refreshHz: refreshHz
-    )
-    guard let mode = catalog.mode(matching: wanted, atSizeOf: current) else { return }
-    apply(mode, in: catalog)
-  }
-
-  private func apply(_ mode: DisplayMode, in catalog: DisplayModeCoordinator.Catalog) {
-    // Never speculative: this runs only from an explicit click naming this
-    // display's mode. No `Task` here — `selectFromList` is fire-and-forget into
-    // the coordinator's queue, which is what serialises two fast clicks;
-    // spawning one per click is precisely how the banner ends up naming a
-    // different mode than the one "Keep" would commit. It also carries the
-    // already-on-screen guard, shared with the full mode list.
-    //
-    // `.settings` routes a failed `begin()` to the banner region, which the
-    // panel cannot show. The SURFACE is the SO6 decision, sampled from this
-    // window's key state synchronously at the click: key settings window →
-    // the banner region answers and the floating window stays away; anything
-    // else keeps the floating default.
-    coordinator.selectFromList(
-      mode, on: displayID, from: .settings,
-      surface: controlActiveState == .key ? .settingsBanner : .floatingPanel,
-      currentModeID: catalog.alreadyOnScreenModeID
-    )
   }
 
   // MARK: - Sound

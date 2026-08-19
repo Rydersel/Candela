@@ -16,21 +16,21 @@ struct PinnedResolutionRowTests {
   )
 
   @Test func nothingIsShownWhileRememberingIsOff() {
-    #expect(DisplayHubView.pinnedRow(isRemembering: false, stored: nil) == .hidden)
+    #expect(RememberResolutionRow.pinnedRow(isRemembering: false, stored: nil) == .hidden)
   }
 
   /// A pin left behind by a previous opt-in stays out of sight while the
   /// toggle is off: it is not applied in that state, and a row describing a
   /// restore that will not happen is worse than no row.
   @Test func aLeftoverPinIsNotShownWhileRememberingIsOff() {
-    #expect(DisplayHubView.pinnedRow(isRemembering: false, stored: Self.pin) == .hidden)
+    #expect(RememberResolutionRow.pinnedRow(isRemembering: false, stored: Self.pin) == .hidden)
   }
 
   @Test func rememberingWithNothingPinnedSaysSo() {
-    #expect(DisplayHubView.pinnedRow(isRemembering: true, stored: nil) == .empty)
+    #expect(RememberResolutionRow.pinnedRow(isRemembering: true, stored: nil) == .empty)
   }
 
   @Test func aPinnedModeIsNamed() {
-    #expect(DisplayHubView.pinnedRow(isRemembering: true, stored: Self.pin) == .pinned(Self.pin))
+    #expect(RememberResolutionRow.pinnedRow(isRemembering: true, stored: Self.pin) == .pinned(Self.pin))
   }
 }

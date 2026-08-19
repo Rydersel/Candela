@@ -3,13 +3,17 @@ import SwiftUI
 
 /// The built-in display's destination.
 ///
-/// It has almost no per-display settings, because macOS owns built-in
-/// brightness — but "almost" is not "none", and the old Displays pane rendered
-/// a dead-end caption saying otherwise. `isDisabled` genuinely applies here:
+/// macOS owns built-in brightness, which is why this page has no brightness
+/// control, and the old Displays pane read that as "nothing to set here" and
+/// rendered a dead-end caption. Two things it was wrong about. `isDisabled`
+/// genuinely applies here:
 /// `stepBrightnessBuiltIn` and `stepBrightness(displayIDs:)` both filter
 /// through `keyEnabledStates`, which reads it for the built-in slot. It had no
 /// UI only because the old pane iterated `model.displays`, which is
-/// external-only.
+/// external-only. And resolution applies here in full: the built-in is in the
+/// configurator's list, its identity has a first-class persistence key, and the
+/// reapply pass already walks it, so the only thing ever missing was a surface
+/// to make the choice on.
 ///
 /// "Show the built-in display in the menu bar" deliberately does NOT
 /// live here. A laptop's panel disappears in clamshell, so a control governing
@@ -24,8 +28,8 @@ struct BuiltInDisplayPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
 
-  /// Pop restoration (a11y contract 1): the Diagnostics row is the only pusher
-  /// here, and it takes focus back when its page pops.
+  /// Pop restoration (a11y contract 1): whichever chevron row pushed takes
+  /// focus back when its page pops. Two of them now, All Sizes and Diagnostics.
   @FocusState private var focusedRow: DisplaySubPage?
 
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "builtIn") }
@@ -34,6 +38,9 @@ struct BuiltInDisplayPane: View {
   /// time, not reactively, so a write without propagation is a dead control.
   private var writer: DisplayPrefWriter {
     DisplayPrefWriter(persistenceKey: "builtIn", actions: actions)
+  }
+  private var catalog: DisplayModeCoordinator.Catalog? {
+    model.builtIn.flatMap { model.displayModes.catalogs[$0.id] }
   }
 
   var body: some View {
@@ -47,6 +54,8 @@ struct BuiltInDisplayPane: View {
           ))
         }
       }
+
+      displaySection
 
       Section("Brightness") {
         SettingsCaption("macOS controls the built-in display's brightness directly, so there is nothing to set here. \(AppInfo.productName) reads its level to keep your other displays in step.")
@@ -77,13 +86,57 @@ struct BuiltInDisplayPane: View {
     }
     // The built-in never passes through the launch warm-up (that walks
     // `model.displays`, which is external-only), so without this its catalog
-    // stays absent and the Diagnostics "Current mode" row has nothing to
-    // report. Hung off the `Form` rather than the section for the reason
+    // stays absent: the Diagnostics "Current mode" row would have nothing to
+    // report and the Display section below would never appear at all. Any LATER
+    // change, ours or System Settings' or a lid cycle, re-enumerates through the
+    // coordinator's own screen-parameters observer, which runs whether or not
+    // this page is on screen.
+    // Hung off the `Form` rather than the section for the reason
     // recorded in `DisplayDetailView`: a lifecycle modifier on a `Section`
     // inside a grouped Form is not reliably applied.
     .task(id: model.builtIn?.id) {
       guard let id = model.builtIn?.id else { return }
       model.displayModes.refreshCatalog(for: id)
+    }
+  }
+
+  /// The laptop panel's own resolution controls, over the same coordinator, the
+  /// same curated rows and the same preview-with-countdown every external gets.
+  ///
+  /// It is the one page in the window where the display being reconfigured is
+  /// also the display the question is asked on, which is a reason to keep the
+  /// countdown rather than to skip it: a mode that leaves this panel unreadable
+  /// leaves nothing to answer with, and the expiry is what recovers it.
+  ///
+  /// Three things an external's Display section has are deliberately absent
+  /// here. Synthesized sizes: SS14 keeps the built-in out entirely, and the
+  /// catalog carries no stops for it. Mirroring and rotation: neither is part of
+  /// this page's scope, so they are not offered rather than offered broken. The
+  /// density recommendation: the built-in never passes through display
+  /// discovery, so no physical size is ever filed for it and the model abstains,
+  /// which would leave a callout that could not appear.
+  @ViewBuilder private var displaySection: some View {
+    // A nil catalog is "not enumerated yet", NOT "no modes": rendering an
+    // empty state for it would flash false copy on every pane switch. The
+    // built-in is never warmed at launch (that pass walks the external list),
+    // so this page's own `.task` is what fills it, one frame in.
+    if let catalog {
+      Section {
+        DisplaySizeRows(catalog: catalog)
+
+        if !catalog.all.isEmpty {
+          RememberResolutionRow(displayID: catalog.display.id, persistenceKey: "builtIn")
+
+          NavigationRow(
+            title: DisplaySubPage.allModes.title,
+            value: "\(catalog.all.count)",
+            spokenValue: "\(catalog.all.count) modes"
+          ) { path.append(.allModes) }
+            .focused($focusedRow, equals: .allModes)
+        }
+      } header: {
+        Text("Display").settingsHeading()
+      }
     }
   }
 }
