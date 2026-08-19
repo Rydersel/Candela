@@ -49,7 +49,34 @@ struct ArrangementPane: View {
   /// else.
   @State private var shownRestoreNotice: ArrangementReapplyNotice?
 
+  /// The layout a requested change is animating INTO, held while the apply is
+  /// in flight.
+  ///
+  /// Without it, the map goes on drawing `coordinator.arrangement`, which is
+  /// still the layout the change started FROM: a dropped tile slides back to
+  /// where it was picked up and only then jumps forward when the apply lands,
+  /// and a move has to travel toward its result rather than away from it.
+  ///
+  /// It lives HERE rather than in the canvas because it is a fact about the
+  /// coordinator, not about a map: "a layout has been asked for and the apply is
+  /// outstanding". While the canvas owned it, the routes that went through the
+  /// canvas animated and this pane's own "Use as Main Display" button did not,
+  /// because it had no way to reach the state. Every route now goes through
+  /// `propose`.
+  ///
+  /// Showing the requested layout while the request is outstanding is the same
+  /// thing the countdown does, so it is not a claim about achieved state, and an
+  /// apply that fails corrects the map as it finishes rather than leaving it
+  /// lying.
+  @State private var settling: DisplayArrangement?
+
   private var coordinator: ArrangementCoordinator { model.arrangement }
+
+  /// What the map is drawing from, and what every proposal is composed against:
+  /// the requested layout while one is outstanding, the achieved one otherwise.
+  private var displayedArrangement: DisplayArrangement {
+    settling ?? coordinator.arrangement
+  }
 
   /// The panel each synthesis virtual display is standing in for, by the
   /// virtual display's ID (SS12). Runtime IDs, derived per read: the pairing
@@ -113,6 +140,25 @@ struct ArrangementPane: View {
       savedLayoutSection
     }
     .formStyle(.grouped)
+    // ONE signal ends the settle, and it is positive: the coordinator has
+    // finished the work it was given. No timer, because a deadline long enough
+    // for a slow reconfiguration is also long enough to show a failed one as
+    // though it worked.
+    //
+    // `coordinator.arrangement` changing is deliberately NOT watched, because it
+    // is not evidence about THIS settle. `performApply` re-reads the layout
+    // before its queue task decrements the in-flight count, so the arrangement
+    // is already current by the time this fires and a second hook would buy
+    // nothing; and with two changes outstanding the count keeps `isApplying`
+    // true, so the first apply's re-read would clear the second's settle and
+    // snap the map back to a layout one change stale. The refusal paths (a
+    // no-op, an invalid layout, the four-way gate of AR12) return before that
+    // re-read and still arrive here, so a refused proposal correctly drops the
+    // map back to achieved state.
+    .onChange(of: coordinator.isApplying) { _, applying in
+      guard !applying else { return }
+      withAnimation(Motion.settle(reduceMotion: reduceMotion)) { settling = nil }
+    }
     .task(id: refusalToken) {
       guard !refusal.isEmpty else { return }
       // Long enough to read a sentence, short enough that it does not outlive
@@ -163,24 +209,36 @@ struct ArrangementPane: View {
         // fixed size (AR2, and the screenshot checks) and is centred inside the
         // field.
         VStack(alignment: .leading, spacing: 12) {
-          // Says the map is draggable at all. The button's caption used to
-          // carry this, but only while nothing was selected, so the one
-          // instruction that explains the whole control disappeared as soon as
-          // anyone used it.
+          // Says the map is draggable at all, and names the arrow keys, which
+          // are the only way to move a display without a pointer. Both used to
+          // live in the button's caption, which is shown only while nothing is
+          // selected, so the instructions that explain the whole control
+          // disappeared as soon as anyone used it. The arrow keys were then
+          // carried for a while by a per-tile accessibility hint alone, which a
+          // sighted keyboard-only user never hears: that user is the gap the
+          // keyboard route exists to close, so the instruction is visible copy.
+          //
+          // The inset is on this line rather than on the field, because the
+          // field's horizontal padding is what the canvas's own width budget is
+          // measured against: at 16 pt a side the row's minimum went to 512 and
+          // overflowed the detail column at the 720 pt window minimum. See
+          // `ArrangementCanvasView.canvasSize`.
           SettingsCaption(
-            "Drag a display to move it. Displays have to touch along an edge and cannot overlap."
+            "Drag a display to move it, or tab to one and move it with the arrow keys. Displays have to touch along an edge and cannot overlap."
           )
+          .padding(.horizontal, 16)
 
           ArrangementCanvasView(
-          arrangement: coordinator.arrangement,
+          arrangement: displayedArrangement,
           name: displayName,
           isVirtual: { virtualIDs.contains($0) },
           isSynthesisPair: { panels[$0] != nil },
-          // The map holds a committed drop's layout until this clears, so the
-          // drop animates into its result instead of back to where it started.
+          // Not for the settle, which is this pane's: the canvas refuses to
+          // SEED a new drag or nudge from a layout that has only been requested,
+          // because a refused request is never achieved.
           isApplying: coordinator.isApplying,
           selection: reconciledSelection,
-          onPropose: { coordinator.apply($0) },
+          onPropose: { propose($0) },
           onRefuse: { problems in
             // The sentence below is a conditional child of a `Form` row: a keyed
             // `.animation` on a `Group` around it animates nothing, and on the
@@ -199,7 +257,7 @@ struct ArrangementPane: View {
           )
           .frame(maxWidth: .infinity, alignment: .center)
         }
-        .padding(16)
+        .padding(.vertical, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 10).fill(.quinary))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
@@ -254,11 +312,36 @@ struct ArrangementPane: View {
         guard let id = reconciledSelection.wrappedValue else { return }
         // A pure translation of the whole layout, so relative geometry is
         // provably unchanged — "make main" cannot rearrange anything.
-        coordinator.apply(coordinator.arrangement.makingMain(id))
+        //
+        // Through `propose`, like every other route: this button is the reason
+        // the settle was lifted out of the canvas, since it was the one way of
+        // asking for a layout that could not reach the state and so stepped to
+        // its result instead of animating into it.
+        propose(displayedArrangement.makingMain(id))
       }
       .accessibilityLabel("Use as Main Display")
       .disabled(!canMakeMain)
     }
+  }
+
+  /// The one place a layout is asked for, so the drop, the arrow keys, the
+  /// context menu, the VoiceOver action and the button above all behave alike.
+  ///
+  /// Composed against `displayedArrangement`, never against the coordinator's:
+  /// during a settle the coordinator still holds the pre-change layout, so a
+  /// second change measured from it would be measured from a layout that is no
+  /// longer the one on screen.
+  private func propose(_ next: DisplayArrangement) {
+    coordinator.apply(next)
+    // A proposal equal to what is already showing arms nothing. The coordinator
+    // drops it at its own no-op guard before anything is applied, so
+    // `isApplying` never rises and nothing would ever clear a settle set here,
+    // leaving the map holding a request forever. The reachable case is the
+    // canvas's VoiceOver "Use as Main Display" action, which has no `.disabled`
+    // guard the way the context-menu button does, so a rotor user can invoke it
+    // on the display that is already main.
+    guard next != displayedArrangement else { return }
+    withAnimation(Motion.settle(reduceMotion: reduceMotion)) { settling = next }
   }
 
   private var canMakeMain: Bool {

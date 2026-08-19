@@ -43,14 +43,28 @@ struct ArrangementCanvasView: View {
   var isSynthesisPair: (CGDirectDisplayID) -> Bool = { _ in false }
   /// Whether the coordinator has a reconfiguration in flight.
   ///
-  /// The map holds the layout a committed drop asked for until this goes back
-  /// to false. `ArrangementCoordinator.apply` enqueues, so `arrangement` is the
-  /// PRE-drop layout for as long as the reconfiguration takes; without this the
-  /// drop would render its own undoing. See `settling`.
+  /// While it is, `arrangement` is the layout a change REQUESTED and not one the
+  /// machine has reached: `ArrangementPane` holds the request there so a
+  /// committed change animates into its result rather than back into the layout
+  /// it started from. That settle is the pane's and not this view's, because
+  /// "a layout has been asked for and the apply is outstanding" is a fact about
+  /// the coordinator; while a map widget owned it, the pane's own button was the
+  /// one route that never got the behaviour.
+  ///
+  /// What the flag buys HERE is about the gesture rather than about the settle:
+  /// a request the coordinator refuses is never achieved, so no NEW gesture may
+  /// be measured from it. See `dragGesture` and `nudge`.
   var isApplying: Bool = false
   @Binding var selection: CGDirectDisplayID?
-  /// Called ONLY with a valid layout that differs from the current one. Starts
-  /// the preview and its countdown.
+  /// Asks for a layout. The pane starts the preview and its countdown, and
+  /// holds the requested layout on the map until the apply finishes.
+  ///
+  /// EVERY route arrives here, a drop and an arrow-key nudge and both "Use as
+  /// Main Display" actions alike, which is what makes them behave the same. A
+  /// valid layout that differs from the current one is the usual case rather
+  /// than a guarantee: the VoiceOver action carries no `.disabled` guard the way
+  /// the context-menu button does, so a rotor user can ask for the layout that
+  /// is already showing. The pane and the coordinator both take that quietly.
   let onPropose: (DisplayArrangement) -> Void
   /// Called when a drop was refused (AR7), with every problem that refused it,
   /// so the pane can say what is wrong in words. Colour alone is never the
@@ -58,20 +72,6 @@ struct ArrangementCanvasView: View {
   let onRefuse: ([ArrangementProblem]) -> Void
 
   @State private var drag: TileDrag?
-  /// The layout a committed drop is animating INTO, held while the apply is in
-  /// flight and cleared by the first honest answer that arrives.
-  ///
-  /// Without it, `drag = nil` on release swaps the map straight back to
-  /// `arrangement`, which is still the layout the drag STARTED from, so the
-  /// tile the user just dropped slides back to where they picked it up and only
-  /// then jumps forward when the apply lands. A drop has to move toward its
-  /// result rather than away from it.
-  ///
-  /// Showing the requested layout while the request is outstanding is the same
-  /// thing the countdown does, so it is not a claim about achieved state. Both
-  /// `arrangement` changing and `isApplying` going false clear it, and an apply
-  /// that fails corrects the map as it finishes rather than leaving it lying.
-  @State private var settling: DisplayArrangement?
   @FocusState private var focused: CGDirectDisplayID?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -81,11 +81,22 @@ struct ArrangementCanvasView: View {
   /// is clipped by the form row at any window size the user is allowed to reach,
   /// and a map that loses its right-hand display is worse than a smaller map.
   ///
+  /// 480 is the WHOLE of the row's minimum width, because the field the map sits
+  /// on adds no horizontal inset around it (`ArrangementPane` keeps the vertical
+  /// inset and gives the hint line its own horizontal one instead). A 16 pt inset
+  /// on each side was tried and made the row 512 wide: at the 720 pt minimum the
+  /// field overflowed, the sidebar clipped and the right-hand display ran off the
+  /// map. Anything added around the canvas has to come out of this number.
+  ///
   /// 250 rather than 290: the map is fitted to the arrangement's bounds, and a
-  /// wide, short layout left dead bands above and below it. A shorter box also
-  /// raises the fitted scale, so the tiles themselves come out larger. Height
-  /// is the axis to be careful with, because a portrait display makes the
-  /// arrangement tall: check this against the Dell at 270 degrees.
+  /// wide, short layout left dead bands above and below it. It does NOT make the
+  /// tiles bigger; `CanvasTransform.fitting` is a `min()` over both axes, so a
+  /// shorter box can only lower the fitted scale or leave it alone. MEASURED on
+  /// this rig, whose display union is 6680 x 2560: width binds at 290 and at 250
+  /// alike, the scale is 0.04975 either way and the map comes out 332 x 127
+  /// either way, so the change trims dead space from 135 pt to 95 pt and costs
+  /// nothing. Height is the axis to be careful with, because a portrait display
+  /// makes the arrangement tall: check this against the Dell at 270 degrees.
   static let canvasSize = CanvasSize(width: 480, height: 250)
   private static let spaceName = "candela.arrangement.canvas"
   private static let margin: Double = 14
@@ -121,19 +132,15 @@ struct ArrangementCanvasView: View {
 
   // MARK: - Derived state
 
-  /// What the map draws from when no drag is running. Everything that used to
-  /// read `arrangement` directly reads this instead, so a drag begun during the
-  /// settle is measured from the layout on screen rather than from the one the
-  /// coordinator has not caught up to yet.
-  private var resting: DisplayArrangement { settling ?? arrangement }
-
   /// Rendered, never mirrored: there is no copy of the layout to fall out of
-  /// step with the proposal.
-  private var displayed: DisplayArrangement { drag?.proposal.arrangement ?? resting }
+  /// step with the proposal. `arrangement` is the whole of what this view knows
+  /// about the world, a settle included, so there is no second layout here to
+  /// keep in agreement with the one it was handed.
+  private var displayed: DisplayArrangement { drag?.proposal.arrangement ?? arrangement }
   private var transform: CanvasTransform { drag?.transform ?? restingTransform }
 
   private var restingTransform: CanvasTransform {
-    CanvasTransform.fitting(resting.bounds, in: Self.canvasSize, margin: Self.margin)
+    CanvasTransform.fitting(arrangement.bounds, in: Self.canvasSize, margin: Self.margin)
   }
 
   /// How much EVERY tile says, decided once from the tiles as they are about to
@@ -154,12 +161,32 @@ struct ArrangementCanvasView: View {
     })
   }
 
-  /// The snap guides for where the tile is, plus the landing guide for where it
-  /// goes if it cannot stay there. Both come from the one proposal, so the edge
-  /// drawn is always the edge the release commits to.
-  private var guideLines: [SnapLine] {
+  /// One guide to draw, and which question it answers. Up to three are on
+  /// screen at once and they describe two different outcomes, so the picture has
+  /// to keep them apart: see `guide(_:)`.
+  private struct Guide: Identifiable {
+    let id: Int
+    let line: SnapLine
+    /// Where the display GOES on release, rather than where it is being drawn.
+    let isLanding: Bool
+  }
+
+  /// The snap guides for where the tile is, tagged apart from the landing guide
+  /// for where it goes if it cannot stay there. Both come from the one proposal,
+  /// so the edge drawn is always the edge the release commits to (AR3).
+  ///
+  /// The tag is carried here because `SnapLine` cannot answer the question:
+  /// an insert seam and an attachment edge are both `.abut`, the same kind an
+  /// ordinary snap guide carries, so `kind` distinguishes snapping from
+  /// aligning and never a rendered position from a committed one. Only the
+  /// proposal knows which list a line came out of.
+  private var guideLines: [Guide] {
     guard let drag else { return [] }
-    return drag.proposal.lines + (drag.proposal.landing?.lines ?? [])
+    let snaps = drag.proposal.lines.map { (line: $0, isLanding: false) }
+    let landing = (drag.proposal.landing?.lines ?? []).map { (line: $0, isLanding: true) }
+    return (snaps + landing).enumerated().map {
+      Guide(id: $0.offset, line: $0.element.line, isLanding: $0.element.isLanding)
+    }
   }
 
   /// Every display NAMED in a problem, not just the dragged one (§3.5): moving
@@ -195,9 +222,7 @@ struct ArrangementCanvasView: View {
         tileView(tile)
       }
 
-      ForEach(Array(guideLines.enumerated()), id: \.offset) { _, line in
-        guide(line)
-      }
+      ForEach(guideLines) { guide($0) }
     }
     .frame(width: Self.canvasSize.width, height: Self.canvasSize.height)
     .coordinateSpace(.named(Self.spaceName))
@@ -208,17 +233,6 @@ struct ArrangementCanvasView: View {
     .onTapGesture { selection = nil }
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Display arrangement")
-    // Either signal ends the settle, and both are positive: the coordinator has
-    // re-read the layout, or it has finished the work. No timer, because a
-    // deadline long enough for a slow reconfiguration is also long enough to
-    // show a failed one as though it worked.
-    .onChange(of: arrangement) { _, _ in
-      withAnimation(motion) { settling = nil }
-    }
-    .onChange(of: isApplying) { _, applying in
-      guard !applying else { return }
-      withAnimation(motion) { settling = nil }
-    }
   }
 
   // MARK: - Tile
@@ -271,7 +285,7 @@ struct ArrangementCanvasView: View {
     .onKeyPress(.upArrow) { nudge(tile.id, .up) }
     .onKeyPress(.downArrow) { nudge(tile.id, .down) }
     .contextMenu {
-      Button("Use as Main Display") { propose(displayed.makingMain(tile.id)) }
+      Button("Use as Main Display") { onPropose(displayed.makingMain(tile.id)) }
         .disabled(displayed.mainDisplayID == tile.id)
     }
     .accessibilityElement(children: .ignore)
@@ -286,7 +300,7 @@ struct ArrangementCanvasView: View {
     // rotor — AR9's whole argument is that setting the main display must not
     // depend on a pointer gesture.
     .accessibilityAction(named: Text("Use as Main Display")) {
-      propose(displayed.makingMain(tile.id))
+      onPropose(displayed.makingMain(tile.id))
     }
     .position(x: rect.midX, y: rect.midY)
     // No implicit animation while dragging: the tile must track the pointer,
@@ -298,14 +312,18 @@ struct ArrangementCanvasView: View {
     // new positions while snapping to their new sizes in the same frame.
     //
     // A keyed `.animation` here is MEASURED to work despite this canvas living
-    // in a grouped `Form` [2026-08-18, `scratchpad/animharness`]: an
-    // `Animatable` probe counted 168 interpolated frames for this shape in a
-    // `Form` section, the same as for the control outside one. The skill's
-    // "a keyed animation in a Form animates nothing" is about a CONDITIONAL ROW
-    // arriving and leaving, which is a transition; a persistent child moving is
-    // not the same question, and the two must not be conflated. Replacing this
-    // with a bare ambient transaction was tried and reverted: it animates too,
-    // and buys nothing this does not already do.
+    // in a grouped `Form` [2026-08-18]: an `Animatable` probe counted 168
+    // interpolated frames for this shape in a `Form` section, the same as for
+    // the control outside one. The harness that produced that number was not
+    // committed; skill `candela-ui-verification` describes its shape well
+    // enough to rebuild, which is the citation to follow rather than any
+    // scratch path.
+    //
+    // The skill's "a keyed animation in a Form animates nothing" is about a
+    // CONDITIONAL ROW arriving and leaving, which is a transition; a persistent
+    // child moving is not the same question, and conflating the two cost a
+    // deploy here. Replacing this with a bare ambient transaction was tried and
+    // reverted: it animates too, and buys nothing this does not already do.
     .animation(isDragging ? nil : motion, value: rect)
     .zIndex(isDragging ? 2 : (selection == tile.id ? 1 : 0))
   }
@@ -349,9 +367,9 @@ struct ArrangementCanvasView: View {
   /// Mid-drag of the main tile the displayed layout has no tile at (0,0), a
   /// state the machine cannot be in: moving the main display never changes
   /// which display is main (the plan re-anchors on it). Fall back to the
-  /// resting layout's main so the badge does not vanish under the pointer.
+  /// layout this view was handed so the badge does not vanish under the pointer.
   private func isMain(_ id: CGDirectDisplayID) -> Bool {
-    (displayed.mainDisplayID ?? resting.mainDisplayID) == id
+    (displayed.mainDisplayID ?? arrangement.mainDisplayID) == id
   }
 
   private func accessibilityValue(_ tile: ArrangementTile) -> String {
@@ -375,13 +393,22 @@ struct ArrangementCanvasView: View {
     // zero-distance drag.
     DragGesture(minimumDistance: 2, coordinateSpace: .named(Self.spaceName))
       .onChanged { value in
+        // A NEW drag is refused while a reconfiguration is outstanding, because
+        // it would be baselined on a layout that has only been ASKED for: the
+        // refusal paths leave such a request unachieved, so a move measured from
+        // it would fold a layout that never happened into this drop. The pane
+        // greys "Use as Main Display" over the same fact and says so in words.
+        // A drag already in progress is left alone: freezing a tile under the
+        // pointer mid gesture is worse than letting it finish, and its release
+        // goes through the same commit path it always did.
+        guard drag != nil || !isApplying else { return }
         selection = tile.id
         let base = drag ?? TileDrag(
           id: tile.id,
-          baseline: resting,
+          baseline: arrangement,
           transform: restingTransform,
           proposal: ArrangementProposal(
-            arrangement: resting, baseline: resting,
+            arrangement: arrangement, baseline: arrangement,
             movedID: tile.id, lines: [], problems: []
           )
         )
@@ -414,19 +441,19 @@ struct ArrangementCanvasView: View {
         // back (AR7), and a no-op commits nothing rather than being refused by
         // the preview session with a message nobody could act on.
         if let commitment = finished.proposal.commitment {
-          onPropose(commitment)
-          // Set in the SAME transaction that clears the drag, so the map never
-          // renders a frame of the pre-drop layout in between. The tiles then
-          // animate from where the pointer left them to where the drop puts
-          // them, which for an insert is the first and only time the displays
-          // the user did not grab move.
+          // `onPropose` is called from INSIDE the animation, and that is the
+          // easiest thing here to get wrong. That call is what arms the pane's
+          // settle, so the settle and this view's `drag = nil` have to land in
+          // ONE transaction: split them and the map renders a frame of the
+          // pre-drop layout and animates BACKWARD into it, which is the whole
+          // defect the settle exists to remove. Kept together, the tiles animate
+          // from where the pointer left them to where the drop puts them, which
+          // for an insert is the first and only time the displays the user did
+          // not grab move.
           withAnimation(motion) {
-            settling = commitment
+            onPropose(commitment)
             drag = nil
           }
-          // `propose` is not used here: the drop has to clear the drag in the
-          // SAME transaction that sets the settle, or the map renders a frame of
-          // the pre-drop layout between the two writes.
         } else {
           if !finished.proposal.isValid { onRefuse(finished.proposal.problems) }
           // On refusal the tile animates home from wherever it was, which is the
@@ -453,36 +480,49 @@ struct ArrangementCanvasView: View {
   /// fall through to the scroll view rather than being swallowed by a tile that
   /// did nothing — a focused tile at the end of its walk must not eat every
   /// further press of that arrow.
+  ///
+  /// A nudge is refused outright while an apply is outstanding, for the reason a
+  /// new drag is: `displayed` is then the layout a change REQUESTED, and a
+  /// request the coordinator refuses is never achieved, so a move measured from
+  /// it would carry a layout that never happened into the next one. The pane
+  /// greys "Use as Main Display" over the same fact and says so in words.
   private func nudge(_ id: CGDirectDisplayID, _ direction: ArrangementDirection) -> KeyPress.Result {
+    guard !isApplying else { return .ignored }
     guard let moved = ArrangementDockPolicy.move(id, direction, in: displayed) else {
       return .ignored
     }
-    propose(moved)
+    onPropose(moved)
     return .handled
-  }
-
-  /// Every route that asks for a new layout, so they all animate into it and all
-  /// hold it while the apply is outstanding.
-  ///
-  /// A drop used to be the only one that did. An arrow-key nudge and "Use as
-  /// Main Display" went straight to `onPropose`, which left the map showing the
-  /// PRE-change layout until the coordinator caught up, then stepping to the new
-  /// one: the same defect the drop had, on the routes a keyboard-only user has.
-  private func propose(_ next: DisplayArrangement) {
-    onPropose(next)
-    withAnimation(motion) { settling = next }
   }
 
   // MARK: - Snap guides
 
-  @ViewBuilder private func guide(_ line: SnapLine) -> some View {
+  /// A snap guide is dashed and hairline; the landing guide is solid and a
+  /// half-point heavier.
+  ///
+  /// Same tint for both, deliberately: this is one gesture and a second colour
+  /// would read as a second kind of state, next to the red that already means
+  /// "this drop springs back". What separates them is weight, which is the
+  /// difference they actually describe. A snap guide says where the tile is
+  /// being drawn, and it is provisional: keep dragging and it goes away. The
+  /// landing says where the display will BE after the release, which is AR15's
+  /// whole argument for letting the tile go on tracking the pointer, and that
+  /// argument only holds while the guide naming the destination can be picked
+  /// out of the up-to-three lines on screen.
+  @ViewBuilder private func guide(_ guide: Guide) -> some View {
+    let line = guide.line
     let start = transform.canvasPoint(guideStart(line))
     let end = transform.canvasPoint(guideEnd(line))
     Path { path in
       path.move(to: CGPoint(x: start.x, y: start.y))
       path.addLine(to: CGPoint(x: end.x, y: end.y))
     }
-    .stroke(.tint, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+    .stroke(
+      .tint,
+      style: guide.isLanding
+        ? StrokeStyle(lineWidth: 1.5)
+        : StrokeStyle(lineWidth: 1, dash: [3, 3])
+    )
     .allowsHitTesting(false)
     // Feedback about a pointer gesture, meaningless to a rotor.
     .accessibilityHidden(true)

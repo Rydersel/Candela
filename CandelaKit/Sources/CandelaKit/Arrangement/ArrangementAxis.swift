@@ -17,8 +17,12 @@ extension DisplayRect {
 
   func length(on axis: SnapAxis) -> Int { axis == .x ? width : height }
 
-  /// The centre, floored the same way `ArrangementSnapper.halved` floors a
-  /// centre alignment, so an odd extent biases one way in both places.
+  /// The centre, floored through `ArrangementSnapper.halved` so an odd extent
+  /// biases the same way everywhere. It matches the snapper's centre-alignment
+  /// GUIDE position, which is `sourceOrigin + halved(source.length)`: the same
+  /// quantity on the same rect. It is NOT the snapper's centre-alignment
+  /// target, which is `sourceOrigin + halved(source.length - movingExtent)` and
+  /// answers a different question, where a second rect comes to rest.
   func centre(on axis: SnapAxis) -> Int {
     start(on: axis) + ArrangementSnapper.halved(length(on: axis))
   }

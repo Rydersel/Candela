@@ -68,10 +68,17 @@ struct ArrangementInsertPolicyTests {
   }
 
   @Test func aGapWideEnoughAbsorbsTheInsertAndNothingElseMoves() {
+    // Display 4 is the bridge under the row, and it is load-bearing rather than
+    // scenery. The gap is 1_000 and the inserted display is 800, so 200 points
+    // of it are left over; in a bare row that leftover strands display 2 and
+    // the insert is refused, since the policy now returns only layouts that can
+    // be kept. The bridge keeps everything connected across the remainder, so
+    // this stays a case about a push of zero.
     let spaced = ArrangementFixtures.arrangement([
       (1, rect(0, 0, 1_000, 1_000)),
       (2, rect(2_000, 0, 1_000, 1_000)),
       (3, rect(5_000, 0, 800, 1_000)),
+      (4, rect(0, 1_000, 3_000, 1_000)),
     ])
 
     let insertion = ArrangementInsertPolicy.insertion(
@@ -87,6 +94,8 @@ struct ArrangementInsertPolicyTests {
     // Untouched, and that is the whole point of this case.
     #expect(origin(insertion!.arrangement, 1) == DisplayPoint(x: 0, y: 0))
     #expect(origin(insertion!.arrangement, 2) == DisplayPoint(x: 2_000, y: 0))
+    #expect(origin(insertion!.arrangement, 4) == DisplayPoint(x: 0, y: 1_000))
+    #expect(ArrangementRules.problems(in: insertion!.arrangement).isEmpty)
   }
 
   @Test func theGuideIsBuiltInTheCoordinatesTheMapIsDrawnIn() {
@@ -295,8 +304,11 @@ struct ArrangementInsertPolicyTests {
     #expect(far?.seam.nearID == 2)
 
     // The outer pair (1, 3) also offers a seam at 1_000, straight through
-    // display 2, with a gap of 2_000 rather than 0. Ascending gap is what
-    // keeps it from being chosen and the push from being measured against it.
+    // display 2, with a gap of 2_000 rather than 0. Ascending gap is what puts
+    // the tight one first here. It is not what saves this case: the wide seam
+    // would under-push and bury the inserted display in display 2, and the walk
+    // would step over it. The case where the gap term is the ONLY thing
+    // deciding is `tiesAtOneSeamPositionGoToTheTighterSeam`.
     #expect(near?.seam.farID == 2)
     #expect(near?.push == 400)
     #expect(origin(near!.arrangement, 2) == DisplayPoint(x: 1_400, y: 0))
@@ -315,5 +327,104 @@ struct ArrangementInsertPolicyTests {
     )
 
     #expect(origin(insertion!.arrangement, 3) == DisplayPoint(x: 1_000, y: 0))
+  }
+
+  @Test func tiesAtOneSeamPositionGoToTheTighterSeam() {
+    // Both seams start at display 1's right edge, so they tie on distance and
+    // `gap` is the only term left that separates them. Display 4 is pulled from
+    // a slot it fits EXACTLY, which is what makes both candidates legal: the
+    // tight seam (1, 3) has a gap of 400 and the wide one (1, 2) has 1_400, and
+    // either way the push is zero and the layout comes out identical. So
+    // nothing but the reported seam can tell them apart, and the walk cannot
+    // paper over a mis-ranking by rejecting the loser.
+    //
+    // The ids are deliberately out of row order: the wide seam's far display is
+    // 2 and the tight one's is 3, so with the `gap` term removed the trailing
+    // `farID` term picks the WIDE seam and this test fails. In a row numbered
+    // left to right the two terms agree and the mutation is invisible, which is
+    // how the tie-break went untested.
+    let exactFit = ArrangementFixtures.arrangement([
+      (1, rect(0, 0, 1_000, 1_000)),
+      (4, rect(1_000, 0, 400, 1_000)),
+      (3, rect(1_400, 0, 1_000, 1_000)),
+      (2, rect(2_400, 0, 1_000, 1_000)),
+    ])
+    #expect(ArrangementRules.problems(in: exactFit).isEmpty)
+
+    let insertion = ArrangementInsertPolicy.insertion(
+      dragging: 4,
+      freeRect: rect(900, 0, 400, 1_000),
+      snappedRect: rect(900, 0, 400, 1_000),
+      into: exactFit
+    )
+
+    #expect(insertion?.seam.position == 1_000)
+    #expect(insertion?.seam.nearID == 1)
+    #expect(insertion?.seam.farID == 3)
+    #expect(insertion?.seam.gap == 400)
+    #expect(insertion?.push == 0)
+
+    // Positive control on the premise: the seam that loses is a real candidate
+    // and a legal one, not a candidate the walk was going to throw away. Both
+    // produce this layout, which is why only the seam can be asserted on.
+    #expect(insertion?.arrangement.tile(4)?.rect.origin == DisplayPoint(x: 1_000, y: 0))
+    #expect(insertion?.arrangement.tile(3)?.rect.origin == DisplayPoint(x: 1_400, y: 0))
+    #expect(insertion?.arrangement.tile(2)?.rect.origin == DisplayPoint(x: 2_400, y: 0))
+    #expect(insertion.map { ArrangementRules.problems(in: $0.arrangement).isEmpty } == true)
+  }
+
+  @Test func aLowerRankedSeamIsUsedWhenTheTopRankedOneIsIllegal() {
+    // The top-ranked seam is (x, 200, gap 0) between 1 and 4: the dragged
+    // display's centre is 25 points from it, against 100 for either seam on y.
+    // Inserting there pushes display 4 clear but leaves the inserted display
+    // lying across display 2, so that seam cannot be used. A lower-ranked one
+    // can: the y seam at 0 between 2 and 1 gives a layout with no problems at
+    // all. Ranking once and taking the winner reported no insert here and the
+    // drop sprang back, which is the defect the walk fixes.
+    let baseline = ArrangementFixtures.arrangement([
+      (1, rect(0, 0, 200, 300)),
+      (2, rect(50, -300, 300, 300)),
+      (3, rect(200, 300, 300, 300)),
+      (4, rect(200, 200, 100, 100)),
+    ])
+    #expect(ArrangementRules.problems(in: baseline).isEmpty)
+
+    // Display 3 dragged up and left, far enough from every edge that nothing
+    // snaps, so the free and snapped rects are the same rect.
+    let dragged = rect(75, -50, 300, 300)
+
+    // Positive control on the premise. The top-ranked seam is the x one at 200,
+    // 25 points from the dragged centre against 100 for either y seam, and this
+    // is the layout it would have produced: display 3 on the seam and display 4
+    // pushed 300 clear of it. It is illegal, so a policy that ranks once and
+    // takes the winner has to report no insert at all. Without this the
+    // assertions below would pass for a policy that never ranked that seam
+    // first in the first place.
+    let ifTopRankedSeamHadBeenUsed = ArrangementFixtures.arrangement([
+      (1, rect(0, 0, 200, 300)),
+      (2, rect(50, -300, 300, 300)),
+      (3, rect(200, -50, 300, 300)),
+      (4, rect(500, 200, 100, 100)),
+    ])
+    #expect(ArrangementRules.problems(in: ifTopRankedSeamHadBeenUsed) == [.overlap(2, 3)])
+
+    let insertion = ArrangementInsertPolicy.insertion(
+      dragging: 3, freeRect: dragged, snappedRect: dragged, into: baseline
+    )
+
+    #expect(insertion?.seam.axis == .y)
+    #expect(insertion?.seam.position == 0)
+    #expect(insertion?.seam.nearID == 2)
+    #expect(insertion?.seam.farID == 1)
+    // Optional-chained rather than force-unwrapped: the defect this pins made
+    // `insertion` return nil, and a test that traps there reports a crash
+    // instead of the four expectations that say what went wrong.
+    #expect(insertion.map { ArrangementRules.problems(in: $0.arrangement).isEmpty } == true)
+    #expect(insertion?.arrangement.tile(1)?.rect.origin == DisplayPoint(x: 0, y: 0))
+    #expect(insertion?.arrangement.tile(2)?.rect.origin == DisplayPoint(x: 50, y: -600))
+    #expect(insertion?.arrangement.tile(3)?.rect.origin == DisplayPoint(x: 75, y: -300))
+    #expect(insertion?.arrangement.tile(4)?.rect.origin == DisplayPoint(x: 200, y: 200))
+    // AR14 holds through the walk: the display that was main still is.
+    #expect(insertion?.arrangement.mainDisplayID == 1)
   }
 }

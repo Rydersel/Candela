@@ -16,8 +16,9 @@ import Foundation
 /// drop. Neither gesture moves anything now until the release, and both say
 /// what they will do with a guide.
 public struct ArrangementLanding: Sendable, Equatable {
-  /// A whole layout, legal by construction: `ArrangementAttachPolicy` returns
-  /// only placements whose arrangement has no problems.
+  /// A whole layout, legal by construction: `ArrangementAttachPolicy` and
+  /// `ArrangementInsertPolicy` each return only results whose arrangement has
+  /// no problems, so nothing downstream re-checks one.
   public let arrangement: DisplayArrangement
   /// The edges it comes to rest against, drawn while the drag is still running
   /// so the landing is visible before the release rather than after it.
@@ -85,8 +86,11 @@ public struct ArrangementProposal: Sendable, Equatable {
 
   /// What a release should apply, or `nil` when it should apply nothing.
   ///
-  /// The landing wins when there is one, because it exists only for drops the
-  /// rendered arrangement cannot answer for. A landing equal to the baseline is
+  /// The landing wins when there is one, and that is safe only because `propose`
+  /// builds one only for drops the rendered arrangement cannot answer for. A
+  /// landing that could also exist for a legal drop would make this line commit
+  /// something other than what the canvas drew, which is exactly the state AR3
+  /// exists to make unreachable. A landing equal to the baseline is
   /// no commitment at all: `ArrangementPreviewSession.begin` refuses a no-op
   /// with `.illegalArgument`, and a drop that resolves back to where the
   /// display started is exactly that.
@@ -160,37 +164,46 @@ public enum ArrangementDragPolicy {
     let arrangement = baseline.moving(id, to: snapped.rect.origin)
     let problems = ArrangementRules.problems(in: arrangement)
 
-    // An insert is decided from the PRE-snap rect and is tried first, because
-    // ordinary snapping cannot express one: it abuts the near display and lands
-    // on top of the far one, which AR7 would otherwise spring back. An insert
-    // whose own result is illegal is dropped rather than reported, so displays
-    // the user did not grab move only when the layout that results is one they
-    // can keep.
+    // A landing exists ONLY when the rendered drop cannot be committed as it
+    // stands, which is what makes this one guard govern both branches. AR3 is
+    // the whole point of the type: what the canvas draws is what the release
+    // applies, so a drop that is legal exactly where the user let go commits
+    // there and nowhere else. The insert branch once ran unguarded, and a drop
+    // that was legal where it was AND happened to straddle a seam rendered
+    // clean, reddened nothing, and then committed a display somewhere the user
+    // had never put it.
     var landing: ArrangementLanding?
-    if let insertion = ArrangementInsertPolicy.insertion(
-         dragging: id, freeRect: moved, snappedRect: snapped.rect, into: baseline
-       ),
-       ArrangementRules.problems(in: insertion.arrangement).isEmpty,
-       let guide = ArrangementInsertPolicy.guide(
-         for: insertion.seam, rendered: snapped.rect, in: baseline
-       )
-    {
-      landing = ArrangementLanding(arrangement: insertion.arrangement, lines: [guide])
-    }
-    // A drop that leaves a display touching nothing was refused before this,
-    // and the refusal said where the display may not be without saying where it
-    // may. A landing answers that. Overlaps that are not an insert still spring
-    // back under AR7: a display dropped squarely on another names no particular
-    // layout.
-    else if !problems.isEmpty, problems.allSatisfy(\.isDisconnection),
-            let attachment = ArrangementAttachPolicy.attach(
-              moved, id: id, in: baseline, threshold: threshold
-            )
-    {
-      landing = ArrangementLanding(
-        arrangement: baseline.moving(id, to: attachment.rect.origin),
-        lines: [attachment.line]
-      )
+    if !problems.isEmpty {
+      // An insert is decided from the PRE-snap rect and is tried first, because
+      // ordinary snapping cannot express one: it abuts the near display and
+      // lands on top of the far one, which AR7 would otherwise spring back.
+      // `ArrangementInsertPolicy` returns only legal layouts, so displays the
+      // user did not grab move only when the result is one they can keep, and
+      // legality is judged in the one place that can also try the next seam.
+      if let insertion = ArrangementInsertPolicy.insertion(
+           dragging: id, freeRect: moved, snappedRect: snapped.rect, into: baseline
+         ),
+         let guide = ArrangementInsertPolicy.guide(
+           for: insertion.seam, rendered: snapped.rect, in: baseline
+         )
+      {
+        landing = ArrangementLanding(arrangement: insertion.arrangement, lines: [guide])
+      }
+      // A drop that leaves a display touching nothing was refused before this,
+      // and the refusal said where the display may not be without saying where
+      // it may. A landing answers that. Overlaps that are not an insert still
+      // spring back under AR7: a display dropped squarely on another names no
+      // particular layout.
+      else if problems.allSatisfy(\.isDisconnection),
+              let attachment = ArrangementAttachPolicy.attach(
+                moved, id: id, in: baseline, threshold: threshold
+              )
+      {
+        landing = ArrangementLanding(
+          arrangement: baseline.moving(id, to: attachment.rect.origin),
+          lines: [attachment.line]
+        )
+      }
     }
 
     // The rendered arrangement keeps its problems even when there is a landing:

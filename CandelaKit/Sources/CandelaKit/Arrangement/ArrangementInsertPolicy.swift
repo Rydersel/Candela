@@ -52,14 +52,20 @@ public struct ArrangementInsertion: Sendable, Equatable {
 /// Dropping a display onto the boundary between two others puts it there and
 /// moves the displays beyond that boundary out of its way.
 ///
-/// **This is the one amendment to AR7** (invalid drops are refused and sprung
-/// back, never auto-corrected). AR7's argument is that macOS silently fixes
-/// overlaps to somewhere of its own choosing, so a silent correction teaches the
-/// user that the map lies. An insert is not that: the user covered a seam with a
-/// display, which names one layout and no other, and the whole result is drawn
-/// live before the drop commits (AR3), so nothing about it is silent. AR7 still
-/// governs every other overlap, including a display dropped squarely on top of
-/// another, where the intent genuinely is ambiguous.
+/// **This is one of AR7's two amendments** (invalid drops are refused and sprung
+/// back, never auto-corrected). The other is AR15's attach landing, which
+/// replaces a spring-back with a nearest legal position; anything calling the
+/// insert the only amendment is out of date. AR7's argument is that macOS
+/// silently fixes overlaps to somewhere of its own choosing, so a silent
+/// correction teaches the user that the map lies. An insert is not silent, but
+/// after AR16 the reason is no longer that the result is drawn live: nothing
+/// but the dragged display moves before the release. What keeps it honest
+/// instead is that covering a seam names one layout and no other, that the seam
+/// guide is drawn on the seam the release will use while the drag is still
+/// running, and that AR8's countdown still defaults to revert. So the
+/// correction is announced before it happens, and it is reversible after. AR7
+/// still governs every other overlap, including a display dropped squarely on
+/// top of another, where the intent genuinely is ambiguous.
 ///
 /// Pure, and deliberately separate from `ArrangementSnapper`: the snapper moves
 /// one display and this moves several, so keeping them apart is what lets a test
@@ -75,8 +81,9 @@ public enum ArrangementInsertPolicy {
   ///   - snappedRect: the result of ordinary snapping. Only its OTHER-axis
   ///     coordinate is used: an insert fixes the seam axis exactly and leaves
   ///     the cross axis to the snapper, so the two compose instead of competing.
-  /// - Returns: `nil` when the drag is not covering a seam, which is every drag
-  ///   that is not an insert.
+  /// - Returns: `nil` when the drag is not covering a seam, or when no seam it
+  ///   covers yields a layout that can be kept. Every insertion returned is
+  ///   legal by construction, so callers do not re-check it.
   public static func insertion(
     dragging id: CGDirectDisplayID,
     freeRect: DisplayRect,
@@ -87,12 +94,35 @@ public enum ArrangementInsertPolicy {
     // A seam needs two displays that are not the one being dragged.
     guard others.count > 1 else { return nil }
 
-    let seams = [SnapAxis.x, .y].flatMap {
-      candidateSeams(on: $0, freeRect: freeRect, others: others)
+    // Ranked once, then WALKED until one is legal, which is the shape
+    // `ArrangementAttachPolicy.attach` already uses and for the same reason.
+    // Ranking once and taking the winner threw legal inserts away: a randomized
+    // probe found a lower-ranked seam giving a fully valid layout in 7.8% of
+    // the situations where any legal insert existed, and in every one of those
+    // the user saw a spring-back instead of the layout they had asked for.
+    for seam in [SnapAxis.x, .y]
+      .flatMap({ candidateSeams(on: $0, freeRect: freeRect, others: others) })
+      .sorted(by: { key($0, from: freeRect) < key($1, from: freeRect) })
+    {
+      let candidate = insertion(
+        on: seam, dragging: id, freeRect: freeRect, snappedRect: snappedRect, into: baseline
+      )
+      guard ArrangementRules.problems(in: candidate.arrangement).isEmpty else { continue }
+      return candidate
     }
-    guard let seam = seams.min(by: { key($0, from: freeRect) < key($1, from: freeRect) })
-    else { return nil }
 
+    return nil
+  }
+
+  /// The layout one seam produces, legal or not. Only the walk above calls it,
+  /// and only the walk decides whether the result may be kept.
+  private static func insertion(
+    on seam: ArrangementSeam,
+    dragging id: CGDirectDisplayID,
+    freeRect: DisplayRect,
+    snappedRect: DisplayRect,
+    into baseline: DisplayArrangement
+  ) -> ArrangementInsertion {
     let axis = seam.axis
     let push = max(0, freeRect.length(on: axis) - seam.gap)
     let placed = snappedRect.placing(on: axis, at: seam.position)
@@ -121,6 +151,17 @@ public enum ArrangementInsertPolicy {
     // Only the insert path does this. An ordinary drag of the main display
     // leaves no tile at the origin today, and changing that is a separate
     // question from this one.
+    //
+    // A baseline with NO tile at the origin skips AR14 entirely, and a push can
+    // then move some display onto (0,0) and make it main without saying so.
+    // Recorded rather than guarded: no path in the live app produces an
+    // origin-less baseline. Tiles are read from `CGDisplayBounds`, whose space
+    // is defined with the main display's top-left at the origin, and the saved
+    // layouts round-trip those same origins. Writing a fallback would be
+    // inventing behaviour for a state nothing can reach, and the invented
+    // choice of which display to anchor on would be untestable against
+    // anything real. If a source of tiles ever appears that can omit the
+    // origin, this is the line that has to answer for it.
     if let main = baseline.mainDisplayID {
       arrangement = arrangement.makingMain(main)
     }
@@ -206,20 +247,33 @@ public enum ArrangementInsertPolicy {
   /// order strict and total over a tile list with distinct ids: a seam decided
   /// by array order is not reproducible in a bug report.
   ///
-  /// `gap` sorts ascending as the first tie-break, and it is load-bearing
-  /// rather than cosmetic. A row of three offers a seam between its OUTER two
-  /// as well, straight through the middle display, and that seam shares its
-  /// position with the near pair's: same distance, so nothing else in the key
-  /// separates them. Its gap is always the wider one, because it contains the
-  /// middle display and then some, so ascending gap is what keeps an insert
-  /// from being measured against a corridor something is already standing in.
+  /// `gap` sorts ascending as the first tie-break. A row of three offers a seam
+  /// between its OUTER two as well, straight through the middle display, and
+  /// that seam shares its position with the near pair's: same distance, so
+  /// nothing else in the key separates them. Its gap is always the wider one,
+  /// because it contains the middle display and then some, so ascending gap
+  /// puts the seam that is actually free ahead of the corridor something is
+  /// already standing in. What the term decides is which seam is REPORTED and
+  /// tried first, and the reported seam is what the guide names and what a bug
+  /// report has to be able to cite. It can no longer decide the resulting
+  /// LAYOUT for two seams sharing a position: they push the same set of
+  /// displays, so they differ only in how far, and the wider gap always
+  /// under-pushes into an overlap whenever it differs at all. Pinned by
+  /// `tiesAtOneSeamPositionGoToTheTighterSeam`, which is built so that both
+  /// candidates are legal and only the reported seam separates them.
   ///
-  /// A corridor-occupancy test was written here and then removed: in a layout
-  /// with no overlaps, a display blocking the corridor between two others
-  /// necessarily forms a narrower seam with the same near display, so the test
-  /// could never reject a seam this ranking would have chosen. Picking the wide
-  /// seam anyway would only under-push, and `ArrangementRules` refuses the
-  /// result, so the failure is caught rather than applied.
+  /// A corridor-occupancy test was written here and then deleted, on the
+  /// argument that in an overlap-free layout a display blocking the corridor
+  /// between two others necessarily forms a narrower seam with the same near
+  /// display, so ascending gap already excluded it. **That argument is false.**
+  /// Cross-axis overlap is not transitive. With 1 at (0,0,100,100), 2 at
+  /// (300,0,100,100) and 3 at (0,100,400,100), display 3 sits squarely in the
+  /// corridor between 1 and 2 while sharing no y span with 1, so it forms no
+  /// seam with 1 at all and no ranking on gap can see it. What actually keeps a
+  /// blocked corridor from costing a legal insert is the walk in `insertion`,
+  /// which moves on to the next seam when the chosen one's layout has problems.
+  /// Do not restore the check: the walk covers it, and a second gate would only
+  /// be a second place for the two to disagree.
   private static func key(
     _ seam: ArrangementSeam,
     from freeRect: DisplayRect

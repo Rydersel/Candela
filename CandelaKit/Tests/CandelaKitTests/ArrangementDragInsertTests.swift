@@ -176,4 +176,49 @@ struct ArrangementDragInsertTests {
     #expect(offSeam?.landing?.arrangement.tile(3)?.rect.origin == DisplayPoint(x: 1_000, y: 1_000))
     #expect(offSeam?.landing?.arrangement.tile(2)?.rect.origin == DisplayPoint(x: 1_000, y: 0))
   }
+
+  @Test func aLegalDropOverASeamCommitsWhereItWasDropped() {
+    // AR3: what the canvas draws is what the release applies. This drop is
+    // legal exactly where the pointer left it AND strictly straddles a seam, so
+    // it is the case where the two gestures collide. The insert branch used to
+    // run whether or not the rendered layout had problems, and `commitment`
+    // prefers a landing whenever one exists, so this drop rendered clean,
+    // reddened nothing (a drop with a landing reddens nothing), and then
+    // committed display 2 a whole 200 points below where the user let go.
+    let baseline = ArrangementFixtures.arrangement([
+      (1, rect(0, 0, 300, 200)),
+      (2, rect(250, 200, 300, 300)),
+      (3, rect(50, 200, 200, 300)),
+      (4, rect(-50, 500, 300, 100)),
+    ])
+    #expect(ArrangementRules.problems(in: baseline).isEmpty)
+
+    let proposal = ArrangementDragPolicy.propose(
+      dragging: 2,
+      by: CanvasPoint(x: -105, y: -40),
+      from: baseline,
+      transform: CanvasTransform(scale: 0.2, offsetX: 0, offsetY: 0)
+    )
+
+    #expect(origin(proposal, 2) == DisplayPoint(x: -300, y: 0))
+    #expect(proposal?.problems.isEmpty == true)
+    #expect(proposal?.isValid == true)
+
+    // No landing at all, because there is nothing for one to salvage.
+    #expect(proposal?.landing == nil)
+    #expect(proposal?.commitment == proposal?.arrangement)
+    #expect(proposal?.isCommittable == true)
+
+    // Positive control on the premise: the drop really does straddle a seam, so
+    // an unguarded insert branch really would fire here. The insert is the y
+    // seam between displays 1 and 4, and it puts display 2 at y = 200 rather
+    // than the y = 0 the pointer asked for.
+    let wouldHaveInserted = ArrangementInsertPolicy.insertion(
+      dragging: 2,
+      freeRect: rect(-275, 0, 300, 300),
+      snappedRect: rect(-300, 0, 300, 300),
+      into: baseline
+    )
+    #expect(wouldHaveInserted?.arrangement.tile(2)?.rect.origin == DisplayPoint(x: -300, y: 200))
+  }
 }
