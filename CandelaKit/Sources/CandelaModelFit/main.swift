@@ -141,26 +141,41 @@ struct Prepared {
   let recordedBaseline: [Double]
   let key: String
 
+  /// `ExposureModel.admitted(_:)`, mirrored. Any drift between the two is a
+  /// divergence the equivalence control will report, so this reads as closely
+  /// to the original as Swift allows.
+  ///
+  /// Applied to the WHOLE list rather than to chrome alone. `prepare()` used to
+  /// filter `windows` down to `includedLayers` before this ran, which silently
+  /// discarded sub-zero-layer system windows that the shipped model
+  /// fraction-tests and admits. Notification Center, at 3.1% coverage of the
+  /// built-in and exactly zero on both externals, was precisely that: it made
+  /// the control fail on that one panel, in the two parameterisations carrying
+  /// a chrome limit, on every sampled record.
+  private func admits(_ window: PreparedWindow, _ parameters: ExposureModelParameters) -> Bool {
+    if ExposureModel.includedLayers.contains(window.layer) { return true }
+    // Below the range only, and never above it, for the reason
+    // `ExposureModel.admitted(_:)` states: below is chrome a coverage bound can
+    // separate, above is transient pop-ups it cannot.
+    guard window.layer < ExposureModel.includedLayers.lowerBound,
+      let limit = parameters.chromeCoverageLimit
+    else { return false }
+    let fraction = window.coverage.reduce(0, +) / Double(PanelGrid.cellCount)
+    return fraction > 0 && fraction < limit
+  }
+
   func modelled(_ parameters: ExposureModelParameters) -> [Double] {
     let prior = dark ? parameters.darkAppearancePrior : parameters.lightAppearancePrior
-    // Chrome admission is driven by the PARAMETERS, never by a separate flag.
-    // A parallel boolean was its own divergence source: `.baseline` carries no
+    // Admission is driven by the PARAMETERS, never by a separate flag. A
+    // parallel boolean was its own divergence source: `.baseline` carries no
     // chrome limit, so the shipped model admitted none while this path appended
     // it anyway, and the equivalence control caught exactly one mismatch per
     // record. One switch, one meaning.
     //
     // Chrome is BEHIND every app window: it is what a window occludes, never
-    // the reverse, so it goes last in a front-to-back walk.
-    let admittedChrome: [PreparedWindow]
-    if let limit = parameters.chromeCoverageLimit {
-      admittedChrome = chrome.filter { window in
-        let fraction = window.coverage.reduce(0, +) / Double(PanelGrid.cellCount)
-        return fraction > 0 && fraction < limit
-      }
-    } else {
-      admittedChrome = []
-    }
-    let all = windows + admittedChrome
+    // the reverse, so it goes last, matching `inputsIncludingChrome`, which is
+    // `windows + chrome`.
+    let all = (windows + chrome).filter { admits($0, parameters) }
     switch parameters.compositing {
     case .summedCoverage:
       var coverage = [Double](repeating: 0, count: PanelGrid.cellCount)
@@ -193,8 +208,10 @@ struct Prepared {
 
 func prepare(_ record: ModelReplayRecord) -> Prepared {
   let transform = record.transform
+  // NOT filtered by layer here. Admission depends on the parameters and on the
+  // coverage fraction, so it belongs at `modelled` time next to the chrome
+  // rule, or the fast path drops windows the shipped model keeps.
   let windows = record.windows.map(\.snapshot)
-    .filter { ExposureModel.includedLayers.contains($0.layer) }
     .map {
       PreparedWindow(
         owner: $0.ownerName, layer: $0.layer,
