@@ -82,29 +82,17 @@ struct ArrangementCanvasView: View {
   @FocusState private var focused: CGDirectDisplayID?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-  /// Sized to fit the DETAIL column at the settings window's minimum width, not
-  /// at its ideal one: 720 pt of window, less a 190 pt sidebar, less the grouped
-  /// `Form`'s own insets, leaves a little under 500 pt. A canvas wider than that
-  /// is clipped by the form row at any window size the user is allowed to reach,
-  /// and a map that loses its right-hand display is worse than a smaller map.
+  /// Sized to fit INSIDE the grouped form's section card at the settings
+  /// window's 720 pt minimum width, measured rather than budgeted: the card's
+  /// interior there is about 454 pt (2x captures, 2026-08-18). The previous 480
+  /// was derived from the detail COLUMN's width and never actually fit the
+  /// card, which stayed latent while the saved frame was wide; at a saved
+  /// 720 pt frame, NavigationSplitView resolves the over-constraint by
+  /// confiscating the sidebar's margins, so the sidebar sits flush against the
+  /// window edge, and the theft persists on every other pane until relaunch.
+  /// 440 leaves ~14 pt of slack for scroller and inset variance.
   ///
-  /// 480 is the WHOLE of the row's minimum width, because the field the map sits
-  /// on adds no horizontal inset around it (`ArrangementPane` keeps the vertical
-  /// inset and gives the hint line its own horizontal one instead). A 16 pt inset
-  /// on each side was tried and made the row 512 wide: at the 720 pt minimum the
-  /// field overflowed, the sidebar clipped and the right-hand display ran off the
-  /// map. Anything added around the canvas has to come out of this number.
-  ///
-  /// 250 rather than 290: the map is fitted to the arrangement's bounds, and a
-  /// wide, short layout left dead bands above and below it. It does NOT make the
-  /// tiles bigger; `CanvasTransform.fitting` is a `min()` over both axes, so a
-  /// shorter box can only lower the fitted scale or leave it alone. MEASURED on
-  /// this rig, whose display union is 6680 x 2560: width binds at 290 and at 250
-  /// alike, the scale is 0.04975 either way and the map comes out 332 x 127
-  /// either way, so the change trims dead space from 135 pt to 95 pt and costs
-  /// nothing. Height is the axis to be careful with, because a portrait display
-  /// makes the arrangement tall: check this against the Dell at 270 degrees.
-  static let canvasSize = CanvasSize(width: 480, height: 250)
+  static let canvasSize = CanvasSize(width: 440, height: 250)
   private static let spaceName = "candela.arrangement.canvas"
   private static let margin: Double = 14
 
