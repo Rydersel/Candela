@@ -49,7 +49,34 @@ struct ArrangementPane: View {
   /// else.
   @State private var shownRestoreNotice: ArrangementReapplyNotice?
 
+  /// The layout a requested change is animating INTO, held while the apply is
+  /// in flight.
+  ///
+  /// Without it, the map goes on drawing `coordinator.arrangement`, which is
+  /// still the layout the change started FROM: a dropped tile slides back to
+  /// where it was picked up and only then jumps forward when the apply lands,
+  /// and a move has to travel toward its result rather than away from it.
+  ///
+  /// It lives HERE rather than in the canvas because it is a fact about the
+  /// coordinator, not about a map: "a layout has been asked for and the apply is
+  /// outstanding". While the canvas owned it, the routes that went through the
+  /// canvas animated and this pane's own "Use as Main Display" button did not,
+  /// because it had no way to reach the state. Every route now goes through
+  /// `propose`.
+  ///
+  /// Showing the requested layout while the request is outstanding is the same
+  /// thing the countdown does, so it is not a claim about achieved state, and an
+  /// apply that fails corrects the map as it finishes rather than leaving it
+  /// lying.
+  @State private var settling: DisplayArrangement?
+
   private var coordinator: ArrangementCoordinator { model.arrangement }
+
+  /// What the map is drawing from, and what every proposal is composed against:
+  /// the requested layout while one is outstanding, the achieved one otherwise.
+  private var displayedArrangement: DisplayArrangement {
+    settling ?? coordinator.arrangement
+  }
 
   /// The panel each synthesis virtual display is standing in for, by the
   /// virtual display's ID (SS12). Runtime IDs, derived per read: the pairing
@@ -113,6 +140,25 @@ struct ArrangementPane: View {
       savedLayoutSection
     }
     .formStyle(.grouped)
+    // ONE signal ends the settle, and it is positive: the coordinator has
+    // finished the work it was given. No timer, because a deadline long enough
+    // for a slow reconfiguration is also long enough to show a failed one as
+    // though it worked.
+    //
+    // `coordinator.arrangement` changing is deliberately NOT watched, because it
+    // is not evidence about THIS settle. `performApply` re-reads the layout
+    // before its queue task decrements the in-flight count, so the arrangement
+    // is already current by the time this fires and a second hook would buy
+    // nothing; and with two changes outstanding the count keeps `isApplying`
+    // true, so the first apply's re-read would clear the second's settle and
+    // snap the map back to a layout one change stale. The refusal paths (a
+    // no-op, an invalid layout, the four-way gate of AR12) return before that
+    // re-read and still arrive here, so a refused proposal correctly drops the
+    // map back to achieved state.
+    .onChange(of: coordinator.isApplying) { _, applying in
+      guard !applying else { return }
+      withAnimation(Motion.settle(reduceMotion: reduceMotion)) { settling = nil }
+    }
     .task(id: refusalToken) {
       guard !refusal.isEmpty else { return }
       // Long enough to read a sentence, short enough that it does not outlive
@@ -157,30 +203,65 @@ struct ArrangementPane: View {
     let panels = Self.panels(standingBehind: model.synthesis.pairings)
     return Section {
       VStack(alignment: .leading, spacing: 8) {
-        ArrangementCanvasView(
-          arrangement: coordinator.arrangement,
-          name: displayName,
-          isVirtual: { virtualIDs.contains($0) },
-          isSynthesisPair: { panels[$0] != nil },
-          selection: reconciledSelection,
-          onPropose: { coordinator.apply($0) },
-          onRefuse: { problems in
-            // The sentence below is a conditional child of a `Form` row: a keyed
-            // `.animation` on a `Group` around it animates nothing, and on the
-            // always-present `VStack` inside the row it fades the sentence in but
-            // snaps it out (measured 2026-08-17), so the write carries the
-            // transaction instead. `refusal` is this view's own state and needs no
-            // mirror: the mirror shape exists to get a coordinator's write inside
-            // a `withAnimation`, and this write is already inside the view. The
-            // whole value moves, so a second refusal with a longer sentence
-            // animates its height rather than snapping to it.
-            withAnimation(Motion.notice(reduceMotion: reduceMotion)) {
-              refusal = problems
+        // The map's FIELD spans the whole row, so its leading edge is the
+        // section's leading edge and everything below it lines up with the map
+        // rather than starting 99 pt to its left. The canvas itself keeps a
+        // fixed size (AR2, and the screenshot checks) and is centred inside the
+        // field.
+        VStack(alignment: .leading, spacing: 12) {
+          // Says the map is draggable at all, and names the arrow keys, which
+          // are the only way to move a display without a pointer. Both used to
+          // live in the button's caption, which is shown only while nothing is
+          // selected, so the instructions that explain the whole control
+          // disappeared as soon as anyone used it. The arrow keys were then
+          // carried for a while by a per-tile accessibility hint alone, which a
+          // sighted keyboard-only user never hears: that user is the gap the
+          // keyboard route exists to close, so the instruction is visible copy.
+          //
+          // The inset is on this line rather than on the field, because the
+          // field's horizontal padding is what the canvas's own width budget is
+          // measured against: at 16 pt a side the row's minimum went to 512 and
+          // overflowed the detail column at the 720 pt window minimum. See
+          // `ArrangementCanvasView.canvasSize`.
+          SettingsCaption(
+            "Drag a display to move it, or tab to one and move it with the arrow keys. Displays have to touch along an edge and cannot overlap."
+          )
+          .padding(.horizontal, 16)
+
+          ArrangementCanvasView(
+            arrangement: displayedArrangement,
+            name: displayName,
+            isVirtual: { virtualIDs.contains($0) },
+            isSynthesisPair: { panels[$0] != nil },
+            // Not for the settle, which is this pane's: the canvas refuses to
+            // compose a new request from a layout that has only been requested,
+            // because a refused request is never achieved. That covers the drag,
+            // the arrow keys, the tile's context menu and its VoiceOver action.
+            isApplying: coordinator.isApplying,
+            selection: reconciledSelection,
+            onPropose: { propose($0) },
+            onRefuse: { problems in
+              // The sentence below is a conditional child of a `Form` row: a keyed
+              // `.animation` on a `Group` around it animates nothing, and on the
+              // always-present `VStack` inside the row it fades the sentence in but
+              // snaps it out (measured 2026-08-17), so the write carries the
+              // transaction instead. `refusal` is this view's own state and needs no
+              // mirror: the mirror shape exists to get a coordinator's write inside
+              // a `withAnimation`, and this write is already inside the view. The
+              // whole value moves, so a second refusal with a longer sentence
+              // animates its height rather than snapping to it.
+              withAnimation(Motion.notice(reduceMotion: reduceMotion)) {
+                refusal = problems
+              }
+              refusalToken &+= 1
             }
-            refusalToken &+= 1
-          }
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
+          )
+          .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.quinary))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
 
         if coordinator.arrangement.tiles.count < 2 {
           // No button at all, rather than a permanently dead one: with one
@@ -232,11 +313,49 @@ struct ArrangementPane: View {
         guard let id = reconciledSelection.wrappedValue else { return }
         // A pure translation of the whole layout, so relative geometry is
         // provably unchanged — "make main" cannot rearrange anything.
-        coordinator.apply(coordinator.arrangement.makingMain(id))
+        //
+        // Through `propose`, like every other route: this button is the reason
+        // the settle was lifted out of the canvas, since it was the one way of
+        // asking for a layout that could not reach the state and so stepped to
+        // its result instead of animating into it.
+        propose(displayedArrangement.makingMain(id))
       }
       .accessibilityLabel("Use as Main Display")
       .disabled(!canMakeMain)
     }
+  }
+
+  /// The one place a layout is asked for, so the drop, the arrow keys, the
+  /// context menu, the VoiceOver action and the button above all behave alike.
+  ///
+  /// Composed against `displayedArrangement`, never against the coordinator's:
+  /// during a settle the coordinator still holds the pre-change layout, so a
+  /// second change measured from it would be measured from a layout that is no
+  /// longer the one on screen.
+  private func propose(_ next: DisplayArrangement) {
+    coordinator.apply(next)
+    // A proposal equal to what is already showing arms nothing.
+    //
+    // `isApplying` DOES rise for one: `ArrangementCoordinator.apply` raises it
+    // synchronously and unconditionally before it enqueues anything. What makes
+    // the guard load-bearing is that it comes straight back down again.
+    // `performApply` reaches its no-op `return` with no `await` in front of it,
+    // so the whole true-then-false transition can complete before SwiftUI
+    // evaluates a body; `onChange` compares against the value captured at the
+    // last evaluation, so it may never fire, and a settle set here would then be
+    // held for the life of the pane. `displayedArrangement` would go on ignoring
+    // the coordinator, and connecting a second display would leave the map
+    // drawing one tile.
+    //
+    // Compared on the ANCHORED form, which is the comparison the coordinator's
+    // own guard makes. Raw equality is narrower, and the gap is reachable with a
+    // single display attached: dragging the only tile anywhere produces a pure
+    // unanchored translation, which passes here and is dropped there, on that
+    // same no-await path. Two guards that disagree about what a no-op is are
+    // exactly one guard too many.
+    guard (next.anchored(preservingMainOf: displayedArrangement) ?? next) != displayedArrangement
+    else { return }
+    withAnimation(Motion.settle(reduceMotion: reduceMotion)) { settling = next }
   }
 
   private var canMakeMain: Bool {
@@ -247,14 +366,23 @@ struct ArrangementPane: View {
   /// What the button will do, or why it will not — never a bare grey button.
   /// Ordered by which fact outlives the others: `isApplying` is transient, so
   /// the structural reasons are stated first.
+  ///
+  /// A consequence of that order worth naming, because it has been read the
+  /// other way: the waiting sentence is reached only with a display selected
+  /// that is not already main. It explains THIS button, and it is not a general
+  /// account of why the canvas refuses a gesture. Nothing in the canvas may lean
+  /// on it to put a refusal into words.
   private var mainDisplayCaption: SettingsCaption {
     guard let id = reconciledSelection.wrappedValue else {
       // It said "click one to make it the main display", which is not what a
-      // click does — a click selects, and the button is the thing that moves the
+      // click does: a click selects, and the button is the thing that moves the
       // menu bar. Copy that promises the button's effect to a click is half of
       // why a selected-looking tile beside a dead button reads as broken.
+      //
+      // The dragging half of this sentence now lives in the field above, where
+      // it stays visible once something is selected.
       return SettingsCaption(
-        "Drag a display to move it, or click one to select it. Tab to a display and press Space to select it, then use the arrow keys to move it. Displays have to touch along an edge and cannot overlap."
+        "Select a display to move the menu bar to it. Click one, or tab to it and press Space."
       )
     }
     if id == coordinator.arrangement.mainDisplayID {
@@ -265,8 +393,17 @@ struct ArrangementPane: View {
     if coordinator.isApplying {
       return SettingsCaption("Waiting for the last change to finish.")
     }
+    // Named, not "this display". The button acts on the selection, and the
+    // selection is a blue fill a long way up the section; the row has to say
+    // which display it means in words.
+    let name = displayName(id)
+    guard !name.isEmpty else {
+      return SettingsCaption(
+        "Moves the menu bar and the Dock to the selected display. You will be asked to keep or undo the change."
+      )
+    }
     return SettingsCaption(
-      "Moves the menu bar and the Dock to this display. You will be asked to keep or undo the change."
+      verbatim: "Moves the menu bar and the Dock to \(name). You will be asked to keep or undo the change."
     )
   }
 

@@ -1,6 +1,35 @@
 import CoreGraphics
 import Foundation
 
+/// Where a drop goes when the position under the pointer is not one the
+/// display can stay in.
+///
+/// Kept apart from the proposal's own `arrangement` because the two answer
+/// different questions at the same instant: `arrangement` is where the display
+/// IS, which has to track the pointer or the user finds out only on release,
+/// and this is where it LANDS. One `propose` call returns both, so they cannot
+/// drift, which is what AR3 is actually protecting.
+///
+/// **Both new gestures land rather than move live.** An insert was built to
+/// rearrange the map under the pointer and was disorienting to use: displays
+/// the user was not touching slid about while they were still deciding where to
+/// drop. Neither gesture moves anything now until the release, and both say
+/// what they will do with a guide.
+public struct ArrangementLanding: Sendable, Equatable {
+  /// A whole layout, legal by construction: `ArrangementAttachPolicy` and
+  /// `ArrangementInsertPolicy` each return only results whose arrangement has
+  /// no problems, so nothing downstream re-checks one.
+  public let arrangement: DisplayArrangement
+  /// The edges it comes to rest against, drawn while the drag is still running
+  /// so the landing is visible before the release rather than after it.
+  public let lines: [SnapLine]
+
+  public init(arrangement: DisplayArrangement, lines: [SnapLine]) {
+    self.arrangement = arrangement
+    self.lines = lines
+  }
+}
+
 /// What a drag is asking for, at one instant.
 ///
 /// **AR3.** It carries everything both ends of a drag need — what to draw, what
@@ -27,19 +56,25 @@ public struct ArrangementProposal: Sendable, Equatable {
   /// the middle display of a row strands the far one, and the user has to see
   /// which displays they broke.
   public let problems: [ArrangementProblem]
+  /// Where a release puts the display when `arrangement` itself cannot be
+  /// committed. `nil` for a drop with nothing to salvage, which is an overlap
+  /// (AR7 springs those back) and a layout of one display.
+  public let landing: ArrangementLanding?
 
   public init(
     arrangement: DisplayArrangement,
     baseline: DisplayArrangement,
     movedID: CGDirectDisplayID,
     lines: [SnapLine],
-    problems: [ArrangementProblem]
+    problems: [ArrangementProblem],
+    landing: ArrangementLanding? = nil
   ) {
     self.arrangement = arrangement
     self.baseline = baseline
     self.movedID = movedID
     self.lines = lines
     self.problems = problems
+    self.landing = landing
   }
 
   public var isValid: Bool { problems.isEmpty }
@@ -49,9 +84,25 @@ public struct ArrangementProposal: Sendable, Equatable {
   /// screen — so validity alone never tells a caller there is something to do.
   public var changesArrangement: Bool { arrangement != baseline }
 
-  /// The one question a drop has to ask. Both halves are required: an invalid
-  /// proposal springs back (AR7) and a no-op is refused by the preview session.
-  public var isCommittable: Bool { isValid && changesArrangement }
+  /// What a release should apply, or `nil` when it should apply nothing.
+  ///
+  /// The landing wins when there is one, and that is safe only because `propose`
+  /// builds one only for drops the rendered arrangement cannot answer for. A
+  /// landing that could also exist for a legal drop would make this line commit
+  /// something other than what the canvas drew, which is exactly the state AR3
+  /// exists to make unreachable. A landing equal to the baseline is
+  /// no commitment at all: `ArrangementPreviewSession.begin` refuses a no-op
+  /// with `.illegalArgument`, and a drop that resolves back to where the
+  /// display started is exactly that.
+  public var commitment: DisplayArrangement? {
+    if let landing { return landing.arrangement == baseline ? nil : landing.arrangement }
+    return isValid && changesArrangement ? arrangement : nil
+  }
+
+  /// The one question a drop has to ask. An overlap still springs back (AR7),
+  /// and a no-op is still refused by the preview session; what changed is that
+  /// a drop into open space now has somewhere to go.
+  public var isCommittable: Bool { commitment != nil }
 }
 
 /// The drag decision (drag-canvas §2.4). Pure, and the only place a dragged
@@ -107,13 +158,76 @@ public enum ArrangementDragPolicy {
       moved, id: id, against: baseline.tiles, threshold: threshold
     )
 
+    // The rendered layout is ALWAYS the dragged display alone, moved to where
+    // the pointer put it. Nothing else moves during a drag, whichever gesture
+    // this turns out to be.
     let arrangement = baseline.moving(id, to: snapped.rect.origin)
+    let problems = ArrangementRules.problems(in: arrangement)
+
+    // A landing exists ONLY when the rendered drop cannot be committed as it
+    // stands, which is what makes this one guard govern both branches. AR3 is
+    // the whole point of the type: what the canvas draws is what the release
+    // applies, so a drop that is legal exactly where the user let go commits
+    // there and nowhere else. The insert branch once ran unguarded, and a drop
+    // that was legal where it was AND happened to straddle a seam rendered
+    // clean, reddened nothing, and then committed a display somewhere the user
+    // had never put it.
+    var landing: ArrangementLanding?
+    if !problems.isEmpty {
+      // An insert is decided from the PRE-snap rect and is tried first, because
+      // ordinary snapping cannot express one: it abuts the near display and
+      // lands on top of the far one, which AR7 would otherwise spring back.
+      // `ArrangementInsertPolicy` returns only legal layouts, so displays the
+      // user did not grab move only when the result is one they can keep, and
+      // legality is judged in the one place that can also try the next seam.
+      if let insertion = ArrangementInsertPolicy.insertion(
+           dragging: id, freeRect: moved, snappedRect: snapped.rect, into: baseline
+         ),
+         let guide = ArrangementInsertPolicy.guide(
+           for: insertion.seam, rendered: snapped.rect, in: baseline
+         )
+      {
+        landing = ArrangementLanding(arrangement: insertion.arrangement, lines: [guide])
+      }
+      // A drop that leaves a display touching nothing was refused before this,
+      // and the refusal said where the display may not be without saying where
+      // it may. A landing answers that. Overlaps that are not an insert still
+      // spring back under AR7: a display dropped squarely on another names no
+      // particular layout.
+      //
+      // UNRESOLVED, and recorded rather than fixed. AR14 re-anchors the insert
+      // path on the display that was main; this branch does not. An attach
+      // landing that moves the main display off (0,0) therefore commits a layout
+      // whose `mainDisplayID` is nil, because AR5 derives main from the tile at
+      // the origin and no tile is there any more. The behaviour is INHERITED,
+      // not introduced: an ordinary legal drag of the main display already does
+      // exactly this, so the landing only follows the rule the drag already had.
+      // Whether either should re-anchor is a question about AR5 and AR14
+      // together, not about this branch, and it has not been answered.
+      else if problems.allSatisfy(\.isDisconnection),
+              let attachment = ArrangementAttachPolicy.attach(
+                moved, id: id, in: baseline, threshold: threshold
+              )
+      {
+        landing = ArrangementLanding(
+          arrangement: baseline.moving(id, to: attachment.rect.origin),
+          lines: [attachment.line]
+        )
+      }
+    }
+
+    // The rendered arrangement keeps its problems even when there is a landing:
+    // the display is not legally where it is being drawn. What the problems no
+    // longer decide on their own is whether the tile reads as refused, because
+    // a drop with a landing is going to succeed; the canvas asks about the
+    // landing before it reddens anything.
     return ArrangementProposal(
       arrangement: arrangement,
       baseline: baseline,
       movedID: id,
       lines: snapped.lines,
-      problems: ArrangementRules.problems(in: arrangement)
+      problems: problems,
+      landing: landing
     )
   }
 }
