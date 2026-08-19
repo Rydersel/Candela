@@ -15,10 +15,25 @@ import Foundation
 /// in it: the ScreenCaptureKit call stays an app-target island.
 public enum LuminanceReduction {
 
+  /// How many capture pixels per panel-grid cell edge.
+  ///
+  /// 16, from the sweep tabulated on `requestedSize`: it takes r from 0.8233 to
+  /// 0.9839 against a full-resolution reference, and 32 buys only 0.005 more
+  /// for four times the pixels.
+  ///
+  /// **The bound this places on a captured frame is the square fallback**,
+  /// 384x384 or 147,456 pixels, not any real panel's request. Among real panels
+  /// the count grows as the aspect moves AWAY from the grid's 2.4:1, so the
+  /// largest panel here asks for the fewest pixels: the MAG requests 384x161
+  /// (61,824) because 2.3889 is nearly 2.4, the rotated Dell 216x384 (82,944)
+  /// and the built-in 384x249 (95,616). Either way no full-resolution frame
+  /// exists in the process, so the privacy story is unchanged.
+  public static let captureOversample = 16
+
   /// The capture is requested at the **display's own aspect**, with its long
-  /// edge at `PanelGrid` resolution. `panelNativeGrid` then re-bins whatever
-  /// shape arrives into the fixed 24x10 storage grid, so the request never has
-  /// to match the storage shape.
+  /// edge at `captureOversample` pixels per grid cell. `panelNativeGrid` then
+  /// re-bins whatever shape arrives into the fixed 24x10 storage grid, so the
+  /// request never has to match the storage shape.
   ///
   /// **This asks for the display's aspect rather than the grid's because SCK
   /// letterboxes.** [MEASURED 2026-08-17, macOS 26] A capture whose requested
@@ -55,11 +70,50 @@ public enum LuminanceReduction {
   ///   content occupied 18 of its 24 rows. Reading back the delivered size was
   ///   never going to catch this, so nothing here should be read as evidence
   ///   that the frame is fully covered.
-  /// - [MEASURED 2026-08-07] **SCK's downscale area-averages, it does not
-  ///   point-sample.** A direct 24x10 capture and a 384x160 capture
-  ///   box-filtered to 24x10 agreed to a mean |delta| of 0.003 to 0.016
-  ///   luminance on all three panels. Oversampling buys no fidelity, so there
-  ///   is nothing to trade against the extra data.
+  /// - **SCK's downscale does NOT area-average at an extreme ratio, and the
+  ///   note that used to stand here was wrong** [MEASURED 2026-08-18, macOS 26].
+  ///   The earlier pass compared a direct 24x10 capture against a 384x160
+  ///   capture box-filtered to 24x10, found a mean |delta| of 0.003 to 0.016,
+  ///   and concluded oversampling bought nothing. Repeated on a deliberately
+  ///   structured, STATIC target (a 40 px stripe on a 143 px cell pitch, placed
+  ///   mid-cell so a box filter must report a partial value and a point sample
+  ///   can only report all or nothing), the same comparison against a
+  ///   full-resolution grab gives:
+  ///
+  ///   | request | r | mean \|d\| | max \|d\| |
+  ///   |---|---|---|---|
+  ///   | 24x10 | 0.8233 | 0.0467 | 0.2837 |
+  ///   | 96x40 | 0.9574 | 0.0241 | 0.1241 |
+  ///   | 384x161 | 0.9839 | 0.0137 | 0.0757 |
+  ///   | 768x321 | 0.9891 | 0.0110 | 0.0598 |
+  ///
+  ///   **What that table measured, stated exactly, because a second table
+  ///   reports different numbers for what reads as the same experiment.** Each
+  ///   row is one SCK capture at the stated size, box-filtered HERE to 24x10,
+  ///   against a `screencapture` grab of the same static target box-filtered to
+  ///   24x10. Reducing every row the same way isolates one variable, what SCK's
+  ///   own downscale loses at each ratio. It is not the shipped path: what
+  ///   ships reduces through `PanelSpaceTransform.panelNativeGrid`, and
+  ///   `docs/spikes/2026-08-18-exposure-model-probe-findings.md` measures THAT,
+  ///   end to end, reporting r 0.9814, mean 0.0094, max 0.1437 for the same
+  ///   384x161 request. Different reducer, different numbers; neither
+  ///   supersedes the other, because the question here is what the request size
+  ///   costs and the question there is what the shipped path delivers. Their
+  ///   24x10 rows are identical, which is what makes the pair look like one
+  ///   experiment: at the grid size neither reducer has anything left to do.
+  ///
+  ///   The old measurement was taken on an ordinary desktop, where large flat
+  ///   regions hide the difference: any sampling of a constant field returns
+  ///   the constant, so only structure exposes it. Two independent checks
+  ///   confirm the fault is the downscale and not the capture API: a 24x10 SCK
+  ///   capture disagrees with a 1920x804 SCK capture box-filtered (r = 0.8858),
+  ///   which is SCK against itself, while a large SCK capture and a
+  ///   `screencapture` grab, both box-filtered, agree at r = 0.9993.
+  ///
+  ///   Exposure needs an area average, because every pixel of a cell emits. So
+  ///   the request is oversampled and the area-weighted reduction to the panel
+  ///   grid is done by `PanelSpaceTransform.panelNativeGrid`, which callers
+  ///   already run.
   ///
   /// Callers still read the DELIVERED size back off the image rather than
   /// assuming this one was honoured.
@@ -68,7 +122,7 @@ public enum LuminanceReduction {
   /// draws through `meanLuminance`, which stretches to fill and never
   /// letterboxes, so an aspect-matched request is right on that path too.
   public static func requestedSize(displayWidth: Int, displayHeight: Int) -> (Int, Int) {
-    let long = max(PanelGrid.cols, PanelGrid.rows)
+    let long = max(PanelGrid.cols, PanelGrid.rows) * captureOversample
     // A zero-sized display reading only happens mid-reconfiguration; the square
     // fallback keeps the request valid and the next sample corrects it.
     guard displayWidth > 0, displayHeight > 0 else { return (long, long) }
@@ -127,7 +181,8 @@ public enum LuminanceReduction {
   /// The image is redrawn into a context of known layout rather than read
   /// through `dataProvider`: a ScreenCaptureKit `CGImage` is IOSurface-backed
   /// and its channel order, row padding and alpha handling are not contractual.
-  /// At this size the redraw is a few thousand pixels.
+  /// At the oversampled request size the redraw is 62k to 147k pixels, still
+  /// small next to a full frame.
   ///
   /// A bitmap context's first memory row is the image's TOP row even though its
   /// user space has a bottom-left origin, so no flip is needed to land in the
