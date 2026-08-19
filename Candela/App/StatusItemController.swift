@@ -1276,6 +1276,53 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     //         controller for a still-connected display and leave it holding
     //         state derived from the prefs just destroyed.
     await model.rebuildControllers()
+
+    // ---- 5b. The post-reset value reaches the GLASS, not just the slider.
+    //          The wipe leaves every display with an empty store, so each
+    //          rebuilt controller publishes the fresh-display default (1.0)
+    //          and nothing sends it: the arrival branch only READS
+    //          (`refreshFromHardware`, itself a no-op under the default
+    //          `.doNothing` startup action), and the restore pass is not run
+    //          here. Without this the slider claims 100% while the panel stays
+    //          wherever the user left it, and on a write-only panel the
+    //          slider's claim IS the app's belief, with no readback that could
+    //          ever correct it. That is the disagreement D30's compound reset
+    //          promises not to produce.
+    //
+    //          R4's gate is not being bypassed, it is inapplicable. It exists
+    //          so a LAUNCH-time restore never blasts a display this session has
+    //          never known to an assumed default; these displays were under
+    //          Candela's control a moment ago and the user just asked for their
+    //          settings to go back to default. `reassertHardware` is
+    //          deliberately ungated for exactly this kind of caller, and the
+    //          gate stays where it is, in `performRestorePass`.
+    //
+    //          Carrying the pre-reset value across the wipe instead (the shape
+    //          step 4b uses for the mute strand) would not fix it: the wipe
+    //          also restores the default combined switching point, so the same
+    //          published number means a different physical brightness on the
+    //          far side of it. Only a write makes the two agree.
+    //
+    //          Brightness only. Volume's assumed default is a hardware write
+    //          into the register the mute strand lives in, over displays step 1
+    //          may have deliberately left muted, and contrast's is the same
+    //          defect in a control that stands on its own; both belong to their
+    //          own issue rather than to this one.
+    //
+    //          Externals only: `model.builtIn` is not in `displays`, macOS owns
+    //          its brightness, and its controller seeded from a live native
+    //          read, so its slider already agrees with its glass.
+    //
+    //          BEFORE step 6, for the reason step 6 states: DDC is unlocked
+    //          only while HDR is down. The write is submitted, not settled
+    //          here: `restoreExternalHDR` opens by settling this display's
+    //          three queues and declines to re-engage if it cannot, so a display
+    //          getting its HDR back cannot lock the register over a brightness
+    //          write still in the air.
+    for state in model.displays {
+      state.controller.reassertHardware()
+    }
+
     // Through the seam's own closure, not `refreshTapConfig()` directly: the
     // wipe reset the key-mode prefs, and `.rearmTap` is where custom-shortcut
     // registration is re-synced against them (Task 12 hand-off). Calling the

@@ -172,4 +172,45 @@ struct ControllerRestoreTests {
     controller.setBrightness(0.5)
     #expect(controller.hasStoredValue) // published once — restore may re-assert
   }
+
+  @Test func reassertOverAnEmptyStoreWritesTheFreshDisplayDefault() async {
+    // The post-reset shape, and the ONE property Reset All Settings depends on:
+    // the domain wipe leaves every display with an empty store, so the rebuilt
+    // controller publishes the fresh-display default and `hasStoredValue` is
+    // false. Nothing else writes that number to the panel. The arrival branch
+    // only READS (a no-op under the default `.doNothing` startup action), and
+    // the restore pass's R4 gate skips exactly this case by design, so a
+    // `reassertHardware` that ever grew the same gate would silently return the
+    // reset to leaving the slider at 100% over a panel that never moved.
+    //
+    // Pure DDC so the assertion is the wire value itself rather than a split
+    // across two legs; the combined path writes the same 100 at the top of its
+    // band.
+    let defaults = InMemoryDefaults()
+    defaults.set(true, forKey: "disableCombinedBrightness")
+    let fake = FakeDDC(readResult: nil)
+    let store = PathMemoryStore()
+    let controller = BrightnessController(
+      writer: fake,
+      backends: BrightnessBackends(
+        applierNative: NativeBrightnessApplier(displayID: 7) { _, _ in false },
+        hdr: nil, shade: nil, gamma: nil
+      ),
+      prefs: DisplayPrefs(defaults: defaults, persistenceKey: "rs"),
+      displayID: 7,
+      store: store,
+      storageKey: "combinedBrightness.rs",
+      wireSiblings: []
+    )
+    #expect(controller.brightness == 1.0)
+    #expect(controller.hasStoredValue == false)
+
+    controller.reassertHardware()
+    await controller.waitForPendingWrites()
+
+    let writes = await fake.recordedWrites()
+    #expect(writes.count == 1)
+    #expect(writes.last?.command == VCP.brightness)
+    #expect(writes.last?.value == 100)
+  }
 }
