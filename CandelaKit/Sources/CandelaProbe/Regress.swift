@@ -185,23 +185,37 @@ enum Regress {
   static func preflight(instruments: RegressInstruments, displays: [Display]) -> Preflight {
     var checks: [PlatformConformance.Check] = []
 
-    // 1. Is the app running at all? Everything else asks questions about a
-    //    process, so this one gates the rest.
-    let pids = instruments.runningPIDs()
-    checks.append(plainCheck(
-      name: "regress.app.running",
-      outcome: pids.isEmpty
-        ? .fail("no Candela process is running; there is no deployed build to assert anything about")
-        : .pass("Candela is running (pid \(pids.joined(separator: ", ")))")
-    ))
-    guard !pids.isEmpty else {
-      let reason = "the app is not running (see regress.app.running)"
+    // 1. Is EXACTLY ONE app running? Everything else asks questions about a
+    //    process, so this one gates the rest, and "a process" has to mean one
+    //    nameable binary. Two instances is refused rather than resolved: the
+    //    accessibility layer would walk whichever the process table listed
+    //    first, `open -b` would reach LaunchServices' choice, and the log
+    //    predicate merges both instances' records under one process name, so
+    //    every reading downstream would be of a build nobody named.
+    let instances = instruments.runningInstances()
+    let runningOutcome: PlatformConformance.Outcome
+    switch instances.count {
+    case 0:
+      runningOutcome = .fail(
+        "no Candela process is running; there is no build to assert anything about")
+    case 1:
+      runningOutcome = .pass("Candela is running: \(instances[0].described)")
+    default:
+      runningOutcome = .fail(
+        "\(instances.count) Candela instances are running (\(instances.map(\.described).joined(separator: "; "))); quit all but the build under test. Only one DDC writer may run at a time, the accessibility layer cannot say which instance it walked, and the log predicate filters on the process NAME, so both instances' records merge into one window: a multi-instance run is unusable evidence end to end"
+      )
+    }
+    checks.append(plainCheck(name: "regress.app.running", outcome: runningOutcome))
+    guard instances.count == 1 else {
+      let reason = instances.isEmpty
+        ? "unreachable while the app is not running (see regress.app.running)"
+        : "unreachable while \(instances.count) Candela instances are running (see regress.app.running)"
       checks += [
         "regress.instrument.log", "regress.instrument.gamma", "regress.instrument.keys",
         "regress.instrument.identifiers", "regress.instrument.prefs",
       ].map { skippedCheck(name: $0, reason: reason) }
       return Preflight(
-        checks: checks, appRunning: false, logProven: false, gammaProven: false,
+        checks: checks, appRunning: !instances.isEmpty, logProven: false, gammaProven: false,
         keysProven: false, identifiersProven: false, prefsProven: false, keyTarget: nil)
     }
 
@@ -348,7 +362,7 @@ enum Regress {
       Thread.sleep(forTimeInterval: 2)
       guard down, up else {
         return .fail(
-          "the media-key poster failed to run (brightnessDown ran: \(down), brightnessUp ran: \(up)): \(instruments.lastPosterError ?? "no reason reported")"
+          "the media-key poster failed to run (brightnessDown ran: \(down), brightnessUp ran: \(up)): \(instruments.posterFailureSummary ?? "no reason reported")"
         )
       }
       let window = instruments.logWindow(since: start)
@@ -473,10 +487,16 @@ final class RegressInstruments {
   /// Why the last accessibility call did not answer, so a check's detail can
   /// name the cause instead of reporting a control as merely missing.
   private(set) var lastAXError: String?
-  /// Why the last media-key post did not run, carrying the script's own
+  /// Why each failed media-key post did not run, carrying the script's own
   /// stderr: "the poster failed" on its own is the silence this command
-  /// refuses everywhere else.
-  private(set) var lastPosterError: String?
+  /// refuses everywhere else. One entry per failed post, kept for the life of
+  /// the run.
+  private(set) var posterFailures: [String] = []
+
+  /// Every poster failure so far on one line, or nil when every post worked.
+  var posterFailureSummary: String? {
+    posterFailures.isEmpty ? nil : posterFailures.joined(separator: "; ")
+  }
 
   init(toolsDir: String) {
     self.toolsDir = toolsDir
@@ -647,21 +667,23 @@ final class RegressInstruments {
 
   /// Posts a real system-defined media key through the committed script. It
   /// imports AppKit, which the probe must not, so this stays a shell out.
+  ///
+  /// A failure is APPENDED and never cleared by a later success: a check posts
+  /// several keys and reports once, so clearing on success would let a failed
+  /// brightnessDown followed by a working brightnessUp report no reason at all.
   func postMediaKey(_ name: String, count: Int) -> Bool {
     guard let script = mediaKeyScript else {
-      lastPosterError = mediaKeySearchDescription
+      posterFailures.append("\(name): \(mediaKeySearchDescription)")
       return false
     }
     let result = Self.execute("/usr/bin/swift", [script, name, String(count)])
-    guard result.status != 0 else {
-      lastPosterError = nil
-      return true
-    }
+    guard result.status != 0 else { return true }
     let stderr = result.err
       .trimmingCharacters(in: .whitespacesAndNewlines)
       .replacingOccurrences(of: "\n", with: "; ")
-    lastPosterError = "\(script) \(name) exited \(result.status): "
-      + (stderr.isEmpty ? "nothing on stderr" : stderr)
+    posterFailures.append(
+      "\(name): \(script) exited \(result.status): "
+        + (stderr.isEmpty ? "nothing on stderr" : stderr))
     return false
   }
 
@@ -675,13 +697,46 @@ final class RegressInstruments {
 
   // MARK: The app process
 
-  func runningPIDs() -> [String] {
-    let result = Self.execute("/usr/bin/pgrep", ["-x", "Candela"])
-    guard result.status == 0 else { return [] }
-    return result.out.split(whereSeparator: \.isNewline).map(String.init)
+  /// One running Candela, named by the binary it is running. The PATH is the
+  /// point: `pgrep -x` matches by executable NAME, so a Debug build out of a
+  /// worktree's DerivedData and the deployed bundle both answer to it, and a
+  /// run that does not print the path cannot say which build it measured.
+  struct RunningInstance {
+    let pid: String
+    let path: String
+
+    var described: String { "pid \(pid) at \(path)" }
   }
 
-  func appIsRunning() -> Bool { !runningPIDs().isEmpty }
+  func runningInstances() -> [RunningInstance] {
+    let result = Self.execute("/usr/bin/pgrep", ["-x", "Candela"])
+    guard result.status == 0 else { return [] }
+    return result.out.split(whereSeparator: \.isNewline).map(String.init).map { pid in
+      let path = Self.execute("/bin/ps", ["-p", pid, "-o", "comm="]).out
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      return RunningInstance(pid: pid, path: path.isEmpty ? "(path unreadable)" : path)
+    }
+  }
+
+  /// The ONE instance every other instrument addresses, or nil with the reason
+  /// recorded. Two instances is refused rather than resolved: it is the same
+  /// non-unique hazard this file already refuses loudly for windows and for
+  /// identifiers, and picking the first would bind whichever the process table
+  /// happened to list first.
+  func soleRunningInstance() -> RunningInstance? {
+    let instances = runningInstances()
+    guard instances.count == 1 else {
+      lastAXError = instances.isEmpty
+        ? "no Candela process is running"
+        : "\(instances.count) Candela instances are running (\(instances.map(\.described).joined(separator: "; "))); quit all but one before measuring anything"
+      return nil
+    }
+    return instances[0]
+  }
+
+  func runningPIDs() -> [String] { runningInstances().map(\.pid) }
+
+  func appIsRunning() -> Bool { !runningInstances().isEmpty }
 
   // MARK: The accessibility layer
 
@@ -772,10 +827,10 @@ final class RegressInstruments {
       lastAXError = "this shell has no Accessibility grant, so every accessibility read would come back empty"
       return nil
     }
-    guard let pid = runningPIDs().first.flatMap(Int32.init) else {
-      lastAXError = "no Candela process to read an accessibility tree from"
-      return nil
-    }
+    // One instance, or nothing: with two Candelas running there is no such
+    // thing as "the app's window", and binding one of them would report a
+    // measurement of a build nobody named.
+    guard let instance = soleRunningInstance(), let pid = Int32(instance.pid) else { return nil }
     let application = AXUIElementCreateApplication(pid)
     var value: CFTypeRef?
     guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value)
@@ -977,9 +1032,14 @@ final class RegressInstruments {
       return false
     }
     Thread.sleep(forTimeInterval: 1.2)
-    let title = settingsWindowName()
-    guard title == row else {
-      lastAXError = "the \(row) row was pressed and the window title reads \(title ?? "(unreadable)")"
+    // Re-bind rather than reading the title off the pre-press reference, and
+    // keep the binding's OWN error when it fails: a non-unique match lists
+    // every open window, and overwriting that with "the title reads
+    // (unreadable)" would throw the loud failure away for a vaguer one.
+    guard let rebound = settingsWindow() else { return false }
+    let title = read(rebound, kAXTitleAttribute as String)
+    guard title.presentText == row else {
+      lastAXError = "the \(row) row was pressed and the window title reads \(title.describedForDetail)"
       return false
     }
     lastAXError = nil
