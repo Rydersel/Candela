@@ -10,11 +10,34 @@ import os
 /// list, so Kit only ever receives the resulting array of floats.
 ///
 /// **One capture per call, never an `SCStream`** (OC16). Suspension is then the
-/// natural state between captures — there is no stream lifecycle to pause,
+/// natural state between captures: there is no stream lifecycle to pause,
 /// resume or leak, and a display that stops qualifying simply stops being
-/// asked. The capture is requested at grid scale, so **no full-resolution frame
-/// exists in this process at any point**; that is the privacy story and the
-/// performance story in one fact (S3 measured 69.6 ms avg at this size).
+/// asked.
+///
+/// **The request is `LuminanceReduction.captureOversample` pixels per grid-cell
+/// edge, not one.** It was grid scale until the oversample landed, and the
+/// sentence that stood here read the privacy story and the performance story
+/// off that one fact. Both still hold, for reasons that are no longer that one.
+///
+/// - Privacy. ScreenCaptureKit scales out of process, so no full-resolution
+///   frame exists here at either size. What changed is what the small frame is:
+///   384x249 on the built-in is 95,616 luminance values, and a greyscale image
+///   that size is a legible screenshot, with window layout, large text and app
+///   identity recoverable from it, where a 24x10 grid is not. It stays
+///   transient, and that is a property of the call graph rather than of the
+///   frame: the `CGImage` dies with `sample(displayID:)`, the caller reduces
+///   `Sample` to 240 cells and stores only those, and nothing retains or logs
+///   the delivered grid. A consumer that started holding a `Sample` is the
+///   thing to look at.
+/// - Performance. Unchanged, and measured rather than carried over. [MEASURED
+///   2026-08-18, 20 captures per leg on this rig] Median capture latency at 16x
+///   is 49.5 ms on the MAG (384x161), 49.0 ms on the built-in (384x249) and
+///   42.2 ms on the rotated Dell (216x384). The OLD grid-scale request is the
+///   control and is no faster: 52.8, 48.7 and 39.3 ms. The cost is the round
+///   trip to the compositor, not the pixel count. Reduction goes from 0.06 to
+///   0.13 ms up to 0.29 to 0.44 ms, still nothing. The 69.6 ms average this
+///   comment used to cite is dropped rather than moved: S3 measured it at the
+///   grid-scale request, so it never described this size.
 ///
 /// **Every failure returns `nil`, never a zero grid.** A zero would accumulate
 /// as "this panel was black for 60 s", which is a lie that silently cools the
