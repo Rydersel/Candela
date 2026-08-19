@@ -1039,6 +1039,37 @@ final class DisplayModeCoordinator {
     }
   }
 
+  /// Removes this display's stored resolution, leaving the opt-in flag alone.
+  ///
+  /// The two are separate answers, exactly as `ModePersistence.clear` says:
+  /// "forget the resolution I pinned" is not "stop remembering resolutions
+  /// here", and the toggle above the button is what answers the second. With
+  /// the toggle still on, the next resolution the user keeps on this display
+  /// is pinned in the cleared one's place.
+  ///
+  /// Queued for the reason `pinCurrentMode` is: the queue is what serialises
+  /// every other write to `storedDisplayMode`, and a clear that skipped it
+  /// could be overtaken by an in-flight pin and silently undone. Announced
+  /// through `didStoreMode` because the propagation seam has to hear about a
+  /// removal on the same terms as a write (D27): a clear that announced
+  /// nothing would leave the row on screen naming a mode that is gone.
+  ///
+  /// A stored SYNTHESIZED size is deliberately untouched: it is a different
+  /// store with its own control, and a button in the resolution section is not
+  /// where someone looks to retire it.
+  func forgetStoredMode(on displayID: CGDirectDisplayID) {
+    queue.enqueue {
+      guard let identity = self.identity(for: displayID) else { return }
+      self.persistence.clear(for: identity)
+      // The reapply report is about a mode that no longer exists to be
+      // reapplied, so it goes with it. Otherwise the banner that sent the user
+      // here would outlive its own subject and keep apologising for a stored
+      // resolution the app is no longer holding.
+      self.dismissReport(forKey: identity.key)
+      self.didStoreMode(displayID)
+    }
+  }
+
   /// The pin as stored, for the row that shows it and for `Set to Current`'s
   /// enabled state. Read-only by design: the writes go through `store`, and they
   /// go through it BECAUSE it announces itself (`didStoreMode`).

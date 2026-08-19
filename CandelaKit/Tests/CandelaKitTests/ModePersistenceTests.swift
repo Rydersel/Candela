@@ -40,6 +40,32 @@ struct ModePersistenceTests {
     #expect(!store.isEnabled(for: identity))
   }
 
+  /// The whole reason `clear` and `setEnabled` are separate calls, and the
+  /// property the Forget button is built on: forgetting the pinned resolution
+  /// must not silently opt the display out of remembering the next one.
+  @Test func clearingTheStoredModeLeavesTheOptInAlone() {
+    let store = ModePersistence(defaults: InMemoryDefaults())
+    store.setEnabled(true, for: identity)
+    store.store(DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880)).descriptor, for: identity)
+    store.clear(for: identity)
+    #expect(store.storedMode(for: identity) == nil)
+    #expect(store.isEnabled(for: identity))
+  }
+
+  /// Clearing one display's pin is not clearing the other's. The keys differ by
+  /// identity, so this is a guard against a future `removePersistentDomain`
+  /// style shortcut rather than against today's code.
+  @Test func clearingOneDisplayLeavesAnothersPinIntact() {
+    let store = ModePersistence(defaults: InMemoryDefaults())
+    let other = DisplayConfigIdentity(vendor: 0x3669, model: 0x3DD0, serial: 0, isBuiltIn: false)
+    let kept = DisplayModeFixtures.mode(1, logical: (3440, 1440), pixels: (3440, 1440), hz: 175).descriptor
+    store.store(DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (5120, 2880)).descriptor, for: identity)
+    store.store(kept, for: other)
+    store.clear(for: identity)
+    #expect(store.storedMode(for: identity) == nil)
+    #expect(store.storedMode(for: other) == kept)
+  }
+
   /// Both keys are UserDefaults key components and are frozen once shipped —
   /// the same contract `DisplayConfigIdentity.key` and `DisplayPrefs` carry.
   /// Pinned by exact literal, so a rename cannot orphan stored preferences
