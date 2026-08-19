@@ -643,6 +643,14 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: "hideBuiltInDisplay") }
   }
 
+  /// Hide the panel's Keep Display Awake row. Presentation only: hiding the row
+  /// never releases an assertion the row took, because a control's visibility
+  /// is not a statement about the state it controls.
+  public var hideKeepAwake: Bool {
+    get { defaults.bool(forKey: "hideKeepAwake") }
+    set { defaults.set(newValue, forKey: "hideKeepAwake") }
+  }
+
   /// D26 escape hatch for #110, with NO UI by design. Default ON, so the
   /// stored form is the override rather than the setting: an absent key means
   /// guarded.

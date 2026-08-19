@@ -117,6 +117,9 @@ struct DiagnosticsPrefSummaryTests {
     // App-level: one value for the whole app, not a fact about a display.
     .menuIcon, .hideBuiltInDisplay, .showContrast,
     .enableSliderSnap, .enableSliderPercent,
+    // The panel's keep-awake row is one row for the whole panel, and the
+    // assertion behind it is one for the process.
+    .hideKeepAwake,
     // One position (and one style) for every display's pills, so they say
     // nothing about a particular display.
     .hudPositionBrightness, .hudPositionVolume, .hudStyle,

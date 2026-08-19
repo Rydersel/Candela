@@ -37,9 +37,15 @@ enum OledCareSignalSources {
     return CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
   }
 
-  /// True while anything system-wide holds `PreventUserIdleDisplaySleep` —
-  /// video, calls, presentations, caffeinate. Candela itself holds none
-  /// (OC14), so there is nothing to self-exclude.
+  /// True while anything system-wide holds `PreventUserIdleDisplaySleep`:
+  /// video, calls, presentations, caffeinate, and since A-21 Candela's own Keep
+  /// Display Awake. Ours is deliberately NOT excluded. A control that promises
+  /// to keep the display awake should not leave it dimmed, so it trips this
+  /// gate exactly as a video player's assertion does.
+  ///
+  /// Self-excluding would take a per-process enumeration on this tick: the
+  /// status dictionary reports an aggregate LEVEL rather than a count, so
+  /// subtracting our own hold cannot stay correct while a video holds one too.
   ///
   /// The status dictionary reports an aggregate LEVEL, not a count:
   /// `kIOPMAssertionLevelOff` is 0 and anything above it means held (observed

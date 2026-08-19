@@ -272,6 +272,20 @@ final class AppModel {
   /// reason — the idle timers must outlive whatever pane configured them.
   @ObservationIgnored private(set) lazy var oledCare = OledCareCoordinator()
 
+  /// The session's ONE keep-awake holder, and it has to be one: the type
+  /// releases nothing on deinit (a nonisolated deinit cannot reach its state),
+  /// so an owner that discarded a live instance would strand its assertion
+  /// until the app quit. `AppModel` outlives every rebuild in the app,
+  /// including the settings reset's, which is why it owns this.
+  ///
+  /// Session-only by design: no pref, no storage key, and nothing in the reset
+  /// path clears it, because it is not a setting.
+  /// `@ObservationIgnored` on the REFERENCE only, exactly as `oledCare` is: the
+  /// macro turns a stored `lazy var` into a computed one otherwise. Observation
+  /// still reaches the panel, because `isOn` is observable on `KeepAwake`
+  /// itself and that is the property the row reads.
+  @ObservationIgnored private(set) lazy var keepAwake = KeepAwake()
+
   /// Displays Candela creates (VD4). In-process ownership is what makes a
   /// crash reclaim them; the host's owned set is the ONLY authority on "is
   /// this one of ours" and feeds discovery's DDC-pool exclusion.
