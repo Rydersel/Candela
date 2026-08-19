@@ -55,11 +55,35 @@ public enum LuminanceReduction {
   ///   content occupied 18 of its 24 rows. Reading back the delivered size was
   ///   never going to catch this, so nothing here should be read as evidence
   ///   that the frame is fully covered.
-  /// - [MEASURED 2026-08-07] **SCK's downscale area-averages, it does not
-  ///   point-sample.** A direct 24x10 capture and a 384x160 capture
-  ///   box-filtered to 24x10 agreed to a mean |delta| of 0.003 to 0.016
-  ///   luminance on all three panels. Oversampling buys no fidelity, so there
-  ///   is nothing to trade against the extra data.
+  /// - **SCK's downscale does NOT area-average at an extreme ratio, and the
+  ///   note that used to stand here was wrong** [MEASURED 2026-08-18, macOS 26].
+  ///   The earlier pass compared a direct 24x10 capture against a 384x160
+  ///   capture box-filtered to 24x10, found a mean |delta| of 0.003 to 0.016,
+  ///   and concluded oversampling bought nothing. Repeated on a deliberately
+  ///   structured, STATIC target (a 40 px stripe on a 143 px cell pitch, placed
+  ///   mid-cell so a box filter must report a partial value and a point sample
+  ///   can only report all or nothing), the same comparison against a
+  ///   full-resolution grab gives:
+  ///
+  ///   | request | r | mean \|d\| | max \|d\| |
+  ///   |---|---|---|---|
+  ///   | 24x10 | 0.8233 | 0.0467 | 0.2837 |
+  ///   | 96x40 | 0.9574 | 0.0241 | 0.1241 |
+  ///   | 384x161 | 0.9839 | 0.0137 | 0.0757 |
+  ///   | 768x321 | 0.9891 | 0.0110 | 0.0598 |
+  ///
+  ///   The old measurement was taken on an ordinary desktop, where large flat
+  ///   regions hide the difference: any sampling of a constant field returns
+  ///   the constant, so only structure exposes it. Two independent checks
+  ///   confirm the fault is the downscale and not the capture API: a 24x10 SCK
+  ///   capture disagrees with a 1920x804 SCK capture box-filtered (r = 0.8858),
+  ///   which is SCK against itself, while a large SCK capture and a
+  ///   `screencapture` grab, both box-filtered, agree at r = 0.9993.
+  ///
+  ///   Exposure needs an area average, because every pixel of a cell emits. So
+  ///   the request is oversampled and the area-weighted reduction to the panel
+  ///   grid is done by `PanelSpaceTransform.panelNativeGrid`, which callers
+  ///   already run.
   ///
   /// Callers still read the DELIVERED size back off the image rather than
   /// assuming this one was honoured.
@@ -67,8 +91,17 @@ public enum LuminanceReduction {
   /// The wallpaper source renders through this same rule, and correctly: it
   /// draws through `meanLuminance`, which stretches to fill and never
   /// letterboxes, so an aspect-matched request is right on that path too.
+  /// How many capture pixels per panel-grid cell edge.
+  ///
+  /// 16 from the table above: it takes r from 0.8233 to 0.9839 against a
+  /// full-resolution reference, and 32 buys only 0.005 more for four times the
+  /// pixels. At this factor the largest panel here requests 384x161, about 62k
+  /// pixels, so no full-resolution frame exists in the process and the privacy
+  /// story is unchanged.
+  public static let captureOversample = 16
+
   public static func requestedSize(displayWidth: Int, displayHeight: Int) -> (Int, Int) {
-    let long = max(PanelGrid.cols, PanelGrid.rows)
+    let long = max(PanelGrid.cols, PanelGrid.rows) * captureOversample
     // A zero-sized display reading only happens mid-reconfiguration; the square
     // fallback keeps the request valid and the next sample corrects it.
     guard displayWidth > 0, displayHeight > 0 else { return (long, long) }

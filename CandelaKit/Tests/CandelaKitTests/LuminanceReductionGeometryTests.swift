@@ -90,17 +90,33 @@ struct LuminanceReductionGeometryTests {
 
   @Test("The rig's panels request the sizes measured on the hardware")
   func theRequestsMatchWhatWasMeasured() {
-    #expect(LuminanceReduction.requestedSize(displayWidth: 3440, displayHeight: 1440) == (24, 10))
-    #expect(LuminanceReduction.requestedSize(displayWidth: 1440, displayHeight: 2560) == (14, 24))
-    #expect(LuminanceReduction.requestedSize(displayWidth: 1800, displayHeight: 1169) == (24, 16))
+    // Oversampled by `captureOversample`, because ScreenCaptureKit's own
+    // downscale to a panel-grid request samples rather than area-averages
+    // [MEASURED 2026-08-18]. The aspects are unchanged, which is what the
+    // letterboxing rule above cares about.
+    #expect(LuminanceReduction.requestedSize(displayWidth: 3440, displayHeight: 1440) == (384, 161))
+    #expect(LuminanceReduction.requestedSize(displayWidth: 1440, displayHeight: 2560) == (216, 384))
+    #expect(LuminanceReduction.requestedSize(displayWidth: 1800, displayHeight: 1169) == (384, 249))
   }
 
-  @Test("The long edge stays at grid resolution, so the sample size does not grow")
-  func theLongEdgeIsAlwaysTwentyFour() {
+  @Test("The long edge is the grid's long edge oversampled, on every panel")
+  func theLongEdgeIsTheOversampledGridEdge() {
+    let expected = max(PanelGrid.cols, PanelGrid.rows) * LuminanceReduction.captureOversample
     for display in Self.displays {
       let (w, h) = LuminanceReduction.requestedSize(
         displayWidth: display.width, displayHeight: display.height)
-      #expect(max(w, h) == max(PanelGrid.cols, PanelGrid.rows), "\(display.name) requested \(w)x\(h)")
+      #expect(max(w, h) == expected, "\(display.name) requested \(w)x\(h)")
+    }
+  }
+
+  @Test("The request carries strictly more pixels than the grid it reduces to")
+  func theRequestOversamplesTheGrid() {
+    // The point of the oversample: the reduction to `PanelGrid` must be ours,
+    // area-weighted through `panelNativeGrid`, not ScreenCaptureKit's.
+    for display in Self.displays {
+      let (w, h) = LuminanceReduction.requestedSize(
+        displayWidth: display.width, displayHeight: display.height)
+      #expect(w * h > PanelGrid.cellCount, "\(display.name) requested \(w)x\(h)")
     }
   }
 
@@ -108,7 +124,7 @@ struct LuminanceReductionGeometryTests {
 
   @Test("A zero-sized reading falls back to a square request rather than an uncapturable one")
   func aZeroSizedDisplayFallsBackToASquare() {
-    let long = max(PanelGrid.cols, PanelGrid.rows)
+    let long = max(PanelGrid.cols, PanelGrid.rows) * LuminanceReduction.captureOversample
     #expect(LuminanceReduction.requestedSize(displayWidth: 0, displayHeight: 1440) == (long, long))
     #expect(LuminanceReduction.requestedSize(displayWidth: 3440, displayHeight: 0) == (long, long))
     #expect(LuminanceReduction.requestedSize(displayWidth: -1, displayHeight: -1) == (long, long))
