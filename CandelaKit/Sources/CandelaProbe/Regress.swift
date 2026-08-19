@@ -159,7 +159,11 @@ enum Regress {
   /// app of anything.
   struct Preflight {
     let checks: [PlatformConformance.Check]
-    let appRunning: Bool
+    /// Exactly one Candela was running and every instrument addressed it. Not
+    /// "the app is running": two instances is a refused rig, not a healthy one,
+    /// and a field that read true for both would invite a driven check to
+    /// proceed against whichever instance the process table listed first.
+    let soleInstanceBound: Bool
     let logProven: Bool
     let gammaProven: Bool
     let keysProven: Bool
@@ -215,7 +219,7 @@ enum Regress {
         "regress.instrument.identifiers", "regress.instrument.prefs",
       ].map { skippedCheck(name: $0, reason: reason) }
       return Preflight(
-        checks: checks, appRunning: !instances.isEmpty, logProven: false, gammaProven: false,
+        checks: checks, soleInstanceBound: false, logProven: false, gammaProven: false,
         keysProven: false, identifiersProven: false, prefsProven: false, keyTarget: nil)
     }
 
@@ -299,7 +303,7 @@ enum Regress {
 
     return Preflight(
       checks: checks,
-      appRunning: true,
+      soleInstanceBound: true,
       logProven: logProven,
       gammaProven: isPass(gammaOutcome),
       keysProven: keysProven,
@@ -734,9 +738,10 @@ final class RegressInstruments {
     return instances[0]
   }
 
-  func runningPIDs() -> [String] { runningInstances().map(\.pid) }
-
-  func appIsRunning() -> Bool { !runningInstances().isEmpty }
+  // There is deliberately no `runningPIDs()` and no `appIsRunning()`. Both
+  // answered the any-instance question, and every honest caller here needs the
+  // one-instance question instead: `runningInstances()` to report what is
+  // running, `soleRunningInstance()` to address it.
 
   // MARK: The accessibility layer
 
