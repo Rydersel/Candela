@@ -90,7 +90,12 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
   /// the only account of what the wire-timing guard withheld, and a filter that
   /// can only be observed by noticing an absence is the kind we criticise
   /// elsewhere (CR11).
-  private func enumerate(
+  // Internal rather than private since 2026-08-19: `PlatformConformance` needs
+  // the published list and the revelation result SEPARATELY, because the
+  // subset cross-check is only meaningful against modes CoreGraphics computed
+  // on its own (a revealed mode agreeing with the CGS entry it was built from
+  // proves nothing).
+  func enumerate(
     _ displayID: CGDirectDisplayID
   ) -> (published: [DisplayMode], revealed: CGSModeRevelation.RevelationResult?) {
     let published = copyModes(displayID).map { ioID, mode in
@@ -462,7 +467,10 @@ public struct CoreGraphicsDisplayConfigurator: DisplayConfiguring {
 /// `IOServiceRequestProbe` + `kIOFBSetTransform` route has **zero**
 /// `IOFramebuffer` services to attach to on Apple Silicon (RS2). Dead code here,
 /// not a second chance.
-private enum SkyLight {
+// Internal rather than private since 2026-08-19: `PlatformConformance` reads
+// the resolved symbols individually so a post-macOS-update run can name WHICH
+// one went missing, where `revealsHiddenModes` can only say that one did.
+enum SkyLight {
   /// Two arguments, the second a 32-bit integer of degrees. Read out of the
   /// shipping binary's prologue rather than guessed (RS1): it saves `x0` and
   /// `x1`, never touches `x2`, and stores argument 1 through `stp w22, w20`. A

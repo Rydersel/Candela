@@ -66,6 +66,12 @@ public enum DisplayServices {
   /// semantics. No new calls into the private API itself.
   public static var isAvailable: Bool { symbols.setBrightness != nil }
 
+  /// Conformance-only granularity: `isAvailable` is deliberately keyed on the
+  /// setter alone, so a getter that vanished in a macOS update would hide
+  /// behind it. `PlatformConformance` reads both.
+  static var resolvedGetter: Bool { symbols.getBrightness != nil }
+  static var resolvedSetter: Bool { symbols.setBrightness != nil }
+
   /// nil when the symbol is unavailable, the call fails, or the value is
   /// out of range (fork convention: success == (ret == 0 && value >= 0),
   /// OtherDisplay.swift:330).
