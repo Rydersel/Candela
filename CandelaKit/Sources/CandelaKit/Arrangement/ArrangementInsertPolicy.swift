@@ -41,20 +41,11 @@ public struct ArrangementInsertion: Sendable, Equatable {
   /// wide enough to hold the inserted display, which is the case where an
   /// insert disturbs nothing.
   public let push: Int
-  /// Guides to draw, same contract as `SnapResult.lines`: at most one per axis,
-  /// X before Y.
-  public let lines: [SnapLine]
 
-  public init(
-    arrangement: DisplayArrangement,
-    seam: ArrangementSeam,
-    push: Int,
-    lines: [SnapLine]
-  ) {
+  public init(arrangement: DisplayArrangement, seam: ArrangementSeam, push: Int) {
     self.arrangement = arrangement
     self.seam = seam
     self.push = push
-    self.lines = lines
   }
 }
 
@@ -134,29 +125,35 @@ public enum ArrangementInsertPolicy {
       arrangement = arrangement.makingMain(main)
     }
 
-    guard let finalTile = arrangement.tile(id), let near = arrangement.tile(seam.nearID)
-    else { return nil }
+    return ArrangementInsertion(arrangement: arrangement, seam: seam, push: push)
+  }
 
-    // Rebuilt from the FINAL arrangement, because re-anchoring above may have
-    // translated every coordinate the snapper's own lines were expressed in.
-    let seamLine = line(
-      axis: axis, moved: finalTile.rect, other: near.rect, otherID: near.id
-    )
-    // Threshold 0 admits only an exact hit, which is all that is wanted here:
-    // the cross axis was already snapped, so a real alignment still registers
-    // and a near miss correctly draws nothing.
-    let crossLine = ArrangementSnapper.snap(
-      finalTile.rect, id: id, against: arrangement.tiles, threshold: 0
-    ).lines.first { $0.axis == axis.other }
-
-    return ArrangementInsertion(
-      arrangement: arrangement,
-      seam: seam,
-      push: push,
-      lines: [
-        axis == .x ? seamLine : crossLine,
-        axis == .x ? crossLine : seamLine,
-      ].compactMap { $0 }
+  /// The seam guide, in the coordinates the MAP is drawn in.
+  ///
+  /// It has to be built from the baseline rather than from the insertion's own
+  /// arrangement. The canvas renders the dragged tile where the pointer is and
+  /// holds the transform frozen on the baseline's bounds (AR2), while the
+  /// insertion may have been re-anchored by a whole-layout translation (AR14).
+  /// A guide taken from the re-anchored layout would be drawn that translation
+  /// away from the seam it names.
+  ///
+  /// - Parameter rendered: the dragged display's rect as the map is drawing it.
+  ///   The guide spans it and the display it will come to rest against, which is
+  ///   the same rule `ArrangementSnapper` uses for a snap guide.
+  public static func guide(
+    for seam: ArrangementSeam,
+    rendered: DisplayRect,
+    in baseline: DisplayArrangement
+  ) -> SnapLine? {
+    guard let near = baseline.tile(seam.nearID) else { return nil }
+    let across = seam.axis.other
+    return SnapLine(
+      axis: seam.axis,
+      position: seam.position,
+      kind: .abut,
+      otherDisplayID: seam.nearID,
+      from: min(rendered.start(on: across), near.rect.start(on: across)),
+      to: max(rendered.end(on: across), near.rect.end(on: across))
     )
   }
 
@@ -233,23 +230,6 @@ public enum ArrangementInsertPolicy {
       seam.axis == .x ? 0 : 1,
       seam.nearID,
       seam.farID
-    )
-  }
-
-  private static func line(
-    axis: SnapAxis,
-    moved: DisplayRect,
-    other: DisplayRect,
-    otherID: CGDirectDisplayID
-  ) -> SnapLine {
-    let across = axis.other
-    return SnapLine(
-      axis: axis,
-      position: other.end(on: axis),
-      kind: .abut,
-      otherDisplayID: otherID,
-      from: min(moved.start(on: across), other.start(on: across)),
-      to: max(moved.end(on: across), other.end(on: across))
     )
   }
 }

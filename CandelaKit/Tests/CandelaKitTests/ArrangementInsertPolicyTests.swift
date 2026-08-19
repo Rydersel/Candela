@@ -52,13 +52,19 @@ struct ArrangementInsertPolicyTests {
       in: row.moving(3, to: DisplayPoint(x: 1_000, y: 0))
     ).isEmpty)
 
-    // The guide names the display the inserted one came to rest against, and
-    // sits on the seam rather than on the moved display's own edge.
-    let xLine = insertion?.lines.first { $0.axis == .x }
-    #expect(xLine?.position == 1_000)
-    #expect(xLine?.kind == .abut)
-    #expect(xLine?.otherDisplayID == 1)
-    #expect(insertion?.lines.first?.axis == .x) // X before Y, as SnapResult orders them
+    // The guide names the display the inserted one will come to rest against,
+    // and sits on the seam rather than on the moved display's own edge. It is
+    // built from the rect the MAP is drawing, which during the drag is still
+    // where the pointer is.
+    let guide = ArrangementInsertPolicy.guide(
+      for: insertion!.seam, rendered: rect(600, 0, 800, 1_000), in: row
+    )
+    #expect(guide?.axis == .x)
+    #expect(guide?.position == 1_000)
+    #expect(guide?.kind == .abut)
+    #expect(guide?.otherDisplayID == 1)
+    #expect(guide?.from == 0)
+    #expect(guide?.to == 1_000)
   }
 
   @Test func aGapWideEnoughAbsorbsTheInsertAndNothingElseMoves() {
@@ -81,6 +87,33 @@ struct ArrangementInsertPolicyTests {
     // Untouched, and that is the whole point of this case.
     #expect(origin(insertion!.arrangement, 1) == DisplayPoint(x: 0, y: 0))
     #expect(origin(insertion!.arrangement, 2) == DisplayPoint(x: 2_000, y: 0))
+  }
+
+  @Test func theGuideIsBuiltInTheCoordinatesTheMapIsDrawnIn() {
+    // AR14 re-anchors the whole layout when an insert pushes the main display,
+    // so the insertion's own arrangement can be a translation away from the
+    // baseline the canvas froze its transform on. A guide taken from there
+    // would be drawn that far off the seam it names.
+    let leftward = ArrangementFixtures.arrangement([
+      (1, rect(0, 0, 1_000, 1_000)),
+      (2, rect(-1_000, 0, 1_000, 1_000)),
+      (3, rect(5_000, 0, 800, 1_000)),
+    ])
+    let insertion = ArrangementInsertPolicy.insertion(
+      dragging: 3,
+      freeRect: rect(-400, 0, 800, 1_000),
+      snappedRect: rect(-400, 0, 800, 1_000),
+      into: leftward
+    )
+
+    let guide = ArrangementInsertPolicy.guide(
+      for: insertion!.seam, rendered: rect(-400, 0, 800, 1_000), in: leftward
+    )
+    // The seam is at 0 in the baseline. In the re-anchored arrangement the same
+    // seam sits at -800, so a guide drawn from there would be a whole display
+    // to the left of the edge the user is aiming at.
+    #expect(guide?.position == 0)
+    #expect(insertion!.arrangement.tile(2)!.rect.maxX == -800)
   }
 
   @Test func insertingLeftOfTheMainDisplayLeavesItMain() {
@@ -138,8 +171,15 @@ struct ArrangementInsertPolicyTests {
     #expect(insertion?.push == 600)
     #expect(origin(insertion!.arrangement, 3) == DisplayPoint(x: 0, y: 1_000))
     #expect(origin(insertion!.arrangement, 2) == DisplayPoint(x: 0, y: 1_600))
-    // X before Y still holds when the seam itself is the Y line.
-    #expect(insertion?.lines.last?.axis == .y)
+
+    // A horizontal seam gives a horizontal guide, spanning the two displays it
+    // separates rather than the axis it constrains.
+    let guide = ArrangementInsertPolicy.guide(
+      for: insertion!.seam, rendered: rect(0, 700, 1_000, 600), in: column
+    )
+    #expect(guide?.axis == .y)
+    #expect(guide?.position == 1_000)
+    #expect(guide?.otherDisplayID == 1)
   }
 
   @Test func touchingTheSeamIsNotCoveringIt() {

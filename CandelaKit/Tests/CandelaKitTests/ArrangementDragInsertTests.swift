@@ -37,36 +37,61 @@ struct ArrangementDragInsertTests {
     proposal?.arrangement.tile(id)?.rect.origin
   }
 
-  @Test func draggingTheEndOfARowOntoTheFirstSeamInsertsItThere() {
+  @Test func draggingTheEndOfARowOntoTheFirstSeamLandsAsAnInsert() {
     // 150 canvas points left is 1_500 display points, which puts display 3 at
     // x = 500: squarely across the seam at 1_000, and nowhere near a snap.
     let proposal = ArrangementDragPolicy.propose(
       dragging: 3, by: CanvasPoint(x: -150, y: 0), from: row, transform: tenToOne
     )
 
-    #expect(origin(proposal, 3) == DisplayPoint(x: 1_000, y: 0))
-    // The display nobody grabbed, moved out of the way. This is the whole
-    // feature: AR4 already required the plan to carry every origin, and now it
-    // carries one that changed.
-    #expect(origin(proposal, 2) == DisplayPoint(x: 2_000, y: 0))
-    #expect(origin(proposal, 1) == DisplayPoint(x: 0, y: 0))
+    // Rendered under the pointer, straddling both its neighbours, and reported
+    // as the illegal position it is.
+    #expect(origin(proposal, 3) == DisplayPoint(x: 500, y: 0))
+    #expect(proposal?.problems == [.overlap(1, 3), .overlap(2, 3)])
+    #expect(proposal?.isValid == false)
 
-    #expect(proposal?.isValid == true)
+    // The insert is what the release applies.
+    let landed = proposal?.landing?.arrangement
+    #expect(landed?.tile(3)?.rect.origin == DisplayPoint(x: 1_000, y: 0))
+    #expect(landed?.tile(2)?.rect.origin == DisplayPoint(x: 2_000, y: 0))
+    #expect(landed?.tile(1)?.rect.origin == DisplayPoint(x: 0, y: 0))
+    #expect(proposal?.commitment == landed)
     #expect(proposal?.isCommittable == true)
-    #expect(proposal?.commitment == proposal?.arrangement)
-    // An insert IS the rendered layout, so there is nothing to land on later.
-    #expect(proposal?.landing == nil)
+    #expect(ArrangementRules.problems(in: landed!).isEmpty)
 
-    let xLine = proposal?.lines.first { $0.axis == .x }
-    #expect(xLine?.position == 1_000)
-    #expect(xLine?.kind == .abut)
-    #expect(xLine?.otherDisplayID == 1)
+    let guide = proposal?.landing?.lines.first
+    #expect(guide?.axis == .x)
+    #expect(guide?.position == 1_000)
+    #expect(guide?.kind == .abut)
+    #expect(guide?.otherDisplayID == 1)
 
     // Positive control: without the push this is the drop AR7 refuses. Moving
-    // display 3 alone to the same origin buries it in display 2.
+    // display 3 alone to the seam buries it in display 2.
     #expect(ArrangementRules.problems(
       in: row.moving(3, to: DisplayPoint(x: 1_000, y: 0))
     ) == [.overlap(2, 3)])
+  }
+
+  @Test func nothingButTheDraggedDisplayMovesBeforeTheRelease() {
+    // The rule the feature is now built around: a drag rearranges nothing.
+    // Displays the user is not holding keep their origins until the drop,
+    // whichever gesture the drag turns out to be.
+    let insert = ArrangementDragPolicy.propose(
+      dragging: 3, by: CanvasPoint(x: -150, y: 0), from: row, transform: tenToOne
+    )
+    #expect(origin(insert, 1) == DisplayPoint(x: 0, y: 0))
+    #expect(origin(insert, 2) == DisplayPoint(x: 1_000, y: 0))
+
+    // Positive control: the layout it lands on DOES move display 2, so the
+    // assertions above are about the rendered layout and not about an insert
+    // that quietly stopped working.
+    #expect(insert?.landing?.arrangement.tile(2)?.rect.origin == DisplayPoint(x: 2_000, y: 0))
+
+    // And the same for a drop into open space.
+    let landing = ArrangementDragPolicy.propose(
+      dragging: 2, by: CanvasPoint(x: 100, y: -300), from: pair, transform: tenToOne
+    )
+    #expect(landing?.arrangement.tile(1)?.rect.origin == DisplayPoint(x: 0, y: 0))
   }
 
   @Test func aDropInOpenSpaceRendersUnderThePointerAndCarriesItsLanding() {
@@ -86,9 +111,9 @@ struct ArrangementDragInsertTests {
     // And the landing says where the release puts it: against the top edge,
     // because the drop was further up than it was across.
     #expect(proposal?.landing?.arrangement.tile(2)?.rect.origin == DisplayPoint(x: 0, y: -1_000))
-    #expect(proposal?.landing?.line.axis == .y)
-    #expect(proposal?.landing?.line.position == 0)
-    #expect(proposal?.landing?.line.otherDisplayID == 1)
+    #expect(proposal?.landing?.lines.first?.axis == .y)
+    #expect(proposal?.landing?.lines.first?.position == 0)
+    #expect(proposal?.landing?.lines.first?.otherDisplayID == 1)
 
     #expect(proposal?.isCommittable == true)
     #expect(proposal?.commitment == proposal?.landing?.arrangement)
@@ -131,15 +156,13 @@ struct ArrangementDragInsertTests {
     #expect(proposal?.isCommittable == false)
   }
 
-  @Test func insertingIsDecidedBeforeAnythingElseAndSuppressesTheLanding() {
-    // The same drag as the insert test, checked from the other direction: the
-    // proposal that comes back is the inserted layout and not an overlap
-    // carrying a landing, so nothing downstream has to know which path ran.
+  @Test func anInsertIsPreferredToTheAttachFallback() {
+    // The insert is tried first, so a drag that covers a seam lands on the
+    // inserted layout rather than being attached somewhere by the fallback.
     let proposal = ArrangementDragPolicy.propose(
       dragging: 3, by: CanvasPoint(x: -150, y: 0), from: row, transform: tenToOne
     )
-    #expect(proposal?.problems.isEmpty == true)
-    #expect(proposal?.landing == nil)
+    #expect(proposal?.landing?.arrangement.tile(2)?.rect.origin == DisplayPoint(x: 2_000, y: 0))
 
     // Positive control: take the same display off the seam entirely and the
     // insert stops applying. 400 canvas points down puts display 3 well below
@@ -149,6 +172,8 @@ struct ArrangementDragInsertTests {
     )
     #expect(origin(offSeam, 3) == DisplayPoint(x: 2_000, y: 4_000))
     #expect(offSeam?.problems == [.disconnected(3)])
+    // Attached, not inserted: no other display moves in this landing either.
     #expect(offSeam?.landing?.arrangement.tile(3)?.rect.origin == DisplayPoint(x: 1_000, y: 1_000))
+    #expect(offSeam?.landing?.arrangement.tile(2)?.rect.origin == DisplayPoint(x: 1_000, y: 0))
   }
 }

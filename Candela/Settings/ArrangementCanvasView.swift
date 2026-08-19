@@ -125,14 +125,19 @@ struct ArrangementCanvasView: View {
   /// drawn is always the edge the release commits to.
   private var guideLines: [SnapLine] {
     guard let drag else { return [] }
-    return drag.proposal.lines + (drag.proposal.landing.map { [$0.line] } ?? [])
+    return drag.proposal.lines + (drag.proposal.landing?.lines ?? [])
   }
 
   /// Every display NAMED in a problem, not just the dragged one (§3.5): moving
   /// the middle display of a row strands the far one, and the user has to see
   /// which displays they broke rather than only which one they are holding.
+  ///
+  /// A drop with a landing reddens nothing. The position under the pointer is
+  /// not legal and the proposal says so, but the release is going to succeed:
+  /// the guide names where the display goes. Red is reserved for the drop that
+  /// really will spring back, or it stops meaning anything.
   private var invalidIDs: Set<CGDirectDisplayID> {
-    guard let drag, !drag.proposal.isValid else { return [] }
+    guard let drag, !drag.proposal.isValid, drag.proposal.landing == nil else { return [] }
     return Set(drag.proposal.problems.flatMap { problem -> [CGDirectDisplayID] in
       switch problem {
       case let .overlap(lhs, rhs): [lhs, rhs]
