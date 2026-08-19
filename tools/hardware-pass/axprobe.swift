@@ -28,11 +28,13 @@
 // Built-in control, same as `axlabel.swift`: the window's own close/zoom
 // buttons and the scroll bar's buttons carry no AXDescription and print
 // (absent) for it, which is the measured half. For AXIdentifier the control
-// element is any of this app's SwiftUI static texts: prose carries no
-// identifier and must print (absent) there. If either prints something else,
-// the reader is wrong and every other line is worthless. What the window
-// buttons themselves print for AXIdentifier is unmeasured; the pass records it
-// at Task 10 rather than assuming it.
+// element is any of this app's SwiftUI static texts: prose is given no
+// identifier, so it must print (absent) or (empty), either of which counts as
+// identifier-absent here. SwiftUI may legitimately publish an empty identifier,
+// and the reader tells those two answers apart on purpose. Anything else on
+// either attribute means the reader is wrong and every other line is
+// worthless. What the window buttons themselves print for AXIdentifier is
+// unmeasured; the pass records it at Task 10 rather than assuming it.
 import AppKit
 import ApplicationServices
 import Foundation

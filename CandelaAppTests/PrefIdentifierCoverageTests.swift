@@ -19,9 +19,11 @@ struct PrefIdentifierCoverageTests {
   ]
 
   /// Cases whose only controls are ACTION buttons in `VirtualDisplaysPane`.
-  /// Add, Create, Apply and Remove each write both names at once, in one
-  /// batch, so neither name has a control of its own to sit on; the buttons
-  /// carry `action.slotAdd.<slot>` / `action.slotApply.<slot>` /
+  /// Neither name is ever written by a control of its own: both come out of an
+  /// action button's batch. Add writes `defined` and `configured` together,
+  /// Remove clears both together, and Create/Apply write `configured` alone
+  /// (plus `virtualSlotUUID` on the first configure). The buttons carry
+  /// `action.slotAdd.<slot>` / `action.slotApply.<slot>` /
   /// `action.slotRemove.<slot>`, which name the act rather than one of its
   /// writes. Separate from `noControl` because the reason is different: these
   /// are reachable, just not by pref name.

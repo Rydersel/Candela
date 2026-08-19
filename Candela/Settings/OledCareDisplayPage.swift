@@ -615,7 +615,11 @@ struct OledCareDisplayPage: View {
   /// written in here: one helper serves the idle level and the unfocused level,
   /// and a hardcoded name would put the idle identifier on both sliders. The
   /// parameter is labelled `prefIdentifier` so each call site names its pref on
-  /// a line the coverage scan can see.
+  /// a line the coverage scan can see. That label is also the hole in that
+  /// guard, and this sentence is the tripwire: the scan sees these two cases
+  /// ONLY through the argument label, so deleting the `.prefIdentifier` call
+  /// inside this helper while keeping the parameter leaves both sliders bare
+  /// with the coverage test still green.
   private func levelRow(
     label: LocalizedStringKey,
     caption: LocalizedStringKey,
