@@ -15,6 +15,7 @@ import SwiftUI
 /// `ArrangementSnapper`, every validity question through `ArrangementRules`, and
 /// the whole drag decision through `ArrangementDragPolicy` — the app target owns
 /// the gesture plumbing and nothing else.
+
 @MainActor
 struct ArrangementCanvasView: View {
   /// The live layout, owned by `ArrangementCoordinator` and read from
@@ -79,7 +80,13 @@ struct ArrangementCanvasView: View {
   /// `Form`'s own insets, leaves a little under 500 pt. A canvas wider than that
   /// is clipped by the form row at any window size the user is allowed to reach,
   /// and a map that loses its right-hand display is worse than a smaller map.
-  static let canvasSize = CanvasSize(width: 480, height: 290)
+  ///
+  /// 250 rather than 290: the map is fitted to the arrangement's bounds, and a
+  /// wide, short layout left dead bands above and below it. A shorter box also
+  /// raises the fitted scale, so the tiles themselves come out larger. Height
+  /// is the axis to be careful with, because a portrait display makes the
+  /// arrangement tall: check this against the Dell at 270 degrees.
+  static let canvasSize = CanvasSize(width: 480, height: 250)
   private static let spaceName = "candela.arrangement.canvas"
   private static let margin: Double = 14
 
@@ -177,9 +184,12 @@ struct ArrangementCanvasView: View {
 
   var body: some View {
     ZStack(alignment: .topLeading) {
-      RoundedRectangle(cornerRadius: 10)
-        .fill(.quinary)
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
+      // No fill and no border. The map is drawn ON the pane's field, which
+      // spans the whole row; a card here as well nests one bordered container
+      // inside another and is what made the map read as an island floating off
+      // the section's leading edge. `contentShape` below still gives the
+      // background its tap target.
+      Color.clear
 
       ForEach(displayed.tiles) { tile in
         tileView(tile)
@@ -261,7 +271,7 @@ struct ArrangementCanvasView: View {
     .onKeyPress(.upArrow) { nudge(tile.id, .up) }
     .onKeyPress(.downArrow) { nudge(tile.id, .down) }
     .contextMenu {
-      Button("Use as Main Display") { onPropose(displayed.makingMain(tile.id)) }
+      Button("Use as Main Display") { propose(displayed.makingMain(tile.id)) }
         .disabled(displayed.mainDisplayID == tile.id)
     }
     .accessibilityElement(children: .ignore)
@@ -276,17 +286,26 @@ struct ArrangementCanvasView: View {
     // rotor — AR9's whole argument is that setting the main display must not
     // depend on a pointer gesture.
     .accessibilityAction(named: Text("Use as Main Display")) {
-      onPropose(displayed.makingMain(tile.id))
+      propose(displayed.makingMain(tile.id))
     }
     .position(x: rect.midX, y: rect.midY)
     // No implicit animation while dragging: the tile must track the pointer,
     // not lag behind it on a spring.
     //
     // Keyed on the whole rect rather than on midX and midY separately, because
-    // the transform is refitted to the new layout's bounds whenever a drop
-    // changes them, and that resizes every tile. With only the centres keyed,
-    // tiles slid to their new positions while snapping to their new sizes in
-    // the same frame. `CanvasRect` is `Equatable`, so this is one comparison.
+    // a drop that changes the layout's bounds refits the transform and so
+    // resizes every tile. With only the centres keyed the tiles slid to their
+    // new positions while snapping to their new sizes in the same frame.
+    //
+    // A keyed `.animation` here is MEASURED to work despite this canvas living
+    // in a grouped `Form` [2026-08-18, `scratchpad/animharness`]: an
+    // `Animatable` probe counted 168 interpolated frames for this shape in a
+    // `Form` section, the same as for the control outside one. The skill's
+    // "a keyed animation in a Form animates nothing" is about a CONDITIONAL ROW
+    // arriving and leaving, which is a transition; a persistent child moving is
+    // not the same question, and the two must not be conflated. Replacing this
+    // with a bare ambient transaction was tried and reverted: it animates too,
+    // and buys nothing this does not already do.
     .animation(isDragging ? nil : motion, value: rect)
     .zIndex(isDragging ? 2 : (selection == tile.id ? 1 : 0))
   }
@@ -405,6 +424,9 @@ struct ArrangementCanvasView: View {
             settling = commitment
             drag = nil
           }
+          // `propose` is not used here: the drop has to clear the drag in the
+          // SAME transaction that sets the settle, or the map renders a frame of
+          // the pre-drop layout between the two writes.
         } else {
           if !finished.proposal.isValid { onRefuse(finished.proposal.problems) }
           // On refusal the tile animates home from wherever it was, which is the
@@ -435,8 +457,20 @@ struct ArrangementCanvasView: View {
     guard let moved = ArrangementDockPolicy.move(id, direction, in: displayed) else {
       return .ignored
     }
-    onPropose(moved)
+    propose(moved)
     return .handled
+  }
+
+  /// Every route that asks for a new layout, so they all animate into it and all
+  /// hold it while the apply is outstanding.
+  ///
+  /// A drop used to be the only one that did. An arrow-key nudge and "Use as
+  /// Main Display" went straight to `onPropose`, which left the map showing the
+  /// PRE-change layout until the coordinator caught up, then stepping to the new
+  /// one: the same defect the drop had, on the routes a keyboard-only user has.
+  private func propose(_ next: DisplayArrangement) {
+    onPropose(next)
+    withAnimation(motion) { settling = next }
   }
 
   // MARK: - Snap guides

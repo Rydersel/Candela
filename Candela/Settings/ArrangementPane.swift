@@ -157,7 +157,21 @@ struct ArrangementPane: View {
     let panels = Self.panels(standingBehind: model.synthesis.pairings)
     return Section {
       VStack(alignment: .leading, spacing: 8) {
-        ArrangementCanvasView(
+        // The map's FIELD spans the whole row, so its leading edge is the
+        // section's leading edge and everything below it lines up with the map
+        // rather than starting 99 pt to its left. The canvas itself keeps a
+        // fixed size (AR2, and the screenshot checks) and is centred inside the
+        // field.
+        VStack(alignment: .leading, spacing: 12) {
+          // Says the map is draggable at all. The button's caption used to
+          // carry this, but only while nothing was selected, so the one
+          // instruction that explains the whole control disappeared as soon as
+          // anyone used it.
+          SettingsCaption(
+            "Drag a display to move it. Displays have to touch along an edge and cannot overlap."
+          )
+
+          ArrangementCanvasView(
           arrangement: coordinator.arrangement,
           name: displayName,
           isVirtual: { virtualIDs.contains($0) },
@@ -182,8 +196,13 @@ struct ArrangementPane: View {
             }
             refusalToken &+= 1
           }
-        )
-        .frame(maxWidth: .infinity, alignment: .center)
+          )
+          .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.quinary))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
 
         if coordinator.arrangement.tiles.count < 2 {
           // No button at all, rather than a permanently dead one: with one
@@ -253,11 +272,14 @@ struct ArrangementPane: View {
   private var mainDisplayCaption: SettingsCaption {
     guard let id = reconciledSelection.wrappedValue else {
       // It said "click one to make it the main display", which is not what a
-      // click does — a click selects, and the button is the thing that moves the
+      // click does: a click selects, and the button is the thing that moves the
       // menu bar. Copy that promises the button's effect to a click is half of
       // why a selected-looking tile beside a dead button reads as broken.
+      //
+      // The dragging half of this sentence now lives in the field above, where
+      // it stays visible once something is selected.
       return SettingsCaption(
-        "Drag a display to move it, or click one to select it. Tab to a display and press Space to select it, then use the arrow keys to move it. Displays have to touch along an edge and cannot overlap."
+        "Select a display to move the menu bar to it. Click one, or tab to it and press Space."
       )
     }
     if id == coordinator.arrangement.mainDisplayID {
@@ -268,8 +290,17 @@ struct ArrangementPane: View {
     if coordinator.isApplying {
       return SettingsCaption("Waiting for the last change to finish.")
     }
+    // Named, not "this display". The button acts on the selection, and the
+    // selection is a blue fill a long way up the section; the row has to say
+    // which display it means in words.
+    let name = displayName(id)
+    guard !name.isEmpty else {
+      return SettingsCaption(
+        "Moves the menu bar and the Dock to the selected display. You will be asked to keep or undo the change."
+      )
+    }
     return SettingsCaption(
-      "Moves the menu bar and the Dock to this display. You will be asked to keep or undo the change."
+      verbatim: "Moves the menu bar and the Dock to \(name). You will be asked to keep or undo the change."
     )
   }
 
