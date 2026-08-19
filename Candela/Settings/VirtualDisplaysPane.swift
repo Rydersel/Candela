@@ -160,6 +160,7 @@ struct VirtualDisplaysPane: View {
     }
     .buttonStyle(.plain)
     .accessibilityLabel(Text("Add a virtual display"))
+    .accessibilityIdentifier("action.slotAdd.\(slot)")
   }
 
   /// The tile's one-line status, shared by the picture and VoiceOver so the
@@ -226,6 +227,7 @@ struct VirtualDisplaysPane: View {
         Toggle("Come Back at Launch", isOn: binding(slot: slot,
                                                     name: .virtualSlotRecreateAtLaunch,
                                                     keyPath: \.recreateAtLaunch))
+          .prefIdentifier(.virtualSlotRecreateAtLaunch, slot: slot)
       }
       actionRow(slot: slot, definition: definition, live: live)
     }
@@ -328,6 +330,7 @@ struct VirtualDisplaysPane: View {
           fieldLabel: Text("Display \(slot) name"),
           width: 220
         )
+        .prefIdentifier(.virtualSlotName, slot: slot)
       }
     }
   }
@@ -345,6 +348,13 @@ struct VirtualDisplaysPane: View {
     ("3840 x 2160 (4K)", 3840, 2160),
   ]
 
+  /// Identifier placement for the size, decided against this pane as built: the
+  /// preset picker and the two number fields are ALL on screen at once (the
+  /// fields are never unmounted, for the reason above), so the pair of
+  /// `virtualSlotWidth.<slot>` / `virtualSlotHeight.<slot>` identifiers goes on
+  /// the fields, which are what stores an arbitrary size, and the picker
+  /// carries none: two elements answering to one identifier would make an
+  /// accessibility walk pick whichever it met first.
   @ViewBuilder
   private func sizeRows(slot: Int, definition: VirtualSlotDefinition) -> some View {
     let presetIndex = Self.presets.firstIndex {
@@ -376,14 +386,17 @@ struct VirtualDisplaysPane: View {
         Spacer()
         numberField(slot: slot, label: "Width", name: .virtualSlotWidth,
                     get: { $0.width }, set: { $0.width = $1 })
+          .prefIdentifier(.virtualSlotWidth, slot: slot)
         Text("x").foregroundStyle(.secondary)
         numberField(slot: slot, label: "Height", name: .virtualSlotHeight,
                     get: { $0.height }, set: { $0.height = $1 })
+          .prefIdentifier(.virtualSlotHeight, slot: slot)
       }
     }
     SettingRow("Text renders at double resolution when the display is next created.") {
       Toggle("Retina (HiDPI)", isOn: binding(slot: slot,
                                              name: .virtualSlotHiDPI, keyPath: \.hiDPI))
+        .prefIdentifier(.virtualSlotHiDPI, slot: slot)
     }
   }
 
@@ -417,14 +430,19 @@ struct VirtualDisplaysPane: View {
         // A tile with no running display: either its create failed (the
         // status row says why) or the last session ended without
         // come-back-at-launch. Create tries again; Remove drops the tile.
+        // Create and Apply are the same write through the same path and are
+        // never on screen together, so they share one identifier.
         Button("Create Display") { setConfigured(true, slot: slot) }
+          .accessibilityIdentifier("action.slotApply.\(slot)")
       } else if drifted {
         // VD1/VD17: the apply path is destroy-and-recreate under the same
         // slot, and the button says what will happen rather than doing it
         // on the field edit.
         Button("Apply and Recreate") { setConfigured(true, slot: slot) }
+          .accessibilityIdentifier("action.slotApply.\(slot)")
       }
       Button("Remove Display") { remove(slot: slot) }
+        .accessibilityIdentifier("action.slotRemove.\(slot)")
     }
     .disabled(busy)
   }

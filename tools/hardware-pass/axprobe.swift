@@ -17,15 +17,22 @@
 // `dump` prints role, AXTitle, AXDescription, AXIdentifier and AXValue for
 // every element, so a LabeledContent readout is the line after its label and
 // `grep -A2` reaches it. AXIdentifier is the stable handle a pref-writing
-// control carries (composed from its PrefName), so a filter argument matches
-// an identifier as readily as a label. `press` refuses on zero matches and on
-// more than one, listing what it saw: a selector that matches nothing reports
-// every control missing, which reads exactly like a real defect in the app.
+// control carries (composed from its PrefName). `dump`'s filter tests the
+// whole printed line, so under `dump` an identifier matches as readily as a
+// label; `press` does NOT match identifiers, only the label attributes, the
+// adopted caption and AXValue, so its selector is a label. `press` refuses on
+// zero matches and on more than one, listing what it saw: a selector that
+// matches nothing reports every control missing, which reads exactly like a
+// real defect in the app.
 //
 // Built-in control, same as `axlabel.swift`: the window's own close/zoom
-// buttons and the scroll bar's buttons carry neither AXDescription nor
-// AXIdentifier and print (absent) for both. If they do not, the reader is
-// wrong and every other line is worthless.
+// buttons and the scroll bar's buttons carry no AXDescription and print
+// (absent) for it, which is the measured half. For AXIdentifier the control
+// element is any of this app's SwiftUI static texts: prose carries no
+// identifier and must print (absent) there. If either prints something else,
+// the reader is wrong and every other line is worthless. What the window
+// buttons themselves print for AXIdentifier is unmeasured; the pass records it
+// at Task 10 rather than assuming it.
 import AppKit
 import ApplicationServices
 import Foundation
