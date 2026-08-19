@@ -49,6 +49,7 @@ usage: candela-probe [--display <id>] <subcommand>
   watch [seconds=10]                      100 ms native-brightness delta log
   topology                                online displays: kind, identity, virtual verdict, DDC pool
   vd create <slot 1-3> <w> <h> [--hidpi] [--hold <s>]  create a virtual display, hold, destroy
+  vd online <id>                          is that display in THIS process's online list
 """
 
 /// The DDC subcommands need a DDC-capable external display. The private-API
@@ -131,6 +132,31 @@ func applyGammaScale(_ scale: Float, to displayID: CGDirectDisplayID) -> Bool {
   return CGSetDisplayTransferByTable(displayID, sampleCount, scaledRed, scaledGreen, scaledBlue) == .success
 }
 
+/// Whether `id` is in THIS process's online list. Correct only in a process
+/// whose snapshot postdates the event being asked about.
+func CandelaVDIsOnlineFresh(_ id: CGDirectDisplayID) -> Bool {
+  var count: UInt32 = 0
+  guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return false }
+  var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+  guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return false }
+  return ids.prefix(Int(count)).contains(id)
+}
+
+/// Re-executes this binary to get an online answer from a snapshot taken after
+/// the destroy. Returns false when the child cannot be run or does not answer,
+/// so an unusable check never manufactures a departure it did not witness.
+func freshProcessSaysDeparted(_ id: CGDirectDisplayID) -> Bool {
+  let child = Process()
+  child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+  child.arguments = ["vd", "online", String(id)]
+  let pipe = Pipe()
+  child.standardOutput = pipe
+  do { try child.run() } catch { return false }
+  let data = pipe.fileHandleForReading.readDataToEndOfFile()
+  child.waitUntilExit()
+  return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) == "0"
+}
+
 switch arguments.first {
 case nil:
   // Usage prints on ANY machine, with no hardware precondition: someone with
@@ -179,6 +205,13 @@ case "vd":
   func profileCount() -> Int {
     (try? FileManager.default.contentsOfDirectory(atPath: profilesDir).count) ?? -1
   }
+  // `vd online <id>` exists to be re-executed: a fresh process is the only
+  // authority this tool has about whether a display is still there, because its
+  // own CoreGraphics snapshot freezes after a destroy (see CandelaVDDestroy).
+  if arguments.count >= 3, arguments[1] == "online", let id = UInt32(arguments[2]) {
+    print(CandelaVDIsOnlineFresh(id) ? "1" : "0")
+    exit(0)
+  }
   guard arguments.count >= 2, arguments[1] == "create" else {
     print(usage)
     exit(2)
@@ -216,7 +249,20 @@ case "vd":
     print("holding \(hold)s (kill -9 me now to test crash reclaim)")
     try? await Task.sleep(nanoseconds: UInt64(hold * 1_000_000_000))
     let departed = host.destroy(slot: slot, departureTimeout: 10)
-    print("destroyed=1 departed=\(departed ? 1 : 0)")
+    if departed {
+      print("destroyed=1 departed=1")
+    } else {
+      // Not a retry and not a second chance for the same check: the in-process
+      // answer is known to be unable to change, so this asks a process whose
+      // snapshot was taken after the destroy. Printing both keeps the verdict
+      // honest either way, rather than reporting a display still standing that
+      // has already gone.
+      let goneForFreshProcess = freshProcessSaysDeparted(handle.displayID)
+      print("destroyed=1 departed=\(goneForFreshProcess ? 1 : 0) in-process-wait=timed-out"
+        + (goneForFreshProcess
+           ? " (confirmed departed by a fresh process; this process cannot observe departures)"
+           : " (a fresh process also still sees it: the display really is standing)"))
+    }
   case let .failure(failure):
     print("create failed: \(failure)")
     exit(1)

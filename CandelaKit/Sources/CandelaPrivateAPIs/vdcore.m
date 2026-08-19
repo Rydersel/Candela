@@ -212,6 +212,23 @@ bool CandelaVDDestroy(void *token, uint32_t displayID, double departureTimeout) 
   @autoreleasepool {
     CFBridgingRelease(token);
   }
+  // KNOWN LIMIT of this poll, and it is the platform, not this code
+  // [MEASURED 2026-08-19]. In a process that is not a GUI app, CoreGraphics
+  // answers every display query from a snapshot that never refreshes after the
+  // token is released: online list, bounds, current mode, vendor, unit number
+  // and CGDisplayIsActive all kept reporting a 3440x1440 virtual display for a
+  // full 10 s wait while a second process watched the same display leave inside
+  // one second. Pumping cannot help, because there is nothing to pump: even
+  // after CGDisplayRegisterReconfigurationCallback returns success, the main run
+  // loop holds sources0 = null, sources1 = null, timers = null, so no
+  // reconfiguration is ever delivered and CFRunLoopRunInMode returns
+  // kCFRunLoopRunFinished on every iteration.
+  //
+  // A GUI process has AppKit's notification machinery and does not sit in this
+  // hole, which is why the app's own synthesis unwind is not known to suffer it.
+  // Callers that are NOT such a process must treat a false return as "not
+  // observed" rather than as "still present": `candela-probe vd` confirms it
+  // from a fresh process for exactly this reason.
   @autoreleasepool {
     double waited = 0;
     while (CandelaVDDisplayIsOnline(displayID) && waited < departureTimeout) {
