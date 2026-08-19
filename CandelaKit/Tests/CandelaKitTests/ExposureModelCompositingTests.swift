@@ -103,8 +103,11 @@ struct ExposureModelCompositingTests {
     }
   }
 
-  @Test("an occluded window contributes nothing under topmost-wins")
-  func occlusionHidesTheWindowBehind() {
+  /// Named for what it pins, which is narrower than "an occluded window
+  /// contributes nothing": that holds only where the front window FILLS the
+  /// cell. The partial case is the test below, and it does not hold there.
+  @Test("a window behind one that fills the cell contributes nothing")
+  func aFullCellFrontWindowHidesEverythingBehindIt() {
     let cellRect = CGRect(x: 0, y: 0, width: 100, height: 100)
     let front = window(1, "Front", cellRect)
     let behind = window(2, "Behind", cellRect)
@@ -122,6 +125,44 @@ struct ExposureModelCompositingTests {
     #expect(abs(grid[0] - 0.9) < 1e-12)
   }
 
+  /// The approximation, written down as a number rather than left implicit.
+  ///
+  /// Coverage is per cell, not per region, so the walk cannot tell "the two
+  /// windows sit on the same 0.6 of this cell" from "they sit on different
+  /// halves of it". It assumes they do not overlap until the cell fills, so a
+  /// window that is totally hidden still claims whatever fraction the front one
+  /// left and books its own luminance there.
+  ///
+  /// Under the single-prior model that only mis-sized the covered fraction and
+  /// cost nothing, since every claim carried the same luminance. With per-app
+  /// priors it mis-ATTRIBUTES: below, a window nobody can see moves the cell.
+  /// The true value under exact occlusion would be 0.82, which is what
+  /// `0.6 * 0.9` plus 0.4 of the uncovered fallback comes to.
+  @Test("a partly-overlapped window behind still claims what the front one left")
+  func aPartlyCoveringFrontWindowLeavesRoomForAHiddenOne() {
+    // 0.6 of cell 0: the grid is 24x10 on a 2400x1000 display, so a cell is
+    // 100x100 px and this covers 60 of its 100 columns.
+    let sixTenths = CGRect(x: 0, y: 0, width: 60, height: 100)
+    var params = ExposureModelParameters.baseline
+    params.compositing = .topmostWins
+    params.appPriors = ["Front": 0.9, "Behind": 0.05]
+
+    let grid = ExposureModel.modelledGrid(
+      inputs: ExposureModelInputs(
+        windows: [window(1, "Front", sixTenths), window(2, "Behind", sixTenths)],
+        wallpaperCells: nil, appearanceIsDark: false),
+      through: transform, parameters: params)
+
+    // 0.6 at 0.9, then 0.4 (all that is left) at the hidden window's 0.05.
+    #expect(abs(grid[0] - (0.6 * 0.9 + 0.4 * 0.05)) < 1e-12)
+    // And the fallback is gone: nothing of the cell reaches the wallpaper term,
+    // even though 0.4 of it is genuinely uncovered.
+    #expect(abs(grid[0] - ExposureModel.lightAppearancePrior) > 0.1)
+  }
+
+  /// Asserts the VALUES, not merely that the two answers differ: a fully
+  /// reversed walk also makes them differ, so a difference is no evidence of
+  /// the convention. Front-to-back means index 0 is nearest the viewer.
   @Test("window order decides the answer, so the log may never be re-sorted")
   func orderIsLoadBearingUnderTopmostWins() {
     let cellRect = CGRect(x: 0, y: 0, width: 100, height: 100)
@@ -132,14 +173,15 @@ struct ExposureModelCompositingTests {
     params.compositing = .topmostWins
     params.appPriors = ["A": 0.9, "B": 0.05]
 
-    let front = ExposureModel.modelledGrid(
-      inputs: ExposureModelInputs(windows: [a, b], wallpaperCells: nil, appearanceIsDark: false),
-      through: transform, parameters: params)
-    let reversed = ExposureModel.modelledGrid(
-      inputs: ExposureModelInputs(windows: [b, a], wallpaperCells: nil, appearanceIsDark: false),
-      through: transform, parameters: params)
+    func value(_ windows: [WindowSnapshot]) -> Double {
+      ExposureModel.modelledGrid(
+        inputs: ExposureModelInputs(
+          windows: windows, wallpaperCells: nil, appearanceIsDark: false),
+        through: transform, parameters: params)[0]
+    }
 
-    #expect(front[0] != reversed[0])
+    #expect(abs(value([a, b]) - 0.9) < 1e-12)
+    #expect(abs(value([b, a]) - 0.05) < 1e-12)
   }
 
   @Test("the clamped sum cannot express a per-window prior, which is the finding")
@@ -180,8 +222,22 @@ struct ExposureModelCompositingTests {
     #expect(abs(value(owner: "Other", layer: 0) - ExposureModel.lightAppearancePrior) < 1e-12)
   }
 
-  @Test("heavy overlap keeps every cell in range and never over-claims")
-  func remainingFractionStaysSane() {
+  /// The remaining-fraction invariant, which is the thing the walk can get
+  /// wrong: claimed plus remaining is exactly one in every cell.
+  ///
+  /// Neither `accumulated` nor `remaining` is observable from here, so they are
+  /// read out through the luminances instead. Run the same 40 windows twice:
+  /// once with every window at 1 over a black wallpaper, where the answer IS
+  /// the claimed fraction, and once with every window at 0 over a white one,
+  /// where it is the remaining fraction. Their sum has to be 1.
+  ///
+  /// This replaces an assertion that could not fail. "Every value lies in 0 to
+  /// 1" holds by construction whenever the priors and the wallpaper do, clamp
+  /// or no clamp, because the result is then a convex combination of them: a
+  /// reviewer's 20 mutations, including one that over-claims and one that
+  /// accumulates five times too much, were caught by none of it.
+  @Test("claimed and remaining sum to exactly one in every cell")
+  func theRemainingFractionIsConserved() {
     var windows: [WindowSnapshot] = []
     for index in 0..<40 {
       windows.append(
@@ -189,17 +245,96 @@ struct ExposureModelCompositingTests {
           UInt32(index), "App\(index % 5)",
           CGRect(x: Double(index) * 37, y: Double(index) * 11, width: 900, height: 600)))
     }
+    let owners = Set(windows.map(\.ownerName))
+
+    func grid(windowLuminance: Double, wallpaper: Double) -> [Double] {
+      var params = ExposureModelParameters.baseline
+      params.compositing = .topmostWins
+      params.appPriors = Dictionary(uniqueKeysWithValues: owners.map { ($0, windowLuminance) })
+      return ExposureModel.modelledGrid(
+        inputs: ExposureModelInputs(
+          windows: windows,
+          wallpaperCells: [Double](repeating: wallpaper, count: PanelGrid.cellCount),
+          appearanceIsDark: false),
+        through: transform, parameters: params)
+    }
+
+    let claimed = grid(windowLuminance: 1, wallpaper: 0)
+    let remaining = grid(windowLuminance: 0, wallpaper: 1)
+    #expect(claimed.count == PanelGrid.cellCount)
+    for cell in 0..<PanelGrid.cellCount {
+      #expect(
+        abs(claimed[cell] + remaining[cell] - 1) < 1e-12,
+        "cell \(cell) claimed \(claimed[cell]) and left \(remaining[cell])")
+    }
+
+    // Control: the fixture has to contain partly claimed cells. In a fully
+    // claimed or fully clear one the sum is 1 whatever the walk does, and an
+    // over-claim would clamp back to 1 unnoticed.
+    #expect(claimed.contains { $0 > 1e-9 && $0 < 1 - 1e-9 })
+  }
+
+  /// `modelledGrid` promises `0...1` whichever branch runs. Only the
+  /// topmost-wins branch enforced it, which was safe while the parameters were
+  /// private to the fit and clamped there; the type is public and every field
+  /// is settable, so an out-of-range prior is reachable from outside and the
+  /// summed branch would have passed it straight through.
+  @Test("an out-of-range prior cannot push a cell outside 0 to 1, in either branch")
+  func theOutputStaysInRangeUnderAnOutOfRangePrior() {
+    let cellRect = CGRect(x: 0, y: 0, width: 100, height: 100)
+    for compositing in [ExposureModelParameters.Compositing.summedCoverage, .topmostWins] {
+      for prior in [1.5, -0.5] {
+        var params = ExposureModelParameters.baseline
+        params.compositing = compositing
+        params.lightAppearancePrior = prior
+        // Covered and uncovered both, since the prior serves as the covered
+        // luminance and as the missing wallpaper's stand-in.
+        for windows in [[window(1, "A", cellRect)], []] {
+          let grid = ExposureModel.modelledGrid(
+            inputs: ExposureModelInputs(
+              windows: windows, wallpaperCells: nil, appearanceIsDark: false),
+            through: transform, parameters: params)
+          for value in grid {
+            #expect(value >= 0 && value <= 1, "\(compositing) at prior \(prior) read \(value)")
+          }
+        }
+      }
+    }
+  }
+
+  /// The two appearance priors are the only free parameters ladder rung V3
+  /// varies, and nothing read them from the parameters: swapping both lookups
+  /// for `ExposureModel`'s shipped constants passed every test in both suites,
+  /// because no test ever set them to anything else. A fit could then report a
+  /// refitted prior it never applied.
+  ///
+  /// The values are deliberately unlike the shipped 0.7 and 0.12, and ordered
+  /// the other way round, so a light-for-dark mix-up fails too.
+  @Test("the appearance priors are read from the parameters, not from the constants")
+  func appearancePriorsComeFromTheParameters() {
+    let cellRect = CGRect(x: 0, y: 0, width: 100, height: 100)
     var params = ExposureModelParameters.baseline
-    params.compositing = .topmostWins
-    params.appPriors = ["App0": 1.0, "App1": 0.0, "App2": 0.5, "App3": 0.75, "App4": 0.25]
+    params.lightAppearancePrior = 0.31
+    params.darkAppearancePrior = 0.83
 
-    let grid = ExposureModel.modelledGrid(
-      inputs: ExposureModelInputs(
-        windows: windows, wallpaperCells: nil, appearanceIsDark: false),
-      through: transform, parameters: params)
+    for compositing in [ExposureModelParameters.Compositing.summedCoverage, .topmostWins] {
+      params.compositing = compositing
+      func grid(windows: [WindowSnapshot], dark: Bool) -> [Double] {
+        ExposureModel.modelledGrid(
+          inputs: ExposureModelInputs(
+            windows: windows, wallpaperCells: nil, appearanceIsDark: dark),
+          through: transform, parameters: params)
+      }
+      let covered = [window(1, "Unpriored", cellRect)]
 
-    #expect(grid.count == PanelGrid.cellCount)
-    for value in grid { #expect(value >= 0 && value <= 1) }
+      // The covered path: a window with no prior of its own falls through to
+      // the appearance prior.
+      #expect(abs(grid(windows: covered, dark: false)[0] - 0.31) < 1e-12, "\(compositing)")
+      #expect(abs(grid(windows: covered, dark: true)[0] - 0.83) < 1e-12, "\(compositing)")
+      // And the uncovered path, where a missing wallpaper falls back to it too.
+      #expect(abs(grid(windows: [], dark: false)[0] - 0.31) < 1e-12, "\(compositing)")
+      #expect(abs(grid(windows: [], dark: true)[0] - 0.83) < 1e-12, "\(compositing)")
+    }
   }
 }
 
@@ -267,6 +402,76 @@ struct ChromeCoverageAdmissionTests {
     #expect(with != without)
     // Cell 0 is inside the strip, so it takes the layer's own luminance.
     #expect(abs(with[0] - 1.0) < 1e-12)
+  }
+
+  /// Admission is an admission rule, not a topmost-wins feature, and both
+  /// branches run it. Nothing said so: disabling chrome under
+  /// `.summedCoverage` passed every test in this file, because every chrome
+  /// test above chose `.topmostWins`.
+  @Test("chrome is admitted under summed coverage too, not only under topmost-wins")
+  func chromeIsAdmittedUnderSummedCoverageAsWell() {
+    let strip = window(
+      "Window Server", CGRect(x: 0, y: 0, width: 2400, height: 100), layer: menuBar)
+    // The summed branch carries no per-window luminance, so admission can only
+    // show as coverage displacing the wallpaper. A wallpaper equal to the
+    // appearance prior would hide it and the test could not fail.
+    let paper = [Double](repeating: 0.0, count: PanelGrid.cellCount)
+
+    func value(chromeLimit: Double?) -> [Double] {
+      var params = ExposureModelParameters.baseline
+      params.compositing = .summedCoverage
+      params.chromeCoverageLimit = chromeLimit
+      return ExposureModel.modelledGrid(
+        inputs: ExposureModelInputs(
+          windows: [strip], wallpaperCells: paper, appearanceIsDark: false),
+        through: transform, parameters: params)
+    }
+
+    // Cell 0 is inside the strip; cell 24 is the row below it and must not move
+    // either way, which is the control that the strip is the cause.
+    #expect(value(chromeLimit: nil)[0] == 0.0)
+    #expect(abs(value(chromeLimit: 0.5)[0] - ExposureModel.lightAppearancePrior) < 1e-12)
+    #expect(value(chromeLimit: nil)[PanelGrid.cols] == 0.0)
+    #expect(value(chromeLimit: 0.5)[PanelGrid.cols] == 0.0)
+  }
+
+  /// A limit above 1 is meaningless and dangerous: a full-display backdrop
+  /// covers exactly 1 and nothing covers more, so any greater value admits the
+  /// blanket that would delete the wallpaper term on every display. Read as
+  /// `min(1, limit)` where it is used, because the field is public and settable
+  /// and a check in `init` would only cover the callers that never assign.
+  @Test("a limit above 1 still refuses a full-display backdrop")
+  func anOutOfRangeLimitCannotAdmitABackdrop() {
+    let dockLayer = -2_147_483_624
+    let backdrop = window("Dock", CGRect(x: 0, y: 0, width: 2400, height: 1000), layer: dockLayer)
+    let half = window("Dock", CGRect(x: 0, y: 0, width: 1200, height: 1000), layer: dockLayer)
+    let paper = [Double](repeating: 0.42, count: PanelGrid.cellCount)
+
+    func value(_ windows: [WindowSnapshot], _ compositing: ExposureModelParameters.Compositing,
+      _ limit: Double) -> [Double] {
+      var params = ExposureModelParameters.baseline
+      params.compositing = compositing
+      params.layerPriors = [dockLayer: 1.0]
+      params.chromeCoverageLimit = limit
+      return ExposureModel.modelledGrid(
+        inputs: ExposureModelInputs(
+          windows: windows, wallpaperCells: paper, appearanceIsDark: false),
+        through: transform, parameters: params)
+    }
+
+    for compositing in [ExposureModelParameters.Compositing.summedCoverage, .topmostWins] {
+      for limit in [1.0, 1.5, 100.0] {
+        for cell in value([backdrop], compositing, limit) {
+          #expect(abs(cell - 0.42) < 1e-12, "\(compositing) at limit \(limit) read \(cell)")
+        }
+        // Control: the same out-of-range limit still admits chrome that is not
+        // a backdrop, so the assertion above is about the coverage bound and
+        // not about admission having been switched off.
+        #expect(
+          value([half], compositing, limit)[0] != 0.42,
+          "\(compositing) at limit \(limit) admitted nothing at all")
+      }
+    }
   }
 
   @Test("a full-display backdrop is refused, so the wallpaper term survives")

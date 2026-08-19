@@ -21,15 +21,28 @@ struct LuminanceReductionGeometryTests {
 
   // MARK: - The property that matters
 
-  /// Blank space SCK would pad into a request, in cells, on whichever axis it
-  /// falls. Zero when the request's aspect matches the display's.
+  /// Blank space SCK would pad into a request, **in grid cells**, on whichever
+  /// axis it falls. Zero when the request's aspect matches the display's.
   ///
   /// This is the model of SCK's behaviour that the fix is built on; it was
   /// measured on all three panels rather than assumed.
-  private func padding(displayWidth: Int, displayHeight: Int, request: (Int, Int)) -> Double {
+  ///
+  /// `pixelsPerCell` is what keeps the unit honest. The padding falls out of
+  /// this arithmetic in REQUEST PIXELS, and a request pixel stopped being a
+  /// cell the moment `captureOversample` arrived: reading the raw number as
+  /// cells demands the padding stay under a sixteenth of a cell, which is a
+  /// far stricter bound than the property this file is about. Swept over
+  /// realistic display sizes, 93,266 of 960,625 of them clear the real bound
+  /// while failing that one. The superseded rule passes 1 because its request
+  /// IS the grid.
+  private func padding(
+    displayWidth: Int, displayHeight: Int, request: (Int, Int), pixelsPerCell: Int
+  ) -> Double {
     let (w, h) = request
     let scale = min(Double(w) / Double(displayWidth), Double(h) / Double(displayHeight))
-    return max(Double(w) - Double(displayWidth) * scale, Double(h) - Double(displayHeight) * scale)
+    let pixels = max(
+      Double(w) - Double(displayWidth) * scale, Double(h) - Double(displayHeight) * scale)
+    return pixels / Double(pixelsPerCell)
   }
 
   /// The rule this replaced: long edge to `PanelGrid.cols`, short to
@@ -62,28 +75,73 @@ struct LuminanceReductionGeometryTests {
       let request = LuminanceReduction.requestedSize(
         displayWidth: display.width, displayHeight: display.height)
       let pad = padding(
-        displayWidth: display.width, displayHeight: display.height, request: request)
+        displayWidth: display.width, displayHeight: display.height, request: request,
+        pixelsPerCell: LuminanceReduction.captureOversample)
       // Under a cell means the pad lands inside one row or column that still
       // carries real content, never as a fully black one.
       #expect(pad < 1.0, "\(display.name) padded by \(pad) cells with request \(request)")
     }
   }
 
+  /// The fixture list above is eleven shapes and all eleven pass by a wide
+  /// margin, so on its own it would not notice a rule that only fails on a
+  /// display nobody owns yet: one virtual display, or an ultra-tall portrait,
+  /// and the property is decided by a case no test covers.
+  ///
+  /// Aspects are bounded at 16:1 deliberately, and it is not a fudge. The
+  /// padding is the short edge's rounding error scaled back up by the aspect,
+  /// so it approaches `aspect / (2 * captureOversample)` cells, which crosses a
+  /// whole cell only past 32:1. That is a display 32 times wider than it is
+  /// tall; the widest thing in the setup is 3.56:1. Recording the real bound
+  /// here beats pretending the property is unconditional.
+  ///
+  /// 60,337 shapes, worst case 0.469 of a cell at 512x8032.
+  @Test("A swept range of display shapes is padded by well under a cell")
+  func noRealisticDisplayShapeIsPaddedByAWholeCell() {
+    var worst = 0.0
+    var worstShape = (0, 0)
+    var swept = 0
+    for width in stride(from: 320, through: 8192, by: 32) {
+      for height in stride(from: 320, through: 8192, by: 32) {
+        let aspect = Double(width) / Double(height)
+        guard aspect <= 16, aspect >= 1.0 / 16 else { continue }
+        swept += 1
+        let pad = padding(
+          displayWidth: width, displayHeight: height,
+          request: LuminanceReduction.requestedSize(displayWidth: width, displayHeight: height),
+          pixelsPerCell: LuminanceReduction.captureOversample)
+        if pad > worst {
+          worst = pad
+          worstShape = (width, height)
+        }
+      }
+    }
+    // Two controls on the sweep itself, because a sweep that covers nothing
+    // and a sweep whose metric is stuck at zero both pass silently.
+    #expect(swept > 50_000, "the sweep has to be non-trivial, got \(swept) shapes")
+    #expect(worst > 0, "the sweep has to reach shapes that pad at all, worst was \(worst)")
+    #expect(worst < 1.0, "\(worstShape.0)x\(worstShape.1) padded by \(worst) cells")
+  }
+
   @Test("Positive control: the superseded rule pads whole cells on real panels")
   func theSupersededRuleFailsTheSameProperty() {
+    // One request pixel per cell, which is exactly what the superseded rule
+    // asked for and what made the raw number readable as cells.
     let dell = supersededRequest(displayWidth: 1440, displayHeight: 2560)
-    let dellPad = padding(displayWidth: 1440, displayHeight: 2560, request: dell)
+    let dellPad = padding(
+      displayWidth: 1440, displayHeight: 2560, request: dell, pixelsPerCell: 1)
     #expect(dell == (10, 24))
     #expect(dellPad >= 6, "expected the measured 6 blank rows, got \(dellPad)")
 
     let builtIn = supersededRequest(displayWidth: 1800, displayHeight: 1169)
-    let builtInPad = padding(displayWidth: 1800, displayHeight: 1169, request: builtIn)
+    let builtInPad = padding(
+      displayWidth: 1800, displayHeight: 1169, request: builtIn, pixelsPerCell: 1)
     #expect(builtIn == (24, 10))
     #expect(builtInPad >= 8, "expected the measured 8 blank columns, got \(builtInPad)")
 
     // And the one panel that escaped, which is why this went unnoticed.
     let mag = supersededRequest(displayWidth: 3440, displayHeight: 1440)
-    #expect(padding(displayWidth: 3440, displayHeight: 1440, request: mag) < 1.0)
+    #expect(padding(displayWidth: 3440, displayHeight: 1440, request: mag, pixelsPerCell: 1) < 1.0)
   }
 
   // MARK: - The measured requests
@@ -99,25 +157,50 @@ struct LuminanceReductionGeometryTests {
     #expect(LuminanceReduction.requestedSize(displayWidth: 1800, displayHeight: 1169) == (384, 249))
   }
 
-  @Test("The long edge is the grid's long edge oversampled, on every panel")
-  func theLongEdgeIsTheOversampledGridEdge() {
-    let expected = max(PanelGrid.cols, PanelGrid.rows) * LuminanceReduction.captureOversample
+  /// 384 is written out rather than recomputed from `PanelGrid.cols` times
+  /// `captureOversample`. Recomputing it restates the implementation, and a
+  /// test that restates the implementation agrees with any implementation.
+  /// What is worth pinning here is which AXIS receives it, which a transposed
+  /// rule gets wrong on the portrait shapes and nowhere else.
+  @Test("The display's own long axis gets the 384-pixel edge, never the other one")
+  func theLongEdgeLandsOnTheDisplaysLongAxis() {
     for display in Self.displays {
       let (w, h) = LuminanceReduction.requestedSize(
         displayWidth: display.width, displayHeight: display.height)
-      #expect(max(w, h) == expected, "\(display.name) requested \(w)x\(h)")
+      if display.width >= display.height {
+        #expect(w == 384 && h <= w, "\(display.name) requested \(w)x\(h)")
+      } else {
+        #expect(h == 384 && w <= h, "\(display.name) requested \(w)x\(h)")
+      }
     }
   }
 
-  @Test("The request carries strictly more pixels than the grid it reduces to")
-  func theRequestOversamplesTheGrid() {
-    // The point of the oversample: the reduction to `PanelGrid` must be ours,
-    // area-weighted through `panelNativeGrid`, not ScreenCaptureKit's.
+  /// `LuminanceReduction.captureOversample` makes a resource and privacy claim:
+  /// the frame never approaches full resolution, and the worst case is the
+  /// square fallback rather than any panel. Nothing asserted it, so raising the
+  /// factor would have moved the documented bound without failing anything.
+  @Test("No request exceeds the square fallback, which is the documented ceiling")
+  func theRequestStaysUnderItsDocumentedPixelCeiling() {
+    let ceiling = 384 * 384
+    #expect(LuminanceReduction.requestedSize(displayWidth: 0, displayHeight: 0) == (384, 384))
     for display in Self.displays {
       let (w, h) = LuminanceReduction.requestedSize(
         displayWidth: display.width, displayHeight: display.height)
+      #expect(w * h <= ceiling, "\(display.name) requested \(w)x\(h) = \(w * h) pixels")
+      // Still strictly more than the grid it reduces to, or the reduction is
+      // ScreenCaptureKit's rather than ours.
       #expect(w * h > PanelGrid.cellCount, "\(display.name) requested \(w)x\(h)")
     }
+    // The counts the file's own privacy paragraph quotes, so the numbers are
+    // pinned and not only the bound they sit under. The MAG is the largest
+    // panel in the setup and asks for the fewest pixels of the three.
+    func pixels(_ w: Int, _ h: Int) -> Int {
+      let (rw, rh) = LuminanceReduction.requestedSize(displayWidth: w, displayHeight: h)
+      return rw * rh
+    }
+    #expect(pixels(3440, 1440) == 61_824)
+    #expect(pixels(1440, 2560) == 82_944)
+    #expect(pixels(1800, 1169) == 95_616)
   }
 
   // MARK: - Degenerate inputs
@@ -136,6 +219,84 @@ struct LuminanceReductionGeometryTests {
       let (rw, rh) = LuminanceReduction.requestedSize(displayWidth: w, displayHeight: h)
       #expect(rw >= 1 && rh >= 1, "\(w)x\(h) requested \(rw)x\(rh)")
     }
+  }
+
+  // MARK: - What the oversample is for
+
+  /// A full-height white stripe on black, as an image of the given size.
+  ///
+  /// A pixel is white when its CENTRE falls inside `stripe`, expressed in
+  /// normalized display coordinates. That is point sampling on purpose: it is
+  /// what ScreenCaptureKit was measured doing at the grid size, and building
+  /// the fixture arithmetically keeps it exact at any size instead of leaving
+  /// it to CoreGraphics interpolation.
+  private func stripeImage(cols: Int, rows: Int, stripe: Range<Double>) -> CGImage {
+    let space = CGColorSpace(name: CGColorSpace.sRGB)!
+    let context = CGContext(
+      data: nil, width: cols, height: rows, bitsPerComponent: 8, bytesPerRow: 0,
+      space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+    let base = context.data!.assumingMemoryBound(to: UInt8.self)
+    for x in 0..<cols where stripe.contains((Double(x) + 0.5) / Double(cols)) {
+      for y in 0..<rows {
+        let offset = y * context.bytesPerRow + x * 4
+        base[offset] = 255
+        base[offset + 1] = 255
+        base[offset + 2] = 255
+      }
+    }
+    return context.makeImage()!
+  }
+
+  /// Reduce a stripe through the shipped pair, `meanLuminance` then
+  /// `panelNativeGrid`, at whatever request size it was drawn for.
+  private func reducedStripe(cols: Int, rows: Int, stripe: Range<Double>) -> [Double] {
+    let image = stripeImage(cols: cols, rows: rows, stripe: stripe)
+    let luminance = LuminanceReduction.meanLuminance(of: image, cols: cols, rows: rows)!
+    let transform = PanelSpaceTransform(
+      displaySize: CGSize(width: 3440, height: 1440), rotation: .standard)
+    return transform.panelNativeGrid(fromDisplayGrid: luminance, cols: cols, rows: rows)
+  }
+
+  /// The property the oversample exists to obtain, and the one this file never
+  /// pinned: a feature narrower than a cell must reduce to a PARTIAL value, not
+  /// to all or nothing. Everything else here would pass at an oversample of 2.
+  ///
+  /// The MAG's request is 384x161, so a panel cell is exactly 16 request
+  /// columns wide and a 6-column stripe is 0.375 of one. Both stripes below are
+  /// 6 columns and both sit wholly inside panel cell 5 (request columns 80 up
+  /// to 96), so both must read 0.375 wherever they are placed within it. Their
+  /// placement is the whole point of the positive control.
+  @Test("A stripe narrower than a cell reduces to its area fraction")
+  func aSubCellStripeReducesToItsAreaFraction() {
+    let (cols, rows) = LuminanceReduction.requestedSize(displayWidth: 3440, displayHeight: 1440)
+    #expect((cols, rows) == (384, 161))
+
+    for start in [85, 80] {
+      let stripe = Double(start) / 384.0..<Double(start + 6) / 384.0
+      let grid = reducedStripe(cols: cols, rows: rows, stripe: stripe)
+      for row in 0..<PanelGrid.rows {
+        let value = grid[row * PanelGrid.cols + 5]
+        #expect(abs(value - 0.375) < 1e-9, "stripe at \(start) read \(value) in row \(row)")
+        // The neighbours stay dark, or the stripe leaked and 0.375 could be an
+        // average of the wrong thing.
+        #expect(grid[row * PanelGrid.cols + 4] == 0)
+        #expect(grid[row * PanelGrid.cols + 6] == 0)
+      }
+    }
+  }
+
+  /// Positive control for the test above, and the reason `captureOversample`
+  /// is not 1. Requesting the grid size directly leaves one sample per cell, so
+  /// a sub-cell stripe can only land on that sample or miss it: the same two
+  /// stripes, both truly 0.375 of cell 5, read 1.0 and 0.0.
+  @Test("Positive control: at the grid size the same stripe reads all or nothing")
+  func theUnOversampledRequestCannotExpressAFraction() {
+    let readings = [85, 80].map { start -> Double in
+      let stripe = Double(start) / 384.0..<Double(start + 6) / 384.0
+      return reducedStripe(cols: PanelGrid.cols, rows: PanelGrid.rows, stripe: stripe)[5]
+    }
+    #expect(abs(readings[0] - 1.0) < 1e-9, "expected the sample to be inside the stripe")
+    #expect(readings[1] == 0, "expected the sample to miss the stripe")
   }
 
   // MARK: - The consequence downstream

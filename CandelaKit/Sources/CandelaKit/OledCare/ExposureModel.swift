@@ -61,8 +61,10 @@ public struct ExposureModelParameters: Equatable, Sendable {
   /// a bad model look alike; only held-out validation makes it mean anything.
   public var appPriors: [String: Double]
   public var compositing: Compositing
-  /// Admit system chrome (the Dock, the menu bar) that `includedLayers`
-  /// excludes, when it covers less than this fraction of the panel.
+  /// Admit system chrome (the Dock, the menu bar) from BELOW `includedLayers`,
+  /// and only from below, when it covers less than this fraction of the panel.
+  /// The range's other exclusion, the transient layers above it, stays excluded
+  /// at every limit: see `ExposureModel.includedLayers`.
   ///
   /// **Nil is the shipped behaviour and the default.** The layer range excludes
   /// everything below zero because the desktop backdrop fills the screen, and
@@ -70,6 +72,12 @@ public struct ExposureModelParameters: Equatable, Sendable {
   /// reasoning is about AREA, not about layer, so a coverage bound expresses the
   /// intent directly while still admitting the menu-bar strips the measured
   /// capture contains and the model has never seen.
+  ///
+  /// **A value above 1 would defeat that**, since a full-display backdrop
+  /// covers exactly 1 and no window can cover more, so this is read as
+  /// `min(1, limit)` where it is used. Validated at the point of use rather
+  /// than here: the field is public and settable, so a check in `init` only
+  /// covers the callers that never assign to it.
   ///
   /// Exists so a candidate model can be expressed HERE rather than only in the
   /// offline harness: a rung the shipped type cannot represent is a rung whose
@@ -96,8 +104,17 @@ public struct ExposureModelParameters: Equatable, Sendable {
 
   /// App prior, then layer prior, then the appearance prior. Most specific
   /// evidence about a window wins.
+  ///
+  /// Public, and taking the owner and layer rather than a `WindowSnapshot`, so
+  /// the offline fit harness in its own target can call it instead of spelling
+  /// the chain out again: it works from windows already reduced to coverage, and
+  /// a second copy of this is kept honest only by a runtime control.
+  public func luminance(forOwner owner: String, layer: Int, appearancePrior: Double) -> Double {
+    appPriors[owner] ?? layerPriors[layer] ?? appearancePrior
+  }
+
   func luminance(for window: WindowSnapshot, appearancePrior: Double) -> Double {
-    appPriors[window.ownerName] ?? layerPriors[window.layer] ?? appearancePrior
+    luminance(forOwner: window.ownerName, layer: window.layer, appearancePrior: appearancePrior)
   }
 }
 
@@ -175,11 +192,13 @@ public enum ExposureModel {
 
     /// Coverage for an admitted window, or nil when the window is excluded.
     ///
-    /// Chrome is admitted by COVERAGE, never by layer: chrome windows in a
-    /// window list belong to every display, so an area test against this
-    /// display admits another panel's full-screen backdrop. Coverage is
-    /// display-local by construction, so a foreign window is exactly 0 and a
-    /// full-display backdrop is exactly 1, and both are refused.
+    /// Chrome is admitted by COVERAGE, never by AREA. The layer decides
+    /// whether a window is eligible at all; coverage decides whether an
+    /// eligible one gets in. Chrome windows in a window list belong to every
+    /// display, so an area test against this display admits another panel's
+    /// full-screen backdrop. Coverage is display-local by construction, so a
+    /// foreign window is exactly 0 and a full-display backdrop is exactly 1,
+    /// and both are refused.
     func admitted(_ window: WindowSnapshot) -> [Double]? {
       let contribution = transform.coverage(ofDisplayRect: window.bounds)
       guard contribution.count == PanelGrid.cellCount else { return nil }
@@ -194,7 +213,11 @@ public enum ExposureModel {
         let limit = parameters.chromeCoverageLimit
       else { return nil }
       let fraction = contribution.reduce(0, +) / Double(PanelGrid.cellCount)
-      guard fraction > 0, fraction < limit else { return nil }
+      // Capped at 1: a full-display backdrop covers exactly that, so any
+      // greater limit admits the blanket the paragraph above says cannot
+      // happen. The field is public and settable, so trusting it is not an
+      // option.
+      guard fraction > 0, fraction < min(1, limit) else { return nil }
       return contribution
     }
 
@@ -211,7 +234,12 @@ public enum ExposureModel {
       var grid = [Double](repeating: 0, count: PanelGrid.cellCount)
       for cell in grid.indices {
         let covered = min(1, max(0, coverage[cell]))
-        grid[cell] = covered * prior + (1 - covered) * (backdrop?[cell] ?? prior)
+        let value = covered * prior + (1 - covered) * (backdrop?[cell] ?? prior)
+        // Clamped for the same reason the other branch is: the priors are
+        // public and settable, and this function's doc promises `0...1`
+        // whichever branch runs. Identity at every in-range prior, so the
+        // baseline stays bit-identical.
+        grid[cell] = min(1, max(0, value))
       }
       return grid
 
