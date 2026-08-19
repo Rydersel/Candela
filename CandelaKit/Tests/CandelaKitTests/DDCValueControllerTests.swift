@@ -1018,4 +1018,55 @@ struct DDCValueControllerTests {
     #expect(after.count == before + 1, "the write went out rather than being skipped")
     #expect(after.last?.value == 30)
   }
+
+  // MARK: - reassertHardware (the settings reset's door)
+
+  /// The post-reset shape: a wiped store, so the controller republishes the
+  /// assumed default and `restoreToHardware` would refuse to send it (no saved
+  /// value) while `setValue(0.75)` would return before the submit (unchanged).
+  @Test func reassertSendsTheAssumedContrastDefaultOverAnEmptyStore() async {
+    let h = Harness(command: .contrast) // no savedValue: the domain was wiped
+    #expect(h.controller.value == 0.75)
+
+    h.controller.reassertHardware()
+
+    let writes = await h.drainedWrites()
+    #expect(writes.count == 1)
+    #expect(writes.last?.value == 75)
+  }
+
+  @Test func reassertSendsTheAssumedVolumeDefaultOverAnEmptyStore() async {
+    let h = Harness(command: .volume)
+    #expect(h.controller.value == 0.125)
+
+    h.controller.reassertHardware()
+
+    let writes = await h.drainedWrites()
+    #expect(writes.count == 1)
+    // Non-zero is the load-bearing half: a volume the reset drove to 0 would
+    // hardware-mute the display, which is the strand D29 rule 4 forbids.
+    #expect((writes.last?.value ?? 0) > 0)
+  }
+
+  /// D29 rule 1, in the register the reset carries across its own wipe: a
+  /// display whose unmute could not be confirmed is put back muted, and this
+  /// door must not then write a level over the silence.
+  @Test func reassertNeverDrivesAMutedDisplaysVolume() async {
+    let h = Harness(command: .volume) { prefs in prefs.muted = true }
+    #expect(h.controller.isMuted)
+
+    h.controller.reassertHardware()
+
+    #expect(await h.drainedWrites().isEmpty)
+  }
+
+  /// The one choke point every other door guards on: a display the user has
+  /// taken off the DDC wire gets no traffic from the reset either.
+  @Test func reassertRespectsTheUnavailableGate() async {
+    let h = Harness(command: .contrast) { prefs in prefs.forceSoftware = true }
+
+    h.controller.reassertHardware()
+
+    #expect(await h.drainedWrites().isEmpty)
+  }
 }

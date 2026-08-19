@@ -324,6 +324,28 @@ public final class DDCValueController: PendingWireDraining {
     }
   }
 
+  /// Asserts the PUBLISHED value onto the wire with no store gate: the sibling
+  /// of `BrightnessController.reassertHardware`, and it exists for the same one
+  /// caller. A settings reset republishes this command's assumed default (the
+  /// fork's volume 12.5% / contrast 75%) over a wiped store, and neither
+  /// existing door can send it. `restoreToHardware` returns early when the
+  /// store holds no saved value, which after a domain wipe is every display,
+  /// and `setValue` returns before the submit because the value it would set is
+  /// the value already published. Without a door that skips both gates the
+  /// slider comes back claiming a number the panel never took.
+  ///
+  /// Refuses to drive a MUTED display's volume register. A reset that could not
+  /// confirm an unmute carries the mute across the wipe on purpose (D29 rule 1,
+  /// and the reset's own `keepMuteStateFor`), so a value write here would either
+  /// contradict that decision or, under the default strategy where silence IS
+  /// the register at 0, leave a display that is supposed to be silent holding a
+  /// level nobody chose.
+  public func reassertHardware() {
+    guard isAvailable else { return }
+    guard !(command == .volume && isMuted) else { return }
+    submitValue(value)
+  }
+
   /// Redoes the restore when the display's answer about 0x8D arrives AFTER the
   /// restore that had to assume one, which at launch it always does.
   ///
