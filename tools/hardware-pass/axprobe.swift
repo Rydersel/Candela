@@ -14,15 +14,18 @@
 //   swift axprobe.swift dump [filter]   every element, tree order, one per line
 //   swift axprobe.swift press <label>   press the ONE element matching <label>
 //
-// `dump` prints role, AXTitle, AXDescription and AXValue for every element, so
-// a LabeledContent readout is the line after its label and `grep -A2` reaches
-// it. `press` refuses on zero matches and on more than one, listing what it
-// saw: a selector that matches nothing reports every control missing, which
-// reads exactly like a real defect in the app.
+// `dump` prints role, AXTitle, AXDescription, AXIdentifier and AXValue for
+// every element, so a LabeledContent readout is the line after its label and
+// `grep -A2` reaches it. AXIdentifier is the stable handle a pref-writing
+// control carries (composed from its PrefName), so a filter argument matches
+// an identifier as readily as a label. `press` refuses on zero matches and on
+// more than one, listing what it saw: a selector that matches nothing reports
+// every control missing, which reads exactly like a real defect in the app.
 //
 // Built-in control, same as `axlabel.swift`: the window's own close/zoom
-// buttons carry no AXDescription and print (absent). If they do not, the reader
-// is wrong and every other line is worthless.
+// buttons and the scroll bar's buttons carry neither AXDescription nor
+// AXIdentifier and print (absent) for both. If they do not, the reader is
+// wrong and every other line is worthless.
 import AppKit
 import ApplicationServices
 import Foundation
@@ -138,6 +141,12 @@ func walk(_ element: AXUIElement, depth: Int) {
   let role = string(element, kAXRoleAttribute as String)
   let title = string(element, kAXTitleAttribute as String)
   let description = string(element, kAXDescriptionAttribute as String)
+  // Read directly by name, like the two label attributes above and for the
+  // same reason: enumerating attribute names omits attributes that have a
+  // value, so only a direct read separates a control with no identifier from
+  // one whose identifier is the empty string. `string` prints (absent) and
+  // (empty) as distinct answers, which is the whole point.
+  let identifier = string(element, kAXIdentifierAttribute as String)
   let value = string(element, kAXValueAttribute as String)
   if role == "AXStaticText", !value.hasPrefix("("), !value.isEmpty {
     pendingCaption = value
@@ -150,7 +159,8 @@ func walk(_ element: AXUIElement, depth: Int) {
     pendingCaption = ""
   }
   var line = "\(String(repeating: " ", count: depth))\(role)"
-    + " AXTitle=[\(title)] AXDescription=[\(description)] AXValue=[\(value)]"
+    + " AXTitle=[\(title)] AXDescription=[\(description)]"
+    + " AXIdentifier=[\(identifier)] AXValue=[\(value)]"
   if !adopted.isEmpty { line += " (label: \(adopted))" }
   switch verb {
   case "dump":

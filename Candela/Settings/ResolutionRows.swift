@@ -357,6 +357,7 @@ struct RememberResolutionRow: View {
             actions.prefDidChange(.rememberDisplayMode, persistenceKey: persistenceKey)
           }
         ))
+        .prefIdentifier(.rememberDisplayMode, persistenceKey: persistenceKey)
         switch Self.pinnedRow(
           isRemembering: coordinator.isRemembering(displayID),
           stored: coordinator.storedDescriptor(for: displayID)

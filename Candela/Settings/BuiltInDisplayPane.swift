@@ -59,6 +59,7 @@ struct BuiltInDisplayPane: View {
             get: { !prefs.isDisabled },
             set: { enabled in writer.write(.isDisabled) { $0.isDisabled = !enabled } }
           ))
+          .prefIdentifier(.isDisabled, persistenceKey: "builtIn")
         }
       }
 

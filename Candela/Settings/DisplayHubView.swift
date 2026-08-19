@@ -155,6 +155,7 @@ struct DisplayHubView: View {
               guard !nameFocused else { return } // never fight a live edit
               nameDraft = prefs.friendlyName
             }
+            .prefIdentifier(.friendlyName, persistenceKey: persistenceKey)
           // Only while there is a name to clear: the escape route from a custom
           // name is otherwise select-all-and-delete, which nothing on the page
           // suggests. A sibling of the field rather than a branch around it, so
@@ -199,6 +200,7 @@ struct DisplayHubView: View {
         get: { !prefs.hideDisplay },
         set: { shown in writer.write(.hideDisplay) { $0.hideDisplay = !shown } }
       ))
+      .prefIdentifier(.hideDisplay, persistenceKey: persistenceKey)
 
       // Kept adjacent to the row above — same question (spec §4). Whether a
       // slider that IS shown accepts input is the Sound section's picker.
@@ -206,11 +208,13 @@ struct DisplayHubView: View {
         get: { !prefs.hideVolumeSlider },
         set: { shown in writer.write(.hideVolumeSlider) { $0.hideVolumeSlider = !shown } }
       ))
+      .prefIdentifier(.hideVolumeSlider, persistenceKey: persistenceKey)
 
       Toggle("Use brightness and volume keys for this display", isOn: Binding(
         get: { !prefs.isDisabled },
         set: { enabled in writer.write(.isDisabled) { $0.isDisabled = !enabled } }
       ))
+      .prefIdentifier(.isDisabled, persistenceKey: persistenceKey)
     }
   }
 
@@ -314,6 +318,7 @@ struct DisplayHubView: View {
             writer.write(.sizeRecommendationDismissed) { $0.sizeRecommendationDismissed = true }
           }
           .accessibilityLabel(DisplayModeCopy.recommendationDismiss)
+          .prefIdentifier(.sizeRecommendationDismissed, persistenceKey: persistenceKey)
           Spacer()
         }
       }
@@ -349,6 +354,7 @@ struct DisplayHubView: View {
         // more. Courtesy, not the guard: the engine is non-reentrant and the
         // coordinator answers `.busy` regardless.
         .disabled(synthesis.isWorking)
+        .prefIdentifier(.offerSyntheticSizes, persistenceKey: persistenceKey)
       }
     }
   }
@@ -421,6 +427,7 @@ struct DisplayHubView: View {
         // rendered above this page and every sub-page, so it cannot be
         // scrolled out of existence by the state it recovers from.
         .disabled(!state.volume.isAvailable)
+        .prefIdentifier(.enableMuteUnmute, persistenceKey: persistenceKey)
       }
 
       SettingRow("\(AppInfo.productName) asks the display, and the volume and mute keys follow the same answer; the slider is greyed only when it says no.") {
@@ -444,6 +451,7 @@ struct DisplayHubView: View {
           Text("Always enabled").tag(AudioSinkOverride.forcePresent)
           Text("Always disabled").tag(AudioSinkOverride.forceNone)
         }
+        .prefIdentifier(.audioSinkOverride, persistenceKey: persistenceKey)
       }
 
       SettingRow("Used when the volume keys pick a display by audio output. Empty matches the display's name.") {
@@ -460,6 +468,7 @@ struct DisplayHubView: View {
                 audioNameDraft = prefs.audioDeviceNameOverride
               }
               .frame(width: 180)
+              .prefIdentifier(.audioDeviceNameOverride, persistenceKey: persistenceKey)
             Button("Use Current") {
               audioNameDraft = currentOutput?.name ?? ""
               commitAudioName()
@@ -519,6 +528,7 @@ struct DisplayHubView: View {
           get: { prefs.oledCareEnrolled },
           set: { on in writer.write(.oledCareEnrolled) { $0.oledCareEnrolled = on } }
         ))
+        .prefIdentifier(.oledCareEnrolled, persistenceKey: persistenceKey)
       }
       LabeledContent("Care status") {
         HStack(spacing: 8) {
@@ -660,6 +670,7 @@ struct DisplayHubView: View {
       // reset's own task.
       Button("Reset Display Settings…") { confirmingReset = true }
         .accessibilityLabel("Reset Display Settings…")
+        .accessibilityIdentifier("action.resetDisplay.\(persistenceKey)")
         .disabled(model.isResetting)
         .alert("Reset the settings for this display?", isPresented: $confirmingReset) {
           Button("Reset", role: .destructive) { resetDisplay() }
