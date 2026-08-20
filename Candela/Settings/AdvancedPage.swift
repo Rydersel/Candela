@@ -163,6 +163,7 @@ struct AdvancedPage: View {
         // control that recovers the state, disabled in the state it recovers
         // from, with no other route back inside the app.
         .disabled(trafficBlock == .macOSDrivesBrightness)
+        .prefIdentifier(.forceSw, persistenceKey: persistenceKey)
       }
 
       SettingRow("Use if another app keeps taking the color profile back, or on virtual displays.") {
@@ -178,6 +179,7 @@ struct AdvancedPage: View {
             writer.write(.avoidGamma) { $0.avoidGamma = overlay }
           }
         ))
+        .prefIdentifier(.avoidGamma, persistenceKey: persistenceKey)
       }
 
       // Candela's OWN volume/mute HUD pills, and volume only — brightness and
@@ -188,6 +190,7 @@ struct AdvancedPage: View {
           get: { !prefs.hideOsd },
           set: { shown in writer.write(.hideOsd) { $0.hideOsd = !shown } }
         ))
+        .prefIdentifier(.hideOsd, persistenceKey: persistenceKey)
       }
       // The caption's mirror hooks hang on the row above, the last row of this
       // section that is always present: hooks on the caption itself would only
@@ -258,6 +261,7 @@ struct AdvancedPage: View {
       // promoted control that stayed live under a traffic block would take a
       // write that reaches nothing (SO12).
       .disabled(isBlocked)
+      .prefIdentifier(.curveDDC, command: command, persistenceKey: persistenceKey)
 
       LabeledContent("\(DDCCommandCopy.title(command)) control code") {
         // An empty title + explicit prompt, the audio-name field's shape: a
@@ -280,6 +284,7 @@ struct AdvancedPage: View {
         // SO23's switcher can carry this page onto another display mid-edit.
         .id(persistenceKey)
         .disabled(isBlocked)
+        .prefIdentifier(.remapDDC, command: command, persistenceKey: persistenceKey)
       }
     }
   }
@@ -314,6 +319,7 @@ struct AdvancedPage: View {
             // SO13: the stored −8…+7 never renders, in the readout OR to
             // VoiceOver, which would otherwise announce the raw position.
             .accessibilityValue(Text(verbatim: crossoverDescription))
+            .prefIdentifier(.combinedSwitchingPoint, persistenceKey: persistenceKey)
             HStack {
               Text(verbatim: crossoverDescription)
                 .foregroundStyle(.secondary)
@@ -322,6 +328,7 @@ struct AdvancedPage: View {
                 writer.write(.combinedSwitchingPoint) { $0.combinedSwitchingPoint = 0 }
               }
               .accessibilityLabel("Reset")
+              .accessibilityIdentifier("action.resetCrossover.\(persistenceKey)")
               .disabled(prefs.combinedSwitchingPoint == 0 || isBlocked)
             }
           }
@@ -343,6 +350,7 @@ struct AdvancedPage: View {
             actions.prefDidChange(.disableCombinedBrightness)
           }
           .accessibilityLabel("Turn On Dim Past the Display's Minimum")
+          .prefIdentifier(.disableCombinedBrightness)
           .disabled(isBlocked)
         }
       }
@@ -409,6 +417,7 @@ struct AdvancedPage: View {
           }
           // Belt, per control — same reason as the VCP fields above.
           .disabled(isBlocked)
+          .prefIdentifier(.pollingMode, persistenceKey: persistenceKey)
         }
         // D11: safe mode suppresses the startup readback outright, so a retry
         // policy shown as live here would describe behavior that is not
@@ -426,6 +435,7 @@ struct AdvancedPage: View {
             Text(verbatim: "Attempts: \(prefs.pollingCount)")
           }
           .disabled(isBlocked)
+          .prefIdentifier(.pollingCount, persistenceKey: persistenceKey)
         }
       } else {
         // SO11 again — the same shape as Combined Dimming above.
@@ -436,6 +446,7 @@ struct AdvancedPage: View {
             actions.prefDidChange(.startupAction)
           }
           .accessibilityLabel("Ask the Display at Startup")
+          .prefIdentifier(.startupAction)
           .disabled(isBlocked)
         }
       }
@@ -476,6 +487,7 @@ struct AdvancedPage: View {
       // is the scoped way back out (D29 rule 3).
       Button("Restore Advanced Defaults…") { confirmingRestore = true }
         .accessibilityLabel("Restore Advanced Defaults…")
+        .accessibilityIdentifier("action.restoreAdvanced.\(persistenceKey)")
         .alert("Restore this display's advanced settings?", isPresented: $confirmingRestore) {
           Button("Restore", role: .destructive) { restoreAdvancedDefaults() }
           Button("Cancel", role: .cancel) {}

@@ -20,6 +20,24 @@ What each one exists for, and the measured fact behind it:
 | `synth-pass.sh` | The scripted legs of the #186 synthesized-sizes pass, one invocable leg at a time | It halts on divergence and restores nothing, so a halt leaves the evidence standing and the operator resumes at the leg they choose. Its run card is `RUN-CARD-186-synthesized-sizes.md` |
 
 
+## The invariant core is `candela-probe regress` now
+
+For the app-behaviour invariants these scripts were assembled into multi-leg
+passes to prove (the combined-dimming propagation, the crossover, the sync
+fan-out, the mute strand, the quiet wake, the panel's D24 pair),
+`candela-probe regress` supersedes the ad-hoc scripting: it carries the positive
+control for each one, splits its verdict three ways rather than two, and writes
+a machine-readable record the verification ledger reads. Run it against the
+deployed build rather than re-deriving one of those legs here.
+
+The scripts remain the instruments. `regress` posts every key by running
+`mediakey.swift` out of this folder (`--tools <dir>` when it cannot find it),
+and it aims the pointer and reads the gamma table in process, which is the same
+measurement `pointer.swift` and `gammaread.swift` make by hand. Everything
+outside the invariant core still starts here: a leg nobody has written a check
+for, a state a person has to see for themselves, and every pass where the
+question is not yet sharp enough to be an invariant.
+
 ## The guidance for these scripts lives in a skill
 
 Everything that used to be in this file below this point (the traps the scripts

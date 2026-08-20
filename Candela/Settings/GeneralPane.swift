@@ -178,6 +178,7 @@ struct GeneralPane: View {
             actions.prefDidChange(.disableCombinedBrightness)
           }
         ))
+        .prefIdentifier(.disableCombinedBrightness)
       }
 
       // Deliberately NOT disabled when combined dimming is off: `applySoftware`
@@ -197,6 +198,7 @@ struct GeneralPane: View {
             actions.prefDidChange(.allowZeroSwBrightness)
           }
         ))
+        .prefIdentifier(.allowZeroSwBrightness)
       }
     }
   }
@@ -213,6 +215,7 @@ struct GeneralPane: View {
             actions.prefDidChange(.enableBrightnessSync)
           }
         ))
+        .prefIdentifier(.enableBrightnessSync)
       }
     }
   }
@@ -233,6 +236,7 @@ struct GeneralPane: View {
           Text("Re-send the last saved values to the display").tag(StartupAction.write)
           Text("Ask the display for its current values").tag(StartupAction.read)
         }
+        .prefIdentifier(.startupAction)
       }
       // The picker deliberately shows the PERSISTED choice even in a safe-mode
       // session: this pane's `DisplayPrefs` is built without the safe-mode

@@ -138,12 +138,14 @@ struct CommandTuningGrid: View {
               // sit above. Fixed size makes the cell the switch.
               .fixedSize()
               .accessibilityLabel(Text("\(rowName(command)) enabled"))
+              .prefIdentifier(.unavailableDDC, command: command, persistenceKey: writer.persistenceKey)
             overrideField(.minimum(command))
             overrideField(.maximum(command))
             Toggle("", isOn: invertBinding(command))
               .labelsHidden()
               .fixedSize()
               .accessibilityLabel(Text("Invert \(rowName(command))"))
+              .prefIdentifier(.invertDDC, command: command, persistenceKey: writer.persistenceKey)
           }
         }
       }
@@ -194,6 +196,9 @@ struct CommandTuningGrid: View {
     // identity per display also lets a pending edit commit to the display it
     // was typed for, on the way out.
     .id(state.display.persistenceKey)
+    // The Target carries the field, so the name it composes cannot drift from
+    // the name `commit` writes: both branch on the same `target.field`.
+    .prefIdentifier(target.field == .minimum ? .minDDCOverride : .maxDDCOverride, command: target.command, persistenceKey: writer.persistenceKey)
   }
 
   private func accessibilityLabel(for target: Target) -> String {

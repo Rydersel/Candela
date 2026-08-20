@@ -30,15 +30,31 @@ public enum PlatformConformance {
     case pass(String)
     case fail(String)
     case skip(String)
+    /// HP7: the check ran but its positive control did not fire, so the
+    /// measurement means nothing either way. Neither a pass (nothing was
+    /// demonstrated) nor a fail (the platform was never actually observed
+    /// misbehaving); it counts against the exit code all the same.
+    case inconclusive(String)
+  }
+
+  /// Whether a check's positive control fired, on the checks that carry one.
+  /// A control that did not fire is what turns a result inconclusive.
+  public enum ControlOutcome: Sendable, Equatable {
+    case fired
+    case failed
   }
 
   public struct Check: Sendable, Equatable {
     public let name: String
     public let outcome: Outcome
+    /// Absent on checks with no positive control; the conformance run's checks
+    /// are all control-free, so this stays nil there.
+    public let control: ControlOutcome?
 
-    public init(name: String, outcome: Outcome) {
+    public init(name: String, outcome: Outcome, control: ControlOutcome? = nil) {
       self.name = name
       self.outcome = outcome
+      self.control = control
     }
   }
 
@@ -60,26 +76,38 @@ public enum PlatformConformance {
     public var passed: Int { checks.count { if case .pass = $0.outcome { true } else { false } } }
     public var failed: Int { checks.count { if case .fail = $0.outcome { true } else { false } } }
     public var skipped: Int { checks.count { if case .skip = $0.outcome { true } else { false } } }
+    public var inconclusive: Int {
+      checks.count { if case .inconclusive = $0.outcome { true } else { false } }
+    }
 
     /// Zero only when something failed is absent AND something passed is
     /// present. All-skips is non-zero: a run that demonstrated nothing must
-    /// not read as the platform conforming.
+    /// not read as the platform conforming. An inconclusive check is non-zero
+    /// too (HP7): a dead positive control makes the whole run unbelievable, so
+    /// it must not print green next to the checks that did measure something.
     public var exitCode: Int32 {
-      failed == 0 && passed > 0 ? 0 : 1
+      failed == 0 && inconclusive == 0 && passed > 0 ? 0 : 1
     }
 
-    public func lines() -> [String] {
+    /// `label` names the run in the summary sentences. It defaults to
+    /// "conform" so the committed conformance baseline stays byte-identical.
+    public func lines(label: String = "conform") -> [String] {
       var out = ["platform: \(platform)"]
       for check in checks {
         switch check.outcome {
         case let .pass(detail): out.append("PASS \(check.name.padding(toLength: 34, withPad: " ", startingAt: 0)) \(detail)")
         case let .fail(detail): out.append("FAIL \(check.name.padding(toLength: 34, withPad: " ", startingAt: 0)) \(detail)")
         case let .skip(reason): out.append("SKIP \(check.name.padding(toLength: 34, withPad: " ", startingAt: 0)) \(reason)")
+        case let .inconclusive(detail): out.append("INCONCLUSIVE \(check.name.padding(toLength: 34, withPad: " ", startingAt: 0)) \(detail)")
         }
       }
-      out.append("conform: \(passed) passed, \(failed) failed, \(skipped) skipped")
+      // The inconclusive count is appended only when it is non-zero, so a
+      // control-free run's summary line is the one the baseline pins.
+      var summary = "\(label): \(passed) passed, \(failed) failed, \(skipped) skipped"
+      if inconclusive > 0 { summary += ", \(inconclusive) inconclusive" }
+      out.append(summary)
       if passed == 0 {
-        out.append("conform: this run demonstrated nothing; that is a failure, not a pass")
+        out.append("\(label): this run demonstrated nothing; that is a failure, not a pass")
       }
       return out
     }
