@@ -302,7 +302,8 @@ enum Regress {
     //    inconclusive rather than fail.
     let target = keyDriveTarget(instruments: instruments, displays: displays)
     let keysCheck = keysInstrumentCheck(
-      instruments: instruments, target: target, logProven: logProven)
+      instruments: instruments, target: target, logProven: logProven,
+      targetingCaveat: keyTargetingGate(instruments))
     checks.append(keysCheck)
     let keysProven = isPass(keysCheck.outcome)
 
@@ -361,9 +362,16 @@ enum Regress {
     return (first, false)
   }
 
+  /// `targetingCaveat` is the key-targeting gate's reason when the pointer is
+  /// not what a brightness key follows. This check is NOT gated on it, and
+  /// deliberately: in the every-display mode the writes really are the posted
+  /// keys', which is the whole of what this instrument claims, so refusing to
+  /// run would withhold a true answer. What is no longer true is the word
+  /// "aimed", so the claim says so instead. The driven checks that DO depend
+  /// on the aim are gated on the same reason.
   private static func keysInstrumentCheck(
     instruments: RegressInstruments, target: (display: Display, inHardwareZone: Bool)?,
-    logProven: Bool
+    logProven: Bool, targetingCaveat: String?
   ) -> PlatformConformance.Check {
     let name = "regress.instrument.keys"
     guard let (target, inHardwareZone) = target else {
@@ -406,7 +414,7 @@ enum Regress {
       }
     }
 
-    return controlledCheck(name: name, control: control) {
+    let check = controlledCheck(name: name, control: control) {
       let start = Date()
       let aim = instruments.warpPointer(toCenterOf: target.id)
       guard aim.landed else {
@@ -445,6 +453,10 @@ enum Regress {
         "brightnessDown then brightnessUp aimed at \(target.name) produced \(writes.count) DDC writes (values \(writes.map(String.init).joined(separator: ", ")))"
       )
     }
+    guard let targetingCaveat else { return check }
+    return note(
+      check,
+      "the word aimed does not hold on this rig and these writes may belong to panels this check never pointed at: \(targetingCaveat)")
   }
 
   private static func identifierInstrumentCheck(
@@ -851,7 +863,7 @@ enum Regress {
   ///
   /// Absent means default, so an unreadable key is the pass here, not a miss.
   private static func switchingPointGate(
-    _ instruments: RegressInstruments, persistenceKey: String
+    _ instruments: RegressInstruments, _ persistenceKey: String
   ) -> String? {
     let key = "combinedSwitchingPoint.\(persistenceKey)"
     guard let text = instruments.defaultsRead(key) else { return nil }
@@ -879,6 +891,46 @@ enum Regress {
       check,
       "teardown: \(display.name) was not walked back to \(AppRegression.combinedFloorBrightness): \(home.failure ?? "the stored brightness never reached it")",
       downgradingPass: true)
+  }
+
+  /// The register values these checks assert (37 released, 50 at the
+  /// crossover) are the untuned mapping's answers: `valueToDDC` over a 0 to
+  /// 100 range, linear, not inverted. Every one of those is an operator
+  /// setting with a documented escape hatch, and a panel carrying a tuned one
+  /// writes a different value for the same brightness while behaving perfectly.
+  ///
+  /// So this reads the tuning rather than asserting through it. A non-default
+  /// row is inconclusive naming the key, never a fail: convicting the app of
+  /// the operator's own tuning is the one reachable false failure both
+  /// constants still had. Absent means default, so unreadable keys are the
+  /// pass here.
+  private static func ddcTuningGate(
+    _ instruments: RegressInstruments, _ persistenceKey: String
+  ) -> String? {
+    func integer(_ name: String) -> Int {
+      instruments.defaultsRead("\(name).brightness.\(persistenceKey)").flatMap(Int.init) ?? 0
+    }
+    let minimum = integer("minDDCOverride")
+    let maximumOverride = integer("maxDDCOverride")
+    // Mirrors `CommandTuning.effectiveMaxDDC`: an override at or below the
+    // minimum is not an override, and the read max is 100 on a panel that
+    // answers no capabilities read.
+    let maximum = maximumOverride > minimum ? maximumOverride : 100
+    let curveIndex = integer("curveDDC")
+    let inverted = integer("invertDDC") != 0
+
+    var tuned: [String] = []
+    if minimum != 0 { tuned.append("minDDCOverride.brightness reads \(minimum), not 0") }
+    if maximum != 100 { tuned.append("maxDDCOverride.brightness makes the range end at \(maximum), not 100") }
+    // 0 is unset and 5 is the middle stop; both are linear.
+    if curveIndex != 0, curveIndex != 5 {
+      tuned.append(
+        "curveDDC.brightness reads \(curveIndex), a curve of \(DimmingMath.curveMultiplier(forIndex: curveIndex)) rather than linear")
+    }
+    if inverted { tuned.append("invertDDC.brightness is set") }
+
+    guard !tuned.isEmpty else { return nil }
+    return "this panel's brightness command is tuned away from the mapping these constants describe (\(tuned.joined(separator: "; "))), so the register values \(AppRegression.combinedReleasedDDCValue) and \(AppRegression.combinedCrossoverDDCValue) are not what a healthy app would write here"
   }
 
   /// The panel these constants belong to, plus its persistence key, or the
@@ -982,8 +1034,10 @@ enum Regress {
     instruments: RegressInstruments, mag: Display, persistenceKey: String
   ) -> PlatformConformance.Check {
     let name = "regress.d28.combined"
-    if let reason = switchingPointGate(instruments, persistenceKey: persistenceKey) {
-      return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
+    for gate in [switchingPointGate, ddcTuningGate] {
+      if let reason = gate(instruments, persistenceKey) {
+        return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
+      }
     }
     let floor = AppRegression.combinedFloorBrightness
     let convergence = convergeToFloorFromAbove(
@@ -1096,8 +1150,10 @@ enum Regress {
     instruments: RegressInstruments, mag: Display, persistenceKey: String
   ) -> PlatformConformance.Check {
     let name = "regress.combined.crossover"
-    if let reason = switchingPointGate(instruments, persistenceKey: persistenceKey) {
-      return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
+    for gate in [switchingPointGate, ddcTuningGate] {
+      if let reason = gate(instruments, persistenceKey) {
+        return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
+      }
     }
     let floor = AppRegression.combinedFloorBrightness
     let top = AppRegression.combinedCrossoverBrightness
@@ -1199,23 +1255,29 @@ enum Regress {
       return refusal
     }
 
-    var check = fanOutDrive(
+    let driven = fanOutDrive(
       instruments: instruments, builtIn: builtIn, preWindowFanOuts: preFanOuts)
 
+    // Sync goes back BEFORE the walk home, which is the opposite of the other
+    // two checks and for a reason particular to this one: the switch it staged
+    // is sync itself, not a pref the floor point is defined under, so nothing
+    // about the walk needs sync held. Walking with sync left ON does harm,
+    // though. The built-in's ambient auto-brightness hunts, every crossing of
+    // the deadband fans out onto this panel, and a walk that takes ten to
+    // twenty seconds spends them fighting that: the stall detector or the
+    // press limit then reports a teardown miss and downgrades a genuine pass
+    // to inconclusive. The other two checks have no such conflict because they
+    // hold sync OFF for their whole duration.
+    var check = restore(instruments, check: driven, switches: switches)
+
     // Leave the panel where the next check expects to find it, by measurement:
-    // the deadband clamp discards remainders, so where the fan-out landed this
+    // the deadband clamp discards remainders, so where the fan-out left this
     // panel is not the arithmetic the source moved by.
-    //
-    // The walk runs with sync still staged on, which is safe for the reason
-    // the log shows rather than the one this comment used to give: a key press
-    // steps its targeted display directly and never reaches the fan-out at
-    // all, so every fan-out line on the rig names the built-in as its source.
-    // The keys here cannot start one whatever sync is set to.
     if case let .success(panel) = magPanel(displays) {
       check = walkHome(
         instruments, check: check, display: panel.0, persistenceKey: panel.1)
     }
-    return restore(instruments, check: check, switches: switches)
+    return check
   }
 
   private static func fanOutDrive(

@@ -295,13 +295,28 @@ struct AppRegressionTests {
 
   @Test func theCrossoverValueIsTheDimmingMathsAnswerAtTheCrossoverBrightness() {
     // The constant is derived rather than transcribed, so the derivation is
-    // pinned: the DDC portion at 0.75 with the default switching point, times
-    // this panel's assumed register maximum of 100.
+    // pinned, and it is pinned through the SAME functions the app writes with
+    // rather than through a hand-truncation that happens to agree today. A
+    // change to the affine step or to where the truncation falls in
+    // `valueToDDC` is then a failing test rather than a rig surprise.
     let split = DimmingMath.combinedSplit(
       value: AppRegression.combinedCrossoverBrightness,
       switching: DimmingMath.switchingValue(fromPoint: 0))
-    #expect(UInt16(split.ddc * 100) == AppRegression.combinedCrossoverDDCValue)
     #expect(split.sw == 1)
+    #expect(
+      DimmingMath.valueToDDC(split.ddc, minDDC: 0, maxDDC: 100)
+        == AppRegression.combinedCrossoverDDCValue)
+  }
+
+  @Test func theReleasedValueIsTheSameMappingWithTheWholeRangeOnTheRegister() {
+    // Combined dimming off puts the whole stored value on the register, so 37
+    // is the same untuned mapping read at the floor brightness. Pinned beside
+    // the crossover value because the two constants stand or fall together:
+    // both assume a 0 to 100 linear, uninverted brightness command, which is
+    // what `ddcTuningGate` refuses to assert through.
+    #expect(
+      DimmingMath.valueToDDC(AppRegression.combinedFloorBrightness, minDDC: 0, maxDDC: 100)
+        == AppRegression.combinedReleasedDDCValue)
   }
 
   // MARK: - Walking the key grid onto a target
