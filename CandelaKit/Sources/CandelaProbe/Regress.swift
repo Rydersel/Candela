@@ -180,6 +180,16 @@ enum Regress {
       crossoverCheck(instruments: instruments, preflight: preflight, displays: displays))
     report.checks.append(
       fanOutCheck(instruments: instruments, preflight: preflight, displays: displays))
+    // The mute check touches no brightness at all, so it neither needs nor
+    // disturbs the floor point the three above hand each other; it needs a
+    // QUIET window instead, which is why nothing else posts a key while it
+    // runs.
+    report.checks.append(
+      muteStrandCheck(instruments: instruments, preflight: preflight, displays: displays))
+    // Last, and only under --apply: it blanks every display, so anything after
+    // it would measure a rig that had just been slept.
+    report.checks.append(
+      wakeCheck(instruments: instruments, preflight: preflight, options: options))
     return report
   }
 
@@ -579,37 +589,61 @@ enum Regress {
   /// margin from any residual.
   static let keyGridStep = 0.0625
 
+  /// Which preflight instruments a driven check consumes.
+  ///
+  /// Stated per check rather than assumed, because gating a check on an
+  /// instrument it never touches reports a check that could have run as one
+  /// that could not: the fan-out drive goes through DisplayServices, and the
+  /// wake check reads nothing but the log.
+  struct InstrumentNeed: OptionSet {
+    let rawValue: Int
+    static let log = InstrumentNeed(rawValue: 1 << 0)
+    static let gamma = InstrumentNeed(rawValue: 1 << 1)
+    static let keys = InstrumentNeed(rawValue: 1 << 2)
+    static let identifiers = InstrumentNeed(rawValue: 1 << 3)
+    static let prefs = InstrumentNeed(rawValue: 1 << 4)
+    /// What the three combined-dimming checks consume: all five.
+    static let all: InstrumentNeed = [.log, .gamma, .keys, .identifiers, .prefs]
+  }
+
   /// Which preflight instruments a driven check needs and did not get, named
   /// rather than counted: "the setup did not hold" is the same silence this
   /// command refuses everywhere else.
-  private static func unprovenInstruments(_ preflight: Preflight, needsKeyDrive: Bool) -> String? {
+  private static func unprovenInstruments(
+    _ preflight: Preflight, needing needs: InstrumentNeed
+  ) -> String? {
     var missing: [String] = []
-    if !preflight.logProven { missing.append("the log window (regress.instrument.log)") }
-    if !preflight.gammaProven { missing.append("the gamma read (regress.instrument.gamma)") }
-    // Only the checks that DRIVE with keys need this one. The fan-out check
-    // moves its source through DisplayServices instead, and gating it on an
-    // instrument it never uses would report a check that could have run as one
-    // that could not.
-    if needsKeyDrive, !preflight.keysProven {
+    if needs.contains(.log), !preflight.logProven {
+      missing.append("the log window (regress.instrument.log)")
+    }
+    if needs.contains(.gamma), !preflight.gammaProven {
+      missing.append("the gamma read (regress.instrument.gamma)")
+    }
+    if needs.contains(.keys), !preflight.keysProven {
       missing.append("the key drive (regress.instrument.keys)")
     }
-    if !preflight.identifiersProven {
+    if needs.contains(.identifiers), !preflight.identifiersProven {
       missing.append("the identifier reader (regress.instrument.identifiers)")
     }
-    if !preflight.prefsProven { missing.append("the pref readback (regress.instrument.prefs)") }
+    if needs.contains(.prefs), !preflight.prefsProven {
+      missing.append("the pref readback (regress.instrument.prefs)")
+    }
     return missing.isEmpty ? nil : missing.joined(separator: ", ")
   }
 
-  /// nil once the settings window is open and showing General, otherwise why
-  /// it is not. Every switch these checks drive lives on that one pane.
-  private static func generalPane(_ instruments: RegressInstruments) -> String? {
+  /// nil once the settings window is open and showing `row`, otherwise why it
+  /// is not. The General pane is where every app-level switch these checks
+  /// stage lives; a display's own row is where its per-display controls do.
+  private static func settingsPane(
+    _ instruments: RegressInstruments, showing row: String
+  ) -> String? {
     guard instruments.openSettingsWindow() else {
       return "the settings window could not be bound: \(instruments.lastAXError ?? "no reason reported")"
     }
     let title = instruments.settingsWindowName()
-    if title == "General" { return nil }
-    guard instruments.axNavigateSidebar(rowNamed: "General") else {
-      return "the settings window is showing \(title.map { "\"\($0)\"" } ?? "an unreadable pane") and it could not be navigated to General: \(instruments.lastAXError ?? "no sidebar row published that accessibility description")"
+    if title == row { return nil }
+    guard instruments.axNavigateSidebar(rowNamed: row) else {
+      return "the settings window is showing \(title.map { "\"\($0)\"" } ?? "an unreadable pane") and it could not be navigated to \(row): \(instruments.lastAXError ?? "no sidebar row published that accessibility description")"
     }
     return nil
   }
@@ -716,9 +750,10 @@ enum Regress {
   }
 
   /// Appends a sentence to a check's detail, whichever outcome it carries.
-  /// `annotate` deliberately skips the two outcomes that carry a reason rather
-  /// than a measurement; a teardown note belongs on all four, because it is
-  /// about the rig and not about the reading.
+  /// `AppRegression.annotating` leaves exactly one outcome alone, the skip,
+  /// whose reason names why the check never ran at all; a teardown note
+  /// belongs on all four, because it is about the rig and not about the
+  /// reading.
   private static func note(
     _ check: PlatformConformance.Check, _ text: String, downgradingPass: Bool = false
   ) -> PlatformConformance.Check {
@@ -1051,22 +1086,79 @@ enum Regress {
     )
   }
 
+  /// What stops a posted MUTE key from reaching the aimed panel, or nil.
+  ///
+  /// Two prefs decide it and neither is the app misbehaving, which is why this
+  /// is a setup gate rather than a verdict. `keyboardVolume` decides whether
+  /// the app watches the media mute key at all: on the custom-shortcut mode
+  /// and on disabled it does not, and the press goes to macOS. Then
+  /// `multiKeyboardVolume` decides which display the press lands on, and only
+  /// its pointer-targeted default makes the aim decide anything.
+  ///
+  /// Read from the prefs rather than driven through their controls, for the
+  /// brightness gate's reason: both are pop-ups on the Keyboard pane whose
+  /// accessibility value is an item title rather than the 0 or 1 every drive
+  /// here handles. Absent means the default, and both defaults are what this
+  /// check needs.
+  private static func muteKeyGate(_ instruments: RegressInstruments) -> String? {
+    let watched = instruments.defaultsRead("keyboardVolume")?
+      .trimmingCharacters(in: .whitespaces) ?? "0"
+    // media (0) and both (2) are the modes that watch the media key; custom
+    // (1) and disabled (3) leave it to macOS.
+    if watched != "0", watched != "2" {
+      return "keyboardVolume reads \(watched), a mode in which the app does not watch the media mute key, so a posted mute key would go to macOS and never reach this panel. The Keyboard pane's volume-key mode has to include the media keys before this check can measure anything"
+    }
+    guard let raw = instruments.defaultsRead("multiKeyboardVolume") else { return nil }
+    let text = raw.trimmingCharacters(in: .whitespaces)
+    guard text != "0" else { return nil }
+    let mode = switch text {
+    case "1": "every display"
+    case "2": "the display matching the audio output device"
+    default: "an unrecognised mode"
+    }
+    return "multiKeyboardVolume reads \(text) (\(mode)) rather than the pointer-targeted default; a posted mute key would not go to the panel this check aims at, so the mute would land on displays the record does not name. The Keyboard pane's volume-key target has to be back on the display under the pointer before this check can measure anything"
+  }
+
+  /// Which family of media keys a driven check posts, and therefore which
+  /// targeting prefs decide where they land. The two families are separately
+  /// configurable, so a check must name its own: refusing the mute drive over
+  /// the brightness keys' targeting would file a reason that is true of the
+  /// rig and false about this check.
+  enum KeyFamily {
+    case brightness
+    case volume
+  }
+
+  private static func targetingReason(
+    _ instruments: RegressInstruments, family: KeyFamily
+  ) -> String? {
+    switch family {
+    case .brightness: keyTargetingGate(instruments)?.reason
+    case .volume: muteKeyGate(instruments)
+    }
+  }
+
+  /// `sidebarRow` is the pane the check's controls live on, or nil for a check
+  /// that drives no control: the wake check opens no settings window at all,
+  /// and refusing it because one could not be bound would withhold an answer
+  /// it did not need the window to reach.
   private static func drivenGate(
-    name: String, instruments: RegressInstruments, preflight: Preflight, needsKeyDrive: Bool
+    name: String, instruments: RegressInstruments, preflight: Preflight,
+    needing needs: InstrumentNeed, keyTargeting: KeyFamily?, sidebarRow: String?
   ) -> PlatformConformance.Check? {
     guard preflight.soleInstanceBound else {
       return skippedCheck(
         name: name,
         reason: "unreachable without exactly one Candela running (see regress.app.running)")
     }
-    if needsKeyDrive, let caveat = keyTargetingGate(instruments) {
-      return plainCheck(name: name, outcome: .inconclusive("setup: \(caveat.reason)"))
+    if let keyTargeting, let reason = targetingReason(instruments, family: keyTargeting) {
+      return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
     }
-    if let missing = unprovenInstruments(preflight, needsKeyDrive: needsKeyDrive) {
+    if let missing = unprovenInstruments(preflight, needing: needs) {
       return plainCheck(name: name, outcome: .inconclusive(
         "setup: \(missing) did not pass, so nothing driven here could convict the app of anything"))
     }
-    if let reason = generalPane(instruments) {
+    if let sidebarRow, let reason = settingsPane(instruments, showing: sidebarRow) {
       return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
     }
     return nil
@@ -1085,7 +1177,8 @@ enum Regress {
     case let .success(panel): (mag, key) = panel
     }
     if let refusal = drivenGate(
-      name: name, instruments: instruments, preflight: preflight, needsKeyDrive: true) {
+      name: name, instruments: instruments, preflight: preflight,
+      needing: .all, keyTargeting: .brightness, sidebarRow: "General") {
       return refusal
     }
 
@@ -1201,7 +1294,8 @@ enum Regress {
     case let .success(panel): (mag, key) = panel
     }
     if let refusal = drivenGate(
-      name: name, instruments: instruments, preflight: preflight, needsKeyDrive: true) {
+      name: name, instruments: instruments, preflight: preflight,
+      needing: .all, keyTargeting: .brightness, sidebarRow: "General") {
       return refusal
     }
 
@@ -1308,7 +1402,8 @@ enum Regress {
     // the teardown walks the panel home with posted keys, so a run whose key
     // path is dead cannot leave the rig where the record says it did.
     if let refusal = drivenGate(
-      name: name, instruments: instruments, preflight: preflight, needsKeyDrive: true) {
+      name: name, instruments: instruments, preflight: preflight,
+      needing: .all, keyTargeting: .brightness, sidebarRow: "General") {
       return refusal
     }
 
@@ -1430,6 +1525,427 @@ enum Regress {
         downgradingPass: true)
     }
     return check
+  }
+
+  // MARK: D29, the mute strand proven by outcome
+
+  /// The two values the mute wire carries, as the write record spells them:
+  /// 1 mutes and 2 unmutes. The record names no command byte and no display,
+  /// so both are read out of a window kept deliberately quiet rather than
+  /// filtered out of a busy one.
+  static let muteWireValue: UInt16 = 1
+  static let unmuteWireValue: UInt16 = 2
+
+  /// The switch that makes the volume command unavailable, which is the
+  /// control D29 rule 1 governs. Composed the way the app composes it: the
+  /// on-disk pref name, the command, then the display's persistence key.
+  static func volumeCommandIdentifier(_ persistenceKey: String) -> String {
+    "unavailableDDC.volume.\(persistenceKey)"
+  }
+
+  static func mutedPrefKey(_ persistenceKey: String) -> String { "muted.\(persistenceKey)" }
+
+  /// D29 rule 1, proven by OUTCOME rather than by log order.
+  ///
+  /// The write record carries a value and no command byte, and pref
+  /// persistence is not logged at all, so which happened first inside the
+  /// operation cannot be read from the log. It does not have to be: in the
+  /// wrong order the availability pref is already false when the unmute runs,
+  /// `toggleMute` refuses, and NO write fires. The presence of the unmute
+  /// write is therefore the discriminator, and the muted pref reading 0
+  /// afterwards is its other half.
+  ///
+  /// What this cannot reach, said plainly because the pass says it too: the
+  /// achieved mute state. Nothing is connected to this panel's aux jack, it
+  /// answers no DDC read, and the one panel here that does answer reads
+  /// carries no volume command at all.
+  static func muteStrandCheck(
+    instruments: RegressInstruments, preflight: Preflight, displays: [Display]
+  ) -> PlatformConformance.Check {
+    let name = "regress.d29.mute"
+    let mag: Display
+    let key: String
+    switch magPanel(displays) {
+    case let .failure(setup): return skippedCheck(name: name, reason: setup.reason)
+    case let .success(panel): (mag, key) = panel
+    }
+
+    // The mute STRATEGY is this check's whole subject. With it off, a mute is
+    // a volume-register write of zero rather than the display's own mute
+    // command, so there is no value=1 to control anything with and no value=2
+    // to look for. The value it actually reads goes into the record either way.
+    let strategy = instruments.defaultsRead("enableMuteUnmute.\(key)")?
+      .trimmingCharacters(in: .whitespaces)
+    guard strategy == "1" else {
+      return skippedCheck(
+        name: name,
+        reason: "enableMuteUnmute.\(key) reads \(strategy ?? "nothing (absent, which is its default: off)"), so \(mag.name) mutes by writing its volume register to zero rather than over the display's own mute command; the value=\(muteWireValue) and value=\(unmuteWireValue) writes this check reads belong to that command, so there would be nothing here to measure"
+      )
+    }
+
+    if let refusal = drivenGate(
+      name: name, instruments: instruments, preflight: preflight,
+      needing: [.log, .keys, .identifiers, .prefs], keyTargeting: .volume,
+      sidebarRow: "General") {
+      return refusal
+    }
+
+    // Sync OFF for the whole window, staged from General because that is the
+    // pane its switch lives on. The built-in's ambient hunting fans out as DDC
+    // brightness writes, and a brightness write carrying 1 or 2 is
+    // indistinguishable from the mute wire in a record that names no command
+    // byte.
+    var switches: [(identifier: String, initial: Bool)] = []
+    if let refusal = stage(
+      instruments, name: name, identifier: syncIdentifier, to: false, recording: &switches) {
+      return refusal
+    }
+
+    var check = muteStrandDrive(instruments: instruments, mag: mag, persistenceKey: key)
+    // Sync goes back from the pane it lives on, and the drive leaves the
+    // window on the display's Advanced page, where that switch is not in the
+    // tree at all: restoring from there would report it missing rather than
+    // put it back.
+    if let reason = settingsPane(instruments, showing: "General") {
+      check = note(
+        check,
+        "teardown: brightness sync was left as this check staged it because the settings window could not be returned to General: \(reason)",
+        downgradingPass: true)
+    } else {
+      check = restore(instruments, check: check, switches: switches)
+    }
+    return check
+  }
+
+  private static func muteStrandDrive(
+    instruments: RegressInstruments, mag: Display, persistenceKey: String
+  ) -> PlatformConformance.Check {
+    let name = "regress.d29.mute"
+    let identifier = volumeCommandIdentifier(persistenceKey)
+    let mutedKey = mutedPrefKey(persistenceKey)
+
+    if let reason = advancedPage(instruments, display: mag, showing: identifier) {
+      return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
+    }
+    if let refusal = clearAnyStandingMute(
+      instruments, name: name, display: mag, persistenceKey: persistenceKey) {
+      return refusal
+    }
+
+    // The positive control: ONE posted mute key, aimed at this panel, in a
+    // window with no other post in it and no brightness drive anywhere near
+    // it. Both halves are read: the wire value proves the command reached the
+    // panel, and the pref proves the app believes it muted.
+    let start = Date()
+    let aim = instruments.warpPointer(toCenterOf: mag.id)
+    guard aim.landed else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: the pointer could not be aimed at \(mag.name) [\(mag.id)]: \(aim.describedForDetail); a mute key goes to the display under the pointer, so the press would mute a panel this check does not name"
+      ))
+    }
+    let mark = instruments.posterFailureMark
+    guard instruments.postMediaKey("mute", count: 1) else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: the media-key poster failed on the mute press: \(instruments.posterFailureSummary(since: mark) ?? "no reason reported")"
+      ))
+    }
+    Thread.sleep(forTimeInterval: 2)
+    let window = instruments.logWindowAllowingForFlush(since: start)
+    guard !window.queryFailed else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "the mute window's log query failed: \(window.failureReason)"))
+    }
+    let muteWriteSeen = AppRegression.ddcWriteValues(fromLogLines: window.lines)
+      .contains(muteWireValue)
+    let mutedNow = readsOne(instruments, mutedKey)
+
+    let control: Control = muteWriteSeen && mutedNow == true
+      ? .fired(
+        "one posted mute key aimed at \(mag.name) produced a value=\(muteWireValue) write and left \(mutedKey) reading 1")
+      : .didNotFire(
+        "one posted mute key aimed at \(mag.name) left \(mutedKey) reading \(describedReading(mutedNow)) and the \(window.count)-line window \(muteWriteSeen ? "carried a" : "carried no") value=\(muteWireValue) write, so the display's own mute command is unproven on this panel and nothing the unmute half does would mean anything"
+      )
+
+    var check = controlledCheck(name: name, control: control) {
+      // The disabling control, driven the way a person drives it: turning the
+      // volume command off is what rule 1 governs. In the right order the app
+      // unmutes first and a value=2 write appears; in the wrong one the
+      // availability pref is already false, `toggleMute` refuses, and the
+      // window carries no write at all.
+      //
+      // What the record cannot separate, stated rather than papered over: a
+      // volume-register write carrying 2 in this same window would read
+      // identically, because the line names no command byte. The window is
+      // kept to one action, the pre-window is quiet, and the muted pref
+      // readback carries the half a value alone cannot.
+      let unmuteStart = Date()
+      guard instruments.axToggle(identifier: identifier, to: false) else {
+        return .inconclusive(
+          "setup: the volume command's switch could not be turned off (\(identifier)): \(instruments.lastAXError ?? "no reason reported")"
+        )
+      }
+      Thread.sleep(forTimeInterval: 2)
+      let unmuteWindow = instruments.logWindowAllowingForFlush(since: unmuteStart)
+      guard !unmuteWindow.queryFailed else {
+        return .inconclusive(
+          "the window after the volume command was turned off failed to read: \(unmuteWindow.failureReason)"
+        )
+      }
+      return AppRegression.muteStrandVerdict(
+        muteWriteSeen: muteWriteSeen,
+        unmuteWriteSeen: AppRegression.ddcWriteValues(fromLogLines: unmuteWindow.lines)
+          .contains(unmuteWireValue),
+        mutedAfter: readsOne(instruments, mutedKey)
+      )
+    }
+
+    // Teardown, in rule 2's order: the availability pref is cleared BEFORE any
+    // unmute is attempted, never after, because `toggleMute` refuses outright
+    // while the volume command is unavailable. Both halves run on every path,
+    // including the ones that never reached the toggle: the mute press may
+    // have landed even where its write was not observed.
+    if !instruments.axToggle(identifier: identifier, to: true) {
+      check = note(
+        check,
+        "teardown: the volume command could not be turned back on for \(mag.name) (\(identifier)): \(instruments.lastAXError ?? "no reason reported")",
+        downgradingPass: true)
+    }
+    return leaveUnmuted(
+      instruments, check: check, display: mag, persistenceKey: persistenceKey,
+      knownMuted: muteWriteSeen && mutedNow == true)
+  }
+
+  /// nil once the display's Advanced page is showing the volume command's own
+  /// switch, otherwise why it is not.
+  ///
+  /// The readback is the switch, not the window title: a display's title names
+  /// the display on its hub and on every page pushed from it, so the title
+  /// cannot say which of the two is on screen. Reading the switch first also
+  /// makes the window's retained sub-page path a non-issue, since a window
+  /// that came back already on Advanced needs no press at all.
+  private static func advancedPage(
+    _ instruments: RegressInstruments, display: Display, showing identifier: String
+  ) -> String? {
+    if let reason = settingsPane(instruments, showing: display.name) { return reason }
+    if instruments.axReading(identifier: identifier).presentText != nil { return nil }
+    guard instruments.axPress(describedAs: "Advanced") else {
+      return "the Advanced row could not be pressed on \(display.name)'s page: \(instruments.lastAXError ?? "no reason reported")"
+    }
+    let reading = instruments.axReading(identifier: identifier)
+    guard reading.presentText != nil else {
+      return "the Advanced row was pressed on \(display.name)'s page and the switch carrying \(identifier) reads \(reading.describedForDetail) afterwards, so the page this check drives is not on screen"
+    }
+    return nil
+  }
+
+  /// A panel that is ALREADY muted turns the mute key into an unmute, so the
+  /// value=1 control could not fire whatever the app did. Cleared with the
+  /// same key and read back, rather than recorded as a dead instrument.
+  private static func clearAnyStandingMute(
+    _ instruments: RegressInstruments, name: String, display: Display, persistenceKey: String
+  ) -> PlatformConformance.Check? {
+    let mutedKey = mutedPrefKey(persistenceKey)
+    guard readsOne(instruments, mutedKey) == true else { return nil }
+    let mark = instruments.posterFailureMark
+    let aim = instruments.warpPointer(toCenterOf: display.id)
+    guard aim.landed, instruments.postMediaKey("mute", count: 1) else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: \(display.name) was already muted (\(mutedKey) reads 1) and the unmute could not be posted: \(aim.landed ? instruments.posterFailureSummary(since: mark) ?? "no reason reported" : aim.describedForDetail)"
+      ))
+    }
+    Thread.sleep(forTimeInterval: 2)
+    let after = readsOne(instruments, mutedKey)
+    guard after == false else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: \(display.name) was already muted and one posted mute key left \(mutedKey) reading \(describedReading(after)); the mute key toggles, so the control press could only have unmuted this panel"
+      ))
+    }
+    return nil
+  }
+
+  /// This check ends with the panel unmuted, or the record says so.
+  ///
+  /// The mute key toggles rather than sets, so the state is READ before the
+  /// key is posted and read again after it. A pref that does not answer is not
+  /// treated as unmuted: pressing on a state nobody established could mute a
+  /// panel this check found quiet, so it posts only where the mute is known,
+  /// either from the pref or from having driven it.
+  private static func leaveUnmuted(
+    _ instruments: RegressInstruments, check: PlatformConformance.Check,
+    display: Display, persistenceKey: String, knownMuted: Bool
+  ) -> PlatformConformance.Check {
+    let mutedKey = mutedPrefKey(persistenceKey)
+    let reading = readsOne(instruments, mutedKey)
+    if reading == false { return check }
+    guard reading == true || knownMuted else {
+      return note(
+        check,
+        "teardown: \(mutedKey) reads \(describedReading(reading)) and nothing this check drove says the panel is muted, so no unmute was posted and whether it was left muted is unknown",
+        downgradingPass: true)
+    }
+    let mark = instruments.posterFailureMark
+    let aim = instruments.warpPointer(toCenterOf: display.id)
+    guard aim.landed, instruments.postMediaKey("mute", count: 1) else {
+      return note(
+        check,
+        "teardown: \(display.name) is muted and the unmute could not be posted (\(aim.landed ? instruments.posterFailureSummary(since: mark) ?? "no reason reported" : aim.describedForDetail)); the way back is the display's own unmute in the settings window",
+        downgradingPass: true)
+    }
+    Thread.sleep(forTimeInterval: 2)
+    let after = readsOne(instruments, mutedKey)
+    guard after == false else {
+      return note(
+        check,
+        "teardown: one posted mute key left \(mutedKey) reading \(describedReading(after)), so \(display.name) may still be muted; the way back is the display's own unmute in the settings window",
+        downgradingPass: true)
+    }
+    return note(check, "teardown: \(display.name) was left unmuted (\(mutedKey) reads 0)")
+  }
+
+  /// A boolean pref as `defaults` prints it, three-state: true, false, or nil
+  /// where the key did not answer at all.
+  private static func readsOne(_ instruments: RegressInstruments, _ key: String) -> Bool? {
+    guard let text = instruments.defaultsRead(key)?.trimmingCharacters(in: .whitespaces)
+    else { return nil }
+    return switch text {
+    case "1": true
+    case "0": false
+    default: nil
+    }
+  }
+
+  private static func describedReading(_ value: Bool?) -> String {
+    value.map { $0 ? "1" : "0" } ?? "nothing"
+  }
+
+  // MARK: The quiet wake
+
+  /// `startupAction`'s on-disk raw value for "Re-send the last saved values to
+  /// the display" (`StartupAction.write`). It is the ONE value whose wake
+  /// behaviour is a burst of writes by design: `RestoreCoordinator.noteWake`
+  /// returns immediately unless the action is that one, and under it runs the
+  /// restore pass ten times after a three-second sober delay. A run under it
+  /// would be measuring that feature working rather than the regression this
+  /// check looks for.
+  static let startupActionResendRaw = "1"
+
+  /// Wake restores values by read resync, not by a burst of writes.
+  ///
+  /// Destructive: it sleeps every display for about ten seconds, so it runs
+  /// only under `--apply`.
+  static func wakeCheck(
+    instruments: RegressInstruments, preflight: Preflight, options: Options
+  ) -> PlatformConformance.Check {
+    let name = "regress.wake.norestoreburst"
+    guard options.applyDestructive else {
+      return skippedCheck(
+        name: name,
+        reason: "this check blanks every display for about ten seconds, so it runs only under --apply")
+    }
+    let raw = instruments.defaultsRead("startupAction")?.trimmingCharacters(in: .whitespaces)
+    let describedAction = raw.map { "startupAction reads \($0)" }
+      ?? "startupAction is absent, which reads as its default 0 (trust the last saved values)"
+    guard raw != startupActionResendRaw else {
+      return skippedCheck(
+        name: name,
+        reason: "\(describedAction), the choice that re-sends the last saved values to the display on wake: that burst is what the app is being asked to do under this setting, so writes here would be the feature rather than a regression"
+      )
+    }
+    if let refusal = drivenGate(
+      name: name, instruments: instruments, preflight: preflight,
+      needing: .log, keyTargeting: nil, sidebarRow: nil) {
+      return refusal
+    }
+    // The identifier is composed from the on-disk pref name, so the switch and
+    // the key are the same string. Read rather than staged: this check opens
+    // no settings window, and a fan-out is contamination it cannot tell from a
+    // restore burst rather than something it can measure around.
+    if readsOne(instruments, syncIdentifier) == true {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: \(syncIdentifier) reads 1, so the built-in's ambient auto-brightness fans out onto every external as DDC writes; a write after wake would then be sync's and this check cannot tell the two apart. Turn brightness sync off before this run"
+      ))
+    }
+    return note(wakeDrive(instruments: instruments), describedAction)
+  }
+
+  private static func wakeDrive(instruments: RegressInstruments) -> PlatformConformance.Check {
+    let name = "regress.wake.norestoreburst"
+    let started = Date()
+    let slept = RegressInstruments.execute("/usr/bin/pmset", ["displaysleepnow"])
+    guard slept.status == 0 else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: pmset displaysleepnow exited \(slept.status): \(described(slept.err))"))
+    }
+    Thread.sleep(forTimeInterval: 8)
+    let woke = RegressInstruments.execute("/usr/bin/caffeinate", ["-u", "-t", "2"])
+    guard woke.status == 0 else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: the displays were slept and caffeinate -u exited \(woke.status): \(described(woke.err)); they are left to wake on their own input"
+      ))
+    }
+
+    // Polled rather than waited out: the quiet window fires one second after
+    // the last raw reconfiguration event, and a wake that brings several
+    // panels back restarts that timer.
+    var window = instruments.logWindow(since: started)
+    var measured = AppRegression.wakeWindow(fromLogLines: window.lines)
+    let deadline = Date().addingTimeInterval(30)
+    while !window.queryFailed, !measured.quietWindowSeen, Date() < deadline {
+      Thread.sleep(forTimeInterval: 2)
+      window = instruments.logWindow(since: started)
+      measured = AppRegression.wakeWindow(fromLogLines: window.lines)
+    }
+    guard !window.queryFailed else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "the wake window's log query failed, so its silence is the query's and not the app's: \(window.failureReason)"
+      ))
+    }
+    if measured.quietWindowSeen {
+      // Five seconds past the quiet window, because that is where a restore
+      // burst would be: the wake chain waits three seconds before its first
+      // pass. A window that stopped at the quiet line would report a burst
+      // that had not started yet as a quiet wake.
+      Thread.sleep(forTimeInterval: 5)
+      let settled = instruments.logWindow(since: started)
+      if !settled.queryFailed {
+        window = settled
+        measured = AppRegression.wakeWindow(fromLogLines: settled.lines)
+      }
+    }
+
+    // The control triple IS this check's positive control: without it the app
+    // never observably saw the sleep or the wake, and an absence of writes
+    // afterwards is an absence of everything. `wakeVerdict` guards the same
+    // condition, so the two agree by construction; the control is what puts
+    // the finding in the record's control column rather than only in its
+    // detail.
+    let control: Control = measured.sleepIntakeSeen && measured.wakeIntakeSeen
+      && measured.quietWindowSeen
+      ? .fired(
+        "the sleep intake, the wake intake and the topology quiet window were all logged, in that order, in a \(window.count)-line window")
+      : .didNotFire(
+        "the control triple did not appear in order in the \(window.count)-line window (sleep intake \(seen(measured.sleepIntakeSeen)), a wake intake after it \(seen(measured.wakeIntakeSeen)), a quiet window after that \(seen(measured.quietWindowSeen))), so the app never observably saw the sleep or the wake this check drove"
+      )
+
+    return controlledCheck(name: name, control: control) {
+      AppRegression.wakeVerdict(
+        sleepIntakeSeen: measured.sleepIntakeSeen,
+        wakeIntakeSeen: measured.wakeIntakeSeen,
+        quietWindowSeen: measured.quietWindowSeen,
+        ddcWritesAfterWake: measured.ddcWritesAfterWake
+      )
+    }
+  }
+
+  private static func seen(_ value: Bool) -> String { value ? "seen" : "not seen" }
+
+  /// A tool's stderr on one line, never an empty string: a failure reported as
+  /// no reason at all is the silence this command refuses everywhere else.
+  private static func described(_ standardError: String) -> String {
+    let text = standardError
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .replacingOccurrences(of: "\n", with: "; ")
+    return text.isEmpty ? "nothing on stderr" : text
   }
 
   private static func formatted(_ value: Double) -> String {
@@ -2103,31 +2619,49 @@ final class RegressInstruments {
     return true
   }
 
+  /// Presses ONE pressable element by the accessibility description it
+  /// publishes, refusing an ambiguous match rather than pressing the first:
+  /// two rows answering to one description means the walk cannot say which
+  /// destination it opened.
+  ///
+  /// It reads nothing back on its own, deliberately. A sidebar row's readback
+  /// is the window title; a chevron row inside a display's page pushes without
+  /// changing that title at all, so the caller supplies whichever readback is
+  /// true of the row it pressed. `AXUIElementPerformAction` has been measured
+  /// returning `.success` while pushing nothing, so no caller may treat this
+  /// return as evidence of arrival.
+  func axPress(describedAs description: String) -> Bool {
+    guard isAddressable(description), let window = settingsWindow() else { return false }
+    var matches: [AXUIElement] = []
+    walk(window, depth: 0) { element in
+      if read(element, kAXDescriptionAttribute as String).presentText == description,
+         canPress(element) {
+        matches.append(element)
+      }
+    }
+    guard matches.count == 1 else {
+      lastAXError = matches.isEmpty
+        ? "no pressable element publishes the accessibility description \(description)"
+        : "\(matches.count) pressable elements publish the accessibility description \(description); refusing rather than guessing"
+      return false
+    }
+    let result = AXUIElementPerformAction(matches[0], kAXPressAction as CFString)
+    guard result == .success else {
+      lastAXError = "pressing the \(description) row failed (AX error \(result.rawValue))"
+      return false
+    }
+    Thread.sleep(forTimeInterval: 1.2)
+    lastAXError = nil
+    return true
+  }
+
   /// Presses a sidebar row by the accessibility description it publishes, then
   /// reads the window title back. The index table is a property of the current
   /// build and one of its rows is an inert header that leaves the title on the
   /// previous pane rather than erroring, so the title is the only answer worth
   /// trusting.
   func axNavigateSidebar(rowNamed row: String) -> Bool {
-    guard isAddressable(row), let window = settingsWindow() else { return false }
-    var matches: [AXUIElement] = []
-    walk(window, depth: 0) { element in
-      if read(element, kAXDescriptionAttribute as String).presentText == row, canPress(element) {
-        matches.append(element)
-      }
-    }
-    guard matches.count == 1 else {
-      lastAXError = matches.isEmpty
-        ? "no pressable sidebar row publishes the accessibility description \(row)"
-        : "\(matches.count) pressable elements publish the accessibility description \(row); refusing rather than guessing"
-      return false
-    }
-    let result = AXUIElementPerformAction(matches[0], kAXPressAction as CFString)
-    guard result == .success else {
-      lastAXError = "pressing the \(row) row failed (AX error \(result.rawValue))"
-      return false
-    }
-    Thread.sleep(forTimeInterval: 1.2)
+    guard axPress(describedAs: row) else { return false }
     // Re-bind rather than reading the title off the pre-press reference, and
     // keep the binding's OWN error when it fails: a non-unique match lists
     // every open window, and overwriting that with "the title reads

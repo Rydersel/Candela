@@ -538,6 +538,68 @@ struct AppRegressionTests {
     #expect(isPass(outcome))
   }
 
+  // MARK: - Reading a sleep/wake window
+
+  private static let sleepLine =
+    "2026-08-18 09:12:01.001 Df Candela[80328:1] [com.rydersel.Candela:topology] sleep intake: epoch=41"
+  private static let wakeLine =
+    "2026-08-18 09:12:11.004 Df Candela[80328:2] [com.rydersel.Candela:topology] wake intake"
+  private static let quietLine =
+    "2026-08-18 09:12:12.010 Df Candela[80328:3] [com.rydersel.Candela:topology] topology quiet window elapsed, signaling refresh"
+  private static func writeLine(_ value: Int, ok: Bool = true) -> String {
+    "2026-08-18 09:12:13.000 Df Candela[80328:4] [com.rydersel.Candela:dragperf] ddc.write.end value=\(value) ok=\(ok)"
+  }
+
+  @Test func aQuietWakeReadsAsTheWholeTripleAndNoWrites() {
+    let window = AppRegression.wakeWindow(
+      fromLogLines: [Self.sleepLine, Self.wakeLine, Self.quietLine])
+    #expect(window == AppRegression.WakeWindow(
+      sleepIntakeSeen: true, wakeIntakeSeen: true, quietWindowSeen: true, ddcWritesAfterWake: 0))
+  }
+
+  @Test func aWakeIntakeAheadOfTheSleepIntakeIsNotThisRunsWake() {
+    // The triple is read IN ORDER: a wake line left over from an earlier sleep
+    // is not evidence that the sleep this check drove ever woke.
+    let window = AppRegression.wakeWindow(
+      fromLogLines: [Self.wakeLine, Self.quietLine, Self.sleepLine])
+    #expect(window.sleepIntakeSeen)
+    #expect(!window.wakeIntakeSeen)
+    #expect(!window.quietWindowSeen)
+  }
+
+  @Test func aQuietWindowLineAheadOfTheWakeIsNotTheWakesOwn() {
+    let window = AppRegression.wakeWindow(
+      fromLogLines: [Self.sleepLine, Self.quietLine, Self.wakeLine])
+    #expect(window.wakeIntakeSeen)
+    #expect(!window.quietWindowSeen)
+  }
+
+  @Test func writesBeforeTheWakeAreNotChargedToIt() {
+    let window = AppRegression.wakeWindow(fromLogLines: [
+      Self.sleepLine, Self.writeLine(37), Self.wakeLine, Self.quietLine,
+    ])
+    #expect(window.ddcWritesAfterWake == 0)
+  }
+
+  @Test func acknowledgedWritesAfterTheWakeAreCounted() {
+    let window = AppRegression.wakeWindow(fromLogLines: [
+      Self.sleepLine, Self.wakeLine, Self.writeLine(37), Self.quietLine,
+      Self.writeLine(50), Self.writeLine(93, ok: false),
+    ])
+    // The unacknowledged write drops out here as everywhere: a write the panel
+    // did not acknowledge is not evidence of one landing.
+    #expect(window.ddcWritesAfterWake == 2)
+  }
+
+  @Test func aWindowWithNoWakeAtAllChargesItNoWrites() {
+    // There is nothing for a count to be a count of. The verdict reports the
+    // missing triple as inconclusive, and a non-zero total here would invite
+    // reading that silence as a result.
+    let window = AppRegression.wakeWindow(fromLogLines: [Self.sleepLine, Self.writeLine(37)])
+    #expect(!window.wakeIntakeSeen)
+    #expect(window.ddcWritesAfterWake == 0)
+  }
+
   // MARK: - D24 through the panel dump
 
   private static let magRow =

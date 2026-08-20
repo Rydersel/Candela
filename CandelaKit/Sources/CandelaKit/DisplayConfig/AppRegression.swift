@@ -396,6 +396,39 @@ public enum AppRegression {
       "sleep intake, wake intake and the quiet window all logged, with zero DDC writes after wake")
   }
 
+  /// What one sleep/wake window carried, read in the order the lines appear.
+  ///
+  /// The window is `log show`'s output, which is chronological, so ORDER is
+  /// what separates this run's wake from a leftover one: a wake line ahead of
+  /// the sleep line belongs to an earlier sleep, and counting it would let a
+  /// window that never woke report the whole control triple.
+  public struct WakeWindow: Sendable, Equatable {
+    public let sleepIntakeSeen: Bool
+    public let wakeIntakeSeen: Bool
+    public let quietWindowSeen: Bool
+    /// Acknowledged DDC writes recorded after the wake intake line. Zero when
+    /// there is no wake to charge them to, because a total with nothing to
+    /// anchor it invites reading an absent wake as a quiet one.
+    public let ddcWritesAfterWake: Int
+  }
+
+  public static func wakeWindow(fromLogLines lines: [String]) -> WakeWindow {
+    func index(of marker: String, after start: Int?) -> Int? {
+      guard let start else { return nil }
+      return lines[start...].firstIndex { $0.contains(marker) }
+    }
+    let sleepIndex = index(of: "sleep intake: epoch=", after: lines.startIndex)
+    let wakeIndex = index(of: "wake intake", after: sleepIndex.map { $0 + 1 })
+    let quietIndex = index(of: "topology quiet window elapsed", after: wakeIndex.map { $0 + 1 })
+    let afterWake = wakeIndex.map { ddcWriteValues(fromLogLines: Array(lines[($0 + 1)...])).count }
+    return WakeWindow(
+      sleepIntakeSeen: sleepIndex != nil,
+      wakeIntakeSeen: wakeIndex != nil,
+      quietWindowSeen: quietIndex != nil,
+      ddcWritesAfterWake: afterWake ?? 0
+    )
+  }
+
   // MARK: - D24 through the panel dump
 
   /// A volume slider is greyed only by the monitor's own denial. The
