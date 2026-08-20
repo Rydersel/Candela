@@ -19,7 +19,9 @@ struct OnboardingCommitRouter {
   /// notification.
   var writeFriendlyName: (_ displayKey: String, _ name: String) -> Void
   var enrollInCare: (_ displayKey: String) -> Void
+  var unenrollFromCare: (_ displayKey: String) -> Void
   var enableMeasuredTelemetry: (_ displayKey: String) -> Void
+  var disableMeasuredTelemetry: (_ displayKey: String) -> Void
   /// The LIVE registration state (D10 has one source of truth and no mirror),
   /// read at routing time so the gate below compares against the system rather
   /// than against whatever the flow snapshotted at launch.
@@ -54,8 +56,14 @@ struct OnboardingCommitRouter {
     case let .enrollInCare(displayKey):
       enrollInCare(displayKey)
 
+    case let .unenrollFromCare(displayKey):
+      unenrollFromCare(displayKey)
+
     case let .enableMeasuredTelemetry(displayKey):
       enableMeasuredTelemetry(displayKey)
+
+    case let .disableMeasuredTelemetry(displayKey):
+      disableMeasuredTelemetry(displayKey)
 
     case let .setLaunchAtLogin(enabled):
       // OB13: differs-only. An unchanged toggle must not touch SMAppService,

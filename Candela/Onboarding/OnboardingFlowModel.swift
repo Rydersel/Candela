@@ -8,7 +8,14 @@ enum OnboardingCommit: Equatable {
   case rename(displayKey: String, name: String)
   case applySize(displayKey: String, looksLikeWidth: Int, looksLikeHeight: Int)
   case enrollInCare(displayKey: String)
+  /// A re-run's off path: a display that was enrolled before this run and is
+  /// no longer wanted in OLED care.
+  case unenrollFromCare(displayKey: String)
   case enableMeasuredTelemetry(displayKey: String)
+  /// The measurement choice turned back down to estimated. Emitted only when
+  /// the harvested pref says measured, so a first run's estimated choice writes
+  /// nothing and absent keeps meaning "no decision".
+  case disableMeasuredTelemetry(displayKey: String)
   case setLaunchAtLogin(Bool)
 }
 
@@ -45,12 +52,41 @@ final class OnboardingFlowModel {
   /// Displays currently marked as OLEDs on the designation page. Changing it
   /// re-derives the plan, which is how the care page appears and disappears.
   var designatedOleds: Set<String> {
-    didSet { replan() }
+    didSet {
+      // Recorded here rather than in the select page, so every path that can
+      // drop a key runs through one rule. `update(environment:)` corrects the
+      // one drop that is not a user decision (a display that departed).
+      deselectedOleds.formUnion(oldValue.subtracting(designatedOleds))
+      deselectedOleds.subtract(designatedOleds)
+      replan()
+    }
   }
+
+  /// Keys the user took out of the designation. The designation commit arm
+  /// reads "enrolled but not designated" as an un-enrollment, so a display
+  /// that is merely ABSENT from the set must never be confused with one the
+  /// user deselected; this is what tells the two apart across a re-harvest.
+  private var deselectedOleds: Set<String> = []
 
   /// Per-display protection choice on the care page, default on for every
   /// designated display (OB3).
-  var careEnabled: Set<String>
+  var careEnabled: Set<String> {
+    didSet {
+      // Same rule as the designation set, one layer in: a protection-off is a
+      // decision, and it is recorded wherever it happens rather than by the
+      // care page, so a re-harvest cannot mistake it for an unseeded key.
+      declinedCare.formUnion(oldValue.subtracting(careEnabled))
+      declinedCare.subtract(careEnabled)
+    }
+  }
+
+  /// Keys whose Protect toggle the user turned off. `designatedOleds` cannot
+  /// carry this: a care-page toggle-off leaves the display designated, so
+  /// absence from `careEnabled` is the ONLY trace of the decision, and a
+  /// re-harvest that reseeded the toggle would flip it back on under the user
+  /// and enroll a display they had just declined.
+  private var declinedCare: Set<String> = []
+
   /// True when the user took the recommended measured path (OB5).
   var measuredTelemetry: Bool = true
   /// The size decision per display. A kept apply records `.recommended` or
@@ -121,7 +157,8 @@ final class OnboardingFlowModel {
   /// simulated countdown with the shipped semantics. Live wiring replaces
   /// all three closures with the shipped mode-apply path and answers its
   /// preview directly, because the shipped banner's answering surface is
-  /// fixed at preview start and renders in the settings window, never here.
+  /// fixed at preview start and never this window, so the Setup window
+  /// renders its own (DM11).
   var onApplySize: (_ displayKey: String, _ looksLikeWidth: Int, _ looksLikeHeight: Int) -> Void
   var onKeepSize: () -> Void
   var onRevertSize: () -> Void
@@ -161,10 +198,18 @@ final class OnboardingFlowModel {
     // recommended measured default for a first run). Only an enrolled
     // display's pref carries a decision: an unenrolled display's stored
     // value is the unwritten default and must not flip the recommendation.
-    if !environment.isFirstRun,
-      let prior = environment.displays.first(where: \.enrolledInCare)
-    {
-      measuredTelemetry = prior.measuredTelemetry
+    //
+    // ANY measuring display seeds this on, not the first enrolled one. The
+    // choice is one switch for the whole flow, so on a mixed harvest one of
+    // the two answers has to lose, and it must not be the measuring display:
+    // seeding off there would make an untouched flow turn its measurement off
+    // on the way past. Seeding on re-affirms the recommended path for the
+    // other display instead, which is a write the user can see coming and can
+    // undo on the page it is offered.
+    if !environment.isFirstRun, environment.displays.contains(where: \.enrolledInCare) {
+      measuredTelemetry = environment.displays.contains {
+        $0.enrolledInCare && $0.measuredTelemetry
+      }
     }
     accessibilityGranted = environment.accessibilityGranted
     onCommit = { _ in }
@@ -259,9 +304,38 @@ final class OnboardingFlowModel {
       // countdown rather than answering into the void.
       resetApplyState()
     }
-    designatedOleds = designatedOleds.filter { key in
-      environment.displays.contains { $0.persistenceKey == key }
+    // This method has a LIVE caller: the app's topology loop calls it on every
+    // display reconfiguration while the Setup window is up, so displays really
+    // do arrive and depart mid-flow. The designation arm turns "enrolled but
+    // not designated" into an un-enrollment write, which makes both edges
+    // below load-bearing rather than housekeeping.
+    //
+    // An already enrolled display that arrives mid-flow is designated on
+    // arrival, or advancing past the designation page would silently
+    // un-enroll a display the user never touched. Only displays the user has
+    // not deselected are re-designated, so a deliberate deselect is never
+    // resurrected by a replug.
+    let seeded = environment.displays
+      .filter { $0.enrolledInCare && !deselectedOleds.contains($0.persistenceKey) }
+      .map(\.persistenceKey)
+    // Protection is seeded on only for a key the user has not declined. Both
+    // decisions outlive a departure, so an ENROLLED display that leaves and
+    // comes back returns the way the user left it: designated with protection
+    // on if they never touched it, still off if they turned it off.
+    // A display designated by the name guess alone is not covered: the filter
+    // above takes enrolled displays only, so that designation is not re-seeded
+    // and the display drops off the care page when it returns.
+    careEnabled.formUnion(seeded.filter { !declinedCare.contains($0) })
+    // A departure is not a decision, so the keys dropped here are subtracted
+    // from `deselectedOleds` afterwards; without that the didSet would record
+    // them as deselections and hold them against the display on its return.
+    // Union and prune in ONE assignment: each write to `designatedOleds`
+    // replans, and the plan only needs deriving once per update.
+    let departed = designatedOleds.filter { key in
+      !environment.displays.contains { $0.persistenceKey == key }
     }
+    designatedOleds = designatedOleds.union(seeded).subtracting(departed)
+    deselectedOleds.subtract(departed)
     // didSet already replanned; clamp in case the list shrank.
     index = min(index, pages.count - 1)
   }
@@ -420,8 +494,18 @@ final class OnboardingFlowModel {
 
   private func commitCurrentPage() {
     switch currentPage {
-    case .welcome, .accessibility, .noDisplays, .oledSelect:
+    case .welcome, .accessibility, .noDisplays:
       break
+    case .oledSelect:
+      // Un-enrollment is split across two pages on purpose. A deselect can be
+      // the very thing that takes the care page out of the plan, so the care
+      // arm would never run for it; this arm owns the displays that left the
+      // designation, and the care arm owns the ones still in it with their
+      // toggle off. The two sets cannot overlap, so nothing is written twice.
+      for entry in environment.displays
+      where entry.enrolledInCare && !designatedOleds.contains(entry.persistenceKey) {
+        onCommit(.unenrollFromCare(displayKey: entry.persistenceKey))
+      }
     case .detection:
       for (key, newName) in renames {
         let original = display(forKey: key)?.name
@@ -448,10 +532,20 @@ final class OnboardingFlowModel {
         break
       }
     case .oledCare:
-      for key in designatedOleds.sorted() where careEnabled.contains(key) {
-        onCommit(.enrollInCare(displayKey: key))
-        if measuredTelemetry {
-          onCommit(.enableMeasuredTelemetry(displayKey: key))
+      for key in designatedOleds.sorted() {
+        let harvested = display(forKey: key)
+        if careEnabled.contains(key) {
+          onCommit(.enrollInCare(displayKey: key))
+          if measuredTelemetry {
+            onCommit(.enableMeasuredTelemetry(displayKey: key))
+          } else if harvested?.measuredTelemetry == true {
+            // Differs-only, against the harvested pref rather than the flow's
+            // default: a first run that picks estimated writes nothing, so an
+            // absent key keeps meaning "no decision made yet".
+            onCommit(.disableMeasuredTelemetry(displayKey: key))
+          }
+        } else if harvested?.enrolledInCare == true {
+          onCommit(.unenrollFromCare(displayKey: key))
         }
       }
     case .finish:

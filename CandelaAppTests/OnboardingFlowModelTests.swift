@@ -406,6 +406,279 @@ struct OnboardingFlowModelTests {
     #expect(model.measuredTelemetry)
   }
 
+  // MARK: - The off paths a re-run needs
+
+  private func walk(_ model: OnboardingFlowModel, to page: OnboardingPage) {
+    for _ in 0..<10 where model.currentPage != page { model.advance() }
+    #expect(model.currentPage == page)
+  }
+
+  /// The designation page owns this write precisely because the deselect can
+  /// take the care page out of the plan: if the care arm owned it, the
+  /// un-enrollment would have no page left to ride.
+  @Test func deselectingTheOnlyEnrolledDisplayEmitsOneUnenroll() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true)],
+      firstRun: false))
+    walk(model, to: .oledSelect)
+    model.designatedOleds.remove("mag")
+    model.careEnabled.remove("mag")
+    #expect(!model.pages.contains(.oledCare))
+    model.advance()
+    #expect(model.committed == [.unenrollFromCare(displayKey: "mag")])
+  }
+
+  /// Nothing to undo, so nothing is written: an unenrolled display's pref is
+  /// the unwritten default and a deselect must not start writing it.
+  @Test func deselectingADisplayThatWasNeverEnrolledEmitsNothing() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledSelect)
+    model.designatedOleds.remove("mag")
+    model.careEnabled.remove("mag")
+    model.advance()
+    #expect(model.committed.isEmpty)
+  }
+
+  /// The other half of the split: still designated, so the designation arm
+  /// leaves it alone and the care page's toggle carries the un-enrollment.
+  @Test func aStillDesignatedDisplayWithProtectionOffEmitsUnenroll() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true)],
+      firstRun: false))
+    walk(model, to: .oledCare)
+    #expect(model.committed.isEmpty)
+    model.careEnabled.remove("mag")
+    model.advance()
+    #expect(model.committed == [.unenrollFromCare(displayKey: "mag")])
+  }
+
+  /// The care arm's guard, from the other side: a display designated by the
+  /// name guess alone was never enrolled, so turning its toggle off is a
+  /// decision not to enroll rather than an un-enrollment.
+  @Test func aNeverEnrolledDisplayWithProtectionOffEmitsNothing() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    model.careEnabled.remove("mag")
+    model.advance()
+    #expect(model.committed.isEmpty)
+  }
+
+  /// The two arms are disjoint by construction; this walks a rig where both
+  /// fire on the same run and pins one write per display.
+  @Test func aDeselectAndAToggleOffEachCommitOnce() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED", enrolled: true),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
+      ],
+      firstRun: false))
+    walk(model, to: .oledSelect)
+    model.designatedOleds.remove("dell")
+    model.careEnabled.remove("dell")
+    model.advance()
+    #expect(model.currentPage == .oledCare)
+    model.careEnabled.remove("mag")
+    model.advance()
+    #expect(model.committed == [
+      .unenrollFromCare(displayKey: "dell"),
+      .unenrollFromCare(displayKey: "mag"),
+    ])
+  }
+
+  /// A first run has no stored measurement decision, so choosing estimated
+  /// leaves the key absent rather than writing a false the app cannot tell
+  /// from a decision.
+  @Test func estimatedOnAFirstRunWritesNoMeasurementDecision() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")]))
+    walk(model, to: .oledCare)
+    model.measuredTelemetry = false
+    model.advance()
+    #expect(model.committed == [.enrollInCare(displayKey: "mag")])
+  }
+
+  @Test func estimatedOnAReRunTurnsOffEachMeasuredDisplay() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED", enrolled: true, measuredTelemetry: true),
+        entry(
+          key: "mag", productName: "MAG 341CQPX QD-OLED",
+          enrolled: true, measuredTelemetry: true),
+      ],
+      firstRun: false))
+    #expect(model.measuredTelemetry)
+    walk(model, to: .oledCare)
+    model.measuredTelemetry = false
+    model.advance()
+    #expect(model.committed == [
+      .enrollInCare(displayKey: "dell"),
+      .disableMeasuredTelemetry(displayKey: "dell"),
+      .enrollInCare(displayKey: "mag"),
+      .disableMeasuredTelemetry(displayKey: "mag"),
+    ])
+  }
+
+  /// Mixed harvest: only the display whose stored pref says measured has
+  /// anything to turn off.
+  @Test func estimatedOnlyTurnsOffTheDisplayThatWasMeasuring() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED", enrolled: true, measuredTelemetry: true),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
+      ],
+      firstRun: false))
+    walk(model, to: .oledCare)
+    model.measuredTelemetry = false
+    model.advance()
+    #expect(model.committed == [
+      .enrollInCare(displayKey: "dell"),
+      .disableMeasuredTelemetry(displayKey: "dell"),
+      .enrollInCare(displayKey: "mag"),
+    ])
+  }
+
+  /// The measurement choice is one switch for the whole flow, so a mixed
+  /// harvest has to pick a side. It must not pick the destructive one: seeding
+  /// from the first enrolled display would let an untouched flow turn the
+  /// OTHER display's measurement off on the way past.
+  @Test func aMixedHarvestReAffirmsMeasuredInsteadOfTurningItOff() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED", enrolled: true),
+        entry(
+          key: "mag", productName: "MAG 341CQPX QD-OLED",
+          enrolled: true, measuredTelemetry: true),
+      ],
+      firstRun: false))
+    #expect(model.measuredTelemetry)
+    walk(model, to: .oledCare)
+    model.advance()
+    #expect(model.committed == [
+      .enrollInCare(displayKey: "dell"),
+      .enableMeasuredTelemetry(displayKey: "dell"),
+      .enrollInCare(displayKey: "mag"),
+      .enableMeasuredTelemetry(displayKey: "mag"),
+    ])
+  }
+
+  /// The topology loop calls `update` on every reconfiguration while Setup is
+  /// open, so an enrolled display really can arrive mid-flow. It must arrive
+  /// designated: absent from the set, the designation arm would read it as a
+  /// deselect and un-enroll a display the user never saw.
+  @Test func anEnrolledDisplayArrivingMidFlowIsNotUnenrolled() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true)],
+      firstRun: false))
+    walk(model, to: .oledSelect)
+    model.update(environment: environment(
+      [
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
+        entry(key: "dell", productName: "DELL OLED", enrolled: true),
+      ],
+      firstRun: false))
+    #expect(model.designatedOleds == ["mag", "dell"])
+    #expect(model.careEnabled.contains("dell"))
+    model.advance()
+    #expect(model.committed.isEmpty)
+  }
+
+  /// A departure is not a decision: the prune that drops a departed display
+  /// must not be remembered as a deselect, or the replug would un-enroll it.
+  @Test func unpluggingAndRepluggingAnEnrolledDisplayIsNotADeselect() {
+    let both = [
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
+      entry(key: "dell", productName: "DELL OLED", enrolled: true),
+    ]
+    let model = OnboardingFlowModel(environment: environment(both, firstRun: false))
+    walk(model, to: .oledSelect)
+    model.update(environment: environment([both[0]], firstRun: false))
+    #expect(model.designatedOleds == ["mag"])
+    model.update(environment: environment(both, firstRun: false))
+    #expect(model.designatedOleds == ["mag", "dell"])
+    // Untouched by the user, so it returns protected as well as designated.
+    #expect(model.careEnabled.contains("dell"))
+    model.advance()
+    #expect(model.committed.isEmpty)
+  }
+
+  /// The care page's toggle leaves the display designated, so absence from
+  /// `careEnabled` is the only trace of the decision. A reconfiguration while
+  /// the window is up must not reseed the toggle and enroll a display the user
+  /// has just declined.
+  @Test func aProtectionOffSurvivesATopologyTick() {
+    let displays = [entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true)]
+    let model = OnboardingFlowModel(environment: environment(displays, firstRun: false))
+    walk(model, to: .oledCare)
+    model.careEnabled.remove("mag")
+    model.update(environment: environment(displays, firstRun: false))
+    #expect(!model.careEnabled.contains("mag"))
+    #expect(model.designatedOleds == ["mag"])
+    model.advance()
+    #expect(model.committed == [.unenrollFromCare(displayKey: "mag")])
+  }
+
+  /// An explicit protection-off survives a departure round trip, the same way
+  /// a designation deselect does. Only a toggle the user never touched is
+  /// reseeded on return.
+  @Test func aProtectionOffSurvivesADepartureAndReturn() {
+    let both = [
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
+      entry(key: "dell", productName: "DELL OLED", enrolled: true),
+    ]
+    let model = OnboardingFlowModel(environment: environment(both, firstRun: false))
+    walk(model, to: .oledCare)
+    model.careEnabled.remove("dell")
+    model.update(environment: environment([both[0]], firstRun: false))
+    model.update(environment: environment(both, firstRun: false))
+    // Designated again, so the user can still change their mind on the page,
+    // but protection stays off and the advance un-enrolls it.
+    #expect(model.designatedOleds == ["mag", "dell"])
+    #expect(!model.careEnabled.contains("dell"))
+    model.advance()
+    #expect(model.committed == [
+      .unenrollFromCare(displayKey: "dell"),
+      .enrollInCare(displayKey: "mag"),
+    ])
+  }
+
+  /// The other side of the same rule: a deliberate deselect IS a decision, and
+  /// a replug must not resurrect the designation and swallow it.
+  @Test func aDeselectSurvivesTheDisplayBeingReplugged() {
+    let both = [
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
+      entry(key: "dell", productName: "DELL OLED", enrolled: true),
+    ]
+    let model = OnboardingFlowModel(environment: environment(both, firstRun: false))
+    walk(model, to: .oledSelect)
+    model.designatedOleds.remove("dell")
+    model.careEnabled.remove("dell")
+    model.update(environment: environment([both[0]], firstRun: false))
+    model.update(environment: environment(both, firstRun: false))
+    #expect(model.designatedOleds == ["mag"])
+    model.advance()
+    #expect(model.committed == [.unenrollFromCare(displayKey: "dell")])
+  }
+
+  /// The enrollment-family commit leads the telemetry-family commit for a
+  /// display, whichever direction each is going.
+  @Test func enrollmentPrecedesTheMeasurementCommitPerDisplay() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED"),
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      ]))
+    walk(model, to: .oledCare)
+    model.advance()
+    #expect(model.committed == [
+      .enrollInCare(displayKey: "dell"),
+      .enableMeasuredTelemetry(displayKey: "dell"),
+      .enrollInCare(displayKey: "mag"),
+      .enableMeasuredTelemetry(displayKey: "mag"),
+    ])
+  }
+
   // MARK: - Display names
 
   @Test func aRenameThatTrimsToEmptyFallsBackToTheEnvironmentName() {

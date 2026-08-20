@@ -13,7 +13,9 @@ struct OnboardingCommitRouterTests {
     enum Call: Equatable {
       case rename(String, String)
       case enroll(String)
+      case unenroll(String)
       case telemetry(String)
+      case telemetryOff(String)
       case launchAtLogin(Bool)
       case acknowledgeSize(String, Int, Int)
     }
@@ -28,7 +30,9 @@ struct OnboardingCommitRouterTests {
       OnboardingCommitRouter(
         writeFriendlyName: { key, name in self.calls.append(.rename(key, name)) },
         enrollInCare: { key in self.calls.append(.enroll(key)) },
+        unenrollFromCare: { key in self.calls.append(.unenroll(key)) },
         enableMeasuredTelemetry: { key in self.calls.append(.telemetry(key)) },
+        disableMeasuredTelemetry: { key in self.calls.append(.telemetryOff(key)) },
         isLoginItemEnabled: {
           self.loginItemReads += 1
           return self.loginItemEnabled
@@ -76,6 +80,41 @@ struct OnboardingCommitRouterTests {
     router.route(.enableMeasuredTelemetry(displayKey: "DELL-2"))
     #expect(recorder.calls == [
       .enroll("MAG-1"), .telemetry("MAG-1"), .enroll("DELL-2"), .telemetry("DELL-2"),
+    ])
+  }
+
+  @Test func unenrollmentRoutesToItsOwnLeg() {
+    let recorder = Recorder()
+    recorder.router.route(.unenrollFromCare(displayKey: "MAG-1"))
+    #expect(recorder.calls == [.unenroll("MAG-1")])
+  }
+
+  @Test func turningMeasurementOffRoutesToItsOwnLeg() {
+    let recorder = Recorder()
+    recorder.router.route(.disableMeasuredTelemetry(displayKey: "MAG-1"))
+    #expect(recorder.calls == [.telemetryOff("MAG-1")])
+  }
+
+  /// The off commits are routed, never re-interpreted: an un-enrollment must
+  /// not drag the measurement pref down with it, because a later re-enrollment
+  /// should find the choice the user made.
+  @Test func unenrollmentDoesNotTouchTheMeasurementLeg() {
+    let recorder = Recorder()
+    let router = recorder.router
+    router.route(.unenrollFromCare(displayKey: "MAG-1"))
+    router.route(.unenrollFromCare(displayKey: "DELL-2"))
+    #expect(recorder.calls == [.unenroll("MAG-1"), .unenroll("DELL-2")])
+  }
+
+  @Test func enrollmentAndTelemetryOffKeepTheirOrder() {
+    let recorder = Recorder()
+    let router = recorder.router
+    router.route(.enrollInCare(displayKey: "MAG-1"))
+    router.route(.disableMeasuredTelemetry(displayKey: "MAG-1"))
+    router.route(.enrollInCare(displayKey: "DELL-2"))
+    router.route(.disableMeasuredTelemetry(displayKey: "DELL-2"))
+    #expect(recorder.calls == [
+      .enroll("MAG-1"), .telemetryOff("MAG-1"), .enroll("DELL-2"), .telemetryOff("DELL-2"),
     ])
   }
 

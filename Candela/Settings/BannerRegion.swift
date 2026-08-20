@@ -146,7 +146,8 @@ struct BannerRegion: View {
   /// The one place the settings window renders an outstanding preview. Which
   /// FORM it takes is the preview's own `surface`, decided at start: buttons
   /// when this window owns the answer, passive text when the floating window
-  /// does — never both (SO6).
+  /// does, nothing when the guided setup window does. Never two answers to one
+  /// question (SO6).
   @ViewBuilder private var countdownBanner: some View {
     if let preview = coordinator.preview, let form = countdownForm {
       switch form {
@@ -164,10 +165,16 @@ struct BannerRegion: View {
 
   /// Which form the countdown card takes, or nil when there is no card. Read by
   /// the builder above and by the animation key, so presence has one definition.
-  private enum CountdownForm { case answerable, passive }
+  enum CountdownForm: Equatable { case answerable, passive }
 
-  private var countdownForm: CountdownForm? {
-    guard let preview = coordinator.preview, preview.displayID == displayID else { return nil }
+  /// Nameable rather than inline, so the app test bundle can assert on it: the
+  /// three surfaces answer differently here and only one of them puts buttons
+  /// on screen, which is the SO6 property nothing else in this file states.
+  static func countdownForm(
+    preview: DisplayModeCoordinator.Preview?, displayID: CGDirectDisplayID,
+    ownsAnswerableCountdown: Bool
+  ) -> CountdownForm? {
+    guard let preview, preview.displayID == displayID else { return nil }
     switch preview.surface {
     case .settingsBanner:
       return ownsAnswerableCountdown ? .answerable : nil
@@ -176,7 +183,22 @@ struct BannerRegion: View {
       // expiry) the floating window is the whole story, and a passive line
       // saying "reverting in 0 seconds" would be false.
       return preview.isCountingDown ? .passive : nil
+    case .guidedSetup:
+      // Nothing at all (DM11). The setup window owns the answer and renders it
+      // itself, and this region can be on screen at the same time in a
+      // background settings window: an answerable banner there would be a
+      // second answer to one question, which is what the surface model exists
+      // to prevent. A passive line is not ruled out on taste; it is simply not
+      // this change.
+      return nil
     }
+  }
+
+  private var countdownForm: CountdownForm? {
+    Self.countdownForm(
+      preview: coordinator.preview, displayID: displayID,
+      ownsAnswerableCountdown: ownsAnswerableCountdown
+    )
   }
 
   // MARK: - A selection that never took effect
