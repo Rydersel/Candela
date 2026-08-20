@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// The recommended size for one display. RM11 copy: renders at a higher
-/// resolution and scales the result, never "native HiDPI". Applying keeps the
-/// keep/revert countdown (PD9); the mock ticks a real countdown so the page
-/// behaves as it will ship.
+/// resolution and scales the result, never "native HiDPI". Applying starts
+/// the keep and revert countdown (PD9) through the model's apply seam; this
+/// page renders the seam's state and never owns a timer of its own.
 struct OnboardingSizePage: View {
   @Bindable var model: OnboardingFlowModel
   let displayKey: String
@@ -11,9 +11,6 @@ struct OnboardingSizePage: View {
 
   @State private var showsAlternatives = false
   @State private var showsFullList = false
-  @State private var applied = false
-  @State private var countdown = 15
-  @State private var ticker: Task<Void, Never>?
 
   private var display: OnboardingDisplayEntry? { model.display(forKey: displayKey) }
 
@@ -42,55 +39,82 @@ struct OnboardingSizePage: View {
         VStack(spacing: 8) {
           DisplayGlyph(aspect: display.drawnAspect, accent: accent)
             .frame(height: 140)
-          sizeLabel(suggestion: suggestion, display: display)
+          sizeLabel(display: display)
         }
       } else {
         DisplayGlyph(
           aspect: display.drawnAspect,
           accent: accent,
-          faceOverlay: AnyView(sizeLabel(suggestion: suggestion, display: display))
+          faceOverlay: AnyView(sizeLabel(display: display))
         )
         .frame(height: 170)
       }
       Spacer(minLength: 16)
-      if applied {
-        countdownBar
+      if let seconds = model.applyCountdownSecondsRemaining(forKey: displayKey) {
+        countdownBar(seconds: seconds)
           .transition(.opacity)
       } else {
         choices(suggestion: suggestion)
       }
       Spacer(minLength: 22)
     }
-    .onDisappear { ticker?.cancel() }
+    // Keyed to the seam state so ticks, the choices/countdown swap and the
+    // revert's return all animate; a plain VStack animates both directions.
+    .animation(.spring(duration: 0.45), value: model.applyState)
+    .onDisappear {
+      // An unanswered countdown must not outlive its page (OB7 keeps only
+      // what was confirmed); the model reverts it and stops ticking.
+      model.sizePageDisappeared()
+    }
   }
 
-  private func sizeLabel(
-    suggestion: OnboardingSizeSuggestion, display: OnboardingDisplayEntry
-  ) -> some View {
-    VStack(spacing: 3) {
+  /// The size the glyph should read: the size under countdown while one is
+  /// open, the kept size after a keep, else what is on the glass now.
+  private func shownSize(display: OnboardingDisplayEntry) -> (width: Int, height: Int) {
+    if let pending = model.pendingAppliedSize(forKey: displayKey) {
+      return pending
+    }
+    switch model.sizeChoices[displayKey] {
+    case let .custom(width, height):
+      return (width, height)
+    case .recommended:
+      if let suggestion = display.sizeSuggestion {
+        return (suggestion.looksLikeWidth, suggestion.looksLikeHeight)
+      }
+    case .keepCurrent, nil:
+      break
+    }
+    return (display.currentLooksLikeWidth, display.currentLooksLikeHeight)
+  }
+
+  private func sizeLabel(display: OnboardingDisplayEntry) -> some View {
+    let size = shownSize(display: display)
+    return VStack(spacing: 3) {
       Text("Looks like")
         .font(.caption2)
         .foregroundStyle(OnboardingStyle.faintColor)
       // verbatim: interpolation into a LocalizedStringKey formats numbers
       // with grouping separators, and a size is "2560 x 1440", never
       // "2,560 x 1,440".
-      Text(
-        verbatim: applied
-          ? "\(suggestion.looksLikeWidth) x \(suggestion.looksLikeHeight)"
-          : "\(display.currentLooksLikeWidth) x \(display.currentLooksLikeHeight)"
-      )
-      .font(.system(.title3, design: .rounded).weight(.semibold))
-      .foregroundStyle(OnboardingStyle.titleColor)
-      .lineLimit(1)
-      .contentTransition(.numericText())
+      Text(verbatim: "\(size.width) x \(size.height)")
+        .font(.system(.title3, design: .rounded).weight(.semibold))
+        .foregroundStyle(OnboardingStyle.titleColor)
+        .lineLimit(1)
+        .contentTransition(.numericText())
     }
   }
 
   @ViewBuilder
   private func choices(suggestion: OnboardingSizeSuggestion) -> some View {
     VStack(spacing: 12) {
+      if model.applyState == .failed {
+        Text("That size could not be applied. Try again, or keep the current size.")
+          .font(.callout)
+          .foregroundStyle(OnboardingStyle.faintColor)
+          .transition(.opacity)
+      }
       Button {
-        apply(width: suggestion.looksLikeWidth, height: suggestion.looksLikeHeight, choice: .recommended)
+        model.applySize(displayKey: displayKey, choice: .recommended)
       } label: {
         Text(verbatim: "Use Looks Like \(suggestion.looksLikeWidth) x \(suggestion.looksLikeHeight)")
       }
@@ -143,8 +167,8 @@ struct OnboardingSizePage: View {
     ) {
       ForEach(choices) { choice in
         Button {
-          apply(
-            width: choice.looksLikeWidth, height: choice.looksLikeHeight,
+          model.applySize(
+            displayKey: displayKey,
             choice: .custom(
               looksLikeWidth: choice.looksLikeWidth, looksLikeHeight: choice.looksLikeHeight))
         } label: {
@@ -166,46 +190,23 @@ struct OnboardingSizePage: View {
     .padding(.horizontal, 60)
   }
 
-  /// The keep/revert bar, exactly the safety shape the picker ships (PD9).
-  private var countdownBar: some View {
+  /// The keep and revert bar, the safety shape the picker ships (PD9). The
+  /// sentence states the shipped semantic: expiry reverts, so the size only
+  /// sticks when Keep is clicked.
+  private func countdownBar(seconds: Int) -> some View {
     VStack(spacing: 12) {
-      Text("Keeping this size in \(countdown)s unless you revert")
+      Text("Reverting to the previous size in \(seconds)s unless you keep it")
         .font(.callout)
         .foregroundStyle(OnboardingStyle.bodyColor)
+        .monospacedDigit()
         .contentTransition(.numericText())
       HStack(spacing: 14) {
-        Button("Keep") { finishApply() }
+        Button("Keep") { model.keepSize() }
           .buttonStyle(OnboardingPrimaryButtonStyle(accent: accent))
           .keyboardShortcut(.defaultAction)
-        Button("Revert") { revert() }
+        Button("Revert") { model.revertSize() }
           .buttonStyle(OnboardingSecondaryButtonStyle())
       }
     }
-  }
-
-  private func apply(width: Int, height: Int, choice: OnboardingSizeChoice) {
-    model.sizeChoices[displayKey] = choice
-    withAnimation(.spring(duration: 0.5)) { applied = true }
-    countdown = 15
-    ticker?.cancel()
-    ticker = Task { @MainActor in
-      while countdown > 0 {
-        try? await Task.sleep(for: .seconds(1))
-        guard !Task.isCancelled else { return }
-        withAnimation { countdown -= 1 }
-      }
-      finishApply()
-    }
-  }
-
-  private func finishApply() {
-    ticker?.cancel()
-    model.advance()
-  }
-
-  private func revert() {
-    ticker?.cancel()
-    model.sizeChoices[displayKey] = .keepCurrent
-    withAnimation(.spring(duration: 0.4)) { applied = false }
   }
 }
