@@ -1100,13 +1100,26 @@ enum Regress {
   /// accessibility value is an item title rather than the 0 or 1 every drive
   /// here handles. Absent means the default, and both defaults are what this
   /// check needs.
-  private static func muteKeyGate(_ instruments: RegressInstruments) -> String? {
+  private static func muteKeyGate(
+    _ instruments: RegressInstruments, persistenceKey: String
+  ) -> String? {
     let watched = instruments.defaultsRead("keyboardVolume")?
       .trimmingCharacters(in: .whitespaces) ?? "0"
     // media (0) and both (2) are the modes that watch the media key; custom
     // (1) and disabled (3) leave it to macOS.
     if watched != "0", watched != "2" {
       return "keyboardVolume reads \(watched), a mode in which the app does not watch the media mute key, so a posted mute key would go to macOS and never reach this panel. The Keyboard pane's volume-key mode has to include the media keys before this check can measure anything"
+    }
+    // The override that demotes the mute strategy also disarms the key:
+    // `VolumeSliderPolicy.acceptsMuteKey` refuses on `.forceNone`, so the press
+    // reaches the app and is dropped there rather than reaching the panel. The
+    // mute check refuses earlier, and for the more specific reason (a mute that
+    // lands on the volume register is not the wire it reads); this clause is
+    // what keeps the sentence true for any other volume-key drive built on
+    // this gate.
+    if instruments.defaultsRead("audioSinkOverride.\(persistenceKey)")?
+      .trimmingCharacters(in: .whitespaces) == "1" {
+      return "audioSinkOverride.\(persistenceKey) reads 1, the always-off override, which refuses the mute key on this display as well as greying its volume control: a posted mute key would reach the app and be dropped there rather than reaching the panel"
     }
     guard let raw = instruments.defaultsRead("multiKeyboardVolume") else { return nil }
     let text = raw.trimmingCharacters(in: .whitespaces)
@@ -1126,7 +1139,10 @@ enum Regress {
   /// rig and false about this check.
   enum KeyFamily {
     case brightness
-    case volume
+    /// The volume family's gates are partly per display, so it carries the
+    /// panel it is about: the always-off override that disarms the mute key is
+    /// a per-display pref, not an app-level one.
+    case volume(persistenceKey: String)
   }
 
   private static func targetingReason(
@@ -1134,7 +1150,7 @@ enum Regress {
   ) -> String? {
     switch family {
     case .brightness: keyTargetingGate(instruments)?.reason
-    case .volume: muteKeyGate(instruments)
+    case let .volume(persistenceKey): muteKeyGate(instruments, persistenceKey: persistenceKey)
     }
   }
 
@@ -1545,6 +1561,42 @@ enum Regress {
 
   static func mutedPrefKey(_ persistenceKey: String) -> String { "muted.\(persistenceKey)" }
 
+  /// Which register a mute on this display would actually land on, as far as
+  /// pref reads can see it, plus both prefs as they read for the record.
+  struct MuteStrategy {
+    /// True where a mute goes out over the display's own mute command rather
+    /// than as a volume-register write of zero.
+    let dedicated: Bool
+    let described: String
+  }
+
+  /// Read the way `VolumeSliderPolicy.usesDedicatedMuteCommand` computes it,
+  /// never from the pref alone: `enableMuteUnmute` ASKS for the display's own
+  /// mute command, and the always-off override refuses it, demoting the mute
+  /// to the volume register. A pref-only reading would judge this check's
+  /// wire values on a register the write does not touch.
+  ///
+  /// That function takes a third input this cannot: the display's own verdict
+  /// for the mute command, which is live app state with no pref behind it. On
+  /// the panel these checks address it can refuse nothing, because that panel
+  /// answers no capabilities read at all and an unknown verdict resolves to
+  /// enabled. The two-pref reading is sound HERE for that reason, and would
+  /// not be on a panel that answers reads.
+  private static func muteStrategy(
+    _ instruments: RegressInstruments, persistenceKey: String
+  ) -> MuteStrategy {
+    let pref = readsOne(instruments, "enableMuteUnmute.\(persistenceKey)")
+    let override = instruments.defaultsRead("audioSinkOverride.\(persistenceKey)")?
+      .trimmingCharacters(in: .whitespaces)
+    // Raw 1 is the always-off override. Absent and any unrecognised raw both
+    // resolve to the automatic default, which is the fallback the pref
+    // accessor itself applies.
+    return MuteStrategy(
+      dedicated: pref == true && override != "1",
+      described: "enableMuteUnmute.\(persistenceKey) reads \(describedReading(pref)) and audioSinkOverride.\(persistenceKey) reads \(override ?? "nothing (absent, which is its default 0: automatic)")"
+    )
+  }
+
   /// D29 rule 1, proven by OUTCOME rather than by log order.
   ///
   /// The write record carries a value and no command byte, and pref
@@ -1570,23 +1622,23 @@ enum Regress {
     case let .success(panel): (mag, key) = panel
     }
 
-    // The mute STRATEGY is this check's whole subject. With it off, a mute is
-    // a volume-register write of zero rather than the display's own mute
-    // command, so there is no value=1 to control anything with and no value=2
-    // to look for. The value it actually reads goes into the record either way.
-    let strategy = instruments.defaultsRead("enableMuteUnmute.\(key)")?
-      .trimmingCharacters(in: .whitespaces)
-    guard strategy == "1" else {
+    // The mute STRATEGY is this check's whole subject. Where it is not in
+    // force a mute is a volume-register write of zero rather than the
+    // display's own mute command, so there is no value=1 to control anything
+    // with and no value=2 to look for. Both prefs behind it go into the record
+    // either way.
+    let strategy = muteStrategy(instruments, persistenceKey: key)
+    guard strategy.dedicated else {
       return skippedCheck(
         name: name,
-        reason: "enableMuteUnmute.\(key) reads \(strategy ?? "nothing (absent, which is its default: off)"), so \(mag.name) mutes by writing its volume register to zero rather than over the display's own mute command; the value=\(muteWireValue) and value=\(unmuteWireValue) writes this check reads belong to that command, so there would be nothing here to measure"
+        reason: "\(strategy.described), so \(mag.name) mutes by writing its volume register to zero rather than over the display's own mute command; the value=\(muteWireValue) and value=\(unmuteWireValue) writes this check reads belong to that command, so there would be nothing here to measure"
       )
     }
 
     if let refusal = drivenGate(
       name: name, instruments: instruments, preflight: preflight,
-      needing: [.log, .keys, .identifiers, .prefs], keyTargeting: .volume,
-      sidebarRow: "General") {
+      needing: [.log, .keys, .identifiers, .prefs],
+      keyTargeting: .volume(persistenceKey: key), sidebarRow: "General") {
       return refusal
     }
 
@@ -1644,16 +1696,32 @@ enum Regress {
       ))
     }
     let mark = instruments.posterFailureMark
+    // Every return from here down runs the unmute teardown first. The press is
+    // what can leave this panel silent over 0x8D, and a return that reports why
+    // it could not finish while leaving the panel muted is the exact state D29
+    // exists to prevent. `knownMuted: false` on both: nothing here established
+    // a mute, so the teardown posts only where the pref says the panel is
+    // muted and says so where it cannot tell.
     guard instruments.postMediaKey("mute", count: 1) else {
-      return plainCheck(name: name, outcome: .inconclusive(
-        "setup: the media-key poster failed on the mute press: \(instruments.posterFailureSummary(since: mark) ?? "no reason reported")"
-      ))
+      // A poster failure is not proof the press did not land: the script can
+      // fail after posting as easily as before it.
+      return leaveUnmuted(
+        instruments,
+        check: plainCheck(name: name, outcome: .inconclusive(
+          "setup: the media-key poster failed on the mute press: \(instruments.posterFailureSummary(since: mark) ?? "no reason reported")"
+        )),
+        display: mag, persistenceKey: persistenceKey, knownMuted: false)
     }
     Thread.sleep(forTimeInterval: 2)
     let window = instruments.logWindowAllowingForFlush(since: start)
     guard !window.queryFailed else {
-      return plainCheck(name: name, outcome: .inconclusive(
-        "the mute window's log query failed: \(window.failureReason)"))
+      // The press landed and only the reading of it failed, so this is the
+      // branch most likely to be holding a muted panel.
+      return leaveUnmuted(
+        instruments,
+        check: plainCheck(name: name, outcome: .inconclusive(
+          "the mute window's log query failed: \(window.failureReason)")),
+        display: mag, persistenceKey: persistenceKey, knownMuted: false)
     }
     let muteWriteSeen = AppRegression.ddcWriteValues(fromLogLines: window.lines)
       .contains(muteWireValue)
@@ -1679,6 +1747,13 @@ enum Regress {
       // kept to one action, the pre-window is quiet, and the muted pref
       // readback carries the half a value alone cannot.
       let unmuteStart = Date()
+      // Read the polarity carefully before touching this line. The identifier
+      // is the on-disk pref name `unavailableDDC`, and the control it names is
+      // the grid's "On" switch, whose value is the POSITIVE accessor over that
+      // inverted key. So 0 is the command DISABLED, and `to: false` is what
+      // makes the volume command unavailable. "Correcting" this to `to: true`
+      // would drive the opposite state while every call reported success, and
+      // the check would measure nothing while passing.
       guard instruments.axToggle(identifier: identifier, to: false) else {
         return .inconclusive(
           "setup: the volume command's switch could not be turned off (\(identifier)): \(instruments.lastAXError ?? "no reason reported")"
@@ -1848,7 +1923,7 @@ enum Regress {
     guard raw != startupActionResendRaw else {
       return skippedCheck(
         name: name,
-        reason: "\(describedAction), the choice that re-sends the last saved values to the display on wake: that burst is what the app is being asked to do under this setting, so writes here would be the feature rather than a regression"
+        reason: "\(describedAction), the choice that re-sends the last saved values to the display on wake: that burst is what the app is being asked to do under this setting, so writes here would be the feature rather than a regression. This reads the key, and a safe-mode session runs on the do-nothing action whatever the key says, so a run started with Shift held is refused here for a setting that is not in effect"
       )
     }
     if let refusal = drivenGate(
@@ -1906,7 +1981,13 @@ enum Regress {
       // pass. A window that stopped at the quiet line would report a burst
       // that had not started yet as a quiet wake.
       Thread.sleep(forTimeInterval: 5)
-      let settled = instruments.logWindow(since: started)
+      // Flush-tolerant, and this is the ONE window in the command where an
+      // empty result is the PASS: `log show` reads the persisted store, and a
+      // burst that had not been persisted yet would read as a quiet wake and
+      // be recorded as one. The polling reads above are self-flushing by
+      // repetition; this final read is taken once, so it re-reads when it
+      // finds no write.
+      let settled = instruments.logWindowAllowingForFlush(since: started)
       if !settled.queryFailed {
         window = settled
         measured = AppRegression.wakeWindow(fromLogLines: settled.lines)
@@ -1922,7 +2003,7 @@ enum Regress {
     let control: Control = measured.sleepIntakeSeen && measured.wakeIntakeSeen
       && measured.quietWindowSeen
       ? .fired(
-        "the sleep intake, the wake intake and the topology quiet window were all logged, in that order, in a \(window.count)-line window")
+        "the sleep intake, the wake intake and the topology quiet window were all logged, in that order, in a \(window.count)-line window, and the writes are counted to 5 s after this run OBSERVED the quiet-window line on a 2 s poll, which is up to 2 s later than the line's own timestamp")
       : .didNotFire(
         "the control triple did not appear in order in the \(window.count)-line window (sleep intake \(seen(measured.sleepIntakeSeen)), a wake intake after it \(seen(measured.wakeIntakeSeen)), a quiet window after that \(seen(measured.quietWindowSeen))), so the app never observably saw the sleep or the wake this check drove"
       )
