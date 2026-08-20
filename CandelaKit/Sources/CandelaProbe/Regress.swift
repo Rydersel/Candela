@@ -49,6 +49,13 @@ enum Regress {
     let message: String
   }
 
+  /// A setup step that did not hold, carrying the sentence the record prints.
+  /// A setup miss never fails the app: it leaves the check inconclusive with
+  /// the step that missed named.
+  struct SetupFailure: Error {
+    let reason: String
+  }
+
   /// Argument parsing, returning the usage message rather than exiting, so the
   /// dispatch site owns the exit code the way every other subcommand does.
   static func parseOptions(_ arguments: [String]) -> Result<Options, UsageError> {
@@ -177,7 +184,19 @@ enum Regress {
     var report = PlatformConformance.Report(
       platform: ProcessInfo.processInfo.operatingSystemVersionString)
     let instruments = RegressInstruments(toolsDir: options.toolsDir)
-    report.checks += preflight(instruments: instruments, displays: displays).checks
+    let preflight = preflight(instruments: instruments, displays: displays)
+    report.checks += preflight.checks
+    // The order is deliberate: each driven check leaves the panel at the floor
+    // brightness the next one needs, so the run walks the rig forward instead
+    // of dragging it back three times. Every check still MEASURES that
+    // precondition rather than inheriting it, because a check that assumes
+    // where it started reports its predecessor's state as its own.
+    report.checks.append(
+      combinedDimmingCheck(instruments: instruments, preflight: preflight, displays: displays))
+    report.checks.append(
+      crossoverCheck(instruments: instruments, preflight: preflight, displays: displays))
+    report.checks.append(
+      fanOutCheck(instruments: instruments, preflight: preflight, displays: displays))
     return report
   }
 
@@ -281,7 +300,7 @@ enum Regress {
     //    host's Accessibility grant, the app's event tap, the DDC path, and
     //    the log query. When it does not pass, every driven check reports
     //    inconclusive rather than fail.
-    let target = displays.first { $0.persistenceKey != nil && !$0.isBuiltIn }
+    let target = keyDriveTarget(instruments: instruments, displays: displays)
     let keysCheck = keysInstrumentCheck(
       instruments: instruments, target: target, logProven: logProven)
     checks.append(keysCheck)
@@ -309,15 +328,45 @@ enum Regress {
       keysProven: keysProven,
       identifiersProven: isPass(identifiersCheck.outcome),
       prefsProven: isPass(prefsCheck.outcome),
-      keyTarget: target
+      keyTarget: target?.display
     )
   }
 
+  /// Where the key-drive instrument aims, and whether that panel is in the
+  /// half of its range where a press must reach the DDC register.
+  ///
+  /// Not simply the first external. A brightness key inside a panel's SOFTWARE
+  /// zone computes the DDC value the register already holds, the coalescer
+  /// drops the repeat, and the window carries no write at all [MEASURED:
+  /// `coalescer.target ddc(raw: 0)` and no `ddc.write.end`, on a panel at
+  /// stored 0.375 with a switching value of 0.5]. Aimed there, an instrument
+  /// that asserts writes reports a healthy app as a dead drive path, and every
+  /// check gated on it goes inconclusive for a reason that is not true. So it
+  /// prefers a panel that is above its switching value, and when none is, it
+  /// still returns one so the check can say WHY it cannot be exercised rather
+  /// than reporting nothing at all.
+  private static func keyDriveTarget(
+    instruments: RegressInstruments, displays: [Display]
+  ) -> (display: Display, inHardwareZone: Bool)? {
+    let candidates = displays.filter { $0.persistenceKey != nil && !$0.isBuiltIn }
+    guard let first = candidates.first else { return nil }
+    for display in candidates {
+      guard let key = display.persistenceKey,
+            let text = instruments.defaultsRead("combinedBrightness.\(key)"),
+            let stored = Double(text)
+      else { continue }
+      let point = instruments.defaultsRead("combinedSwitchingPoint.\(key)").flatMap(Int.init) ?? 0
+      if stored >= DimmingMath.switchingValue(fromPoint: point) { return (display, true) }
+    }
+    return (first, false)
+  }
+
   private static func keysInstrumentCheck(
-    instruments: RegressInstruments, target: Display?, logProven: Bool
+    instruments: RegressInstruments, target: (display: Display, inHardwareZone: Bool)?,
+    logProven: Bool
   ) -> PlatformConformance.Check {
     let name = "regress.instrument.keys"
-    guard let target else {
+    guard let (target, inHardwareZone) = target else {
       return skippedCheck(
         name: name,
         reason: "no DDC-capable external display is attached, so no key post can produce a DDC write")
@@ -337,6 +386,9 @@ enum Regress {
     if !logProven {
       control = .didNotFire(
         "the log query has not been shown able to return a line (see regress.instrument.log), so an empty pre-window is not evidence of a quiet app")
+    } else if !inHardwareZone {
+      control = .didNotFire(
+        "every DDC-capable panel sits below its switching value, inside the software zone, where a brightness key computes the DDC value the register already holds and the coalescer drops the repeat: no write can appear there whatever the app does, so an absent write would say nothing about the drive path")
     } else {
       let quietStart = Date()
       Thread.sleep(forTimeInterval: 3)
@@ -369,7 +421,12 @@ enum Regress {
           "the media-key poster failed to run (brightnessDown ran: \(down), brightnessUp ran: \(up)): \(instruments.posterFailureSummary ?? "no reason reported")"
         )
       }
-      let window = instruments.logWindow(since: start)
+      // Flush-tolerant: this window was measured coming back holding two
+      // records of a three-record write, two seconds after the press that made
+      // them, where the same query moments later carried all six. A drive path
+      // reported dead because the store had not caught up is exactly the
+      // false conviction this whole command is built against.
+      let window = instruments.logWindowAllowingForFlush(since: start)
       guard !window.queryFailed else {
         return .fail("the drive window's log query failed: \(window.failureReason)")
       }
@@ -469,6 +526,696 @@ enum Regress {
     return plainCheck(name: name, outcome: .pass(reads.joined(separator: " ")))
   }
 
+  // MARK: - The driven checks
+
+  /// The panel every D28 constant was measured on. Matched by name fragment
+  /// rather than by persistence key: the key is a hardware identity that moves
+  /// with the cable, and these numbers belong to a panel, not to a port.
+  static let magNameFragment = "MAG 341C"
+
+  /// The General pane's two app-level switches, addressed by the accessibility
+  /// identifier the pref composer emits.
+  ///
+  /// Read the combined one carefully. `disableCombinedBrightness` is the
+  /// identifier, because identifiers are composed from on-disk pref names, but
+  /// the control it names is "Dim past the display's minimum", whose value is
+  /// the POSITIVE accessor over that inverted key (D1). So an accessibility
+  /// value of 1 means combined dimming is ON, and driving it to 0 is what
+  /// turns combined dimming off. Getting that backwards would drive every leg
+  /// of this check into the opposite state while every call reported success.
+  static let combinedDimmingIdentifier = "disableCombinedBrightness"
+  static let syncIdentifier = "enableBrightnessSync"
+  /// "Allow a fully dark display", direct polarity: 1 lets the software leg
+  /// run to black. It moves the floor these checks assert, so they hold it off.
+  static let allowZeroIdentifier = "allowZeroSwBrightness"
+
+  /// One media-key press, as the system actually moves brightness: a synthetic
+  /// press lands on a 1/16 grid whatever modifiers ride with it [MEASURED].
+  /// Also the fan-out drive's step, which clears the 0.03 sync deadband with
+  /// margin from any residual.
+  static let keyGridStep = 0.0625
+
+  /// Which preflight instruments a driven check needs and did not get, named
+  /// rather than counted: "the setup did not hold" is the same silence this
+  /// command refuses everywhere else.
+  private static func unprovenInstruments(_ preflight: Preflight, needsKeyDrive: Bool) -> String? {
+    var missing: [String] = []
+    if !preflight.logProven { missing.append("the log window (regress.instrument.log)") }
+    if !preflight.gammaProven { missing.append("the gamma read (regress.instrument.gamma)") }
+    // Only the checks that DRIVE with keys need this one. The fan-out check
+    // moves its source through DisplayServices instead, and gating it on an
+    // instrument it never uses would report a check that could have run as one
+    // that could not.
+    if needsKeyDrive, !preflight.keysProven {
+      missing.append("the key drive (regress.instrument.keys)")
+    }
+    if !preflight.identifiersProven {
+      missing.append("the identifier reader (regress.instrument.identifiers)")
+    }
+    if !preflight.prefsProven { missing.append("the pref readback (regress.instrument.prefs)") }
+    return missing.isEmpty ? nil : missing.joined(separator: ", ")
+  }
+
+  /// nil once the settings window is open and showing General, otherwise why
+  /// it is not. Every switch these checks drive lives on that one pane.
+  private static func generalPane(_ instruments: RegressInstruments) -> String? {
+    guard instruments.openSettingsWindow() else {
+      return "the settings window could not be bound: \(instruments.lastAXError ?? "no reason reported")"
+    }
+    let title = instruments.settingsWindowName()
+    if title == "General" { return nil }
+    guard instruments.axNavigateSidebar(rowNamed: "General") else {
+      return "the settings window is showing \(title.map { "\"\($0)\"" } ?? "an unreadable pane") and it could not be navigated to General: \(instruments.lastAXError ?? "no sidebar row published that accessibility description")"
+    }
+    return nil
+  }
+
+  /// Reads a switch's state, drives it, and hands back what it read BEFORE the
+  /// drive, so the teardown restores what was actually there rather than what
+  /// the check would prefer.
+  ///
+  /// The pre-state is read three-state on purpose. The toggle instrument
+  /// presses whenever the pre-read is not the wanted value, and an unreadable
+  /// pre-read is not the wanted value: gating here is what stops a press
+  /// against a control whose state nobody established.
+  private static func recordAndSet(
+    _ instruments: RegressInstruments, identifier: String, to desired: Bool
+  ) -> Result<Bool, SetupFailure> {
+    let before = instruments.axReading(identifier: identifier)
+    guard let text = before.presentText, text == "0" || text == "1" else {
+      return .failure(SetupFailure(
+        reason: "the General pane's \(identifier) switch read \(before.describedForDetail), so its state before the drive is unknown and pressing it would be pressing blind"
+      ))
+    }
+    guard instruments.axToggle(identifier: identifier, to: desired) else {
+      return .failure(SetupFailure(
+        reason: "\(identifier) could not be set to \(desired ? "1" : "0"): \(instruments.lastAXError ?? "no reason reported")"
+      ))
+    }
+    return .success(text == "1")
+  }
+
+  /// Puts the General switches back to what they read before a check drove
+  /// them, and says so in the record when it cannot.
+  ///
+  /// A failed restore downgrades a PASS to inconclusive. The check itself
+  /// measured what it measured, but the run then leaves the rig in a state
+  /// nobody recorded and every later check inherits it; printing that green
+  /// next to a rig it silently changed is the shape this command exists to
+  /// refuse.
+  /// Restored in the reverse of the order they were driven, so a pref whose
+  /// propagation depends on another's is put back under the same conditions it
+  /// was changed under.
+  private static func restore(
+    _ instruments: RegressInstruments, check: PlatformConformance.Check,
+    switches: [(identifier: String, initial: Bool)]
+  ) -> PlatformConformance.Check {
+    var notes: [String] = []
+    for entry in switches.reversed()
+    where !instruments.axToggle(identifier: entry.identifier, to: entry.initial) {
+      notes.append(
+        "teardown: \(entry.identifier) could not be put back to \(entry.initial ? "1" : "0"): \(instruments.lastAXError ?? "no reason reported")"
+      )
+    }
+    guard !notes.isEmpty else { return check }
+    return note(check, notes.joined(separator: "; "), downgradingPass: true)
+  }
+
+  /// Drives one General switch, recording what it was so the teardown can put
+  /// it back. On a miss the check is already finished: it reports inconclusive
+  /// naming the step, and the switches driven so far are restored.
+  ///
+  /// A setup miss is never the app's fault, which is why every one of these
+  /// lands as inconclusive rather than as a failure.
+  private static func stage(
+    _ instruments: RegressInstruments, name: String, identifier: String, to desired: Bool,
+    recording switches: inout [(identifier: String, initial: Bool)]
+  ) -> PlatformConformance.Check? {
+    switch recordAndSet(instruments, identifier: identifier, to: desired) {
+    case let .failure(setup):
+      return restore(
+        instruments,
+        check: plainCheck(name: name, outcome: .inconclusive("setup: \(setup.reason)")),
+        switches: switches)
+    case let .success(initial):
+      switches.append((identifier, initial))
+      return nil
+    }
+  }
+
+  /// The three General switches every combined-dimming check needs held, in
+  /// the order they are driven.
+  ///
+  /// - sync OFF: it fans the built-in's ambient hunting out to every external
+  ///   as DDC writes, and those would be read as the check's own.
+  /// - combined dimming ON: the floor these checks measure does not exist
+  ///   without it. Note the inversion at `combinedDimmingIdentifier`.
+  /// - a fully dark display OFF: the software leg is transformed onto
+  ///   `[0.15, 1]` with it off and onto `[0, 1]` with it on, which moves the
+  ///   floor gamma from 0.7875 to 0.7500 at the same stored brightness. The
+  ///   constants describe the first configuration, so the check establishes it
+  ///   rather than convicting the app of the operator's preference. Measured
+  ///   on the rig, where this pref was on.
+  private static func stageCombinedPreconditions(
+    _ instruments: RegressInstruments, name: String,
+    recording switches: inout [(identifier: String, initial: Bool)]
+  ) -> PlatformConformance.Check? {
+    for (identifier, desired) in [
+      (syncIdentifier, false), (combinedDimmingIdentifier, true), (allowZeroIdentifier, false),
+    ] {
+      if let refusal = stage(
+        instruments, name: name, identifier: identifier, to: desired, recording: &switches) {
+        return refusal
+      }
+    }
+    return nil
+  }
+
+  /// Appends a sentence to a check's detail, whichever outcome it carries.
+  /// `annotate` deliberately skips the two outcomes that carry a reason rather
+  /// than a measurement; a teardown note belongs on all four, because it is
+  /// about the rig and not about the reading.
+  private static func note(
+    _ check: PlatformConformance.Check, _ text: String, downgradingPass: Bool = false
+  ) -> PlatformConformance.Check {
+    let outcome: PlatformConformance.Outcome
+    switch check.outcome {
+    case let .pass(detail):
+      outcome = downgradingPass
+        ? .inconclusive(
+          "\(detail); \(text), so the rig is not in the state this record says it was left in")
+        : .pass("\(detail); \(text)")
+    case let .fail(detail): outcome = .fail("\(detail); \(text)")
+    case let .inconclusive(detail): outcome = .inconclusive("\(detail); \(text)")
+    case let .skip(detail): outcome = .skip("\(detail); \(text)")
+    }
+    return .init(name: check.name, outcome: outcome, control: check.control)
+  }
+
+  // MARK: Walking a panel onto a stored brightness
+
+  /// What one convergence drive did, measured rather than counted.
+  struct Convergence {
+    let arrived: Bool
+    let lastRead: Double?
+    let presses: Int
+    /// Every acknowledged DDC write in the drive's window. Not this panel's
+    /// alone: the write record names no display, so the check reads PRESENCE
+    /// out of this and never exclusivity.
+    let ddcValues: [UInt16]
+    /// Why it did not arrive, or why its window cannot be read.
+    let failure: String?
+  }
+
+  /// Walks a panel's stored brightness onto `target` with posted media keys,
+  /// re-reading the stored value after every press.
+  ///
+  /// By measurement, never by arithmetic. The key grid snaps a press onto the
+  /// nearest sixteenth rather than adding to where the panel was, and the sync
+  /// deadband clamp discards remainders, so counting presses describes a panel
+  /// that is not there.
+  ///
+  /// Two rules the loop is built around, both of them incidents:
+  ///
+  /// - **Re-aim before every press, not once per drive.** A brightness key
+  ///   goes to the display under the pointer, so an aim taken once is an
+  ///   assumption that nothing moved the pointer for the twenty seconds that
+  ///   follow. On the rig a drive was measured landing on the built-in
+  ///   instead, which walked THAT panel most of the way to black while the
+  ///   panel under test barely moved.
+  /// - **Stop when the panel stops moving.** Three presses with no change in
+  ///   the stored value means the keys are not reaching this display, and
+  ///   pressing on to the limit does not discover that, it just drives
+  ///   whatever IS receiving them further. The reason says so, so the record
+  ///   names the real fault rather than a count.
+  private static func converge(
+    instruments: RegressInstruments, display: Display, persistenceKey: String,
+    to target: Double, limit: Int
+  ) -> Convergence {
+    let key = "combinedBrightness.\(persistenceKey)"
+    let mark = instruments.posterFailureMark
+    let start = Date()
+    var presses = 0
+    var last: Double?
+    var stalled = 0
+    var arrived = false
+    var failure: String?
+
+    while true {
+      guard let text = instruments.defaultsRead(key), let value = Double(text) else {
+        failure = "the stored brightness \(key) did not answer after \(presses) posted keys"
+        break
+      }
+      if let previous = last, presses > 0 {
+        stalled = abs(previous - value) <= AppRegression.storedBrightnessTolerance ? stalled + 1 : 0
+      }
+      last = value
+      let step = AppRegression.convergenceStep(current: value, target: target)
+      if step == .arrived {
+        arrived = true
+        break
+      }
+      guard stalled < 3 else {
+        failure =
+          "\(display.name) did not move under 3 consecutive posted keys (it reads \(value), heading for \(target)): the keys are not reaching this display, so pressing on would only drive whichever display is receiving them"
+        break
+      }
+      guard presses < limit else {
+        failure =
+          "\(limit) posted keys did not walk the stored brightness onto \(target); it last read \(value)"
+        break
+      }
+      let name = step == .pressUp ? "brightnessUp" : "brightnessDown"
+      // Re-aimed every time: a key press is addressed by pointer position, and
+      // an aim taken once at the top of the drive is an aim nobody re-checked.
+      instruments.warpPointer(toCenterOf: display.id)
+      guard instruments.postMediaKey(name, count: 1) else {
+        failure =
+          "the media-key poster failed on press \(presses + 1): \(instruments.posterFailureSummary(since: mark) ?? "no reason reported")"
+        break
+      }
+      presses += 1
+      Thread.sleep(forTimeInterval: 0.8)
+    }
+
+    let window = instruments.logWindowAllowingForFlush(since: start)
+    if window.queryFailed {
+      return Convergence(
+        arrived: false, lastRead: last, presses: presses, ddcValues: [],
+        failure: "the drive window's log query failed: \(window.failureReason)")
+    }
+    return Convergence(
+      arrived: arrived, lastRead: last, presses: presses,
+      ddcValues: AppRegression.ddcWriteValues(fromLogLines: window.lines), failure: failure)
+  }
+
+  /// Walks the panel onto the floor point BY WAY OF the hardware zone, and
+  /// hands back the descent, whose window is where the floor write lives.
+  ///
+  /// The floor write exists only on a CROSSING [MEASURED]. Inside the software
+  /// zone every press computes the same DDC value the register already holds,
+  /// the coalescer drops the repeat, and the window carries no write at all.
+  /// A drive that started below the switching point would therefore produce a
+  /// floor gamma with no floor write beside it, and the checks whose positive
+  /// control is that write would report a healthy app as a dead drive path.
+  /// Going up first and coming down makes both the crossing and the write
+  /// unconditional, whatever the panel was at when the run began.
+  private static func convergeToFloorFromAbove(
+    instruments: RegressInstruments, display: Display, persistenceKey: String
+  ) -> Convergence {
+    let above = converge(
+      instruments: instruments, display: display, persistenceKey: persistenceKey,
+      to: AppRegression.combinedCrossoverBrightness, limit: 24)
+    guard above.arrived else { return above }
+    return converge(
+      instruments: instruments, display: display, persistenceKey: persistenceKey,
+      to: AppRegression.combinedFloorBrightness, limit: 24)
+  }
+
+  /// The floor gamma these checks assert is `swTransform(v / s)`, so it is a
+  /// reading of the panel's switching point as much as of its brightness. The
+  /// constants were measured at the default point (pref 0, s = 0.5); at any
+  /// other the same healthy app produces a different number, and asserting the
+  /// constant anyway would convict it of the operator's setting.
+  ///
+  /// Absent means default, so an unreadable key is the pass here, not a miss.
+  private static func switchingPointGate(
+    _ instruments: RegressInstruments, persistenceKey: String
+  ) -> String? {
+    let key = "combinedSwitchingPoint.\(persistenceKey)"
+    guard let text = instruments.defaultsRead(key) else { return nil }
+    guard text.trimmingCharacters(in: .whitespaces) != "0" else { return nil }
+    return "\(key) reads \(text) rather than the default 0; the floor gamma \(AppRegression.combinedFloorGamma) is that default's number, so this panel's software leg divides by a different switching point and the constant does not describe it"
+  }
+
+  /// The panel these constants belong to, plus its persistence key, or the
+  /// reason this run cannot ask the question of any attached display.
+  private static func magPanel(_ displays: [Display]) -> Result<(Display, String), SetupFailure> {
+    guard let mag = displays.first(where: { $0.name.contains(magNameFragment) }) else {
+      return .failure(SetupFailure(
+        reason: "no \(magNameFragment) panel is attached; the gamma floor and the DDC values asserted here were measured on that panel at stored brightness \(AppRegression.combinedFloorBrightness) and are not general numbers"
+      ))
+    }
+    guard let key = mag.persistenceKey else {
+      return .failure(SetupFailure(
+        reason: "\(mag.name) carries no persistence key, so its stored brightness cannot be read back"))
+    }
+    return .success((mag, key))
+  }
+
+  /// The gates every driven check shares: one instance, proven instruments,
+  /// and a settings window on the pane the switches live on.
+  private static func drivenGate(
+    name: String, instruments: RegressInstruments, preflight: Preflight, needsKeyDrive: Bool
+  ) -> PlatformConformance.Check? {
+    guard preflight.soleInstanceBound else {
+      return skippedCheck(
+        name: name,
+        reason: "unreachable without exactly one Candela running (see regress.app.running)")
+    }
+    if let missing = unprovenInstruments(preflight, needsKeyDrive: needsKeyDrive) {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: \(missing) did not pass, so nothing driven here could convict the app of anything"))
+    }
+    if let reason = generalPane(instruments) {
+      return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
+    }
+    return nil
+  }
+
+  // MARK: D28, the combined-dimming propagation
+
+  static func combinedDimmingCheck(
+    instruments: RegressInstruments, preflight: Preflight, displays: [Display]
+  ) -> PlatformConformance.Check {
+    let name = "regress.d28.combined"
+    let mag: Display
+    let key: String
+    switch magPanel(displays) {
+    case let .failure(setup): return skippedCheck(name: name, reason: setup.reason)
+    case let .success(panel): (mag, key) = panel
+    }
+    if let refusal = drivenGate(
+      name: name, instruments: instruments, preflight: preflight, needsKeyDrive: true) {
+      return refusal
+    }
+
+    var switches: [(identifier: String, initial: Bool)] = []
+    if let refusal = stageCombinedPreconditions(
+      instruments, name: name, recording: &switches) {
+      return refusal
+    }
+
+    let check = combinedDimmingDrive(instruments: instruments, mag: mag, persistenceKey: key)
+    return restore(instruments, check: check, switches: switches)
+  }
+
+  private static func combinedDimmingDrive(
+    instruments: RegressInstruments, mag: Display, persistenceKey: String
+  ) -> PlatformConformance.Check {
+    let name = "regress.d28.combined"
+    if let reason = switchingPointGate(instruments, persistenceKey: persistenceKey) {
+      return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
+    }
+    let floor = AppRegression.combinedFloorBrightness
+    let convergence = convergeToFloorFromAbove(
+      instruments: instruments, display: mag, persistenceKey: persistenceKey)
+    guard convergence.arrived else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: \(convergence.failure ?? "the stored brightness never reached \(floor)"); the panel is not at the point these constants describe, so nothing was judged"
+      ))
+    }
+    guard let gammaAtFloor = instruments.gammaTop(mag.id) else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: \(mag.name) answered no gamma table at the floor, so the software leg cannot be observed at all"
+      ))
+    }
+
+    let floorWriteSeen = convergence.ddcValues.contains(AppRegression.combinedFloorDDCValue)
+    let seen = convergence.ddcValues.map(String.init).joined(separator: ", ")
+    let control: Control = floorWriteSeen
+      ? .fired(
+        "\(convergence.presses) posted keys walked \(mag.name) down onto \(floor) from above the switching point and produced a DDC write of \(AppRegression.combinedFloorDDCValue)")
+      : .didNotFire(
+        "\(convergence.presses) posted keys walked \(mag.name) down onto \(floor) but no write in the window carried the floor value \(AppRegression.combinedFloorDDCValue) (values seen: \(seen.isEmpty ? "none" : seen)), so the key drive to this panel is unproven and the gamma readings mean nothing either way"
+      )
+
+    return controlledCheck(name: name, control: control) {
+      // 0 is combined dimming OFF: the identifier is the inverted on-disk key,
+      // the control's value is the positive accessor over it.
+      let offStart = Date()
+      guard instruments.axToggle(identifier: combinedDimmingIdentifier, to: false) else {
+        return .inconclusive(
+          "setup: combined dimming could not be turned off: \(instruments.lastAXError ?? "no reason reported")"
+        )
+      }
+      Thread.sleep(forTimeInterval: 2)
+      let offWindow = instruments.logWindowAllowingForFlush(since: offStart)
+      guard !offWindow.queryFailed else {
+        return .inconclusive(
+          "the window after combined dimming was turned off failed to read: \(offWindow.failureReason)"
+        )
+      }
+      guard let gammaAfterOff = instruments.gammaTop(mag.id) else {
+        return .inconclusive(
+          "\(mag.name) answered no gamma table after combined dimming was turned off")
+      }
+
+      let onStart = Date()
+      guard instruments.axToggle(identifier: combinedDimmingIdentifier, to: true) else {
+        return .inconclusive(
+          "setup: combined dimming could not be turned back on: \(instruments.lastAXError ?? "no reason reported")"
+        )
+      }
+      Thread.sleep(forTimeInterval: 2)
+      let onWindow = instruments.logWindowAllowingForFlush(since: onStart)
+      guard !onWindow.queryFailed else {
+        return .inconclusive(
+          "the window after combined dimming was turned back on failed to read: \(onWindow.failureReason)"
+        )
+      }
+      guard let gammaAfterOn = instruments.gammaTop(mag.id) else {
+        return .inconclusive(
+          "\(mag.name) answered no gamma table after combined dimming was turned back on")
+      }
+
+      return AppRegression.combinedToggleVerdict(
+        gammaAtFloor: gammaAtFloor, ddcFloorWriteSeen: floorWriteSeen,
+        gammaAfterOff: gammaAfterOff,
+        ddcValuesAfterOff: AppRegression.ddcWriteValues(fromLogLines: offWindow.lines),
+        gammaAfterOn: gammaAfterOn,
+        ddcValuesAfterOn: AppRegression.ddcWriteValues(fromLogLines: onWindow.lines),
+        storedBrightnessAfter: instruments
+          .defaultsRead("combinedBrightness.\(persistenceKey)").flatMap(Double.init)
+      )
+    }
+  }
+
+  // MARK: The crossover, above and below the switching point
+
+  static func crossoverCheck(
+    instruments: RegressInstruments, preflight: Preflight, displays: [Display]
+  ) -> PlatformConformance.Check {
+    let name = "regress.combined.crossover"
+    let mag: Display
+    let key: String
+    switch magPanel(displays) {
+    case let .failure(setup): return skippedCheck(name: name, reason: setup.reason)
+    case let .success(panel): (mag, key) = panel
+    }
+    if let refusal = drivenGate(
+      name: name, instruments: instruments, preflight: preflight, needsKeyDrive: true) {
+      return refusal
+    }
+
+    var switches: [(identifier: String, initial: Bool)] = []
+    if let refusal = stageCombinedPreconditions(
+      instruments, name: name, recording: &switches) {
+      return refusal
+    }
+
+    let check = crossoverDrive(instruments: instruments, mag: mag, persistenceKey: key)
+    return restore(instruments, check: check, switches: switches)
+  }
+
+  private static func crossoverDrive(
+    instruments: RegressInstruments, mag: Display, persistenceKey: String
+  ) -> PlatformConformance.Check {
+    let name = "regress.combined.crossover"
+    if let reason = switchingPointGate(instruments, persistenceKey: persistenceKey) {
+      return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
+    }
+    let floor = AppRegression.combinedFloorBrightness
+    let top = AppRegression.combinedCrossoverBrightness
+
+    // The starting point is measured, not inherited from the check before it.
+    let atFloor = convergeToFloorFromAbove(
+      instruments: instruments, display: mag, persistenceKey: persistenceKey)
+    guard atFloor.arrived else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: \(atFloor.failure ?? "the stored brightness never reached \(floor)"); this check starts from the floor and the panel is not on it"
+      ))
+    }
+    guard let gammaBefore = instruments.gammaTop(mag.id) else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: \(mag.name) answered no gamma table at the floor"))
+    }
+
+    // The control is the floor pair itself: a DDC write at the floor value and
+    // a scaled gamma together prove the keys reach this panel AND that combined
+    // dimming is actually in effect, which is what makes the release above the
+    // switching point mean anything.
+    let floorWriteSeen = atFloor.ddcValues.contains(AppRegression.combinedFloorDDCValue)
+    let floorGammaHolds =
+      abs(gammaBefore - AppRegression.combinedFloorGamma) <= AppRegression.combinedGammaTolerance
+    let control: Control = floorWriteSeen && floorGammaHolds
+      ? .fired(
+        "the panel starts on the floor pair: gamma \(formatted(gammaBefore)) with a DDC write of \(AppRegression.combinedFloorDDCValue) at stored \(floor)")
+      : .didNotFire(
+        "the panel did not start on the floor pair (gamma reads \(formatted(gammaBefore)), expected \(formatted(AppRegression.combinedFloorGamma)); a floor DDC write was \(floorWriteSeen ? "seen" : "not seen")), so combined dimming was not observably in effect below the switching point and its release above one proves nothing"
+      )
+
+    return controlledCheck(name: name, control: control) {
+      let up = converge(
+        instruments: instruments, display: mag, persistenceKey: persistenceKey, to: top, limit: 12)
+      guard up.arrived else {
+        return .inconclusive(
+          "the drive up to \(top) did not arrive: \(up.failure ?? "the stored brightness never reached it")"
+        )
+      }
+      guard let gammaAtTop = instruments.gammaTop(mag.id) else {
+        return .inconclusive("\(mag.name) answered no gamma table at \(top)")
+      }
+      let down = converge(
+        instruments: instruments, display: mag, persistenceKey: persistenceKey, to: floor,
+        limit: 12)
+      guard down.arrived else {
+        return .inconclusive(
+          "the drive back down to \(floor) did not arrive: \(down.failure ?? "the stored brightness never reached it")"
+        )
+      }
+      guard let gammaBack = instruments.gammaTop(mag.id) else {
+        return .inconclusive("\(mag.name) answered no gamma table back at \(floor)")
+      }
+      return AppRegression.combinedCrossoverVerdict(
+        upWriteValues: up.ddcValues, gammaAtTop: gammaAtTop,
+        downWriteValues: down.ddcValues, gammaBackAtFloor: gammaBack)
+    }
+  }
+
+  // MARK: The sync fan-out
+
+  static func fanOutCheck(
+    instruments: RegressInstruments, preflight: Preflight, displays: [Display]
+  ) -> PlatformConformance.Check {
+    let name = "regress.sync.fanout"
+    guard let builtIn = displays.first(where: \.isBuiltIn) else {
+      return skippedCheck(
+        name: name,
+        reason: "no built-in panel is attached, so there is no display with a native brightness path to move as the sync source")
+    }
+    guard displays.contains(where: { $0.persistenceKey != nil && !$0.isBuiltIn }) else {
+      return skippedCheck(
+        name: name,
+        reason: "no DDC-capable external display is attached, so a fan-out has nowhere to land")
+    }
+    if let refusal = drivenGate(
+      name: name, instruments: instruments, preflight: preflight, needsKeyDrive: false) {
+      return refusal
+    }
+
+    // The pre-window control, read BEFORE sync is touched: the built-in's
+    // ambient sensor fans out continuously when the room light moves, and those
+    // lines would be read as the ones this check drove. Thirty seconds of
+    // silence is what makes the drive window attributable.
+    let preWindow = instruments.logWindow(since: Date().addingTimeInterval(-30))
+    guard !preWindow.queryFailed else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: the pre-window log query failed, so its silence is the query's and not the app's: \(preWindow.failureReason)"
+      ))
+    }
+    let preFanOuts = AppRegression.fanOutSources(fromLogLines: preWindow.lines).count
+
+    var switches: [(identifier: String, initial: Bool)] = []
+    if let refusal = stage(
+      instruments, name: name, identifier: syncIdentifier, to: true, recording: &switches) {
+      return refusal
+    }
+
+    let driven = fanOutDrive(
+      instruments: instruments, builtIn: builtIn, preWindowFanOuts: preFanOuts)
+    // Sync goes back to what it was before the panel is walked home, so the
+    // teardown's own keys cannot fan out to anything.
+    var check = restore(instruments, check: driven, switches: switches)
+
+    // Leave the rig where the next check expects to find it. By measurement:
+    // the deadband clamp discards remainders, so the fan-out's arrival on this
+    // panel is not the arithmetic the source moved by.
+    if case let .success(panel) = magPanel(displays) {
+      let home = converge(
+        instruments: instruments, display: panel.0, persistenceKey: panel.1,
+        to: AppRegression.combinedFloorBrightness, limit: 24)
+      if !home.arrived {
+        check = note(
+          check,
+          "teardown: \(panel.0.name) was not walked back to \(AppRegression.combinedFloorBrightness): \(home.failure ?? "the stored brightness never reached it")",
+          downgradingPass: true)
+      }
+    }
+    return check
+  }
+
+  private static func fanOutDrive(
+    instruments: RegressInstruments, builtIn: Display, preWindowFanOuts: Int
+  ) -> PlatformConformance.Check {
+    let name = "regress.sync.fanout"
+    guard let before = instruments.nativeBrightness(builtIn.id) else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: the built-in's native brightness did not answer, so the sync source can neither be moved nor put back"
+      ))
+    }
+
+    // One key step, comfortably past the 0.03 deadband from any residual and
+    // small enough that no external lands anywhere near its floor. Away from
+    // whichever end the panel is nearer: a step DOWN from a panel already at
+    // the bottom clamps to where it already was, and a source that did not
+    // move cannot be fanned out.
+    let target = before >= keyGridStep ? before - keyGridStep : min(1, before + keyGridStep)
+    let start = Date()
+    instruments.setNativeBrightness(target, for: builtIn.id)
+    Thread.sleep(forTimeInterval: 2)
+    let observed = instruments.nativeBrightness(builtIn.id)
+
+    // The control is the source having actually MOVED, read back rather than
+    // inferred from the setter's return, and moved far enough to leave the
+    // deadband. Both halves are needed: a write that returned success and
+    // achieved nothing is this project's most repeated defect, and a move
+    // smaller than the band is one sync is designed to swallow. Either would
+    // otherwise present as the app failing to fan out.
+    let control: Control
+    let landed = observed.map { abs($0 - target) <= 0.01 } ?? false
+    let cleared = observed.map { abs($0 - before) >= SyncDeadband.threshold } ?? false
+    if let observed, landed, cleared {
+      control = .fired(
+        "the built-in moved from \(formatted(before)) to \(formatted(observed)), past the \(SyncDeadband.threshold) deadband and confirmed by a read back rather than by the write's own return"
+      )
+    } else {
+      control = .didNotFire(
+        "the built-in was written \(formatted(target)) and reads back \(observed.map(formatted) ?? "nothing") against \(formatted(before)) before it: the source \(landed ? "did not clear the \(SyncDeadband.threshold) deadband" : "never moved"), so an absent fan-out would say nothing about sync"
+      )
+    }
+
+    var check = controlledCheck(name: name, control: control) {
+      let window = instruments.logWindowAllowingForFlush(since: start)
+      guard !window.queryFailed else {
+        return .inconclusive("the drive window's log query failed: \(window.failureReason)")
+      }
+      let fromBuiltIn = AppRegression.fanOutSources(fromLogLines: window.lines)
+        .count { $0 == builtIn.id }
+      return AppRegression.fanOutVerdict(
+        preWindowFanOuts: preWindowFanOuts,
+        fanOutLinesFromSource: fromBuiltIn,
+        ddcWrites: AppRegression.ddcWriteValues(fromLogLines: window.lines).count)
+    }
+
+    // The source goes back whatever the verdict was, and the restore is read
+    // back too rather than assumed.
+    instruments.setNativeBrightness(before, for: builtIn.id)
+    Thread.sleep(forTimeInterval: 1.5)
+    let restored = instruments.nativeBrightness(builtIn.id)
+    if restored == nil || abs(restored! - before) > 0.01 {
+      check = note(
+        check,
+        "teardown: the built-in was written back to \(formatted(before)) and reads \(restored.map(formatted) ?? "nothing")",
+        downgradingPass: true)
+    }
+    return check
+  }
+
+  private static func formatted(_ value: Double) -> String {
+    String(format: "%.4f", value)
+  }
+
   static func isPass(_ outcome: PlatformConformance.Outcome) -> Bool {
     if case .pass = outcome { return true }
     return false
@@ -500,6 +1247,17 @@ final class RegressInstruments {
   /// Every poster failure so far on one line, or nil when every post worked.
   var posterFailureSummary: String? {
     posterFailures.isEmpty ? nil : posterFailures.joined(separator: "; ")
+  }
+
+  /// A cursor into `posterFailures`, taken before a check's own drives begin.
+  /// The array is never cleared, so a check that reported the whole of it
+  /// would attribute an earlier check's failure to itself, which is a reason
+  /// that names the wrong drive.
+  var posterFailureMark: Int { posterFailures.count }
+
+  func posterFailureSummary(since mark: Int) -> String? {
+    let own = posterFailures.dropFirst(mark)
+    return own.isEmpty ? nil : own.joined(separator: "; ")
   }
 
   init(toolsDir: String) {
@@ -610,6 +1368,24 @@ final class RegressInstruments {
     )
   }
 
+  /// A window read that gives the log store a second chance before an empty
+  /// result is believed.
+  ///
+  /// `log show` reads the PERSISTED store, and persistence is not instant: a
+  /// window read a couple of seconds after a write has been measured on this
+  /// rig coming back without it, where the same query moments later carried it.
+  /// Re-reading once when the first result has no DDC write in it can only
+  /// turn a false empty into a true reading, never the other way: if there
+  /// really was no write, both reads agree and the extra wait costs seconds.
+  func logWindowAllowingForFlush(since: Date) -> LogWindow {
+    let first = logWindow(since: since)
+    guard !first.queryFailed,
+          AppRegression.ddcWriteValues(fromLogLines: first.lines).isEmpty
+    else { return first }
+    Thread.sleep(forTimeInterval: 2)
+    return logWindow(since: since)
+  }
+
   // MARK: Gamma
 
   /// The top of the red ramp. 1.0000 means the software dimming leg has
@@ -697,6 +1473,23 @@ final class RegressInstruments {
     let bounds = CGDisplayBounds(id)
     CGWarpMouseCursorPosition(CGPoint(x: bounds.midX, y: bounds.midY))
     CGAssociateMouseAndMouseCursorPosition(1)
+  }
+
+  // MARK: The built-in's native brightness
+
+  /// The fan-out check needs to move a display WITHOUT going through the app,
+  /// so the app has something to observe and replicate. DisplayServices is the
+  /// same private path the app's own native leg uses, and the built-in is the
+  /// only panel here that has one.
+  func nativeBrightness(_ id: CGDirectDisplayID) -> Double? {
+    DisplayServices.getBrightness(for: id).map(Double.init)
+  }
+
+  /// The return is the call's own status and says nothing about the achieved
+  /// state; every caller here reads the value back afterwards.
+  @discardableResult
+  func setNativeBrightness(_ value: Double, for id: CGDirectDisplayID) -> Bool {
+    DisplayServices.setBrightness(Float(value), for: id)
   }
 
   // MARK: The app process
@@ -880,17 +1673,44 @@ final class RegressInstruments {
     settingsWindow().flatMap { read($0, kAXTitleAttribute as String).presentText }
   }
 
-  /// `open -b` reaches the reopen handler on a RUNNING app, which is what
-  /// opens the settings scene. The window is then polled for rather than
-  /// assumed: the call returns long before the scene exists. The bound is a
-  /// real ten seconds, measured off a deadline rather than counted in sleeps,
-  /// because the per-poll cost is not a constant.
+  /// Where LaunchServices resolves `com.rydersel.Candela` to. A running
+  /// instance outside this path is a build LaunchServices does not know about,
+  /// which is what makes `open -b` dangerous rather than merely useless.
+  private static let registeredBundlePath = "/Applications/Candela.app/"
+
+  /// Binds the settings window, opening it only when there is not one already.
+  ///
+  /// Three rules, each of them a failure measured live on the rig:
+  ///
+  /// - **Bind first, open second.** A call that opens before it looks re-issues
+  ///   an activation against a window that is already there, which raises and
+  ///   re-lays-out the window under a walk that is about to read it.
+  /// - **Issue the open ONCE, then poll.** An `open` per poll iteration is a
+  ///   LaunchServices relaunch storm; the ten-second bound is measured off a
+  ///   deadline rather than counted in sleeps, because the per-poll cost is not
+  ///   a constant.
+  /// - **Never `open -b` when the running instance is not the registered
+  ///   copy.** LaunchServices resolves the bundle identifier to /Applications
+  ///   and launches a SECOND instance from there rather than reaching the one
+  ///   that is running, which the multi-instance gate then refuses: the run
+  ///   ends having measured nothing and changed the rig. There is no way to
+  ///   open that instance's settings window from here, so this says so and
+  ///   fails rather than spawning a sibling.
   func openSettingsWindow() -> Bool {
+    if settingsWindow() != nil { return true }
+    guard let instance = soleRunningInstance() else { return false }
+    guard instance.path.hasPrefix(Self.registeredBundlePath) else {
+      lastAXError = "the running Candela is \(instance.described), not the registered copy at \(Self.registeredBundlePath), and it has no settings window open. Opening by bundle identifier would launch a SECOND instance from /Applications rather than reach this one, so nothing here can open it: open Settings in that instance by hand, or relaunch it with CANDELA_DEBUG_SETTINGS=pane:general"
+      return false
+    }
+    // `open -b` reaches the reopen handler on a RUNNING app, which is what
+    // opens the settings scene. The window is polled for rather than assumed:
+    // the call returns long before the scene exists.
     Self.execute("/usr/bin/open", ["-b", "com.rydersel.Candela"])
     let deadline = Date().addingTimeInterval(10)
     repeat {
-      if settingsWindow() != nil { return true }
       Thread.sleep(forTimeInterval: 0.25)
+      if settingsWindow() != nil { return true }
     } while Date() < deadline
     return false
   }
@@ -982,6 +1802,19 @@ final class RegressInstruments {
   func axRead(identifier: String) -> String? {
     guard let element = element(carrying: identifier) else { return nil }
     return read(element, kAXValueAttribute as String).presentText
+  }
+
+  /// The same read, three-state. `axRead` collapses absent, empty and
+  /// unreadable into one nil, which is the right shape for "what does this
+  /// control say" and the wrong shape for "may I press it": a drive gated on
+  /// nil-ness presses a control whose state before the press was never
+  /// established, and the readback afterwards then has nothing to be a change
+  /// FROM.
+  func axReading(identifier: String) -> Reading {
+    guard let element = element(carrying: identifier) else {
+      return .unreadable(lastAXError ?? "the control could not be located")
+    }
+    return read(element, kAXValueAttribute as String)
   }
 
   /// Sets a checkbox or switch, then READS IT BACK. A toggle that silently

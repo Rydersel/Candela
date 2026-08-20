@@ -31,8 +31,25 @@ public enum AppRegression {
   /// enough to reject the failure this check exists for (a gamma that never
   /// releases sits 0.2125 away).
   public static let combinedGammaTolerance = 0.0005
+  /// Released gamma is the identity table's exact 1.0 rather than a computed
+  /// scale, so it is held to a tighter tolerance than the floor: a leg that
+  /// released ALMOST all the way is a leg that did not release.
+  public static let combinedReleasedGammaTolerance = 0.0001
   public static let combinedFloorDDCValue: UInt16 = 0
   public static let combinedReleasedDDCValue: UInt16 = 37
+
+  /// The stored brightness the floor numbers above were measured at, and the
+  /// point every driven check converges the panel to before and after it runs,
+  /// so each check's precondition is the previous check's end state.
+  public static let combinedFloorBrightness = 0.375
+  /// Six key steps above the floor point, and above the switching point, where
+  /// the DDC leg carries the whole value on its own.
+  public static let combinedCrossoverBrightness = 0.75
+  /// A stored brightness is written out as text and read back through
+  /// `defaults`, so it is compared within a tolerance rather than by equality.
+  /// Far below the 1/16 key grid, so two adjacent grid points can never both
+  /// count as arrived.
+  public static let storedBrightnessTolerance = 0.0005
 
   // MARK: - The log window's own control
 
@@ -60,14 +77,25 @@ public enum AppRegression {
   /// while converging to the floor, the drive path (key post, event tap,
   /// transport, log query) is unproven and the gamma numbers are just two
   /// readings of an unknown state.
+  /// The DDC halves take every value the window carried rather than one
+  /// value. The write record names no display, so a window tight enough to
+  /// catch this panel's write catches whatever another panel re-applied in the
+  /// same moment; the assertion is that the expected value is PRESENT, never
+  /// that it is the only one there.
   public static func combinedToggleVerdict(
     gammaAtFloor: Double, ddcFloorWriteSeen: Bool,
-    gammaAfterOff: Double, ddcValueAfterOff: UInt16?,
-    gammaAfterOn: Double, ddcValueAfterOn: UInt16?
+    gammaAfterOff: Double, ddcValuesAfterOff: [UInt16],
+    gammaAfterOn: Double, ddcValuesAfterOn: [UInt16],
+    storedBrightnessAfter: Double?
   ) -> PlatformConformance.Outcome {
     guard ddcFloorWriteSeen else {
       return .inconclusive(
         "no DDC write was observed while converging to the floor, so the drive path is unproven and the gamma readings mean nothing either way"
+      )
+    }
+    guard let storedBrightnessAfter else {
+      return .inconclusive(
+        "the panel's stored brightness did not answer after the toggle cycle, so what the two gamma readings were readings OF was never established"
       )
     }
 
@@ -76,37 +104,119 @@ public enum AppRegression {
       failures.append(
         "gamma at the floor reads \(rounded(gammaAtFloor)), expected \(rounded(combinedFloorGamma))")
     }
-    if !within(gammaAfterOff, combinedReleasedGamma) {
+    if !within(gammaAfterOff, combinedReleasedGamma, tolerance: combinedReleasedGammaTolerance) {
       failures.append(
         "combined dimming off left gamma at \(rounded(gammaAfterOff)), expected \(rounded(combinedReleasedGamma)): the software leg did not release"
       )
     }
     failures += ddcFailure(
-      ddcValueAfterOff, expected: combinedReleasedDDCValue, when: "combined dimming was turned off")
+      ddcValuesAfterOff, expected: combinedReleasedDDCValue,
+      when: "combined dimming was turned off")
     if !within(gammaAfterOn, combinedFloorGamma) {
       failures.append(
         "combined dimming back on left gamma at \(rounded(gammaAfterOn)), expected \(rounded(combinedFloorGamma)): the floor did not come back"
       )
     }
     failures += ddcFailure(
-      ddcValueAfterOn, expected: combinedFloorDDCValue, when: "combined dimming was turned back on")
+      ddcValuesAfterOn, expected: combinedFloorDDCValue,
+      when: "combined dimming was turned back on")
+    if abs(storedBrightnessAfter - combinedFloorBrightness) > storedBrightnessTolerance {
+      failures.append(
+        "the stored brightness reads \(storedBrightnessAfter) after the toggle cycle, expected \(combinedFloorBrightness): the toggle governs how a value is applied and must not move the value itself"
+      )
+    }
 
     guard failures.isEmpty else { return .fail(failures.joined(separator: "; ")) }
     return .pass(
-      "combined dimming propagates both ways: gamma \(rounded(gammaAtFloor)) with a DDC floor write, \(rounded(gammaAfterOff)) with DDC \(combinedReleasedDDCValue) released, \(rounded(gammaAfterOn)) with DDC \(combinedFloorDDCValue) restored"
+      "combined dimming propagates both ways at stored brightness \(combinedFloorBrightness): gamma \(rounded(gammaAtFloor)) with a DDC floor write, \(rounded(gammaAfterOff)) with DDC \(combinedReleasedDDCValue) released, \(rounded(gammaAfterOn)) with DDC \(combinedFloorDDCValue) restored"
     )
   }
 
   private static func ddcFailure(
-    _ value: UInt16?, expected: UInt16, when: String
+    _ values: [UInt16], expected: UInt16, when: String
   ) -> [String] {
-    guard let value else {
+    guard !values.isEmpty else {
       return [
         "no DDC write reached the panel after \(when): that is the propagation failure this check exists to catch"
       ]
     }
-    guard value != expected else { return [] }
-    return ["the DDC write after \(when) carried \(value), expected \(expected)"]
+    guard !values.contains(expected) else { return [] }
+    return [
+      "the DDC writes after \(when) carried \(list(values)), none of them the expected \(expected)"
+    ]
+  }
+
+  // MARK: - The crossover, above and below the switching point
+
+  /// Above the switching point the DDC leg carries the whole value on its own:
+  /// the software leg releases (gamma back to the identity table) and the
+  /// register takes a value above its floor. Stepping back down restores the
+  /// floor pair.
+  ///
+  /// A drive window with no writes at all is the dead-drive case and reports
+  /// inconclusive: it says nothing about where the DDC leg picks up, only that
+  /// nothing reached the panel. A window full of floor writes is the real
+  /// failure, and the two are told apart here rather than merged.
+  public static func combinedCrossoverVerdict(
+    upWriteValues: [UInt16], gammaAtTop: Double,
+    downWriteValues: [UInt16], gammaBackAtFloor: Double
+  ) -> PlatformConformance.Outcome {
+    guard !upWriteValues.isEmpty else {
+      return .inconclusive(
+        "the drive up to \(combinedCrossoverBrightness) carried no DDC writes at all, so the key drive never reached the app and nothing above the switching point was measured"
+      )
+    }
+    guard !downWriteValues.isEmpty else {
+      return .inconclusive(
+        "the drive back down to \(combinedFloorBrightness) carried no DDC writes at all, so the return leg was never measured"
+      )
+    }
+
+    var failures: [String] = []
+    if !upWriteValues.contains(where: { $0 > combinedFloorDDCValue }) {
+      failures.append(
+        "every DDC write on the way up to \(combinedCrossoverBrightness) carried \(combinedFloorDDCValue) (\(list(upWriteValues))): above the switching point the DDC leg carries the whole value, so the register never left its floor"
+      )
+    }
+    if !within(gammaAtTop, combinedReleasedGamma, tolerance: combinedReleasedGammaTolerance) {
+      failures.append(
+        "gamma at \(combinedCrossoverBrightness) reads \(rounded(gammaAtTop)), expected \(rounded(combinedReleasedGamma)): the software leg is still scaling above the switching point"
+      )
+    }
+    if !downWriteValues.contains(combinedFloorDDCValue) {
+      failures.append(
+        "the drive back down to \(combinedFloorBrightness) carried \(list(downWriteValues)) and never the floor value \(combinedFloorDDCValue)"
+      )
+    }
+    if !within(gammaBackAtFloor, combinedFloorGamma) {
+      failures.append(
+        "gamma back at \(combinedFloorBrightness) reads \(rounded(gammaBackAtFloor)), expected \(rounded(combinedFloorGamma)): the software floor did not come back"
+      )
+    }
+
+    guard failures.isEmpty else { return .fail(failures.joined(separator: "; ")) }
+    return .pass(
+      "the crossover holds both ways: at \(combinedCrossoverBrightness) gamma reads \(rounded(gammaAtTop)) with the DDC register above its floor, and back at \(combinedFloorBrightness) gamma reads \(rounded(gammaBackAtFloor)) with a floor write"
+    )
+  }
+
+  // MARK: - Walking the key grid onto a target
+
+  /// Which media key moves a panel's stored brightness towards a target, or
+  /// that it is already there.
+  public enum ConvergenceStep: Sendable, Equatable {
+    case pressUp
+    case pressDown
+    case arrived
+  }
+
+  /// Stated here rather than in the driver so the arrival tolerance is
+  /// red-tested: a bare equality against a value that made a round trip
+  /// through `defaults` never arrives, and a drive loop that never arrives
+  /// reports a working app as inconclusive.
+  public static func convergenceStep(current: Double, target: Double) -> ConvergenceStep {
+    guard abs(current - target) > storedBrightnessTolerance else { return .arrived }
+    return current < target ? .pressUp : .pressDown
   }
 
   // MARK: - The sync fan-out
@@ -273,13 +383,34 @@ public enum AppRegression {
     }
   }
 
+  /// The source display of every `sync fan-out` record in a window.
+  ///
+  /// The whole digit run is parsed and handed back as a number, so the caller
+  /// compares by VALUE: `from=1` and `from=10` differ by one character, and a
+  /// substring match would count another display's fan-out as the built-in's,
+  /// turning a contaminated window into a pass.
+  public static func fanOutSources(fromLogLines lines: [String]) -> [UInt32] {
+    lines.compactMap { line in
+      guard let marker = line.range(of: "sync fan-out ") else { return nil }
+      let tail = line[marker.upperBound...]
+      guard let from = tail.range(of: "from=") else { return nil }
+      return UInt32(tail[from.upperBound...].prefix { $0.isNumber })
+    }
+  }
+
   // MARK: - Helpers
 
-  private static func within(_ measured: Double, _ expected: Double) -> Bool {
-    abs(measured - expected) <= combinedGammaTolerance
+  private static func within(
+    _ measured: Double, _ expected: Double, tolerance: Double = combinedGammaTolerance
+  ) -> Bool {
+    abs(measured - expected) <= tolerance
   }
 
   private static func rounded(_ value: Double) -> String {
     String(format: "%.4f", value)
+  }
+
+  private static func list(_ values: [UInt16]) -> String {
+    values.map(String.init).joined(separator: ", ")
   }
 }

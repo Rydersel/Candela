@@ -5,7 +5,7 @@ import AppKit
 // app is frontmost, so this reaches the app even though the terminal has focus
 // and a plain `keystroke` would not.
 //
-// usage: swift mediakey.swift <brightnessUp|brightnessDown|volUp|volDown> [count]
+// usage: swift mediakey.swift <brightnessUp|brightnessDown|mute|volUp|volDown> [count]
 //                             [--cmd] [--opt] [--ctrl] [--shift]
 //
 // The modifier flags exist for the routes only reachable WITH one:
@@ -23,6 +23,9 @@ let NX_KEYTYPE_SOUND_UP: Int32 = 0
 let NX_KEYTYPE_SOUND_DOWN: Int32 = 1
 let NX_KEYTYPE_BRIGHTNESS_UP: Int32 = 2
 let NX_KEYTYPE_BRIGHTNESS_DOWN: Int32 = 3
+// The mute key toggles rather than sets, so a check that drives it reads the
+// achieved state back instead of counting presses.
+let NX_KEYTYPE_MUTE: Int32 = 7
 
 let modifierNames: [String: NSEvent.ModifierFlags] = [
   "--cmd": .command, "--opt": .option, "--ctrl": .control, "--shift": .shift,
@@ -62,6 +65,7 @@ let names: [String: Int32] = [
   "brightnessDown": NX_KEYTYPE_BRIGHTNESS_DOWN,
   "volUp": NX_KEYTYPE_SOUND_UP,
   "volDown": NX_KEYTYPE_SOUND_DOWN,
+  "mute": NX_KEYTYPE_MUTE,
 ]
 
 let args = CommandLine.arguments
