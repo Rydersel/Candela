@@ -31,33 +31,33 @@ struct OledModelComparisonSection: View {
             SettingsCaption("A temporary instrument: it exists to judge the estimate during the current soak, and it is removed once that verdict is recorded.")
             LabeledContent("Paired readings") {
               Text(verbatim: pairedReadingsLine(comparison))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(SettingsTheme.bodyColor)
             }
             if let last = comparison.lastPair {
               LabeledContent("Last pair") {
                 Text(verbatim: Self.relativePhrase(last))
-                  .foregroundStyle(.secondary)
+                  .foregroundStyle(SettingsTheme.bodyColor)
               }
             }
             if let stats = comparison.statistics() {
               LabeledContent("Correlation") {
                 Text(verbatim: String(format: "%.2f", stats.pearson))
-                  .foregroundStyle(.secondary)
+                  .foregroundStyle(SettingsTheme.bodyColor)
               }
               LabeledContent("Rank agreement") {
                 Text(verbatim: String(format: "%.2f", stats.spearmanRank))
-                  .foregroundStyle(.secondary)
+                  .foregroundStyle(SettingsTheme.bodyColor)
               }
               LabeledContent("Hottest regions in common") {
                 Text(verbatim: Self.overlapPhrase(stats.hottestDecileOverlap))
-                  .foregroundStyle(.secondary)
+                  .foregroundStyle(SettingsTheme.bodyColor)
               }
               if let measured = PanelHealthCopy.multiple(stats.measuredHottestMultiple),
                 let modelled = PanelHealthCopy.multiple(stats.modelledHottestMultiple)
               {
                 LabeledContent("Hottest region") {
                   Text(verbatim: "measured \(measured), estimated \(modelled)")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SettingsTheme.bodyColor)
                 }
               }
             } else if comparison.pairCount > 0 {
