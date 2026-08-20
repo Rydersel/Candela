@@ -157,7 +157,8 @@ final class OnboardingFlowModel {
   /// simulated countdown with the shipped semantics. Live wiring replaces
   /// all three closures with the shipped mode-apply path and answers its
   /// preview directly, because the shipped banner's answering surface is
-  /// fixed at preview start and renders in the settings window, never here.
+  /// fixed at preview start and never this window, so the Setup window
+  /// renders its own (DM11).
   var onApplySize: (_ displayKey: String, _ looksLikeWidth: Int, _ looksLikeHeight: Int) -> Void
   var onKeepSize: () -> Void
   var onRevertSize: () -> Void
@@ -318,9 +319,12 @@ final class OnboardingFlowModel {
       .filter { $0.enrolledInCare && !deselectedOleds.contains($0.persistenceKey) }
       .map(\.persistenceKey)
     // Protection is seeded on only for a key the user has not declined. Both
-    // decisions outlive a departure, so a display that leaves and comes back
-    // returns the way the user left it: designated with protection on if they
-    // never touched it, still off if they turned it off.
+    // decisions outlive a departure, so an ENROLLED display that leaves and
+    // comes back returns the way the user left it: designated with protection
+    // on if they never touched it, still off if they turned it off.
+    // A display designated by the name guess alone is not covered: the filter
+    // above takes enrolled displays only, so that designation is not re-seeded
+    // and the display drops off the care page when it returns.
     careEnabled.formUnion(seeded.filter { !declinedCare.contains($0) })
     // A departure is not a decision, so the keys dropped here are subtracted
     // from `deselectedOleds` afterwards; without that the didSet would record
