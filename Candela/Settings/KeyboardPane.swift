@@ -48,10 +48,15 @@ struct KeyboardPane: View {
     // like it snapped back.
     let _ = model.prefsRevision
     SettingsPageScaffold {
+      // "Set to take" rather than "handled here": lit-ness is
+      // `KeyModePolicy.watchesMediaKeys` and knows nothing about the
+      // Accessibility grant, so a subtitle claiming achieved reach would be
+      // refuted by the warning card one line below it whenever the grant is
+      // missing. This wording is true in both grant states.
       SettingsPageHeader(
         title: "Keyboard",
         subtitle:
-          "Which keys \(AppInfo.productName) handles, and which display they reach. Lit keys are handled here; grey ones go straight to macOS."
+          "Which keys \(AppInfo.productName) takes, and which display they reach. Lit keys are the ones it is set to take; grey ones go straight to macOS."
       )
       accessibilitySection
       heroSection
