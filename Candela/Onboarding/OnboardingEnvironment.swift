@@ -39,6 +39,8 @@ struct OnboardingDisplayEntry: Equatable, Sendable, Identifiable {
   var diagonalInches: Double?
   var currentLooksLikeWidth: Int
   var currentLooksLikeHeight: Int
+  /// The FASTEST rate the display offers, not the one it is running: the
+  /// detection card reads it as a capability.
   var refreshHz: Double
   var volume: VolumeSupport
   /// The recommendation, already filtered upstream: nil when the engine

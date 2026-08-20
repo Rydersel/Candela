@@ -43,7 +43,8 @@ struct OnboardingLiveEnvironmentTests {
     rotation: Int? = 0,
     physicalCm: (Int, Int)? = (60, 34),
     looksLike: (Int, Int) = (3840, 2160),
-    refreshHz: Double = 60,
+    offeredRefreshRates: [Double] = [60],
+    currentRefreshHz: Double = 60,
     volume: VCPSupport? = nil,
     recommendation: SizeRecommendation? = nil,
     curatedRows: [DisplayModeRow] = [],
@@ -63,7 +64,8 @@ struct OnboardingLiveEnvironmentTests {
       physicalHeightCm: physicalCm?.1,
       currentLooksLikeWidth: looksLike.0,
       currentLooksLikeHeight: looksLike.1,
-      refreshHz: refreshHz,
+      offeredRefreshRates: offeredRefreshRates,
+      currentRefreshHz: currentRefreshHz,
       volumeSupport: volume,
       recommendation: recommendation,
       curatedRows: curatedRows,
@@ -344,12 +346,19 @@ struct OnboardingLiveEnvironmentTests {
     #expect(environment.displays.isEmpty)
   }
 
-  @Test func enrollmentAndRefreshRateArriveUnchanged() {
+  @Test func theEntryCarriesTheFastestOfferedRateNotTheRunningOne() {
+    // The MAG's ladder, sampled while the panel sits at 100 Hz. The card says
+    // "Up to N Hz", so the ceiling is the answer; the noise on 143.9998 is what
+    // the quantizer is there for.
     let entry = OnboardingEnvironmentBuilder.entry(for: Self.input(
-      refreshHz: 175, enrolled: true))
+      offeredRefreshRates: [60, 100, 143.9998, 175], currentRefreshHz: 100, enrolled: true))
 
     #expect(entry.refreshHz == 175)
     #expect(entry.enrolledInCare)
+
+    // Nothing enumerated yet: the running rate is all there is to say.
+    #expect(OnboardingEnvironmentBuilder.entry(for: Self.input(
+      offeredRefreshRates: [], currentRefreshHz: 120)).refreshHz == 120)
   }
 
   @Test func theTelemetryPrefArrivesOnTheEntry() {

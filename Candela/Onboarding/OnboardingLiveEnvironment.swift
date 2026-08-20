@@ -32,7 +32,14 @@ struct OnboardingDisplayInput {
   /// a rotated display, so this one is never un-rotated.
   var currentLooksLikeWidth: Int
   var currentLooksLikeHeight: Int
-  var refreshHz: Double
+  /// Every rate the display's published modes offer, in any order and at any
+  /// size. The card states a CAPABILITY ("Up to N Hz"), so the entry carries
+  /// the panel's ceiling rather than whatever it happens to be running: the MAG
+  /// sitting at 100 Hz is still a 175 Hz panel.
+  var offeredRefreshRates: [Double]
+  /// The rate on the glass. Only a fallback here, for a display nothing has
+  /// enumerated yet.
+  var currentRefreshHz: Double
   /// The stored D24 verdict. nil for an ABSENT entry, meaning the capabilities
   /// probe has not run, which is not a denial.
   var volumeSupport: VCPSupport?
@@ -84,7 +91,7 @@ enum OnboardingEnvironmentBuilder {
         widthCm: input.physicalWidthCm, heightCm: input.physicalHeightCm),
       currentLooksLikeWidth: input.currentLooksLikeWidth,
       currentLooksLikeHeight: input.currentLooksLikeHeight,
-      refreshHz: input.refreshHz,
+      refreshHz: maximumRefreshHz(for: input),
       volume: volume(from: input.volumeSupport),
       sizeSuggestion: sizeSuggestion(for: input),
       enrolledInCare: input.enrolledInCare,
@@ -112,6 +119,24 @@ enum OnboardingEnvironmentBuilder {
     }
     let quarterTurn = rotation == 90 || rotation == 270
     return quarterTurn ? (reported.height, reported.width) : reported
+  }
+
+  /// The panel's ceiling, which is what "Up to N Hz" claims. The rate a display
+  /// happens to be running is a different sentence, and reading one as the other
+  /// described a 175 Hz panel as a 100 Hz one.
+  ///
+  /// Quantized before comparing: rates arrive carrying float noise, and the
+  /// quantizer is what keeps a genuine 59.9 apart from 60 while collapsing
+  /// 59.9998 onto it.
+  ///
+  /// The running rate is a floor rather than only a fallback. An enumeration
+  /// taken while the display sits in a mirror set describes the master, so its
+  /// rates can be lower than the one the panel is demonstrably scanning out,
+  /// and claiming less than that is a claim we can see is false.
+  private static func maximumRefreshHz(for input: OnboardingDisplayInput) -> Double {
+    let current = DisplayMode.quantizedRefresh(input.currentRefreshHz)
+    let offered = input.offeredRefreshRates.map(DisplayMode.quantizedRefresh)
+    return max(offered.max() ?? 0, current)
   }
 
   /// Rotation-free by construction: the hypotenuse of the declared physical
@@ -252,7 +277,11 @@ enum OnboardingLiveEnvironment {
       physicalHeightCm: facts?.physicalHeightCm,
       currentLooksLikeWidth: onScreen?.logicalWidth ?? 0,
       currentLooksLikeHeight: onScreen?.logicalHeight ?? 0,
-      refreshHz: onScreen?.refreshHz ?? 0,
+      // Every published mode, not the running one: the card claims a ceiling.
+      // Synthesized stops are absent from `all` by construction, which is what
+      // keeps their `refreshHz: 0` sentinel out of the maximum.
+      offeredRefreshRates: catalog?.all.map(\.refreshHz) ?? [],
+      currentRefreshHz: onScreen?.refreshHz ?? 0,
       volumeSupport: model.volumeSupport[key],
       recommendation: catalog?.density?.recommendation,
       curatedRows: catalog?.rows ?? [],
