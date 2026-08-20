@@ -6,11 +6,10 @@ import SwiftUI
 /// protocol, so only `body` would otherwise be main-actor, and
 /// `SettingsActions` is a `@MainActor` type.
 ///
-/// Two deliberate omissions. **No Donate button and no project links** (D26):
+/// One deliberate omission. **No Donate button and no project links** (D26):
 /// every fork link points at a project Candela is not, and Candela has no
-/// public URL yet. **No updater section**: Sparkle is not a dependency and the
-/// spec forbids adding one, so a "Check for Updates" button would have nothing
-/// behind it.
+/// public URL yet. Update controls live in the Updates pane, not here: the
+/// version line stays informational.
 @MainActor
 struct AboutPane: View {
   @Environment(SettingsActions.self) private var actions
@@ -73,6 +72,9 @@ struct AboutPane: View {
         }
         LabeledContent("KeyboardShortcuts") {
           Text("MIT (Sindre Sorhus)")
+        }
+        LabeledContent("Sparkle") {
+          Text("MIT (Sparkle Project, software updates)")
         }
         SettingsCaption(copyrightLine)
       }

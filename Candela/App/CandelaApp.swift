@@ -26,6 +26,7 @@ struct CandelaApp: App {
       SettingsRootView()
         .environment(statusItemController.model)
         .environment(statusItemController.settingsActions)
+        .environment(statusItemController.updaterModel)
     }
     // The sidebar redesign made this matter. A `Settings` scene sizes itself to
     // its content and refuses to resize by default; with a split view and panes

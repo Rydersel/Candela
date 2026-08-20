@@ -39,6 +39,10 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// The propagation seam's app-side fan-out (D20). Every settings pane writes
   /// a pref and then calls through here; the closures are wired at launch.
   let settingsActions: SettingsActions
+  /// The one Sparkle updater (W6 auto-update). Constructed here so it starts
+  /// with the app and outlives any settings window; `CandelaApp` puts it in
+  /// the Settings scene environment for the Updates pane.
+  let updaterModel = UpdaterModel()
   private var statusItem: NSStatusItem?
   /// KVO on the item's own visibility: `behavior = .removalAllowed` lets the
   /// user ⌘-drag the icon out of the menu bar, which must persist as

@@ -1,0 +1,58 @@
+import Foundation
+import Observation
+import Sparkle
+
+/// Owns the app's one Sparkle updater and adapts it for SwiftUI observation.
+///
+/// Sparkle is the store for every updater setting (`SUEnableAutomaticChecks`
+/// and friends live in our defaults domain but are Sparkle's schema, not
+/// `PrefName` cases): the toggle below writes through to the updater rather
+/// than persisting anything of our own, the same one-source-of-truth shape as
+/// launch-at-login (D10) and the ambient row. `automaticallyChecksForUpdates`
+/// is a stored mirror ONLY because `@Observable` cannot invalidate a view from
+/// a computed property over foreign storage; it is written back in `didSet`
+/// and nothing else in the app writes the underlying key.
+@MainActor @Observable
+final class UpdaterModel {
+  @ObservationIgnored private let controller: SPUStandardUpdaterController
+
+  /// False while a check or install is in flight; drives the button's
+  /// disabled state. Mirrored from Sparkle's KVO-compliant property.
+  private(set) var canCheckForUpdates = false
+  private(set) var lastUpdateCheckDate: Date?
+
+  var automaticallyChecksForUpdates: Bool {
+    didSet { controller.updater.automaticallyChecksForUpdates = automaticallyChecksForUpdates }
+  }
+
+  @ObservationIgnored private var canCheckObservation: NSKeyValueObservation?
+
+  init() {
+    // Starting at construction is Sparkle's recommended shape; the scheduled
+    // check fires only if automatic checks are enabled. The `--vd-engage`
+    // helper never gets here: it exits inside CandelaMain before any app
+    // machinery is built.
+    controller = SPUStandardUpdaterController(
+      startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil
+    )
+    automaticallyChecksForUpdates = controller.updater.automaticallyChecksForUpdates
+    lastUpdateCheckDate = controller.updater.lastUpdateCheckDate
+    canCheckObservation = controller.updater.observe(
+      \.canCheckForUpdates, options: [.initial, .new]
+    ) { [weak self] updater, _ in
+      // KVO delivers on the main thread here, but the closure is nonisolated;
+      // hop rather than assume. Re-reading the check date on every flip is
+      // what refreshes "Last checked" after a check completes.
+      let canCheck = updater.canCheckForUpdates
+      let lastCheck = updater.lastUpdateCheckDate
+      Task { @MainActor [weak self] in
+        self?.canCheckForUpdates = canCheck
+        self?.lastUpdateCheckDate = lastCheck
+      }
+    }
+  }
+
+  func checkForUpdates() {
+    controller.checkForUpdates(nil)
+  }
+}
