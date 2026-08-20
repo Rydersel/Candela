@@ -222,4 +222,88 @@ struct ModePersistenceTests {
     #expect(ModePersistence.resolve(sixty.descriptor, in: [ntsc, sixty]) == .exact(sixty))
     #expect(ModePersistence.resolve(sixty.descriptor, in: [sixty, ntsc]) == .exact(sixty))
   }
+
+  // MARK: - Rotation
+
+  /// The observed case: a choice recorded while the Dell enumerated un-rotated,
+  /// re-resolved against the portrait list the same panel publishes at 270°.
+  /// A quarter turn swaps every entry's axes, so nothing there can match the
+  /// stored landscape geometry literally even though the identical
+  /// panel-native mode is sitting in the list with its sides swapped.
+  ///
+  /// Two assertions because the fixture keeps ONE rate per logical size (see
+  /// `DisplayModeFixtures.dell`): the stored 120 Hz the real panel offers is
+  /// absent there, so it exercises the transposed arm's refresh fallback,
+  /// while the fixture's own rate exercises the silent exact case.
+  @Test func aStoredLandscapeChoiceFindsItsPortraitTwin() throws {
+    let twin = try #require(DisplayModeFixtures.dell.first {
+      $0.logicalWidth == 1440 && $0.logicalHeight == 2560
+        && $0.pixelWidth == 2880 && $0.pixelHeight == 5120
+    })
+
+    let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 120)
+    #expect(ModePersistence.resolve(stored.descriptor, in: DisplayModeFixtures.dell)
+      == .refreshRateDiffers(twin))
+
+    let atTheListedRate = DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (5120, 2880), hz: twin.refreshHz)
+    #expect(ModePersistence.resolve(atTheListedRate.descriptor, in: DisplayModeFixtures.dell)
+      == .exact(twin))
+  }
+
+  /// The negative control for the test above. Trying the other orientation
+  /// must not turn "nothing here fits" into a substitution: a 21:9 shape has no
+  /// twin on a 16:9 panel either way up, and the aspect-ratio guard has to hold
+  /// in both arms.
+  @Test func aSizeWithNoTwinInEitherOrientationStillResolvesToNothing() {
+    let stored = DisplayModeFixtures.mode(1, logical: (2580, 1080), pixels: (5160, 2160)).descriptor
+    #expect(ModePersistence.resolve(stored, in: DisplayModeFixtures.dell) == .none)
+  }
+
+  /// Swapping the axes must not launder a SCALE difference into an exact
+  /// match. The stored choice here is 1x, its twin in the list is 2x, and the
+  /// transposed arm compares framebuffers exactly as the literal one does, so
+  /// the answer is a reported substitution rather than a silent apply.
+  @Test func transposingDoesNotLaunderAScaleChange() throws {
+    let twin = try #require(DisplayModeFixtures.dell.first {
+      $0.logicalWidth == 1440 && $0.logicalHeight == 2560
+        && $0.pixelWidth == 2880 && $0.pixelHeight == 5120
+    })
+    let storedAtOneX = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (2560, 1440)).descriptor
+    #expect(ModePersistence.resolve(storedAtOneX, in: DisplayModeFixtures.dell) == .scaleDiffers(twin))
+  }
+
+  /// The stored orientation is the one the user chose, so it wins whenever it
+  /// can be honoured. Both list orders, because "the literal arm ran first" and
+  /// "the literal mode happened to be enumerated first" look identical in one
+  /// ordering.
+  @Test func theStoredOrientationWinsWhenBothWouldBeExact() {
+    let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 60)
+    let sideways = DisplayModeFixtures.mode(2, logical: (1440, 2560), pixels: (2880, 5120), hz: 60)
+    #expect(ModePersistence.resolve(stored.descriptor, in: [stored, sideways]) == .exact(stored))
+    #expect(ModePersistence.resolve(stored.descriptor, in: [sideways, stored]) == .exact(stored))
+  }
+
+  /// The same preference one rung down, where the exact-match short circuit
+  /// cannot decide it and the two arms are compared on outcome quality alone.
+  /// Both offer a scale substitute, so the stored orientation must still take
+  /// the tie.
+  @Test func theStoredOrientationAlsoTakesATieBetweenSubstitutes() {
+    let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (3840, 2160)).descriptor
+    let upright = DisplayModeFixtures.mode(2, logical: (2560, 1440), pixels: (5120, 2880))
+    let sideways = DisplayModeFixtures.mode(3, logical: (1440, 2560), pixels: (2880, 5120))
+    #expect(ModePersistence.resolve(stored, in: [upright, sideways]) == .scaleDiffers(upright))
+    #expect(ModePersistence.resolve(stored, in: [sideways, upright]) == .scaleDiffers(upright))
+  }
+
+  /// The transposed twin of `aScaleSubstituteKeepsTheNearestRefreshRate`: every
+  /// rule the literal arm follows still applies once the axes are swapped, so a
+  /// deliberate 60 Hz choice is not bumped to the panel's fastest rate on the
+  /// way through the rotated list.
+  @Test func theTransposedArmStillKeepsTheNearestRefreshRate() {
+    let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880), hz: 60).descriptor
+    let fast = DisplayModeFixtures.mode(2, logical: (1440, 2560), pixels: (2160, 3840), hz: 144)
+    let near = DisplayModeFixtures.mode(3, logical: (1440, 2560), pixels: (2160, 3840), hz: 60)
+    #expect(ModePersistence.resolve(stored, in: [fast, near]) == .scaleDiffers(near))
+    #expect(ModePersistence.resolve(stored, in: [near, fast]) == .scaleDiffers(near))
+  }
 }

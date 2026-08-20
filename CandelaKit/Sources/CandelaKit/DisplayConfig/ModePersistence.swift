@@ -57,7 +57,49 @@ public final class ModePersistence: @unchecked Sendable {
     defaults.removeObject(forKey: key(PrefName.storedDisplayMode, identity))
   }
 
+  /// Resolves a stored choice against the live list, first in the orientation
+  /// it was recorded in and then transposed.
+  ///
+  /// A quarter turn swaps the axes of the WHOLE mode list, so a descriptor
+  /// recorded un-rotated cannot match anything a rotated display publishes,
+  /// even though the identical panel-native mode is present with its sides
+  /// swapped. The literal arm runs first and short-circuits on an exact match,
+  /// so an un-rotated display takes exactly the path it always did; otherwise
+  /// the transposed arm runs too and the better-ranked outcome wins, with the
+  /// literal arm taking ties.
+  ///
+  /// A transposed exact match reports `.exact` and so applies silently, on
+  /// purpose: it is the same panel-native picture the user chose, and a
+  /// substitution notice for a pure orientation swap reads as a bug rather
+  /// than as honesty.
+  public static func resolve(
+    _ descriptor: DisplayModeDescriptor, in modes: [DisplayMode]
+  ) -> ModeMatch {
+    let literal = resolveLiteral(descriptor, in: modes)
+    if case .exact = literal { return literal }
+    let transposed = resolveLiteral(descriptor.transposed, in: modes)
+    return rank(transposed) > rank(literal) ? transposed : literal
+  }
+
+  /// Outcome quality, best first. Mirrors `resolveLiteral`'s own step order
+  /// rather than inventing a second opinion about which compromise is worse:
+  /// exact, then the same geometry at another rate, then the same logical size
+  /// at another framebuffer, then another size, then nothing.
+  private static func rank(_ match: ModeMatch) -> Int {
+    switch match {
+    case .exact: 4
+    case .refreshRateDiffers: 3
+    case .scaleDiffers: 2
+    case .sizeDiffers: 1
+    case .none: 0
+    }
+  }
+
   /// Resolution order, specified because it runs unattended on every reconnect.
+  ///
+  /// Orientation-literal by design: `resolve` is what tries the other
+  /// orientation, and it does so by handing this method a transposed
+  /// descriptor rather than by loosening any comparison here.
   ///
   /// 1. exact geometry + refresh
   /// 2. same geometry, nearest refresh
@@ -72,7 +114,7 @@ public final class ModePersistence: @unchecked Sendable {
   /// can explain to the user or reproduce in a bug report: the nearest logical
   /// size typically exists at two framebuffers and six refresh rates, and even
   /// at exact geometry two rates can sit inside the match window at once.
-  public static func resolve(
+  private static func resolveLiteral(
     _ descriptor: DisplayModeDescriptor, in modes: [DisplayMode]
   ) -> ModeMatch {
     guard !modes.isEmpty else { return .none }
@@ -167,5 +209,22 @@ public final class ModePersistence: @unchecked Sendable {
 
   private func key(_ name: PrefName, _ identity: DisplayConfigIdentity) -> String {
     "\(name.rawValue).\(identity.key)"
+  }
+}
+
+extension DisplayModeDescriptor {
+  /// The same stored choice seen through a quarter turn: both size pairs
+  /// swapped, the refresh rate untouched, since rotation does not retime the
+  /// panel.
+  ///
+  /// Computed rather than stored, so the descriptor's five CodingKeys stay
+  /// exactly the shipped on-disk format. Nothing about a stored record changes;
+  /// only what `resolve` is willing to look for changes.
+  var transposed: DisplayModeDescriptor {
+    DisplayModeDescriptor(
+      logicalWidth: logicalHeight, logicalHeight: logicalWidth,
+      pixelWidth: pixelHeight, pixelHeight: pixelWidth,
+      refreshHz: refreshHz
+    )
   }
 }
