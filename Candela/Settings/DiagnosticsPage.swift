@@ -71,7 +71,7 @@ struct DiagnosticsPage: View {
     // page.
     let _ = model.prefsRevision
 
-    Form {
+    SettingsPageScaffold {
       SubPageHeader(
         title: DisplaySubPage.diagnostics.title,
         currentKey: persistenceKey,
@@ -79,24 +79,23 @@ struct DiagnosticsPage: View {
         onSwitch: onSwitch
       )
 
-      // Spec §7: one sentence, above everything. Composed from the same state
-      // the "Last brightness command" and "Reading values back" rows below
-      // render, so the summary cannot disagree with its own evidence.
-      Section {
+      // Spec §7: one sentence, above everything, on a card of its own so it
+      // reads as the page's answer rather than as the first of forty rows.
+      // Composed from the same state the "Last brightness command" and
+      // "Reading values back" rows below render, so the summary cannot
+      // disagree with its own evidence.
+      SettingsCard {
         Text(verbatim: verdictText)
+          .foregroundStyle(SettingsTheme.titleColor)
           .fixedSize(horizontal: false, vertical: true)
       }
 
-      Section {
+      SettingsCardSection(title: "This Display") {
         thisDisplayRows
-      } header: {
-        Text("This Display").settingsHeading()
       }
 
-      Section {
+      SettingsCardSection(title: "Brightness Control") {
         brightnessRows
-      } header: {
-        Text("Brightness Control").settingsHeading()
       }
 
       // Every row in this section is about a DDC answer, and the built-in never
@@ -106,28 +105,27 @@ struct DiagnosticsPage: View {
       // arrive (DT30 rule (e)); the built-in's DDC story is already stated
       // once, in Brightness Control, where it is true.
       if !isBuiltIn {
-        Section {
+        SettingsCardSection(title: "Reported Capabilities") {
           reportedCapabilitiesRows
-        } header: {
-          Text("Reported Capabilities").settingsHeading()
         }
       }
 
-      Section {
+      SettingsCardSection(title: "Availability") {
         availabilityRows
-      } header: {
-        Text("Availability").settingsHeading()
       }
 
-      Section {
+      SettingsCardSection(title: "Right Now") {
         rightNowRows
-      } header: {
-        Text("Right Now").settingsHeading()
       }
 
       actionsSection
     }
-    .formStyle(.grouped)
+  }
+
+  /// The right-hand half of a row, in the window's body weight. One helper for
+  /// forty-odd rows, so the answers cannot end up styled forty different ways.
+  private func valueText(_ value: String) -> some View {
+    Text(verbatim: value).foregroundStyle(SettingsTheme.bodyColor)
   }
 
   // MARK: - Verdict
@@ -147,13 +145,13 @@ struct DiagnosticsPage: View {
 
   @ViewBuilder private var thisDisplayRows: some View {
     LabeledContent("Reported name") {
-      Text(verbatim: state.display.name).foregroundStyle(.secondary)
+      valueText(state.display.name)
     }
 
     if !DisplayCardPolicy.normalizedFriendlyName(prefs.friendlyName).isEmpty {
+      SettingsCardDivider()
       LabeledContent("Your name for it") {
-        Text(verbatim: DisplayCardPolicy.normalizedFriendlyName(prefs.friendlyName))
-          .foregroundStyle(.secondary)
+        valueText(DisplayCardPolicy.normalizedFriendlyName(prefs.friendlyName))
       }
     }
 
@@ -161,28 +159,32 @@ struct DiagnosticsPage: View {
     // the type comment. The hub's identity block deliberately does NOT carry
     // "Connection" (T12); it lives here, where the rest of the cable's story is.
     if !isBuiltIn {
+      SettingsCardDivider()
       SettingRow(DiagnosticsPageCopy.connection) {
         LabeledContent("Connection") {
-          Text(verbatim: DiagnosticsCopy.connection(facts)).foregroundStyle(.secondary)
+          valueText(DiagnosticsCopy.connection(facts))
         }
       }
 
+      SettingsCardDivider()
       LabeledContent("Manufacturer") {
-        Text(verbatim: DiagnosticsCopy.manufacturer(facts)).foregroundStyle(.secondary)
+        valueText(DiagnosticsCopy.manufacturer(facts))
       }
 
+      SettingsCardDivider()
       LabeledContent("Serial number") {
-        Text(verbatim: DiagnosticsCopy.serial(facts)).foregroundStyle(.secondary)
+        valueText(DiagnosticsCopy.serial(facts))
       }
 
       if let facts, facts.numericSerialNumber == nil, facts.alphanumericSerialNumber == nil {
         SettingsCaption(DiagnosticsPageCopy.noSerialNumber)
+          .padding(.bottom, 6)
       }
 
       if let width = facts?.physicalWidthCm, let height = facts?.physicalHeightCm {
+        SettingsCardDivider()
         LabeledContent("Display size") {
-          Text(verbatim: DiagnosticsCopy.displaySize(widthCm: width, heightCm: height))
-            .foregroundStyle(.secondary)
+          valueText(DiagnosticsCopy.displaySize(widthCm: width, heightCm: height))
         }
       }
     }
@@ -193,13 +195,15 @@ struct DiagnosticsPage: View {
     // same page and the mode line of the report pasted from it.
     if let native = model.displayModes.catalogs[state.id], native.nativeKnown,
        let onScreen = native.onScreen {
+      SettingsCardDivider()
       LabeledContent("Current mode") {
-        Text(verbatim: DiagnosticsCopy.mode(onScreen)).foregroundStyle(.secondary)
+        valueText(DiagnosticsCopy.mode(onScreen))
       }
     }
 
     resolutionSourceRows
 
+    SettingsCardDivider()
     identityKeysRow
   }
 
@@ -223,14 +227,15 @@ struct DiagnosticsPage: View {
       let publishedCount = catalog.all.count { $0.provenance == .coreGraphics }
       let revealedCount = catalog.all.count(where: \.isRevealed)
 
+      SettingsCardDivider()
       LabeledContent("Resolutions listed by macOS") {
-        Text(verbatim: "\(publishedCount)").foregroundStyle(.secondary)
+        valueText("\(publishedCount)")
       }
 
+      SettingsCardDivider()
       LabeledContent("Additional resolutions found") {
-        Text(verbatim: DiagnosticsCopy.additionalResolutions(
+        valueText(DiagnosticsCopy.additionalResolutions(
           revealed: revealedCount, revealsHiddenModes: model.displayModes.revealsHiddenModes))
-          .foregroundStyle(.secondary)
       }
 
       wireTimingRow(withheld: catalog.withheldForWireTiming)
@@ -251,9 +256,11 @@ struct DiagnosticsPage: View {
     _ catalog: DisplayModeCoordinator.Catalog
   ) -> some View {
     if model.synthesis.offersSyntheticSizes(displayID: state.id) {
+      SettingsCardDivider()
       Text(verbatim: SynthesisCopy.diagnosticsOffered(catalog.syntheticStops.count))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(SettingsTheme.bodyColor)
         .fixedSize(horizontal: false, vertical: true)
+        .padding(.vertical, 6)
     }
   }
 
@@ -261,13 +268,15 @@ struct DiagnosticsPage: View {
   /// the ordinary case on most panels.
   @ViewBuilder private func wireTimingRow(withheld: Int) -> some View {
     if !model.displayModes.guardsWireTiming {
+      SettingsCardDivider()
       LabeledContent(DiagnosticsCopy.wireTimingCheckLabel) {
-        Text(verbatim: "Off").foregroundStyle(.secondary)
+        valueText("Off")
       }
       .help(DiagnosticsCopy.wireTimingGuardOff)
     } else if withheld > 0 {
+      SettingsCardDivider()
       LabeledContent(DiagnosticsCopy.wireTimingWithheldLabel) {
-        Text(verbatim: "\(withheld)").foregroundStyle(.secondary)
+        valueText("\(withheld)")
       }
       .help(DiagnosticsCopy.wireTimingWithheld)
     }
@@ -282,11 +291,10 @@ struct DiagnosticsPage: View {
     let row = SettingRow(caption) {
       VStack(alignment: .leading, spacing: 2) {
         LabeledContent("Settings key") {
-          Text(verbatim: persistenceKey).foregroundStyle(.secondary)
+          valueText(persistenceKey)
         }
         LabeledContent("Display key") {
-          Text(verbatim: DiagnosticsCopy.displayKey(displayKey))
-            .foregroundStyle(.secondary)
+          valueText(DiagnosticsCopy.displayKey(displayKey))
         }
       }
     }
@@ -307,23 +315,24 @@ struct DiagnosticsPage: View {
   @ViewBuilder private var brightnessRows: some View {
     SettingRow(DiagnosticsPageCopy.brightnessPath(brightnessPath)) {
       LabeledContent("Brightness path") {
-        Text(verbatim: DiagnosticsCopy.brightnessPath(brightnessPath)).foregroundStyle(.secondary)
+        valueText(DiagnosticsCopy.brightnessPath(brightnessPath))
       }
     }
 
+    SettingsCardDivider()
+
     SettingRow(DiagnosticsPageCopy.nativeBrightness) {
       LabeledContent("Native brightness") {
-        Text(verbatim: DiagnosticsCopy.nativeBrightness(
+        valueText(DiagnosticsCopy.nativeBrightness(
           isAvailable: DisplayServices.isAvailable, app: AppInfo.productName))
-          .foregroundStyle(.secondary)
       }
     }
 
     if isBuiltIn {
+      SettingsCardDivider()
       SettingRow(DiagnosticsPageCopy.builtInHardwareControl) {
         LabeledContent("Hardware control") {
-          Text(verbatim: DiagnosticsCopy.builtInHardwareControl)
-            .foregroundStyle(.secondary)
+          valueText(DiagnosticsCopy.builtInHardwareControl)
         }
       }
     }
@@ -341,14 +350,15 @@ struct DiagnosticsPage: View {
     // (`StatusItemController`), so "this session" told a user who had watched
     // a conflict happen, then woken the Mac, that there had been none.
     if usesGammaLeg, let monitor = model.gammaInterference {
+      SettingsCardDivider()
       SettingRow(DiagnosticsPageCopy.gammaConflicts) {
         LabeledContent("Color profile conflicts") {
-          Text(verbatim: DiagnosticsCopy.gammaConflicts(monitor.interferenceCount(for: state.id)))
-            .foregroundStyle(.secondary)
+          valueText(DiagnosticsCopy.gammaConflicts(monitor.interferenceCount(for: state.id)))
         }
       }
       if monitor.suspendedForSession {
         SettingsCaption(DiagnosticsPageCopy.gammaWatchSuspended)
+          .padding(.bottom, 6)
       }
     }
   }
@@ -387,48 +397,54 @@ struct DiagnosticsPage: View {
       isHDREngaged: state.controller.isHDREngaged
     )) {
       LabeledContent("Capability request") {
-        Text(verbatim: DiagnosticsCopy.capabilityAnswer(
+        valueText(DiagnosticsCopy.capabilityAnswer(
           hasDescription: capabilities != nil,
           parsedACommandList: advertisedCodes != nil,
           wasAsked: wasAsked,
           app: AppInfo.productName
-        )).foregroundStyle(.secondary)
+        ))
       }
     }
     .help(DiagnosticsPageCopy.capabilityRequestHelp)
 
     if let capabilities {
+      SettingsCardDivider()
       LabeledContent("MCCS version") {
-        Text(verbatim: CapabilityString.tag("mccs_ver", in: capabilities)
+        valueText(CapabilityString.tag("mccs_ver", in: capabilities)
           ?? DiagnosticsCopy.notStated)
-          .foregroundStyle(.secondary)
       }
+      SettingsCardDivider()
       LabeledContent("Model") {
-        Text(verbatim: CapabilityString.tag("model", in: capabilities)
+        valueText(CapabilityString.tag("model", in: capabilities)
           ?? DiagnosticsCopy.notStated)
-          .foregroundStyle(.secondary)
       }
+      SettingsCardDivider()
       LabeledContent("Display type") {
-        Text(verbatim: CapabilityString.tag("type", in: capabilities)
+        valueText(CapabilityString.tag("type", in: capabilities)
           ?? DiagnosticsCopy.notStated)
-          .foregroundStyle(.secondary)
       }
 
+      SettingsCardDivider()
       SettingRow(DiagnosticsPageCopy.advertisedCommands) {
         LabeledContent("Advertised commands") {
-          Text(verbatim: DiagnosticsCopy.advertisedCommands(
-            advertisedCodes, app: AppInfo.productName)).foregroundStyle(.secondary)
+          valueText(DiagnosticsCopy.advertisedCommands(
+            advertisedCodes, app: AppInfo.productName))
         }
       }
 
+      SettingsCardDivider()
       DisclosureGroup(DiagnosticsPageCopy.rawDescriptionDisclosure) {
         Text(verbatim: capabilities)
           .font(.system(.caption, design: .monospaced))
+          .foregroundStyle(SettingsTheme.bodyColor)
           .textSelection(.enabled)
           .fixedSize(horizontal: false, vertical: true)
           .frame(maxWidth: .infinity, alignment: .leading)
       }
+      .padding(.vertical, 6)
     }
+
+    SettingsCardDivider()
 
     SettingRow(DiagnosticsPageCopy.readEvidence(
       readEvidence,
@@ -436,21 +452,22 @@ struct DiagnosticsPage: View {
       readsBackAtStartup: prefs.startupAction == .read
     )) {
       LabeledContent("Reading values back") {
-        Text(verbatim: DiagnosticsCopy.readEvidence(readEvidence, app: AppInfo.productName))
-          .foregroundStyle(.secondary)
+        valueText(DiagnosticsCopy.readEvidence(readEvidence, app: AppInfo.productName))
       }
     }
+
+    SettingsCardDivider()
 
     LabeledContent("Brightness scale") {
       // The brightness controller's OWN evidence, not the folded `readEvidence`:
       // the maximum comes from the brightness read alone, so a volume read that
       // answered must not be allowed to speak for it.
-      Text(verbatim: DiagnosticsCopy.brightnessScale(
+      valueText(DiagnosticsCopy.brightnessScale(
         didReadMax: state.controller.didReadMaxDDC,
         maxValue: state.controller.maxDDCValue,
         evidence: state.controller.readEvidence,
         app: AppInfo.productName
-      )).foregroundStyle(.secondary)
+      ))
     }
   }
 
@@ -480,47 +497,49 @@ struct DiagnosticsPage: View {
   /// rather than answered wrongly.
   @ViewBuilder private var availabilityRows: some View {
     LabeledContent("Brightness") {
-      Text(verbatim: DiagnosticsCopy.brightnessAvailability(brightnessPath))
-        .foregroundStyle(.secondary)
+      valueText(DiagnosticsCopy.brightnessAvailability(brightnessPath))
     }
 
     if !isBuiltIn {
+      SettingsCardDivider()
       LabeledContent("Volume") {
-        Text(verbatim: DiagnosticsCopy.volumeAvailability(
+        valueText(DiagnosticsCopy.volumeAvailability(
           override: prefs.audioSinkOverride,
           isAvailable: state.volume.isAvailable,
           support: model.volumeSupport[persistenceKey],
           hasDescription: capabilities != nil,
           forceSoftware: prefs.forceSoftware,
           app: AppInfo.productName
-        )).foregroundStyle(.secondary)
+        ))
       }
       .help(DiagnosticsPageCopy.volumeHelp)
 
+      SettingsCardDivider()
       LabeledContent("Contrast") {
-        Text(verbatim: DiagnosticsCopy.contrastAvailability(
+        valueText(DiagnosticsCopy.contrastAvailability(
           isAvailable: state.contrast.isAvailable, forceSoftware: prefs.forceSoftware))
-          .foregroundStyle(.secondary)
       }
       .help(DiagnosticsPageCopy.contrastHelp)
 
+      SettingsCardDivider()
       LabeledContent("Mute") {
-        Text(verbatim: DiagnosticsCopy.muteAvailability(
+        valueText(DiagnosticsCopy.muteAvailability(
           muteEnabled: prefs.enableMuteUnmute,
           volumeAvailable: state.volume.isAvailable,
           forceSoftware: prefs.forceSoftware,
           override: prefs.audioSinkOverride,
           muteSupport: model.muteSupport[persistenceKey] ?? .unknown
-        )).foregroundStyle(.secondary)
+        ))
       }
       .help(DiagnosticsPageCopy.muteHelp)
 
+      SettingsCardDivider()
       LabeledContent("HDR") {
-        Text(verbatim: DiagnosticsCopy.hdrAvailability(
+        valueText(DiagnosticsCopy.hdrAvailability(
           displayServicesAvailable: DisplayServices.isAvailable,
           supportsHDR: state.controller.supportsHDR,
           app: AppInfo.productName
-        )).foregroundStyle(.secondary)
+        ))
       }
     }
   }
@@ -538,28 +557,34 @@ struct DiagnosticsPage: View {
   @ViewBuilder private var rightNowRows: some View {
     if !isBuiltIn {
       LabeledContent("HDR") {
-        Text(verbatim: DiagnosticsCopy.hdrState(engaged: state.controller.isHDREngaged))
-          .foregroundStyle(.secondary)
+        valueText(DiagnosticsCopy.hdrState(engaged: state.controller.isHDREngaged))
       }
 
       if state.controller.isHDREngaged, state.controller.hdrMode == .off {
         SettingsCaption(DiagnosticsPageCopy.hdrTurnedOnOutside)
+          .padding(.bottom, 6)
       }
+
+      // Trailing rather than leading, so the built-in's card does not open on a
+      // hairline: this block is the one that may be missing, not the row below.
+      SettingsCardDivider()
     }
 
     LabeledContent(DiagnosticsPageCopy.writeGateLabel(isBuiltIn: isBuiltIn)) {
-      Text(verbatim: DiagnosticsCopy.writeGate(
+      valueText(DiagnosticsCopy.writeGate(
         isSending: model.displayManager.isEpochCurrent(model.displayManager.currentEpoch())))
-        .foregroundStyle(.secondary)
     }
 
     if model.isSafeMode {
+      SettingsCardDivider()
       SettingRow(caption: SettingsCaption(verbatim: DiagnosticsPageCopy.safeMode)) {
         LabeledContent("Safe Mode") {
-          Text(verbatim: DiagnosticsCopy.safeModeState).foregroundStyle(.secondary)
+          valueText(DiagnosticsCopy.safeModeState)
         }
       }
     }
+
+    SettingsCardDivider()
 
     // The caption is attached whenever a family is missing, not only when they
     // all are. Partial states are ordinary now that volume and mute arm
@@ -568,7 +593,7 @@ struct DiagnosticsPage: View {
     if model.lastArmedTapConfig != nil, !watchesEveryFamily {
       SettingRow(DiagnosticsPageCopy.watchedKeys) {
         LabeledContent("Keys being watched") {
-          Text(verbatim: watchedKeysText).foregroundStyle(.secondary)
+          valueText(watchedKeysText)
         }
         // The conditions are a list, so they render as one rather than as a
         // paragraph nobody finishes (SO15/SO16).
@@ -580,34 +605,40 @@ struct DiagnosticsPage: View {
       }
     } else {
       LabeledContent("Keys being watched") {
-        Text(verbatim: watchedKeysText).foregroundStyle(.secondary)
+        valueText(watchedKeysText)
       }
     }
 
     if model.accessibility.isWarningWarranted {
       SettingsCaption(DiagnosticsPageCopy.accessibilityMissing)
+        .padding(.bottom, 6)
     }
 
     if !isBuiltIn {
+      SettingsCardDivider()
       LabeledContent("Sound output") {
-        Text(verbatim: audioMatchText).foregroundStyle(.secondary)
+        valueText(audioMatchText)
       }
     }
 
+    SettingsCardDivider()
+
     LabeledContent("Last brightness command") {
-      Text(verbatim: DiagnosticsCopy.lastWrite(
+      valueText(DiagnosticsCopy.lastWrite(
         target: state.controller.lastAppliedTarget(),
         failed: state.controller.lastApplyFailed()
-      )).foregroundStyle(.secondary)
+      ))
     }
 
     if let report = model.displayModes.report(for: state.id) {
+      SettingsCardDivider()
       LabeledContent("Last resolution problem") {
-        Text(verbatim: DiagnosticsCopy.reapplyProblem(report.notice, app: AppInfo.productName))
-          .foregroundStyle(.secondary)
+        valueText(DiagnosticsCopy.reapplyProblem(report.notice, app: AppInfo.productName))
       }
       .modifier(ReapplyDiagnostic(notice: report.notice))
     }
+
+    SettingsCardDivider()
 
     LabeledContent("Mirroring") {
       // SS7: a synthesis set is not user mirroring, and the CG flag says it is.
@@ -615,10 +646,9 @@ struct DiagnosticsPage: View {
       // flag answers only when it is not a synthesis set. Without this the row
       // reads "Showing another display's contents" about a display that is
       // showing its own picture at a size this app renders.
-      Text(verbatim: DiagnosticsCopy.mirroring(
+      valueText(DiagnosticsCopy.mirroring(
         isMirrorSlave: model.displayModes.catalogs[state.id]?.display.isMirrorSlave,
         isSynthesized: model.synthesis.isEngaged(displayID: state.id)))
-        .foregroundStyle(.secondary)
     }
 
     synthesizedActiveRow
@@ -635,13 +665,15 @@ struct DiagnosticsPage: View {
   /// mirror. This line is what says whose mirror it is.
   @ViewBuilder private var synthesizedActiveRow: some View {
     if let pairing = model.synthesis.pairing(forPhysical: state.id) {
+      SettingsCardDivider()
       Text(verbatim: SynthesisCopy.diagnosticsActive(
         width: pairing.size.logicalWidth,
         height: pairing.size.logicalHeight,
         slot: pairing.slot
       ))
-      .foregroundStyle(.secondary)
+      .foregroundStyle(SettingsTheme.bodyColor)
       .fixedSize(horizontal: false, vertical: true)
+      .padding(.vertical, 6)
     }
   }
 
@@ -692,7 +724,7 @@ struct DiagnosticsPage: View {
   // MARK: - Actions
 
   @ViewBuilder private var actionsSection: some View {
-    Section {
+    SettingsCardSection {
       SettingRow(DiagnosticsPageCopy.reportScope) {
         DiagnosticsReportActions()
       }
@@ -702,6 +734,7 @@ struct DiagnosticsPage: View {
       // destination has no Advanced sub-page, because it has no hardware
       // control to method.
       if !isBuiltIn {
+        SettingsCardDivider()
         NavigationRow(
           title: DiagnosticsPageCopy.controlMethodTitle,
           value: DiagnosticsPageCopy.controlMethodValue
@@ -748,7 +781,7 @@ private struct KeyRequirementRow: View {
   }
 
   private var needsText: some View {
-    Text(verbatim: needs).foregroundStyle(.secondary)
+    Text(verbatim: needs).foregroundStyle(SettingsTheme.bodyColor)
   }
 }
 
@@ -769,13 +802,18 @@ struct DiagnosticsReportActions: View {
 
   var body: some View {
     HStack(spacing: 8) {
+      // Copy takes the primary: pasting the report into a message is what a
+      // person came to this page's foot to do, and saving a file is the
+      // fallback for the report too long to paste.
       Button(DiagnosticsPageCopy.copyReport) { copyReport() }
+        .buttonStyle(SettingsPrimaryButtonStyle())
         .accessibilityLabel(Text(DiagnosticsPageCopy.copyReport))
       Button(DiagnosticsPageCopy.saveReport) { saveReport() }
+        .buttonStyle(SettingsSecondaryButtonStyle())
         .accessibilityLabel(Text(DiagnosticsPageCopy.saveReport))
       if justCopied {
         Text(DiagnosticsPageCopy.copied)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(SettingsTheme.bodyColor)
           .transition(.opacity)
           .accessibilityLabel(Text(DiagnosticsPageCopy.copiedAccessibly))
       }

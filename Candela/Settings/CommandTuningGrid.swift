@@ -81,6 +81,8 @@ struct CommandTuningGrid: View {
   /// size.
   @ScaledMetric(relativeTo: .body) private var fieldWidth: CGFloat = 60
 
+  @Environment(\.settingsAccent) private var lighting
+
   private var prefs: DisplayPrefs { writer.prefs }
 
   /// Why no DDC command is reaching this display, if none is — read from the
@@ -131,8 +133,16 @@ struct CommandTuningGrid: View {
         ForEach(DDCCommand.allCases, id: \.self) { command in
           GridRow {
             Text(verbatim: DDCCommandCopy.title(command))
+              .foregroundStyle(SettingsTheme.titleColor)
+            // The native switch under the window's tint, NOT `themedSwitch()`:
+            // that style draws the label at the leading edge and spreads the
+            // row, and here the label is the grid's own first column and the
+            // cell has to BE the switch for the header to sit above it.
             Toggle("", isOn: enabledBinding(command))
               .labelsHidden()
+              .toggleStyle(.switch)
+              .controlSize(.small)
+              .tint(lighting.accent)
               // Without it the toggle takes the column's full width and draws
               // its switch at the trailing edge, which no header placement can
               // sit above. Fixed size makes the cell the switch.
@@ -143,18 +153,22 @@ struct CommandTuningGrid: View {
             overrideField(.maximum(command))
             Toggle("", isOn: invertBinding(command))
               .labelsHidden()
+              .toggleStyle(.switch)
+              .controlSize(.small)
+              .tint(lighting.accent)
               .fixedSize()
               .accessibilityLabel(Text("Invert \(rowName(command))"))
               .prefIdentifier(.invertDDC, command: command, persistenceKey: writer.persistenceKey)
           }
         }
       }
-      // Belt to the section-level disable `AdvancedPage` applies (SO12): this
+      // Belt to the card-level disable `AdvancedPage` applies (SO12): this
       // grid is the thing a traffic block actually voids, so it states the
       // condition itself rather than trusting its container.
       .disabled(isInert)
       captions
     }
+    .padding(.vertical, 6)
   }
 
   // MARK: - Cells
@@ -168,7 +182,7 @@ struct CommandTuningGrid: View {
   private func columnHeader(_ title: LocalizedStringKey) -> some View {
     Text(title)
       .font(.caption)
-      .foregroundStyle(.secondary)
+      .foregroundStyle(SettingsTheme.faintColor)
       .gridColumnAlignment(.center)
   }
 

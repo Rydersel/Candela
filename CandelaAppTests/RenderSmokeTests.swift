@@ -158,7 +158,7 @@ struct RenderSmokeTests {
     expectPixels(render(shell), "SettingsRootView")
   }
 
-  /// The page's header and its grouped form chrome. The mode list is NOT on
+  /// The page's header and the scaffold's card chrome. The mode list is NOT on
   /// screen: it renders from `DisplayModeCoordinator.catalogs`, which is
   /// `private(set)` on the coordinator the page reads out of the environment
   /// model, so the only honest routes to a populated list are a live display
@@ -166,6 +166,12 @@ struct RenderSmokeTests {
   /// state the page has to survive anyway (it is what a push renders before
   /// enumeration lands), so this covers that state and the row derivation
   /// stays covered structurally instead.
+  ///
+  /// The frame is the page's own extent since the card conversion, the way the
+  /// built-in pane's render is: the scaffold lays a `SettingsTheme.pageWidth`
+  /// column out inside 32 pt of horizontal padding, so anything narrower than
+  /// that sum renders the cards compressed. The accent is injected because the
+  /// list's selection ring and its checkmark both read from it.
   @Test func theAllModesPageRendersWithoutACatalog() {
     let model = TestFixtures.appModel()
     let state = TestFixtures.displayState(name: "Smoke Panel", persistenceKey: "smoke-panel")
@@ -175,7 +181,8 @@ struct RenderSmokeTests {
       onSwitch: { _ in }
     )
     .environment(model)
-    .frame(width: 640, height: 520)
+    .environment(\.settingsAccent, .display(isBuiltIn: false, ordinal: 0))
+    .frame(width: SettingsTheme.pageWidth + 64, height: 520)
     expectPixels(render(page), "AllModesPage")
   }
 
