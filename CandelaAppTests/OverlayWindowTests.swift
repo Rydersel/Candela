@@ -38,6 +38,10 @@ struct OverlayWindowTests {
     #expect(config.isReleasedWhenClosed == false)
     #expect(config.isMovableByWindowBackground == false)
     #expect(config.initialContentAlpha == 0)
+    // A shadowed overlay draws a hairline rim around the detection mask's
+    // dimmed regions: the window server shapes the shadow from the
+    // non-transparent content, and the mask is mostly transparent.
+    #expect(config.hasShadow == false)
   }
 
   /// The value and the window have to agree, or describing the recipe as a
@@ -55,6 +59,9 @@ struct OverlayWindowTests {
     // whether or not `configure` ever writes it: a check that cannot fail.
     window.isMovableByWindowBackground = true
     window.ignoresMouseEvents = false
+    // Seeded like the above: if a borderless window's default ever became
+    // shadowless, an unwritten `hasShadow` would pass below without this.
+    window.hasShadow = true
     // Not the seed rect, and not any screen's frame: an arbitrary rect proves
     // the frame argument is what lands.
     let frame = NSRect(x: 120, y: 60, width: 400, height: 300)
@@ -68,6 +75,7 @@ struct OverlayWindowTests {
     #expect(window.ignoresMouseEvents == config.ignoresMouseEvents)
     #expect(window.isReleasedWhenClosed == config.isReleasedWhenClosed)
     #expect(window.isMovableByWindowBackground == config.isMovableByWindowBackground)
+    #expect(window.hasShadow == config.hasShadow)
     #expect(window.frame == frame)
     // The window is clear and the black lives in the content layer. Swapping
     // the two (a black window faded by its own alpha) is the exact mistake the
