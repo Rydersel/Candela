@@ -114,6 +114,37 @@ struct OnboardingFlowModelTests {
     #expect(model.committed.isEmpty)
   }
 
+  @Test func revertThenReapplyThenKeepWalksAsOneSequence() {
+    let model = modelOnSizePage()
+    let pageIndex = model.index
+    model.applySize(displayKey: "dell", choice: .recommended)
+    model.revertSize()
+    #expect(model.applyState == .reverted)
+    #expect(model.sizeChoices["dell"] == .keepCurrent)
+    #expect(model.index == pageIndex)
+    // A second apply on the same page overwrites the reverted decision.
+    model.applySize(
+      displayKey: "dell", choice: .custom(looksLikeWidth: 3008, looksLikeHeight: 1692))
+    #expect(model.applyState == .counting(secondsRemaining: 15))
+    model.keepSize()
+    #expect(model.sizeChoices["dell"]
+      == .custom(looksLikeWidth: 3008, looksLikeHeight: 1692))
+    #expect(model.index == pageIndex + 1)
+    #expect(model.committed == [
+      .applySize(displayKey: "dell", looksLikeWidth: 3008, looksLikeHeight: 1692)
+    ])
+  }
+
+  @Test func countdownSeedFollowsTheInstalledApplierSeconds() {
+    let model = modelOnSizePage()
+    // The tick is long enough that nothing lands during the test; only the
+    // synchronous seed is under inspection.
+    model.installFixtureSizeApplier(seconds: 7, tick: .seconds(60))
+    model.applySize(displayKey: "dell", choice: .recommended)
+    #expect(model.applyState == .counting(secondsRemaining: 7))
+    #expect(model.applyCountdownSecondsRemaining(forKey: "dell") == 7)
+  }
+
   @Test func fixtureExpiryRevertsAndThePageStays() async throws {
     let model = modelOnSizePage()
     let pageIndex = model.index
@@ -248,6 +279,34 @@ struct OnboardingFlowModelTests {
     #expect(model.sizeChoices["dell"] == nil)
     #expect(!model.pages.contains { if case .size = $0 { true } else { false } })
     #expect(model.index < model.pages.count)
+  }
+
+  // MARK: - Screen Recording achieved state
+
+  @Test func screenRecordingGrantTracksThePreflightNeverTheClick() {
+    let model = OnboardingFlowModel(environment: environment([
+      entry(key: "dell", suggestion: suggestion)
+    ]))
+    var granted = false
+    model.onPreflightScreenRecording = { granted }
+    #expect(!model.screenRecordingGranted)
+    // The ask alone proves nothing; the preflight still says no.
+    model.requestScreenRecording()
+    #expect(model.screenRecordingRequested)
+    #expect(!model.screenRecordingGranted)
+    // The grant lands outside the app; a refresh picks it up.
+    granted = true
+    model.refreshScreenRecordingGranted()
+    #expect(model.screenRecordingGranted)
+  }
+
+  @Test func fixturePreflightSimulatesGrantedAfterRequest() {
+    let model = OnboardingFlowModel(environment: environment([
+      entry(key: "dell", suggestion: suggestion)
+    ]))
+    #expect(!model.screenRecordingGranted)
+    model.requestScreenRecording()
+    #expect(model.screenRecordingGranted)
   }
 
   // MARK: - Stage 1 behaviours that must not regress

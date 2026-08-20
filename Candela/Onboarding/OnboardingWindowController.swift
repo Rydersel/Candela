@@ -24,7 +24,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
   /// stay quiet: the user asked to dismiss a window, not to be handed a menu.
   var onFinishedByButton: (() -> Void)?
   private var closedByFinishButton = false
-  /// Constructed once and reused, exactly like the window — and that is only
+  /// Constructed once and reused, exactly like the window, and that is only
   /// safe because `isEnabled` is a LIVE read of `SMAppService.mainApp.status`
   /// (D10). This object holds no copy of the registration state, so there is
   /// nothing here to go stale after a settings reset unregisters the login
@@ -63,14 +63,14 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // Setup opens BEHIND the frontmost app. Measured on an isolated harness
     // (4/4 runs). The deprecation is accepted deliberately here.
     //
-    // The call must also stay inside the click's event context — every
+    // The call must also stay inside the click's event context: every
     // `DispatchQueue.main.async` variant lost the activation grant, and
     // neither `makeKeyAndOrderFront` nor `orderFrontRegardless` rescues it.
     NSApp.activate(ignoringOtherApps: true)
     window.makeKeyAndOrderFront(nil)
     // D13 safety net: `recordCurrentVersion` is otherwise written ONLY from
-    // `windowWillClose`. If presentation ever fails — an `LSUIElement` window
-    // that will not order front, a future AppKit change — the version key
+    // `windowWillClose`. If presentation ever fails (an `LSUIElement` window
+    // that will not order front, a future AppKit change), the version key
     // would never be written, the app would re-run Setup on every launch, and
     // `migrateIfNeeded` would never have a stored version to advance.
     // Recording it here in that case costs the (already broken) Setup window
@@ -100,9 +100,14 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
   }
 
   private func installFlow(in window: NSWindow) {
+    // A fresh flow replaces the applier; the old one forgets its pending
+    // apply so its observation loop can die instead of reporting into a
+    // discarded flow.
+    self.applier?.cancel()
     let flow = OnboardingFlowModel(
       environment: OnboardingLiveEnvironment.current(model: model, loginItem: loginItem))
     let applier = OnboardingLiveApplier(model: model, flow: flow)
+    flow.applierCountdownSeconds = OnboardingLiveApplier.countdownSeedSeconds
     let router = liveRouter()
     let permission = model.accessibility
     flow.onCommit = { router.route($0) }
@@ -113,6 +118,9 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // shown), so nothing may gate on it; the telemetry pref itself is written
     // later through the commit router when the care page is advanced past.
     flow.onRequestScreenRecording = { _ = CGRequestScreenCaptureAccess() }
+    // Achieved state for the care page's copy: the preflight, never the
+    // request's return value.
+    flow.onPreflightScreenRecording = { CGPreflightScreenCaptureAccess() }
     flow.onApplySize = { [weak applier] key, width, height in
       applier?.applySize(displayKey: key, looksLikeWidth: width, looksLikeHeight: height)
     }
@@ -175,7 +183,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     window.titleVisibility = .hidden
     window.isMovableByWindowBackground = true
     // Hidden in the titlebar, but still what VoiceOver and the Window menu
-    // read — so it uses the user-facing name for this flow, "Setup".
+    // read, so it uses the user-facing name for this flow, "Setup".
     window.title = "\(AppInfo.productName) Setup"
     // The flow is composed against its own dark palette; the window forces it
     // so a light-mode system does not render dark text on dark canvas.
@@ -192,6 +200,11 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     // open countdown is answered here with the revert the model already owns;
     // idempotent when the flow closed itself.
     flowModel?.sizePageDisappeared()
+    // After the revert routed, the applier forgets any pending apply so its
+    // observation loop dies rather than staying armed behind a closed window.
+    // An answer still waiting on its first preview observation survives the
+    // cancel and is delivered when that preview appears.
+    applier?.cancel()
     onCompletion()
     if closedByFinishButton {
       closedByFinishButton = false

@@ -101,8 +101,6 @@ struct OnboardingOledCarePage: View {
   @Bindable var model: OnboardingFlowModel
   let accent: Color
 
-  @State private var screenRecordingAsked = false
-
   private var designated: [OnboardingDisplayEntry] {
     model.environment.displays.filter { model.designatedOleds.contains($0.persistenceKey) }
   }
@@ -135,6 +133,9 @@ struct OnboardingOledCarePage: View {
       }
       Spacer(minLength: 22)
     }
+    // The grant can land outside the app (System Settings), so the copy
+    // re-checks whenever the page comes back on screen.
+    .onAppear { model.refreshScreenRecordingGranted() }
   }
 
   private func protectRow(for display: OnboardingDisplayEntry) -> some View {
@@ -160,13 +161,10 @@ struct OnboardingOledCarePage: View {
         selected: model.measuredTelemetry,
         title: "Measured",
         badge: "Recommended",
-        text: screenRecordingAsked && model.measuredTelemetry
-          ? "Screen Recording enabled. \(AppInfo.productName) reads the picture only to average its brightness; nothing leaves your Mac."
-          : "Uses Screen Recording to see exactly what your display shows, so wear tracking reflects reality."
+        text: measuredCardText
       ) {
         model.measuredTelemetry = true
-        if !screenRecordingAsked {
-          screenRecordingAsked = true
+        if !model.screenRecordingRequested {
           model.requestScreenRecording()
         }
       }
@@ -180,6 +178,20 @@ struct OnboardingOledCarePage: View {
       }
     }
     .padding(.horizontal, 40)
+  }
+
+  /// Three states, keyed on what actually happened, never on the click alone:
+  /// the pitch before the ask, the enabled line only once the preflight
+  /// confirms the grant, and an honest pointer to System Settings while the
+  /// grant has not landed.
+  private var measuredCardText: String {
+    guard model.screenRecordingRequested && model.measuredTelemetry else {
+      return "Uses Screen Recording to see exactly what your display shows, so wear tracking reflects reality."
+    }
+    if model.screenRecordingGranted {
+      return "Screen Recording enabled. \(AppInfo.productName) reads the picture only to average its brightness; nothing leaves your Mac."
+    }
+    return "Waiting for permission. Turn on \(AppInfo.productName) in System Settings, under Privacy & Security, Screen Recording. Health figures stay estimates until then."
   }
 
   private func measurementCard(

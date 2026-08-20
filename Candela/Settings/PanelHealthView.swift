@@ -79,8 +79,9 @@ struct PanelHealthView: View {
     model.oledCare.healthSummary(for: persistenceKey)
   }
 
-  /// Preflight only, never `CGRequestScreenCaptureAccess`: the only prompting
-  /// call in the app is the pane's telemetry toggle. Gated on a live display,
+  /// Preflight only, never `CGRequestScreenCaptureAccess`: the prompting
+  /// calls in the app are the pane's telemetry toggle and the guided setup
+  /// flow's measured choice. Gated on a live display,
   /// because with nothing attached there is no capture to be missing a grant
   /// for and the page is pure history either way.
   ///

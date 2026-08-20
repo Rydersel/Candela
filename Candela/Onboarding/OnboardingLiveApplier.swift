@@ -19,6 +19,12 @@ import Observation
 /// decides what each report does to the flow.
 @MainActor
 final class OnboardingLiveApplier {
+  /// What the flow's synchronous `.counting` seed shows before the first
+  /// observed tick arrives. Mirrors `ModePreviewSession`'s default countdown
+  /// length; only cosmetic, because the first tick report carries the real
+  /// remaining seconds and overwrites it.
+  static let countdownSeedSeconds = 30
+
   private let model: AppModel
   /// Weak both ways is deliberate: the flow's seam closures capture this
   /// object weakly, and the window controller owns both.
@@ -38,6 +44,11 @@ final class OnboardingLiveApplier {
   /// an answer is in flight the observation pass must not interpret the
   /// preview's disappearance; the outcome is the authority.
   private var answerInFlight = false
+  /// An answer requested before the first preview observation (the window can
+  /// close between the select and the first tick). Held and delivered when
+  /// the preview first appears; cleared whenever the pending apply resolves
+  /// some other way first. true keeps, false reverts.
+  private var requestedAnswerBeforePreview: Bool?
   private var tracking = false
 
   init(model: AppModel, flow: OnboardingFlowModel) {
@@ -83,10 +94,18 @@ final class OnboardingLiveApplier {
       flow?.applyKept()
       return
     }
+    // A start failure left behind by an earlier select (a settings-window
+    // visit included) must not be mistaken for THIS apply's outcome: the
+    // failure branch below keys on the display alone, so dismiss any stale
+    // one before the select.
+    if let stale = coordinator.startFailure, stale.displayID == state.id {
+      coordinator.dismissStartFailure()
+    }
     pendingDisplayID = state.id
     renderedPreview = nil
     sawPreview = false
     answerInFlight = false
+    requestedAnswerBeforePreview = nil
     // `.settingsBanner` is the surface that presents NO floating confirmation
     // window: the Setup page renders the answer, and a second button row on
     // the display that just changed would be the two-surfaces defect the
@@ -104,10 +123,30 @@ final class OnboardingLiveApplier {
   func keep() { answer(keeping: true) }
   func revert() { answer(keeping: false) }
 
+  /// Forget the pending apply so the next observation pass lets the tracking
+  /// loop die. Called when the hosting window closes and when a fresh flow
+  /// replaces this applier: a departed pending display or a late answer
+  /// outcome must not leave the loop armed against a dead flow. An answer
+  /// already requested before the first preview observation is kept; the loop
+  /// stays armed just long enough to deliver it (the coordinator's own expiry
+  /// revert is the backstop if the preview never appears).
+  func cancel() {
+    guard requestedAnswerBeforePreview == nil else { return }
+    finishPending()
+  }
+
   // MARK: - Answering
 
   private func answer(keeping: Bool) {
-    guard pendingDisplayID != nil, let preview = renderedPreview, !answerInFlight else { return }
+    guard pendingDisplayID != nil, !answerInFlight else { return }
+    guard let preview = renderedPreview else {
+      // The apply is pending but its preview has not been observed yet (the
+      // window can close inside that sliver). Remember the answer; the
+      // observation pass delivers it when the preview first appears, so the
+      // preview never runs headless to expiry.
+      requestedAnswerBeforePreview = keeping
+      return
+    }
     answerInFlight = true
     let coordinator = model.displayModes
     Task { [weak self] in
@@ -178,12 +217,20 @@ final class OnboardingLiveApplier {
   }
 
   private func processCoordinatorState() {
-    guard let flow, let pendingID = pendingDisplayID else { return }
+    guard let pendingID = pendingDisplayID else { return }
     let coordinator = model.displayModes
     if let preview = coordinator.preview, preview.displayID == pendingID {
       renderedPreview = preview
       sawPreview = true
-      flow.applyCountdownTicked(secondsRemaining: preview.secondsRemaining)
+      // An answer requested before this first observation is delivered now,
+      // with the preview it could not name earlier; the in-flight rule below
+      // then owns the resolution as usual.
+      if let keeping = requestedAnswerBeforePreview {
+        requestedAnswerBeforePreview = nil
+        answer(keeping: keeping)
+        return
+      }
+      flow?.applyCountdownTicked(secondsRemaining: preview.secondsRemaining)
       return
     }
     // No outstanding preview for this display. While an answer is in flight
@@ -195,7 +242,7 @@ final class OnboardingLiveApplier {
       // departure, and the coordinator's own handling of both is a revert
       // (PD9). Reported rather than left counting.
       finishPending()
-      flow.applyReverted()
+      flow?.applyReverted()
     } else if let failure = coordinator.startFailure, failure.displayID == pendingID {
       // The select never took effect: begin() failed or another
       // reconfiguration claimed the displays. Nothing is outstanding. The
@@ -204,7 +251,7 @@ final class OnboardingLiveApplier {
       // settings window opens on this display.
       finishPending()
       coordinator.dismissStartFailure()
-      flow.applyFailed()
+      flow?.applyFailed()
     }
   }
 
@@ -212,5 +259,6 @@ final class OnboardingLiveApplier {
     pendingDisplayID = nil
     renderedPreview = nil
     sawPreview = false
+    requestedAnswerBeforePreview = nil
   }
 }

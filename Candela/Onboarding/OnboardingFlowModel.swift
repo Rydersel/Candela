@@ -87,9 +87,28 @@ final class OnboardingFlowModel {
   /// OB5's ask, injected like the accessibility actions: live mode calls
   /// `CGRequestScreenCaptureAccess`, the mock records the click.
   var onRequestScreenRecording: () -> Void = {}
+  /// Achieved-state check for the Screen Recording grant, injected like the
+  /// ask above: live mode binds `CGPreflightScreenCaptureAccess`, because the
+  /// request's own return value is false when it merely shows the dialog and
+  /// proves nothing. The fixture default (installed in `init`) simulates
+  /// granted-after-request so the mock flow stays demonstrable.
+  var onPreflightScreenRecording: () -> Bool = { false }
+  /// True once the flow has asked for Screen Recording; the care page's copy
+  /// keys off this together with the granted state below.
+  var screenRecordingRequested = false
+  private(set) var screenRecordingGranted = false
 
   func requestScreenRecording() {
+    screenRecordingRequested = true
     onRequestScreenRecording()
+    refreshScreenRecordingGranted()
+  }
+
+  /// Re-read the grant. Called after the request and on care page appearance:
+  /// the grant can land outside the app (System Settings), so the copy never
+  /// trusts a stale answer.
+  func refreshScreenRecordingGranted() {
+    screenRecordingGranted = onPreflightScreenRecording()
   }
 
   // MARK: - Size apply seam
@@ -123,6 +142,13 @@ final class OnboardingFlowModel {
 
   static let applyCountdownSeconds = 15
 
+  /// Seconds the installed applier's countdown opens with, used to seed the
+  /// synchronous `.counting` state in `applySize`. Only a seed: the applier's
+  /// first tick report carries the real remaining seconds and overwrites it.
+  /// The fixture installer sets it from its own `seconds`; live wiring sets
+  /// it to the shipped preview countdown's length.
+  var applierCountdownSeconds = OnboardingFlowModel.applyCountdownSeconds
+
   private(set) var committed: [OnboardingCommit] = []
 
   init(environment: OnboardingEnvironment) {
@@ -138,6 +164,9 @@ final class OnboardingFlowModel {
     onRevertSize = {}
     pages = OnboardingPlan.pages(for: environment, designatedOleds: designated)
     onCommit = { [weak self] in self?.committed.append($0) }
+    // Fixture preflight: granted once asked, so the mock flow's measured card
+    // reaches its enabled state without a real TCC grant.
+    onPreflightScreenRecording = { [weak self] in self?.screenRecordingRequested ?? false }
     installFixtureSizeApplier()
   }
 
@@ -227,7 +256,7 @@ final class OnboardingFlowModel {
     pendingApply = PendingApply(
       displayKey: displayKey, choice: choice,
       looksLikeWidth: size.width, looksLikeHeight: size.height)
-    applyState = .counting(secondsRemaining: Self.applyCountdownSeconds)
+    applyState = .counting(secondsRemaining: applierCountdownSeconds)
     onApplySize(displayKey, size.width, size.height)
   }
 
@@ -316,6 +345,7 @@ final class OnboardingFlowModel {
     seconds: Int = OnboardingFlowModel.applyCountdownSeconds,
     tick: Duration = .seconds(1)
   ) {
+    applierCountdownSeconds = seconds
     onApplySize = { [weak self] _, _, _ in
       self?.beginFixtureCountdown(seconds: seconds, tick: tick)
     }
