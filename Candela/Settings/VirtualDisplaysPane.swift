@@ -144,13 +144,23 @@ struct VirtualDisplaysPane: View {
   /// The tile row's one line about what is left, told about SLOTS rather than
   /// about running displays: a slot with a stopped display in it is still spent.
   static func capacityCaption(definedCount: Int) -> String {
+    let cap = VirtualDisplayIdentity.userSlotRange.count
+    let spelled = Self.spelled(cap)
     if definedCount == 0 {
-      return "Nothing created yet. Up to three virtual displays can run at once."
+      return "Nothing created yet; up to \(spelled) virtual displays can run at once."
     }
-    if definedCount >= VirtualDisplayIdentity.userSlotRange.count {
-      return "All three slots are in use. Remove one to create a different display."
+    if definedCount >= cap {
+      return "All \(spelled) slots are in use; remove one to create a different display."
     }
-    return "Up to three virtual displays can run at once."
+    return "Up to \(spelled) virtual displays can run at once."
+  }
+
+  /// A small count as a word, which is how the rest of the window writes one.
+  /// The digits are a fallback rather than a trap: the sentence still reads if
+  /// the slot range ever grows past the list.
+  private static func spelled(_ count: Int) -> String {
+    let words = ["zero", "one", "two", "three", "four", "five", "six"]
+    return words.indices.contains(count) ? words[count] : String(count)
   }
 
   /// Adds the lowest free slot: definition with the slot defaults, created
@@ -386,31 +396,23 @@ struct VirtualDisplaysPane: View {
       $0.width == definition.width && $0.height == definition.height
     }
     SettingRow("Size changes apply when the display is next created.") {
-      HStack {
-        Text("Size")
-        Spacer()
-        Picker("Size", selection: Binding(
-          get: { presetIndex ?? -1 },
-          set: { newIndex in
-            // The Custom tag is a read-only state of the picker, not a choice:
-            // typing in the fields below is what makes a size custom.
-            guard newIndex >= 0 else { return }
-            var updated = prefs.virtualSlot(slot)
-            updated.width = Self.presets[newIndex].width
-            updated.height = Self.presets[newIndex].height
-            prefs.setVirtualSlot(updated, slot: slot)
-            actions.prefsDidChange([.virtualSlotWidth, .virtualSlotHeight])
-          }
-        )) {
-          ForEach(Self.presets.indices, id: \.self) { index in
-            Text(Self.presets[index].label).tag(index)
-          }
-          Text("Custom").tag(-1)
+      ThemedChoiceRow(label: "Size", selection: Binding(
+        get: { presetIndex ?? -1 },
+        set: { newIndex in
+          // The Custom tag is a read-only state of the picker, not a choice:
+          // typing in the fields below is what makes a size custom.
+          guard newIndex >= 0 else { return }
+          var updated = prefs.virtualSlot(slot)
+          updated.width = Self.presets[newIndex].width
+          updated.height = Self.presets[newIndex].height
+          prefs.setVirtualSlot(updated, slot: slot)
+          actions.prefsDidChange([.virtualSlotWidth, .virtualSlotHeight])
         }
-        // The row draws the label, so the picker is the pop-up alone; the
-        // hidden label is still what VoiceOver reads it by.
-        .labelsHidden()
-        .fixedSize()
+      )) {
+        ForEach(Self.presets.indices, id: \.self) { index in
+          Text(Self.presets[index].label).tag(index)
+        }
+        Text("Custom").tag(-1)
       }
     }
     SettingsCardDivider()
@@ -486,9 +488,6 @@ struct VirtualDisplaysPane: View {
     }
     .padding(.vertical, 8)
     .disabled(busy)
-    // A custom `ButtonStyle` draws the same whether or not it is enabled, so
-    // the dimming that says "not now" has to be asked for.
-    .opacity(busy ? 0.5 : 1)
   }
 
   private func setConfigured(_ configured: Bool, slot: Int) {
