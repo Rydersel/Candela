@@ -219,11 +219,13 @@ struct SettingsBadge: View {
 /// the call site.
 ///
 /// The spread lives here because a `Picker` has no style point that can carry
-/// it, the way the theme's switch style carries it for a `Toggle`. The row is
-/// ONE accessibility element for the same reason the switch style is: the
-/// written label and the chosen value have to land on the thing that changes,
-/// and `SettingRow` attaches its caption as that element's hint. `combine`
-/// keeps the pop-up's own action, which `ignore` would drop.
+/// it, the way the theme's switch style carries it for a `Toggle`.
+///
+/// The pop-up stays the row's one element and keeps its own accessibility: the
+/// written label moves onto it and the drawn `Text` leaves the tree. Merging
+/// the two with `children: .combine` is what this row must NOT do: measured
+/// 2026-08-20 on the switch style, a combined element keeps `AXPress` and
+/// loses `AXFocused`, so the row falls out of the Tab order entirely.
 struct ThemedChoiceRow<Value: Hashable, Options: View>: View {
   let label: LocalizedStringKey
   @Binding var selection: Value
@@ -235,6 +237,7 @@ struct ThemedChoiceRow<Value: Hashable, Options: View>: View {
       // ideal width, so the label is the half that has to give.
       Text(label)
         .fixedSize(horizontal: false, vertical: true)
+        .accessibilityHidden(true)
       Spacer(minLength: 16)
       Picker(selection: $selection) {
         options
@@ -243,9 +246,9 @@ struct ThemedChoiceRow<Value: Hashable, Options: View>: View {
       }
       .labelsHidden()
       .fixedSize()
+      .accessibilityLabel(Text(label))
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .accessibilityElement(children: .combine)
   }
 }
 
@@ -287,10 +290,16 @@ private struct ThemedSwitchStyle: ToggleStyle {
         .controlSize(.small)
         .tint(accent)
     }
-    // One row element, not a caption beside an unlabeled control: the row's
-    // label, its safety sentence and its hint all have to land on the thing
-    // that toggles. `combine` keeps the child's action, unlike `ignore`.
-    .accessibilityElement(children: .combine)
+    // A real labeled toggle stands in for the drawn row, so the element is
+    // focusable, pressable and named. NOT `children: .combine`: measured
+    // 2026-08-20 against the live app, a combined element keeps `AXPress` and
+    // loses `AXFocused`, which drops every switch row out of the Tab order.
+    // The inner style is explicit because this style is still in the
+    // environment here and would otherwise recurse into itself.
+    .accessibilityRepresentation {
+      Toggle(isOn: configuration.$isOn) { configuration.label }
+        .toggleStyle(.switch)
+    }
   }
 }
 
