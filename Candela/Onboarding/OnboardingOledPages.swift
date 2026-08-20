@@ -12,7 +12,7 @@ struct OnboardingOledSelectPage: View {
       Spacer(minLength: 22)
       OnboardingHeading(
         title: "Any OLEDs here?",
-        subtitle: "OLED displays age where bright, static content sits. \(AppInfo.productName) can protect them, but only you know which these are."
+        subtitle: "OLED displays age where bright, static content sits. \(AppInfo.productName) can protect them from burn-in."
       )
       Spacer(minLength: 18)
       HStack(alignment: .top, spacing: 14) {
@@ -22,7 +22,7 @@ struct OnboardingOledSelectPage: View {
       }
       .padding(.horizontal, 30)
       if hasNameGuess {
-        Text("Preselected from the display's own name. Deselect it if the guess is wrong.")
+        Text("Candela's OLED detection can make mistakes. Deselect a display if it got one wrong.")
           .font(.caption)
           .foregroundStyle(OnboardingStyle.faintColor)
           .padding(.top, 12)

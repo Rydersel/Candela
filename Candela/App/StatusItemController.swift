@@ -661,12 +661,16 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // fires only on actual reconfigurations), so the initial OLED-care
       // enrollment resolve happens here, against the freshly discovered list.
       model.oledCare.displaysReconfigured()
-      // Same reason, same remedy for Setup: the first-run presentation fires
-      // at the end of launch, BEFORE this refresh lands, so the flow would
-      // derive over an empty display list (the slim no-displays flow, on a
-      // desk with two externals; measured on the rig 2026-08-19). Re-derive
-      // against the discovered list; a no-op unless Setup is visible.
+      // Setup's re-derivation for slow or straggling discovery (a no-op
+      // unless the window is visible), then the first-run presentation
+      // itself: it lives HERE, after the refresh, so the flow's init-time
+      // seeds derive over the discovered list. The end-of-launch placement
+      // raced discovery and produced the slim no-displays flow on a desk
+      // with two externals (measured on the rig 2026-08-19).
       self.onboardingController?.displayTopologyChanged()
+      if isFirstRun {
+        presentOnboarding()
+      }
       // Virtual display launch prelude (VD6/VD13): normalize the slot prefs,
       // log any orphan from a previous instance, and recreate the
       // recreate-at-launch slots (skipped in Safe Mode). Non-blocking: the
@@ -728,12 +732,14 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     // state IS a first-run state and gets the same window.
     settingsActions.postReset = { [weak self] in self?.presentOnboarding() }
 
-    // Last statement of launch, per the HIG: Setup appears over a fully live
-    // app (menu-bar icon already installed, displays warming) rather than as
-    // part of launching.
-    if isFirstRun {
-      presentOnboarding()
-    }
+    // The first-run Setup now presents from the warm task, AFTER the launch
+    // display refresh lands, so the flow's model seeds (designation guess,
+    // measurement choice, size pages) derive over the discovered list rather
+    // than the empty pre-refresh one. Measured on the rig 2026-08-19: the
+    // end-of-launch presentation raced discovery and produced the slim
+    // no-displays flow on a desk with two externals, and a re-derivation
+    // alone cannot repair init-time seeds. The HIG intent stands: the app is
+    // fully live (icon installed, displays discovered) when Setup appears.
 
     #if DEBUG
       startHUDDemoIfRequested()
