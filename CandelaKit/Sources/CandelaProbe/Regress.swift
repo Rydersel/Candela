@@ -2204,13 +2204,17 @@ enum Regress {
     else {
       return setupMiss(instruments.lastProcessError ?? "the Debug build did not launch")
     }
-    // Boundary 3: the launched build is the only one running. A stray instance
-    // here would put another build's rows in the window this check judges.
-    guard let running = instruments.waitForSoleRunningInstance(timeout: 20) else {
+    // Boundary 3: the launched build is the only one running, and it is THIS
+    // child. Exactly-one and exactly-this-one are different questions: a child
+    // that died on launch while something else came up satisfies the count and
+    // none of the meaning, and the window would then be read as its own.
+    let running: RegressInstruments.RunningInstance
+    switch settled(instruments, instrumented, describedAs: "instrumented") {
+    case let .failure(setup):
       _ = instruments.terminate(instrumented)
-      return setupMiss(
-        "the instrumented Debug launch did not settle as the only running build: \(instruments.lastProcessError ?? "no reason reported")"
-      )
+      return setupMiss(setup.reason)
+    case let .success(instance):
+      running = instance
     }
 
     // The verdict lands asynchronously, so this waits for the dump that KNOWS
@@ -2225,7 +2229,11 @@ enum Regress {
       Thread.sleep(forTimeInterval: 2)
       window = instruments.logWindow(since: instrumentedStart)
     }
-    let rows = AppRegression.panelDumpRows(fromLogLines: window.lines)
+    // The NEWEST dump's rows, never the window's. The window accumulates every
+    // dump since launch, and the launch dump reports both panels unknown, so
+    // handing the verdict the whole window selects the denying panel's
+    // pre-verdict row and convicts a healthy rig of a D24 regression.
+    let rows = AppRegression.newestPanelDumpRows(fromLogLines: window.lines)
     let landed = AppRegression.panelDumpVerdictLanded(inLogLines: window.lines)
     let queryFailed = window.queryFailed
     let queryFailure = window.failureReason
@@ -2253,11 +2261,9 @@ enum Regress {
       return setupMiss(
         instruments.lastProcessError ?? "the control launch of the Debug build did not start")
     }
-    guard instruments.waitForSoleRunningInstance(timeout: 20) != nil else {
+    if case let .failure(setup) = settled(instruments, control, describedAs: "control") {
       _ = instruments.terminate(control)
-      return setupMiss(
-        "the control launch did not settle as the only running build: \(instruments.lastProcessError ?? "no reason reported")"
-      )
+      return setupMiss(setup.reason)
     }
     Thread.sleep(forTimeInterval: 10)
     let controlWindow = instruments.logWindow(since: controlStart)
@@ -2298,16 +2304,45 @@ enum Regress {
     }
   }
 
+  /// The child, confirmed to BE the only Candela running.
+  ///
+  /// The count and the identity are different questions. A child that exited on
+  /// launch while another instance was coming up satisfies "exactly one" and
+  /// none of what the count was asked for, and every line read afterwards would
+  /// be attributed to a build this check never started. So the sole instance's
+  /// pid is compared to the child's rather than assumed to be it.
+  private static func settled(
+    _ instruments: RegressInstruments, _ process: Process, describedAs role: String
+  ) -> Result<RegressInstruments.RunningInstance, SetupFailure> {
+    guard let running = instruments.waitForSoleRunningInstance(timeout: 20) else {
+      return .failure(SetupFailure(
+        reason: "the \(role) Debug launch did not settle as the only running build: \(instruments.lastProcessError ?? "no reason reported")"
+      ))
+    }
+    guard running.pid == "\(process.processIdentifier)" else {
+      return .failure(SetupFailure(
+        reason: "the only Candela running is \(running.described), not the \(role) child this check launched (pid \(process.processIdentifier)): the count is right and the instance is not, so nothing read from this window would be the launched build's"
+      ))
+    }
+    return .success(running)
+  }
+
   /// Puts the deployed build back and says so in the record: the rig leaves as
-  /// it arrived, or the record says it did not. A failed relaunch downgrades a
-  /// pass for the same reason a failed teardown does, and more sharply here:
-  /// the run would otherwise print a green line beside a rig with no app on it.
+  /// it arrived, or the record says exactly how it does not. A relaunch that
+  /// did not put back what it aimed at downgrades a pass for the same reason a
+  /// failed teardown does, and more sharply here: the alternative is a green
+  /// line printed beside a rig running a build nobody named.
+  ///
+  /// The path is compared rather than trusted. `open -a` goes through
+  /// LaunchServices, which this file already records resolving a bundle to the
+  /// REGISTERED copy rather than to the path handed to it, so "the app at X was
+  /// relaunched" is a sentence that has to be checked before it is written.
   private static func relaunchDeployed(
     _ instruments: RegressInstruments, check: PlatformConformance.Check, bundle: String?
   ) -> PlatformConformance.Check {
     let path = bundle ?? deployedBundlePath
     let aim = bundle == nil
-      ? "the running build's path did not name a bundle, so the deployed \(path) was relaunched instead"
+      ? "the running build's path did not name a bundle, so \(path) was relaunched instead"
       : "the deployed app at \(path) was relaunched"
     guard instruments.openBundle(path),
           let back = instruments.waitForSoleRunningInstance(timeout: 30)
@@ -2315,6 +2350,13 @@ enum Regress {
       return note(
         check,
         "teardown: \(aim) and it did not come back: \(instruments.lastProcessError ?? "no reason reported"); the rig is left with no Candela running",
+        downgradingPass: true)
+    }
+    let expected = "\(path)/Contents/MacOS/Candela"
+    guard back.path == expected else {
+      return note(
+        check,
+        "teardown: \(aim) and what came back is \(back.described), not \(expected); open goes through LaunchServices, which resolves a bundle to the registered copy, so the rig is running a build this check did not put back",
         downgradingPass: true)
     }
     return note(check, "teardown: \(aim) and answers as \(back.described)")

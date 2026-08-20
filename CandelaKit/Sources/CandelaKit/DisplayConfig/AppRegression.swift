@@ -516,16 +516,47 @@ public enum AppRegression {
     }
   }
 
-  /// Whether a window carries the verdict-landing dump rather than only the
-  /// launch one.
+  /// The rows of the NEWEST dump in a window, and the only rows anything should
+  /// judge.
+  ///
+  /// A window accumulates every dump a launch produced, oldest first, and the
+  /// launch dump reports each panel `unknown` by construction. A search through
+  /// the whole window for the line naming a panel therefore finds that panel's
+  /// PRE-VERDICT row: on a healthy rig the denying panel reads there as
+  /// `volumeEnabled=yes volumeSupport=unknown`, which is the exact shape of the
+  /// D24 regression this check exists to catch. Segmenting is what stops a
+  /// correct wait from being spent on the wrong rows.
+  ///
+  /// Cut positionally at the last header, because that is the only boundary the
+  /// format has: the pass number is a field inside a line, and a dump IS a
+  /// header followed by its rows. A window carrying rows and no header opened
+  /// mid-dump and has exactly one candidate segment, so its rows are handed
+  /// back rather than dropped; reporting nothing there would turn a readable
+  /// dump into a silent one.
+  public static func newestPanelDumpRows(fromLogLines lines: [String]) -> [String] {
+    guard let header = lines.lastIndex(where: { $0.contains("paneldump=header") }) else {
+      return panelDumpRows(fromLogLines: lines)
+    }
+    return panelDumpRows(fromLogLines: Array(lines[(header + 1)...]))
+  }
+
+  /// Whether the NEWEST dump in a window is the one that knows.
   ///
   /// The capabilities verdict lands asynchronously, so the launch dump reports
   /// every panel `unknown` by construction; a run that judged it would convict
   /// the denying panel of the app's own not-yet-knowing. Waiting on a verdict
   /// rather than on the pass counter is deliberate: the counter says how many
   /// dumps have happened, and what the D24 pair needs is one that knows.
+  ///
+  /// Asked of the newest segment rather than of the window, for two halves of
+  /// one reason. A landed verdict in an OLDER dump would end a wait whose rows
+  /// are then judged from a newer dump nobody checked, and a reconfigure can
+  /// re-dump `unknown` while the app re-resolves. A header whose rows have not
+  /// persisted yet leaves the segment empty, which is not landed, so the poll
+  /// waits for them instead of judging nothing.
   public static func panelDumpVerdictLanded(inLogLines lines: [String]) -> Bool {
-    panelDumpVolumeSupport(fromLogLines: lines).contains { $0 != "unknown" }
+    panelDumpVolumeSupport(fromLogLines: newestPanelDumpRows(fromLogLines: lines))
+      .contains { $0 != "unknown" }
   }
 
   // MARK: - The ledger's filename
@@ -539,6 +570,14 @@ public enum AppRegression {
   /// unpadded month or day would sort `2026-1-5` after `2026-10-05`: either way
   /// the job reads a record that is not the newest and reports an outstanding
   /// count for the wrong run. This function is the one definition of the shape.
+  ///
+  /// It does not validate the token it is handed, and deliberately: a short or
+  /// mistyped `--commit` lands in the ledger as a well-formed filename naming a
+  /// build that does not exist. What catches that is the ledger job's positive
+  /// control, which resolves the record's own `commit` field with `git cat-file
+  /// -e` and reddens when it does not name a real commit. Rejecting it here
+  /// would be a second definition of what a commit is, in the layer least able
+  /// to answer the question.
   public static func recordFilename(commit: String, date: Date) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")

@@ -526,6 +526,12 @@ case "regress":
     // that reports its verdict and drops it.
     switch Regress.writeRecords(report: report, options: options, timestamp: Date()) {
     case let .failure(usage):
+      // On stdout as well as stderr. Stdout is where a run says where its
+      // record landed, so it is where it has to say when none did: a reader
+      // watching that stream would otherwise see the report and no line about
+      // the record at all, which is the shape of a run that was never asked
+      // for one.
+      print("record NOT written: \(usage.message)")
       FileHandle.standardError.write(Data("\(usage.message)\n".utf8))
       exit(2)
     case let .success(paths):

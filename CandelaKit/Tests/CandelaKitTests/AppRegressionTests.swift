@@ -665,15 +665,36 @@ struct AppRegressionTests {
   /// The bytes the Debug build actually writes: `paneldump=header` once per
   /// dump, then one `paneldump=row` per panel row, at `.info` in the
   /// `PanelDump` category.
-  private static let dumpHeader =
-    "2026-08-19 11:02:03.099 If Candela[9:1] [com.rydersel.Candela:PanelDump] paneldump=header pass=1 rows=2 builtIn=hidden externals=2 hiddenExternals=0 safeMode=no prefsRevision=4"
+  private static let dumpHeader = header(pass: 1)
+  private static func header(pass: Int) -> String {
+    "2026-08-19 11:02:03.099 If Candela[9:1] [com.rydersel.Candela:PanelDump] paneldump=header pass=\(pass) rows=2 builtIn=hidden externals=2 hiddenExternals=0 safeMode=no prefsRevision=4"
+  }
   private static func dumpRow(
-    title: String, volumeSupport: String, muteSupport: String = "unknown"
+    title: String, volumeSupport: String, muteSupport: String = "unknown",
+    volumeEnabled: String = "yes", volumeReason: String = "none"
   ) -> String {
-    "2026-08-19 11:02:03.100 If Candela[9:1] [com.rydersel.Candela:PanelDump] paneldump=row index=1 kind=external title=\"\(title)\" key=\"abc\" displayID=3 brightness=0.375 hdrEngaged=no hdrSupported=yes hdrMode=off volumeSlider=shown volumeAvailable=yes hideVolumePref=no volumeEnabled=yes volumeSupport=\(volumeSupport) muteSupport=\(muteSupport) volumeReason=\"none\" volume=0.500 muted=no contrastSlider=hidden contrastAvailable=no showContrastPref=no contrast=0.500"
+    "2026-08-19 11:02:03.100 If Candela[9:1] [com.rydersel.Candela:PanelDump] paneldump=row index=1 kind=external title=\"\(title)\" key=\"abc\" displayID=3 brightness=0.375 hdrEngaged=no hdrSupported=yes hdrMode=off volumeSlider=shown volumeAvailable=yes hideVolumePref=no volumeEnabled=\(volumeEnabled) volumeSupport=\(volumeSupport) muteSupport=\(muteSupport) volumeReason=\"\(volumeReason)\" volume=0.500 muted=no contrastSlider=hidden contrastAvailable=no showContrastPref=no contrast=0.500"
   }
   private static let unrelatedLine =
     "2026-08-19 11:02:03.098 Df Candela[9:1] [com.rydersel.Candela:ddc] ddc.write.end value=50 ok=true"
+
+  /// The rows the denying panel writes before and after its verdict lands. The
+  /// pass=1 row is not a degraded copy of the pass=2 one: it is the app's
+  /// honest not-yet-knowing, and it looks exactly like the D24 regression this
+  /// check exists to catch.
+  private static let dellBeforeVerdict = dumpRow(
+    title: "DELL U2725QE", volumeSupport: "unknown")
+  private static let dellAfterVerdict = dumpRow(
+    title: "DELL U2725QE", volumeSupport: "unsupported", volumeEnabled: "no",
+    volumeReason: "This display lists no volume command.")
+  private static let magAnyPass = dumpRow(title: "MAG 341C OLED", volumeSupport: "unknown")
+
+  /// One instrumented launch as the rig logs it: the window starts at launch,
+  /// so it accumulates BOTH dumps and the older one comes first.
+  private static let twoPassWindow = [
+    header(pass: 1), magAnyPass, dellBeforeVerdict, unrelatedLine,
+    header(pass: 2), magAnyPass, dellAfterVerdict,
+  ]
 
   @Test func theControlCountsHeadersAsDumpOutput() {
     // A launch that emitted a header and no rows is still an instrumented
@@ -721,6 +742,58 @@ struct AppRegressionTests {
       Self.dumpRow(title: "DELL U2725QE", volumeSupport: "unsupported"),
     ])
     #expect(landed)
+  }
+
+  // MARK: - Which dump in the window gets judged
+
+  @Test func theWholeWindowSelectsTheDenyingPanelsPreVerdictRow() {
+    // The defect this segmentation exists for, pinned so it cannot come back.
+    // The window accumulates both dumps, so a search for the first line naming
+    // the panel finds its pass=1 row, whose slider is enabled on an unknown
+    // verdict: the shape of a D24 regression, on a rig where D24 is intact.
+    let outcome = AppRegression.panelDumpVerdict(
+      dumpLines: AppRegression.panelDumpRows(fromLogLines: Self.twoPassWindow),
+      noVarDumpLineCount: 0, magTitleFragment: "MAG 341C", dellTitleFragment: "U2725QE")
+    #expect(isFail(outcome))
+  }
+
+  @Test func theNewestDumpIsTheOneJudged() {
+    let rows = AppRegression.newestPanelDumpRows(fromLogLines: Self.twoPassWindow)
+    #expect(rows.count == 2)
+    let outcome = AppRegression.panelDumpVerdict(
+      dumpLines: rows, noVarDumpLineCount: 0,
+      magTitleFragment: "MAG 341C", dellTitleFragment: "U2725QE")
+    #expect(isPass(outcome))
+  }
+
+  @Test func aLandedVerdictInAnOlderDumpDoesNotEndTheWait() {
+    // A later reconfiguration re-dumps, and the app can report unknown again
+    // while it re-resolves. Waiting on the window rather than on its newest
+    // segment would stop here and then judge rows that are not the ones the
+    // wait was satisfied by.
+    let window = Self.twoPassWindow + [
+      Self.header(pass: 3), Self.magAnyPass, Self.dellBeforeVerdict,
+    ]
+    #expect(!AppRegression.panelDumpVerdictLanded(inLogLines: window))
+  }
+
+  @Test func aHeaderThatArrivedAheadOfItsRowsIsNotYetADump() {
+    // The store persists a dump's lines in order but not atomically, so the
+    // newest segment can be empty for a beat. Empty is not landed, so the poll
+    // keeps waiting rather than judging nothing.
+    let window = Self.twoPassWindow + [Self.header(pass: 3)]
+    #expect(!AppRegression.panelDumpVerdictLanded(inLogLines: window))
+    #expect(AppRegression.newestPanelDumpRows(fromLogLines: window).isEmpty)
+  }
+
+  @Test func aWindowThatMissedTheHeaderStillOffersItsRows() {
+    // A window that opened mid-dump has one candidate segment and no header to
+    // cut it at. Reporting no rows there would turn a readable dump into a
+    // silent one.
+    let rows = AppRegression.newestPanelDumpRows(fromLogLines: [
+      Self.magAnyPass, Self.dellAfterVerdict,
+    ])
+    #expect(rows.count == 2)
   }
 
   // MARK: - The ledger's filename
