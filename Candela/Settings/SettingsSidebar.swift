@@ -16,10 +16,9 @@ struct SettingsSymbolTile: View {
       .overlay(
         Image(systemName: symbol)
           .font(.system(size: 10, weight: .semibold))
-          // The one deliberate non-semantic color in the window. The glyph sits
-          // on a saturated tint in BOTH appearances, so it stays white in both
-          // — exactly what System Settings does. A semantic label color would
-          // go dark on the tint in light mode and lose all contrast.
+          // Always white, never the row's own foreground: the glyph sits on a
+          // saturated fill, and the row dims its text when it is not selected.
+          // A glyph that dimmed with it would lose the tile underneath.
           .foregroundStyle(.white)
       )
       .accessibilityHidden(true)
@@ -66,6 +65,9 @@ struct SettingsSidebar: View {
   var onReselect: (SettingsDestination) -> Void = { _ in }
 
   @Environment(AppModel.self) private var model
+  /// The destination's lighting, published by the shell. The wordmark takes
+  /// its tint from here, so the mark relights with the canvas.
+  @Environment(\.settingsAccent) private var lighting
 
   var body: some View {
     // Display rows show the user's chosen name, and `DisplayPrefs` is plain
@@ -75,31 +77,42 @@ struct SettingsSidebar: View {
     let _ = model.prefsRevision
     ScrollView {
       VStack(alignment: .leading, spacing: 2) {
+        wordmark
+
         ForEach(SettingsRegistry.panes) { pane in
-          row(.pane(pane.id), label: pane.title) {
+          row(.pane(pane.id), label: pane.title, accent: pane.accent.accent) {
             Label {
               Text(pane.title)
             } icon: {
-              SettingsSymbolTile(symbol: pane.symbol, tint: pane.tint)
+              SettingsSymbolTile(symbol: pane.symbol, tint: pane.accent.accent)
             }
           }
         }
 
-        Text("Displays")
-          .font(.callout.weight(.semibold))
-          .foregroundStyle(.secondary)
-          .padding(.horizontal, 8)
-          .padding(.top, 14)
-          .padding(.bottom, 2)
+        Text("DISPLAYS")
+          .font(.caption2.weight(.semibold))
+          .kerning(1.2)
+          .foregroundStyle(SettingsTheme.faintColor)
+          // The uppercasing is typography; VoiceOver gets the written word.
+          .accessibilityLabel(Text("Displays"))
+          .padding(.leading, 14)
+          .padding(.top, 18)
+          .padding(.bottom, 6)
 
         // Built-in first, matching `AppModel.allControlledStates`.
         if let builtIn = model.builtIn {
-          displayRow(display: builtIn.display, controller: builtIn.controller)
+          displayRow(
+            display: builtIn.display, controller: builtIn.controller,
+            accent: .display(isBuiltIn: true, ordinal: 0))
         }
-        ForEach(displayRows) { row in
+        ForEach(Array(displayRows.enumerated()), id: \.element.id) { index, row in
           displayRow(
             display: row.state.display,
             controller: row.state.controller,
+            // Position among the externals, NOT the shared-identity ordinal:
+            // this only decides which hue the row lights with, so two panels
+            // attached at once never draw the same colour.
+            accent: .display(isBuiltIn: false, ordinal: index),
             ordinal: row.ordinal
           )
         }
@@ -109,7 +122,7 @@ struct SettingsSidebar: View {
           // monitor from a broken app.
           Text("No external displays connected")
             .font(.callout)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(SettingsTheme.faintColor)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 8)
             .padding(.top, 4)
@@ -117,43 +130,61 @@ struct SettingsSidebar: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(.horizontal, 8)
-      .padding(.vertical, 10)
+      .padding(.bottom, 12)
     }
     .scrollContentBackground(.hidden)
-    // OPAQUE, deliberately. No material, no Liquid Glass, nothing translucent.
+    // Transparent, and that is now the whole point: the canvas behind the
+    // shell is this column's ground, so the sidebar has nothing of its own to
+    // dim when the window loses focus. The opaque fill that used to sit here
+    // solved the same problem the other way round, before there was a canvas.
     //
-    // Every translucent option dimmed when the window lost focus, which for a
-    // settings window is most of the time it is on screen — you click away to
-    // see what a setting did. That dimming was not reachable: the panel is
-    // drawn by SwiftUI's list style, not by an `NSVisualEffectView` (a dump of
-    // the live hierarchy found no sidebar-material effect view at all, and
-    // every effect view present was already pinned `.active`), and replacing
-    // it with our own `glassEffect` surface dimmed too. A solid fill cannot
-    // dim, which is the whole point.
-    //
-    // Hand-built rows rather than a `List` for a related reason: `.sidebar`
-    // and `.inset` draw the panel that dims, `.plain` draws a square
-    // full-width highlight, and a custom pill under a `List`'s own selection
-    // gave two stacked highlights because `listRowBackground` composites
-    // INSIDE the selection rather than replacing it. Owning the rows gives
-    // exactly one pill and no panel.
+    // Hand-built rows rather than a `List`, still: `.sidebar` and `.inset`
+    // draw a panel that dims, `.plain` draws a square full-width highlight,
+    // and a custom pill under a `List`'s own selection gave two stacked
+    // highlights because `listRowBackground` composites INSIDE the selection
+    // rather than replacing it. Owning the rows gives exactly one pill and no
+    // panel.
     //
     // The cost is arrow-key navigation between rows, which a `List` gave for
     // free. Each row is a focusable button, so the sidebar stays reachable and
     // operable by keyboard via Tab and Space.
-    .background(Color(nsColor: .windowBackgroundColor))
-    // A settings window has exactly one navigation surface, and collapsing it
-    // leaves a detail pane you cannot navigate out of. `NavigationSplitView`
-    // adds the toggle by default, which parks a stray button in the toolbar.
-    .toolbar(removing: .sidebarToggle)
+  }
+
+  /// The brand mark AS the C of the product name, seated on the first text
+  /// baseline and sized to the cap height so it reads as a capital letter
+  /// rather than an icon standing beside the word (SV10). It relights with the
+  /// destination at the selection cadence.
+  private var wordmark: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 2) {
+      BrandMark(tint: lighting.accent)
+        .frame(width: 13.5, height: 13.5)
+        // Seats the ring on the optical baseline and tucks it toward the word;
+        // the arc's open right side reads as extra letter-spacing.
+        .offset(x: 1.5, y: 1.5)
+        .animation(SettingsTheme.selectionMotion, value: lighting)
+      Text(verbatim: String(AppInfo.productName.dropFirst()))
+        .font(.system(size: 16, weight: .bold, design: .rounded))
+        .foregroundStyle(SettingsTheme.titleColor)
+    }
+    .padding(.leading, 12)
+    // Clears the traffic lights: the window is full-size-content now, so the
+    // first row of the sidebar sits under the titlebar unless it is pushed
+    // past it.
+    .padding(.top, 38)
+    .padding(.bottom, 16)
+    // The mark carries the missing letter, so the two halves have to be read
+    // as one word: without this VoiceOver announces the text alone, which is
+    // the product name with its first letter cut off.
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(Text(verbatim: AppInfo.productName))
   }
 
   /// One selectable row: a button that draws its own selection pill.
   ///
-  /// Foreground is forced to white when selected. SwiftUI only auto-inverts a
-  /// label's colour for selection styles it drew itself, so a hand-drawn
-  /// background has to handle the text, or the tinted-tile rows go unreadable
-  /// against the accent fill.
+  /// The pill is the destination's own accent at low alpha with a brighter
+  /// stroke, so a selected row reads as lit rather than filled and the row's
+  /// text keeps its own colour. Hover is a plain white wash: it says "this is
+  /// clickable", never "this is where you are".
   ///
   /// `label` is passed in rather than read off `content`, for the reason
   /// `SettingRow` records: a control's own label is not readable from here, and
@@ -164,28 +195,19 @@ struct SettingsSidebar: View {
   private func row(
     _ destination: SettingsDestination,
     label: String,
+    accent: Color,
     @ViewBuilder _ content: () -> some View
   ) -> some View {
     let isSelected = selection == destination
-    Button {
+    SidebarRowButton(isSelected: isSelected, accent: accent) {
       if isSelected {
         onReselect(destination)
       } else {
         selection = destination
       }
-    } label: {
+    } content: {
       content()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
-    .buttonStyle(.plain)
-    .foregroundStyle(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-    .background(
-      RoundedRectangle(cornerRadius: 6, style: .continuous)
-        .fill(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.clear))
-    )
     // Never `.accessibilityElement(children: .ignore)` here: it replaces the
     // button's element and takes `AXPress` and `AXFocused` with it. See
     // `NavigationRow` for the measurement.
@@ -221,7 +243,8 @@ struct SettingsSidebar: View {
   /// announced on every row is noise, and it is not actionable from here.
   @ViewBuilder
   private func displayRow(
-    display: ExternalDisplay, controller: BrightnessController, ordinal: Int? = nil
+    display: ExternalDisplay, controller: BrightnessController,
+    accent: SettingsAccent, ordinal: Int? = nil
   ) -> some View {
     // The SAME resolution the panel uses, so a rename moves the sidebar, the
     // panel header, the slider's accessibility label and the HUD together. The
@@ -232,14 +255,13 @@ struct SettingsSidebar: View {
       hardwareName: display.name
     )
     let name = ordinal.map { "\(resolved) (\($0))" } ?? resolved
-    let isSelected = selection == .display(display.persistenceKey)
     let hasUnread = model.displayModes.hasUnreadReport(for: display.id)
     // The dot's fact rides in the row's own label rather than in a nested
     // element: an explicit `.accessibilityLabel` on a `Button` replaces the
     // label derived from its content, so a child element's label would simply
     // stop being announced. Same reason the brightness bar stays hidden.
     let spokenName = hasUnread ? "\(name), has an unread notice" : name
-    row(.display(display.persistenceKey), label: spokenName) {
+    row(.display(display.persistenceKey), label: spokenName, accent: accent.accent) {
       Label {
         VStack(alignment: .leading, spacing: 3) {
           HStack(spacing: 5) {
@@ -253,15 +275,15 @@ struct SettingsSidebar: View {
             // inside — so a missed dot costs nothing.
             if hasUnread {
               Circle()
-                // White on the selected row for the reason the row forces its
-                // foreground: an accent dot on the accent pill is invisible.
-                .fill(isSelected ? AnyShapeStyle(.white) : AnyShapeStyle(Color.accentColor))
+                // The row's own hue, which the low-alpha selection pill no
+                // longer swallows the way the old solid accent fill did.
+                .fill(accent.accent)
                 .frame(width: 6, height: 6)
                 .accessibilityHidden(true)
             }
           }
           Capsule()
-            .fill(.quaternary)
+            .fill(Color.white.opacity(0.14))
             .frame(height: 3)
             .overlay(alignment: .leading) {
               GeometryReader { geo in
@@ -270,23 +292,62 @@ struct SettingsSidebar: View {
                 // sidebar read as several competing highlights rather than one
                 // selection plus some levels.
                 //
-                // `.primary`, NOT `.secondary`. Secondary sits one step from
-                // the quaternary track, so in dark mode both are mid-greys and
-                // a full bar was indistinguishable from an empty one — the fill
-                // boundary simply did not read. A level indicator's entire job
-                // is showing where that boundary is, so it takes the highest-
-                // contrast neutral available: near-white on dark, near-black on
-                // light, and white against the accent on the selected row.
+                // Near-white, and explicit rather than `.primary`: the row
+                // dims its own text on an unselected row, and a level
+                // indicator's entire job is showing where the fill boundary
+                // is. Inheriting that dimming put the fill one step from the
+                // track and a full bar stopped reading as full.
                 Capsule()
-                  .fill(.primary)
+                  .fill(SettingsTheme.titleColor)
                   .frame(width: geo.size.width * min(max(controller.brightness, 0), 1))
               }
             }
             .accessibilityHidden(true)
         }
       } icon: {
-        SettingsSymbolTile(symbol: "display", tint: .blue)
+        // The built-in draws as a laptop everywhere it is depicted (SV9).
+        SettingsSymbolTile(
+          symbol: display.persistenceKey == "builtIn" ? "laptopcomputer" : "display",
+          tint: accent.accent)
       }
     }
+  }
+}
+
+/// The sidebar's row chrome: hover wash, selection pill, and the type weight
+/// that moves with selection. A view of its own because the hover state has to
+/// live somewhere, and a `@State` cannot live in a function.
+private struct SidebarRowButton<Content: View>: View {
+  let isSelected: Bool
+  let accent: Color
+  let action: () -> Void
+  @ViewBuilder let content: Content
+
+  @State private var hovering = false
+
+  var body: some View {
+    Button(action: action) {
+      content
+        .font(.callout.weight(isSelected ? .semibold : .regular))
+        .foregroundStyle(isSelected ? SettingsTheme.titleColor : SettingsTheme.bodyColor)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .background(
+          RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
+            .fill(
+              isSelected
+                ? accent.opacity(0.13)
+                : Color.white.opacity(hovering ? 0.06 : 0))
+        )
+        .overlay(
+          RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
+            .stroke(isSelected ? accent.opacity(0.25) : .clear, lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous))
+    }
+    .buttonStyle(.plain)
+    .onHover { hovering = $0 }
+    .animation(SettingsTheme.hoverMotion, value: hovering)
   }
 }

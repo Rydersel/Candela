@@ -4,8 +4,17 @@ import SwiftUI
 
 /// Sidebar navigation over a pane registry. Replaces the five-tab `TabView`,
 /// whose tab-for-tab match with the fork was the actual source of the visual
-/// resemblance — the styling was already modern, and the window already
-/// renders with Liquid Glass on macOS 26, which changed nothing.
+/// resemblance.
+///
+/// The shell is hand-built (SV4): a canvas, a fixed-width sidebar, a hairline,
+/// and the detail column. It was a framework split view until the visual
+/// redesign, and what that cost was the whole surface: a split view owns its
+/// column backgrounds, so no canvas could be drawn under both columns, and its
+/// sidebar column drew a panel that dimmed whenever the window lost focus. It
+/// also brought a collapse hazard with it, since AppKit's `NSSplitView` could
+/// hide the sidebar under a squeeze and autosave that state, leaving a window
+/// with no navigation and no way back from inside the app. A fixed column
+/// cannot collapse, so that whole defence retires with the split view.
 ///
 /// D6 still holds and generalises to the registry: `PaneID.rawValue` is the
 /// identifier, `title` is the label, and cross-pane state goes through
@@ -17,26 +26,6 @@ import SwiftUI
 @MainActor
 struct SettingsRootView: View {
   @State private var selection: SettingsDestination? = .pane(.general)
-  /// Pinned to `.all` and BOUND rather than left `.automatic`, so SwiftUI
-  /// holds an explicit visibility value to defend.
-  ///
-  /// AppKit's `NSSplitView` may collapse the sidebar when the window is
-  /// squeezed — and it autosaves that under
-  /// `"NSSplitView Subview Frames …SidebarNavigationSplitView"`, so the collapse
-  /// survives relaunch. There is no sidebar-toggle item in this window's
-  /// toolbar, so once collapsed there was **no way back from inside the app**:
-  /// every pane and every display disappeared from navigation permanently.
-  ///
-  /// Measured 2026-08-04. A display being rotated and mirrored under an open
-  /// settings window squeezed it, the sidebar collapsed, and the stored frames
-  /// came back `"0, 0, 208, 568, YES, NO"` — collapsed — on every subsequent
-  /// launch. Recovery took a `defaults delete`, which is not a thing to ask of
-  /// anyone. The binding pins the INITIAL state; the `.onChange` in `body`
-  /// springs the value back if a collapse ever reaches the binding. Whether
-  /// AppKit's restored autosave frames reach it is UNMEASURED — that launch
-  /// case is #66's open hardware item, and the lever that can actually touch
-  /// the `NSSplitView` is `SettingsWindowConfigurator`, not this state.
-  @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
   /// Each display destination's pushed-sub-page stack, keyed by persistence key
   /// (SO23). Retained for the life of the window so leaving a display and
@@ -73,70 +62,53 @@ struct SettingsRootView: View {
   @Environment(AppModel.self) private var model
 
   var body: some View {
-    NavigationSplitView(columnVisibility: $columnVisibility) {
-      SettingsSidebar(selection: $selection, onReselect: returnToHub)
-        .navigationSplitViewColumnWidth(min: 190, ideal: 200, max: 240)
-    } detail: {
-      // The content keeps its own opaque surface: this window carries a lot of
-      // small secondary text, and it must not end up at the mercy of whatever
-      // is behind the window.
-      //
-      // The ONE visible title. Three spellings were tried and two shipped a
-      // visible defect, so the reasoning is recorded rather than rediscovered:
-      //
-      // 1. `.navigationTitle` alone renders at the LEADING edge of the detail
-      //    column — a stray label rather than a title.
-      // 2. Setting `window.title` alone does the same thing: in a
-      //    full-size-content window with a sidebar, AppKit draws the window
-      //    title leading, NOT centred.
-      // 3. A principal item plus either of the above shows the name TWICE.
-      //
-      // So: a principal item draws it, and the window's own title is set but
-      // hidden (`titleVisibility`), which keeps the window named for the
-      // Window menu and accessibility without drawing a second copy.
-      detail
-        .background(.background)
-        .environment(\.oledCarePath, $oledCarePath)
-        .environment(\.keyboardPath, $keyboardPath)
-        .focused($detailFocusAnchor)
-        // Keyboard contract (accessibility contract 2): ⌘[ pops the current
-        // display's sub-page; ⌘1–⌘9 select the first nine sidebar destinations
-        // in sidebar render order. Hidden buttons rather than `.commands`: the
-        // `Settings` scene's menu bar is not this view's to edit, and a
-        // shortcut on a button in the key window's hierarchy fires without
-        // being visible. Not tab-reachable at zero size; VoiceOver skips them
-        // via `accessibilityHidden`.
-        .background {
-          Group {
-            Button("") { popCurrentSubPage() }
-              .keyboardShortcut("[", modifiers: .command)
-            ForEach(Array(orderedDestinations.prefix(9).enumerated()), id: \.offset) { index, destination in
-              Button("") { selection = destination }
-                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+    ZStack {
+      // The ground under both columns, lit by whatever destination is on
+      // screen. One canvas for the life of the window, so a selection change
+      // moves the light rather than cutting to a new one (SV8).
+      SettingsCanvas(accent: currentAccent.accent, secondary: currentAccent.secondary)
+      HStack(spacing: 0) {
+        SettingsSidebar(selection: animatedSelection, onReselect: returnToHub)
+          // Fixed, not a resizable split-view column: nothing in this window
+          // needs a wider sidebar, and a fixed column cannot be collapsed to
+          // nothing by an AppKit squeeze.
+          .frame(width: 224)
+        Rectangle()
+          .fill(Color.white.opacity(0.08))
+          .frame(width: 1)
+        detail
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .environment(\.oledCarePath, $oledCarePath)
+          .environment(\.keyboardPath, $keyboardPath)
+          .focused($detailFocusAnchor)
+          // Keyboard contract (accessibility contract 2): ⌘[ pops the current
+          // display's sub-page; ⌘1–⌘9 select the first nine sidebar
+          // destinations in sidebar render order. Hidden buttons rather than
+          // `.commands`: the `Settings` scene's menu bar is not this view's to
+          // edit, and a shortcut on a button in the key window's hierarchy
+          // fires without being visible. Not tab-reachable at zero size;
+          // VoiceOver skips them via `accessibilityHidden`.
+          .background {
+            Group {
+              Button("") { popCurrentSubPage() }
+                .keyboardShortcut("[", modifiers: .command)
+              ForEach(Array(orderedDestinations.prefix(9).enumerated()), id: \.offset) { index, destination in
+                Button("") { select(destination) }
+                  .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+              }
             }
+            .frame(width: 0, height: 0)
+            .opacity(0)
+            .accessibilityHidden(true)
           }
-          .frame(width: 0, height: 0)
-          .opacity(0)
-          .accessibilityHidden(true)
-        }
+      }
     }
-    // The toolbar has to PAINT, or scrolled content is simply visible in the
-    // titlebar (#124). Both columns are scroll views in a full-size-content
-    // window, so their content passes under the chrome by design and the
-    // chrome's own background is the thing that hides it. Without this the
-    // hero's volume slider rode up beside the traffic lights and the centred
-    // title was drawn over it.
-    //
-    // Declared on the split view, not on a column: `.unifiedCompact` merges the
-    // toolbar into the titlebar across the WHOLE window width, so the sidebar
-    // needs the same band the detail column does.
-    // `.visible` alone is NOT enough and was tried first: it makes the band
-    // paint, but the material it paints is translucent, so scrolled rows came
-    // through it greyed and half-cut. The opaque window background is what
-    // actually hides them, and it is the same choice the rest of this window
-    // already makes (no materials anywhere; a solid fill has no key state and
-    // cannot dim when the window loses focus).
-    .toolbarBackground(.background, for: .windowToolbar)
+    // Published once for the whole shell, so the sidebar's wordmark and every
+    // themed component on the page read one destination's lighting.
+    .environment(\.settingsAccent, currentAccent)
+    // Dark-only (SV2). Every colour in this window comes from the theme layer,
+    // and none of them has a light-appearance answer.
+    .preferredColorScheme(.dark)
     // Replaces the fork-era fixed `.frame(width: 620)`.
     //
     // The maxima are load-bearing, not decoration: a bare `minWidth/minHeight`
@@ -157,9 +129,9 @@ struct SettingsRootView: View {
     // `navigationToken` re-runs the configurator on every push and pop.
     // Measured in the Task 9 spike: a push flips `titleVisibility` back to
     // visible and AppKit draws the scene's own "Candela Settings" at the
-    // LEADING edge next to the Back button — and it LINGERS after the pop,
-    // beside the principal title. Without a dependency that changes with the
-    // path, `updateNSView` never fires for a push/pop and cannot re-hide it.
+    // LEADING edge next to the Back button, and it LINGERS after the pop.
+    // Without a dependency that changes with the path, `updateNSView` never
+    // fires for a push/pop and cannot re-hide it.
     .background(SettingsWindowConfigurator(title: currentTitle, navigationToken: currentPathDepth))
     // Debug-only screenshot hook: the window has no URL scheme and cannot be
     // driven by clicking without an Accessibility grant, so a capture run says
@@ -255,21 +227,43 @@ struct SettingsRootView: View {
     .onChange(of: selection) { _, _ in
       detailFocusAnchor = true
     }
-    // Best-effort anti-collapse defence (#66): this window has no
-    // sidebar-toggle item, so a hidden sidebar removes every pane from
-    // navigation with no way back from inside the app. Guards `.detailOnly`
-    // alone — "the sidebar is hidden" — never `!= .all`: `.automatic` and
-    // `.doubleColumn` are legitimate framework values, and fighting them would
-    // ping-pong writes against SwiftUI's own normalisation. On a window
-    // genuinely too narrow for both columns, the forced `.all` may itself be
-    // re-collapsed by AppKit — a squeeze-fight #66's hardware item should
-    // watch for. This layer helps only when a collapse is reflected into the
-    // binding; whether AppKit's restored autosave frames ever are is
-    // unmeasured, so the restored-collapsed launch stays OPEN on #66 — this
-    // modifier does not claim to cover it.
-    .onChange(of: columnVisibility) { _, visibility in
-      if visibility == .detailOnly { columnVisibility = .all }
+  }
+
+  /// Every selection write in this window, so the canvas relight, the sidebar
+  /// pill and the page swap all ride one transaction (SV8). The sidebar writes
+  /// through the binding; the shortcuts and the display switcher call `select`.
+  private var animatedSelection: Binding<SettingsDestination?> {
+    Binding(get: { selection }, set: { new in
+      withAnimation(SettingsTheme.selectionMotion) { selection = new }
+    })
+  }
+
+  private func select(_ destination: SettingsDestination?) {
+    withAnimation(SettingsTheme.selectionMotion) { selection = destination }
+  }
+
+  /// The lighting the whole window reads: the destination's own pair, resolved
+  /// from the same `presentation` the title and the content resolve from, so
+  /// the canvas can never be lit for a destination that is not on screen.
+  private var currentAccent: SettingsAccent {
+    switch presentation {
+    case let .display(key, _):
+      displayAccent(for: key)
+    case .pane:
+      if case let .pane(id) = selection {
+        SettingsRegistry.descriptor(for: id).accent
+      } else {
+        SettingsRegistry.descriptor(for: .general).accent
+      }
     }
+  }
+
+  /// A display's hue, chosen by its position among the externals: the same
+  /// rule the sidebar's rows use, so a row and the canvas it lights agree.
+  private func displayAccent(for key: String) -> SettingsAccent {
+    guard key != "builtIn" else { return .display(isBuiltIn: true, ordinal: 0) }
+    let index = model.displays.firstIndex { $0.display.persistenceKey == key } ?? 0
+    return .display(isBuiltIn: false, ordinal: index)
   }
 
   /// The selected display's key, or nil for a pane. Never a claim that the
@@ -342,7 +336,6 @@ struct SettingsRootView: View {
   private var detail: some View {
     NavigationStack(path: currentPathBinding) {
       detailRoot
-        .toolbar { SettingsPrincipalTitle(title: currentTitle) }
         .navigationDestination(for: SettingsPushedPage.self) { pushed in
           switch pushed {
           case let .display(page): pushedPage(page)
@@ -391,9 +384,10 @@ struct SettingsRootView: View {
       // here handed the answer to a page nobody could see.
       BannerRegion(state: state, ownsAnswerableCountdown: !hasPushedPage)
       if key == "builtIn" {
-        BuiltInDisplayPane(selection: $selection, path: pathBinding(for: key))
+        BuiltInDisplayPane(selection: animatedSelection, path: pathBinding(for: key))
       } else {
-        DisplayDetailView(state: state, selection: $selection, path: pathBinding(for: key))
+        DisplayDetailView(
+          state: state, selection: animatedSelection, path: pathBinding(for: key))
       }
     }
     .modifier(BannerColumnHeight())
@@ -423,27 +417,12 @@ struct SettingsRootView: View {
         .id(key)
       }
     }
-    // The root's principal title does NOT survive a push (measured in the
-    // Task 9 spike: the toolbar came up empty but for Back), so every pushed
-    // page re-declares it. Still the DISPLAY's name: the sub-page names itself
-    // in its header, and the toolbar keeps answering "which display am I
-    // configuring".
-    //
-    // OUTSIDE the guard above, and that placement is the point (#124). Inside
-    // it, a frame where the display was momentarily unresolvable contributed no
-    // principal item at all, and a window with no title of its own is a window
-    // AppKit titles itself: it flips `titleVisibility` back and draws
-    // `window.title` at the leading edge. The empty case is now a page with a
-    // title and no content, which is recoverable by looking at it; the other
-    // was not.
-    .toolbar { SettingsPrincipalTitle(title: currentTitle) }
   }
 
   /// An OLED Care pushed page (OCR1), resolved against the connected
-  /// externals. Same placement rules as `pushedPage`: `.id` on the content so
-  /// a display switch resets page state (SO10's lesson), and the principal
-  /// title OUTSIDE the guard (#124). The guard goes empty for the frame in
-  /// which a departed display's page is still popping.
+  /// externals. Same placement rule as `pushedPage`: `.id` on the content so a
+  /// display switch resets page state (SO10's lesson). The guard goes empty
+  /// for the frame in which a departed display's page is still popping.
   @ViewBuilder
   private func oledPushedPage(_ page: OledCarePage) -> some View {
     Group {
@@ -466,22 +445,17 @@ struct SettingsRootView: View {
         .id(page.displayKey)
       }
     }
-    .toolbar { SettingsPrincipalTitle(title: currentTitle) }
   }
 
   /// A Keyboard pushed page (KMR11). No display dependence: no resolution
   /// guard, no `.id` re-key, no switcher; the page renders from app-level
-  /// prefs alone. The principal title is re-declared for the same #124 reason
-  /// as every other pushed page.
+  /// prefs alone.
   @ViewBuilder
   private func keyboardPushedPage(_ page: KeyboardPage) -> some View {
-    Group {
-      switch page {
-      case .modifiers: KeyboardModifierKeysPage()
-      case .targeting: KeyboardTargetingPage()
-      }
+    switch page {
+    case .modifiers: KeyboardModifierKeysPage()
+    case .targeting: KeyboardTargetingPage()
     }
-    .toolbar { SettingsPrincipalTitle(title: currentTitle) }
   }
 
   /// External displays only: OLED care never covers the built-in (its copy
@@ -699,34 +673,13 @@ struct SettingsRootView: View {
   /// any deeper future stack intact.
   private func switchDisplay(from currentKey: String, to newKey: String) {
     subPagePaths[newKey] = subPagePaths[currentKey] ?? []
-    selection = .display(newKey)
+    select(.display(newKey))
   }
 
   /// The detail column is never empty: an unresolvable selection shows General
   /// rather than a blank pane, which reads as a broken window.
   private var generalFallback: some View {
     SettingsRegistry.descriptor(for: .general).content()
-  }
-}
-
-/// The one visible title, centred. macOS 26 gives toolbar items the Liquid
-/// Glass capsule it gives CONTROLS, which drew a pill around the title; a
-/// title is not a control, so on 26 it opts out of the shared background.
-/// Earlier versions have no such background and need no opt-out.
-private struct SettingsPrincipalTitle: ToolbarContent {
-  let title: String
-
-  var body: some ToolbarContent {
-    if #available(macOS 26.0, *) {
-      ToolbarItem(placement: .principal) {
-        Text(title).font(.headline)
-      }
-      .sharedBackgroundVisibility(.hidden)
-    } else {
-      ToolbarItem(placement: .principal) {
-        Text(title).font(.headline)
-      }
-    }
   }
 }
 
@@ -789,37 +742,46 @@ private struct BannerColumnHeight: ViewModifier {
 /// write the frame back, and the next launch comes up at the ideals.
 ///
 /// The MINIMA are a different contract and are not advisory: see the floor
-/// note above, `SettingsWindowConfigurator.pinMinimumSize` and #124.
+/// note above, `SettingsWindowConfigurator.pinMinimumSize` and #124. The
+/// visual redesign raised them well above the old ones, which is the one way a
+/// saved frame does not have the last word: a frame saved by the smaller
+/// window is under the new floor, so it is clamped back up to it on the next
+/// launch rather than restored as saved.
 enum SettingsWindowMetrics {
-  static let minWidth: CGFloat = 720
+  static let minWidth: CGFloat = 1040
   /// First-launch width only. Read the note above before quoting it.
-  static let idealWidth: CGFloat = 900
-  static let minHeight: CGFloat = 480
+  static let idealWidth: CGFloat = 1100
+  static let minHeight: CGFloat = 660
   /// First-launch height only. Read the note above before quoting it.
-  static let idealHeight: CGFloat = 560
+  static let idealHeight: CGFloat = 680
 
   static var minContentSize: NSSize { NSSize(width: minWidth, height: minHeight) }
 }
 
-/// Adds the `.resizable` style mask that a `Settings` scene omits.
+/// The window chrome a `Settings` scene does not offer: the `.resizable` and
+/// `.fullSizeContentView` style masks, the dark appearance, the transparent
+/// titlebar, and dragging by the background.
 ///
-/// No SwiftUI modifier restores it: `.windowResizability(.contentMinSize)` on
-/// the scene plus an `.infinity` content frame both leave the zoom button
+/// No SwiftUI modifier restores resizability: `.windowResizability(.contentMinSize)`
+/// on the scene plus an `.infinity` content frame both leave the zoom button
 /// disabled and the window pinned — measured at a hard 900×512, immovable in
-/// either direction. A fixed size was tolerable for a stack of tabs; it is not
-/// for a split view whose panes differ in height, where the window keeps
-/// whatever size the pane it first opened on happened to want.
+/// either direction.
 ///
 /// This hangs off the view rather than off `SettingsOpener` deliberately.
 /// ⌘, does NOT go through `SettingsOpener` — it is delivered straight to
 /// SwiftUI's own menu item — so a fix installed on the open path only works
 /// when the window is opened from the panel's gear. Attaching it to the view
 /// makes it independent of how the window came to exist.
-/// Also owns the window's NAME — set, but with `titleVisibility` hidden. The
-/// visible title is a principal toolbar item (see `body`); this one exists so
-/// the Window menu and accessibility have a name to report, and is not drawn
-/// because AppKit would place it at the LEADING edge of a full-size-content
-/// window with a sidebar, giving a second, misaligned copy.
+///
+/// Also owns the window's NAME: set, but with `titleVisibility` hidden. The
+/// window is titled for the Window menu and for accessibility, and the page
+/// itself is what names the destination on screen. Drawing this title would
+/// put a second name at the LEADING edge of a full-size-content window, over
+/// the sidebar's own wordmark.
+///
+/// The dark appearance is pinned here as well as by `.preferredColorScheme`
+/// (SV2), because the appearance decides the titlebar and the traffic lights,
+/// which SwiftUI's colour scheme does not reach.
 ///
 /// **The whole contract is re-asserted, never written once** (#124). Every
 /// property below is one AppKit or SwiftUI can change back, and the previous
@@ -924,17 +886,34 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
       if !window.styleMask.contains(.resizable) {
         window.styleMask.insert(.resizable)
       }
-      // Named but not drawn: the visible title is the principal toolbar item, so
-      // letting AppKit draw this one too is what produced two copies of the pane
-      // name. `title` still feeds the Window menu and accessibility.
+      // The canvas runs to the top of the window, so the titlebar has to be
+      // glass over it rather than a band of its own.
+      if !window.styleMask.contains(.fullSizeContentView) {
+        window.styleMask.insert(.fullSizeContentView)
+      }
+      if !window.titlebarAppearsTransparent {
+        window.titlebarAppearsTransparent = true
+      }
+      // Dark-only (SV2): the appearance is what the titlebar and the traffic
+      // lights read, and neither of them sees `.preferredColorScheme`.
+      if window.appearance?.name != .darkAqua {
+        window.appearance = NSAppearance(named: .darkAqua)
+      }
+      // With no titlebar band to grab, the canvas is the handle.
+      if !window.isMovableByWindowBackground {
+        window.isMovableByWindowBackground = true
+      }
+      // Named but not drawn: the page names the destination on screen, so
+      // letting AppKit draw this one too would put a second name at the
+      // leading edge. `title` still feeds the Window menu and accessibility.
       if window.titleVisibility != .hidden {
         window.titleVisibility = .hidden
       }
-      // The default style puts the toolbar in its own band BELOW the titlebar,
-      // which dropped the pane title 24 pt under the window controls and opened
-      // a strip of dead space across the top of both columns (measured: title at
-      // y=162 against controls at y=138). `.unifiedCompact` merges the two rows,
-      // so the title sits on the same line as the controls.
+      // The window declares no toolbar content of its own any more, but a
+      // pushed page still gets SwiftUI's Back item, and the default style
+      // would put that in its own band BELOW the titlebar: a strip of dead
+      // space across the top of both columns (measured at 24 pt when the
+      // principal title lived there). `.unifiedCompact` merges the two rows.
       if window.toolbarStyle != .unifiedCompact {
         window.toolbarStyle = .unifiedCompact
       }

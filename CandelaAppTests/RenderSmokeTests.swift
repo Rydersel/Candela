@@ -124,18 +124,38 @@ struct RenderSmokeTests {
 
   // MARK: - The settings window
 
-  /// Every static pane row plus the empty-display-list message, which is the
-  /// sidebar the fixture model produces. The shared-identity ordinals the
-  /// structural tests cover need display rows and so are not on screen here.
+  /// The wordmark, every static pane row and the empty-display-list message,
+  /// which is the sidebar the fixture model produces. The shared-identity
+  /// ordinals the structural tests cover need display rows and so are not on
+  /// screen here.
+  ///
+  /// No accent is injected, deliberately: `settingsAccent` defaults to
+  /// neutral, so this also covers the sidebar drawn outside the shell that
+  /// normally publishes one.
   @Test func theSettingsSidebarRenders() {
     let model = TestFixtures.appModel()
     let sidebar = SettingsSidebar(selection: .constant(.pane(SettingsRegistry.panes[0].id)))
       .environment(model)
       // A `ScrollView` proposes nothing of its own, so the render needs a
-      // window-shaped frame to fill: roughly the sidebar column of the real
-      // settings window.
-      .frame(width: 215, height: 520)
+      // frame to fill: the sidebar column's real fixed width, and a height
+      // that clears the wordmark above every pane row.
+      .frame(width: 224, height: 560)
     expectPixels(render(sidebar), "SettingsSidebar")
+  }
+
+  /// The whole shell: the canvas, the sidebar, the hairline, and the detail
+  /// column's `NavigationStack` on its opening destination. Nothing else
+  /// reaches the composition itself, which is where the hand-built shell can
+  /// fail: the canvas is a `TimelineView` and the detail column resolves its
+  /// content through `presentation`, so a shell that resolved to nothing would
+  /// render an empty window rather than crash.
+  @Test func theSettingsShellRenders() {
+    let model = TestFixtures.appModel()
+    let shell = SettingsRootView()
+      .environment(model)
+      .environment(SettingsActions(model: model))
+      .frame(width: SettingsWindowMetrics.idealWidth, height: SettingsWindowMetrics.idealHeight)
+    expectPixels(render(shell), "SettingsRootView")
   }
 
   /// The page's header and its grouped form chrome. The mode list is NOT on
