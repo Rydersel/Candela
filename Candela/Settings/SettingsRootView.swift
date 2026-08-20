@@ -365,10 +365,13 @@ struct SettingsRootView: View {
         // countdown-ownership rule needs the root to keep existing behind the
         // page, and taking it out of the hierarchy would also drop the stack's
         // root while it is presenting, which is the orphaned-page defect above.
-        // Hit testing goes with the opacity, so an invisible control cannot
-        // catch a click meant for the page over it.
+        // Hit testing and accessibility go with the opacity: an invisible
+        // control must not catch a click meant for the page over it, and a
+        // zero-opacity subtree otherwise stays in the accessibility tree, so
+        // VoiceOver would still walk the hidden root's controls.
         .opacity(hasPushedPage ? 0 : 1)
         .allowsHitTesting(!hasPushedPage)
+        .accessibilityHidden(hasPushedPage)
         .navigationDestination(for: SettingsPushedPage.self) { pushed in
           Group {
             switch pushed {
