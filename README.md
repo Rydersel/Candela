@@ -1,9 +1,12 @@
 # Candela
 
-A macOS menu-bar app for controlling external displays — brightness, volume,
-contrast, HDR — with native polish. Successor to our MonitorControl fork;
-long-term goal: a free, open competitor to BetterDisplay.
+A macOS menu-bar app that looks after external displays: panel health, burn-in
+protection, and the everyday controls (brightness, volume, contrast, HDR) with
+native polish. Successor to our MonitorControl fork. Positioning and scope live
+in [`NORTHSTAR.md`](NORTHSTAR.md), the product constitution: display care, a
+category of one.
 
+- Constitution: `NORTHSTAR.md`
 - Spec: `docs/superpowers/specs/2026-07-29-candela-v1-design.md`
 - Engine: `CandelaKit/` (Swift package, no UI imports)
 - App: `Candela/` (SwiftUI, generated via `xcodegen generate` — never edit the xcodeproj)
