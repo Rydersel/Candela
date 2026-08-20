@@ -107,9 +107,13 @@ struct SettingsAccent: Equatable, Sendable {
       return SettingsAccent(
         accent: Color(red: 0.69, green: 0.76, blue: 0.90), secondary: neutral.secondary)
     }
+    // Both cool, and the second one deliberately so (SC8): it used to be the
+    // amber that now belongs to the CARE section, and warm light means CARE.
+    // A display page is a place you adjust a display, never a care pillar, so
+    // it must not light the window the way Health or OLED Care does.
     let hues = [
       Color(red: 0.36, green: 0.57, blue: 0.90),
-      Color(red: 0.91, green: 0.60, blue: 0.31),
+      Color(red: 0.38, green: 0.72, blue: 0.68),
     ]
     let index = ((ordinal % hues.count) + hues.count) % hues.count
     return SettingsAccent(accent: hues[index], secondary: neutral.secondary)

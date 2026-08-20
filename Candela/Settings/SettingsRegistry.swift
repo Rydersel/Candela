@@ -19,13 +19,53 @@ struct SettingsPaneDescriptor: Identifiable {
   let content: () -> AnyView
 }
 
+/// One group of sidebar rows: the section's header, if it has one, and the
+/// panes under it in render order.
+///
+/// A section with no header and `gapAbove` is a quiet break rather than a peer
+/// section (SC1): the utility rows at the bottom get air, not a promotion.
+struct SettingsSidebarSection: Identifiable {
+  /// Drawn uppercase, exactly as written here. Nil means the rows start with
+  /// no kicker over them.
+  let header: String?
+  /// Space above the first row, for a section that has no header to supply it.
+  let gapAbove: Bool
+  let panes: [PaneID]
+
+  /// Stable across renders because the section list is static: the header when
+  /// there is one, otherwise the first pane, which no other section can hold.
+  var id: String { header ?? panes.first?.rawValue ?? "" }
+}
+
 /// The ONLY place a settings pane is declared. Adding a feature area is one
-/// `PaneID` case, one entry here, and one view file — the sidebar, the split
-/// view, the toolbar title and the selection logic are untouched.
+/// `PaneID` case, one entry here, one line in a section, and one view file.
+/// The sidebar, the split view, the toolbar title and the selection logic are
+/// untouched.
 @MainActor
 enum SettingsRegistry {
+  /// The ONE source of sidebar render order (SC1). The sidebar draws these in
+  /// order, then the displays; ⌘1–⌘9 index the same flattened list.
+  ///
+  /// CARE first because it is what this app is for, CONTROLS visibly under it
+  /// because everyday adjustment is the commodity half. `PaneID.allCases` is
+  /// deliberately NOT consulted: raw values are on-disk schema and can only be
+  /// appended to, so order lives here where it costs nothing to change.
+  static let sections: [SettingsSidebarSection] = [
+    SettingsSidebarSection(header: nil, gapAbove: false, panes: [.general]),
+    SettingsSidebarSection(
+      header: "CARE", gapAbove: false, panes: [.health, .protection, .oledCare, .checkup]),
+    SettingsSidebarSection(
+      header: "CONTROLS", gapAbove: false,
+      panes: [.menuBar, .keyboard, .arrangement, .virtualDisplays]),
+    SettingsSidebarSection(header: nil, gapAbove: true, panes: [.updates, .about]),
+  ]
+
+  /// Sidebar render order, flattened. Nameable so a test can pin it against
+  /// SC1's list rather than against a screenshot.
+  static var paneOrder: [PaneID] { sections.flatMap(\.panes) }
+
   static var panes: [SettingsPaneDescriptor] {
-    PaneID.allCases.map(descriptor(for:))
+    paneOrder.map(descriptor(for:))
   }
 
   /// Exhaustive by construction: a new `PaneID` case fails to compile here
@@ -93,6 +133,35 @@ enum SettingsRegistry {
           accent: Color(red: 0.37, green: 0.76, blue: 0.50),
           secondary: Color(red: 0.22, green: 0.55, blue: 0.67)),
         content: { AnyView(UpdatesPane()) }
+      )
+    // The CARE panes light from one warm hue family, so the section reads as
+    // one identity (SC8). OLED Care's amber anchors it and is unchanged; these
+    // three take neighbouring warm hues, each still distinct from the others at
+    // a glance.
+    case .health:
+      SettingsPaneDescriptor(
+        // A trace, not a heart: what this pane shows is a record over time.
+        id: id, title: "Health", symbol: "waveform.path.ecg",
+        accent: SettingsAccent(
+          accent: Color(red: 0.93, green: 0.72, blue: 0.38),
+          secondary: Color(red: 0.82, green: 0.50, blue: 0.30)),
+        content: { AnyView(HealthPane()) }
+      )
+    case .protection:
+      SettingsPaneDescriptor(
+        id: id, title: "Protection", symbol: "shield",
+        accent: SettingsAccent(
+          accent: Color(red: 0.89, green: 0.52, blue: 0.34),
+          secondary: Color(red: 0.72, green: 0.33, blue: 0.44)),
+        content: { AnyView(ProtectionPane()) }
+      )
+    case .checkup:
+      SettingsPaneDescriptor(
+        id: id, title: "Checkup", symbol: "checkmark.seal",
+        accent: SettingsAccent(
+          accent: Color(red: 0.90, green: 0.67, blue: 0.45),
+          secondary: Color(red: 0.78, green: 0.45, blue: 0.40)),
+        content: { AnyView(CheckupPane()) }
       )
     case .about:
       SettingsPaneDescriptor(

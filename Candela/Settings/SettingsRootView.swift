@@ -662,8 +662,11 @@ struct SettingsRootView: View {
     if case .pane(.keyboard) = selection { keyboardPath.count } else { 0 }
   }
 
-  /// Sidebar render order — registry panes, then built-in, then externals
-  /// (`allControlledStates` is exactly that order). ⌘1–⌘9 index into this.
+  /// Sidebar render order: the registry's panes in section order (SC1), then
+  /// built-in, then externals (`allControlledStates` is exactly that order).
+  /// ⌘1–⌘9 index into this. `SettingsRegistry.panes` follows
+  /// `SettingsRegistry.sections`, so re-sectioning the sidebar moves the
+  /// shortcuts with it and nothing here has to know the order.
   private var orderedDestinations: [SettingsDestination] {
     SettingsRegistry.panes.map { .pane($0.id) }
       + model.allControlledStates.map { .display($0.display.persistenceKey) }

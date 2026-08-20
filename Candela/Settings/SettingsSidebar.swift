@@ -56,24 +56,26 @@ struct SettingsSidebar: View {
       VStack(alignment: .leading, spacing: 2) {
         wordmark
 
-        ForEach(SettingsRegistry.panes) { pane in
-          row(
-            .pane(pane.id), label: pane.title, symbol: pane.symbol,
-            accent: pane.accent.accent
-          ) {
-            Text(pane.title).lineLimit(1)
+        ForEach(SettingsRegistry.sections) { section in
+          if let header = section.header {
+            sectionHeader(header)
+          }
+          ForEach(Array(section.panes.enumerated()), id: \.element) { index, id in
+            let pane = SettingsRegistry.descriptor(for: id)
+            row(
+              .pane(pane.id), label: pane.title, symbol: pane.symbol,
+              accent: pane.accent.accent
+            ) {
+              Text(pane.title).lineLimit(1)
+            }
+            // A headerless break (SC1): the same air a header would put above
+            // the group, with nothing said over it, so the utility rows stay
+            // quiet instead of reading as a fourth section.
+            .padding(.top, section.gapAbove && index == 0 ? 18 : 0)
           }
         }
 
-        Text("DISPLAYS")
-          .font(.caption2.weight(.semibold))
-          .kerning(1.2)
-          .foregroundStyle(SettingsTheme.faintColor)
-          // The uppercasing is typography; VoiceOver gets the written word.
-          .accessibilityLabel(Text("Displays"))
-          .padding(.leading, 14)
-          .padding(.top, 18)
-          .padding(.bottom, 6)
+        sectionHeader("DISPLAYS")
 
         // Built-in first, matching `AppModel.allControlledStates`.
         if let builtIn = model.builtIn {
@@ -157,6 +159,24 @@ struct SettingsSidebar: View {
     .accessibilityLabel(Text(verbatim: AppInfo.productName))
   }
 
+  /// A section kicker. ONE treatment for CARE, CONTROLS and DISPLAYS alike
+  /// (SC2): the displays header was here first and the new sections adopt it
+  /// exactly, rather than growing a second near-identical style.
+  ///
+  /// `title` is written uppercase because the uppercasing is typography;
+  /// VoiceOver gets the written word, which is why the label capitalizes it
+  /// back rather than spelling the caps out letter by letter.
+  private func sectionHeader(_ title: String) -> some View {
+    Text(verbatim: title)
+      .font(.caption2.weight(.semibold))
+      .kerning(1.2)
+      .foregroundStyle(SettingsTheme.faintColor)
+      .accessibilityLabel(Text(verbatim: title.capitalized))
+      .padding(.leading, 14)
+      .padding(.top, 18)
+      .padding(.bottom, 6)
+  }
+
   /// One selectable row: the destination's glyph, whatever the row draws beside
   /// it, and a button that draws its own selection pill.
   ///
@@ -230,17 +250,24 @@ struct SettingsSidebar: View {
     // panel header, the slider's accessibility label and the HUD together. The
     // detail pane's title deliberately does NOT follow — it stays the hardware
     // name, so renaming does not relabel the window you are editing it in.
+    let prefs = DisplayPrefs(persistenceKey: display.persistenceKey)
     let resolved = DisplayOrdering.title(
-      friendlyName: DisplayPrefs(persistenceKey: display.persistenceKey).friendlyName,
-      hardwareName: display.name
+      friendlyName: prefs.friendlyName, hardwareName: display.name
     )
     let name = ordinal.map { "\(resolved) (\($0))" } ?? resolved
     let hasUnread = model.displayModes.hasUnreadReport(for: display.id)
-    // The dot's fact rides in the row's own label rather than in a nested
-    // element: an explicit `.accessibilityLabel` on a `Button` replaces the
-    // label derived from its content, so a child element's label would simply
-    // stop being announced. Same reason the brightness bar stays hidden.
-    let spokenName = hasUnread ? "\(name), has an unread notice" : name
+    // Read straight from prefs, like the name above it: `DisplayPrefs` is plain
+    // UserDefaults with no observation, and the `prefsRevision` read at the top
+    // of `body` is what brings an enrollment change back here.
+    let isEnrolled = prefs.oledCareEnrolled
+    // Both facts ride in the row's own label rather than in nested elements: an
+    // explicit `.accessibilityLabel` on a `Button` replaces the label derived
+    // from its content, so a child element's label would simply stop being
+    // announced. Same reason the brightness bar stays hidden. Spoken in the
+    // order the glyphs are drawn.
+    let spokenName =
+      name + (isEnrolled ? ", enrolled in OLED care" : "")
+      + (hasUnread ? ", has an unread notice" : "")
     row(
       .display(display.persistenceKey), label: spokenName,
       // The built-in draws as a laptop everywhere it is depicted (SV9).
@@ -252,6 +279,17 @@ struct SettingsSidebar: View {
           Text(verbatim: name) // a display's name — never a lookup key
             .lineLimit(1)
             .truncationMode(.tail)
+          // This display is enrolled in OLED care (SC9). A shield, not the
+          // notice dot: two facts, two shapes, and neither is ever carried by
+          // colour. Faint on purpose, because it is a standing state rather
+          // than something to act on, and it is never the sole carrier either:
+          // the OLED Care overview holds the authoritative enrollment badge.
+          if isEnrolled {
+            Image(systemName: "shield.fill")
+              .font(.system(size: 8))
+              .foregroundStyle(SettingsTheme.faintColor)
+              .accessibilityHidden(true)
+          }
           // Something happened on this display while nobody was looking and
           // nobody has read it yet. A dot, not a count: the destination
           // carries the account, this only says there is one to open. It is

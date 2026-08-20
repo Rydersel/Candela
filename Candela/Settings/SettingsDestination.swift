@@ -5,17 +5,17 @@ import Foundation
 /// rather than a sidebar row that navigates nowhere. Same guarantee `PrefName`
 /// gives the propagation seam.
 enum PaneID: String, CaseIterable, Hashable {
-  // Order is the sidebar's order. `arrangement` sits after `menuBar` because it
-  // is about the desktop rather than about the app, and before the input and
-  // informational panes. `oledCare` follows it: it is also about the displays
-  // themselves, and its per-display sections read as a continuation of the
-  // arrangement pane's subject rather than of the app's own settings.
-  // `virtualDisplays` follows `oledCare` for the same reason `oledCare`
-  // follows `arrangement`: it is about the desktop's displays rather than
-  // about the app, and it CREATES the things the arrangement pane places.
-  // `updates` sits with the app-and-informational tail, directly above
-  // `about`, whose version line it shares a subject with.
+  // This list is NO LONGER the sidebar's order (SC1). Render order comes from
+  // `SettingsRegistry.sections`, which groups the panes under CARE and
+  // CONTROLS; `allCases` is now only the id space, and a test pins that every
+  // case appears in exactly one section.
+  //
+  // Raw values are shipped schema (the `CANDELA_DEBUG_SETTINGS` route ids, and
+  // whatever else stores a pane id): append, never rename and never renumber.
+  // The care panes are appended for that reason alone, and their position here
+  // says nothing about where they draw.
   case general, menuBar, arrangement, oledCare, virtualDisplays, keyboard, updates, about
+  case health, protection, checkup
 }
 
 /// The split view's selection type.
