@@ -305,6 +305,37 @@ public enum AppRegression {
     return current < target ? .pressUp : .pressDown
   }
 
+  // MARK: - Where a drive that steps DOWN can be aimed
+
+  /// One media-key press, as the system actually moves brightness: a synthetic
+  /// press lands on a 1/16 grid whatever modifiers ride with it [MEASURED].
+  public static let keyGridStep = 0.0625
+
+  /// Whether a panel at `stored` still reaches the DDC register after a
+  /// one-step DOWNWARD move.
+  ///
+  /// Not the same question as "is this panel in the hardware zone", and the
+  /// difference is a false failure measured on the rig. The zone is
+  /// `stored >= switching`, but every drive here presses DOWN first, and a
+  /// panel sitting exactly ON the switching value crosses into the software
+  /// zone on that press: no write, by the app's own design, and the press back
+  /// up restores a register value the coalescer drops as a repeat. The window
+  /// then carries zero writes on a healthy app, and the instrument blames the
+  /// Accessibility grant, the event tap and the DDC path instead: three named
+  /// causes, none of them true.
+  ///
+  /// So a drive needs a whole step of headroom rather than a boundary. Exactly
+  /// one step is enough: the press lands ON the switching value, whose register
+  /// portion is zero, which is a real delta from wherever it started.
+  ///
+  /// Compared exactly rather than within a tolerance. Both sides are dyadic
+  /// (the grid is 1/16, the default switching value is 1/2), so a panel that
+  /// arrived here by key press sits on the boundary exactly, and a tolerance
+  /// would only widen the band this exists to exclude.
+  public static func survivesDownStep(stored: Double, switchingValue: Double) -> Bool {
+    stored >= switchingValue + keyGridStep
+  }
+
   // MARK: - The gates a driven check reads before it judges anything
 
   /// nil when the software dimming leg is observable through the gamma table on

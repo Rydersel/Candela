@@ -430,19 +430,31 @@ enum Regress {
   ) -> (display: Display, inHardwareZone: Bool)? {
     let candidates = displays.filter { $0.persistenceKey != nil && !$0.isBuiltIn }
     guard let first = candidates.first else { return nil }
-    for display in candidates where isInHardwareZone(instruments, display) {
+    for display in candidates where survivesADownStep(instruments, display) {
       return (display, true)
     }
     return (first, false)
   }
 
-  /// Whether this panel's stored brightness sits at or above its switching
-  /// value, which is where a change has to reach the DDC register.
+  /// Whether a one-step DOWNWARD move from this panel's stored brightness still
+  /// reaches the DDC register. The verdict is `AppRegression.survivesDownStep`,
+  /// red-tested there; this reads the two prefs it needs.
   ///
-  /// One predicate, two consumers: where the key drive aims, and whether a
-  /// fan-out could produce a write at all. A second copy of this arithmetic
-  /// would agree with the first until one of them was updated.
-  private static func isInHardwareZone(
+  /// One predicate, two consumers, and both of them step DOWN, which is why the
+  /// stricter question is the right one for each:
+  ///
+  /// - **The key drive** presses down first. Aimed at a panel sitting exactly
+  ///   on its switching value, that press crosses into the software zone and
+  ///   the press back up is dropped as a repeat, so the instrument reads zero
+  ///   writes and blames the grant, the tap and the transport. Measured on the
+  ///   rig at stored 0.5 with the default switching value.
+  /// - **The fan-out**, whose zero-write branch this softens, drives its source
+  ///   DOWN by one grid step and fans that lower value out, so a target within
+  ///   one step of its switching value produces no write for the same reason.
+  ///   Softening is the safe direction there in any case: it can only turn a
+  ///   verdict inconclusive, never turn a real failure into a pass, since a
+  ///   pass needs writes that a contaminated reading does not have.
+  private static func survivesADownStep(
     _ instruments: RegressInstruments, _ display: Display
   ) -> Bool {
     guard let key = display.persistenceKey,
@@ -450,7 +462,8 @@ enum Regress {
           let stored = Double(text)
     else { return false }
     let point = instruments.defaultsRead("combinedSwitchingPoint.\(key)").flatMap(Int.init) ?? 0
-    return stored >= DimmingMath.switchingValue(fromPoint: point)
+    return AppRegression.survivesDownStep(
+      stored: stored, switchingValue: DimmingMath.switchingValue(fromPoint: point))
   }
 
   /// `targetingCaveat` is what the key-targeting gate found when the pointer
@@ -495,7 +508,7 @@ enum Regress {
         "the log query has not been shown able to return a line (see regress.instrument.log), so an empty pre-window is not evidence of a quiet app")
     } else if !inHardwareZone {
       control = .didNotFire(
-        "every DDC-capable panel sits below its switching value, inside the software zone, where a brightness key computes the DDC value the register already holds and the coalescer drops the repeat: no write can appear there whatever the app does, so an absent write would say nothing about the drive path")
+        "no DDC-capable panel sits a whole key step above its switching value, so none of them can be driven down and back without crossing into the software zone: down there a brightness key computes the DDC value the register already holds and the coalescer drops the repeat, so no write can appear whatever the app does and an absent one would say nothing about the drive path. A panel sitting exactly ON its switching value is refused for the same reason, since the first press is a press DOWN. Walk one panel a step or two up before this run")
     } else {
       let quietStart = Date()
       Thread.sleep(forTimeInterval: 3)
@@ -553,8 +566,14 @@ enum Regress {
         // zero-write rationale would put an explanation in the record that
         // does not describe what happened.
         guard let targetingCaveat else {
-          return .fail(
-            "\(shortfall); the Accessibility grant, the app's event tap or the DDC path is down")
+          // Re-read rather than inherited from the target selection: sync, the
+          // ambient sensor or a person's own key can move the panel between
+          // the two, and a panel that drifted onto its switching value
+          // produces this exact silence with nothing wrong.
+          let cause = survivesADownStep(instruments, target)
+            ? "the Accessibility grant, the app's event tap or the DDC path is down"
+            : "either the Accessibility grant, the app's event tap or the DDC path is down, or \(target.name) no longer sits a whole key step above its switching value: the press down then crossed into the software zone and the press back up was dropped as a repeat, which produces this silence on a healthy app"
+          return .fail("\(shortfall); \(cause)")
         }
         return .inconclusive(
           "\(shortfall), with brightness keys targeting \(targetingCaveat.mode) rather than the display under the pointer: \(targetingCaveat.zeroWriteExplanation)"
@@ -687,11 +706,11 @@ enum Regress {
   /// run to black. It moves the floor these checks assert, so they hold it off.
   static let allowZeroIdentifier = "allowZeroSwBrightness"
 
-  /// One media-key press, as the system actually moves brightness: a synthetic
-  /// press lands on a 1/16 grid whatever modifiers ride with it [MEASURED].
-  /// Also the fan-out drive's step, which clears the 0.03 sync deadband with
-  /// margin from any residual.
-  static let keyGridStep = 0.0625
+  /// One media-key press, on the 1/16 grid, and also the fan-out drive's step,
+  /// which clears the 0.03 sync deadband with margin from any residual. The
+  /// number lives in the Kit, beside the headroom rule that is defined in terms
+  /// of it: a drive step and the headroom a drive needs must be one constant.
+  static let keyGridStep = AppRegression.keyGridStep
 
   /// Which preflight instruments a driven check consumes.
   ///
@@ -1604,7 +1623,7 @@ enum Regress {
     // the panel at its floor, which is inside the software zone, so this is
     // routinely false on a healthy run.
     let anyTargetInHardwareZone = displays.contains {
-      !$0.isBuiltIn && isInHardwareZone(instruments, $0)
+      !$0.isBuiltIn && survivesADownStep(instruments, $0)
     }
     let driven = fanOutDrive(
       instruments: instruments, builtIn: builtIn, preWindowFanOuts: preFanOuts,

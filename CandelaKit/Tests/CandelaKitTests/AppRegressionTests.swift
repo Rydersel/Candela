@@ -452,6 +452,34 @@ struct AppRegressionTests {
     #expect(sources.count { $0 == 10 } == 1)
   }
 
+  // MARK: - Where a key drive can be aimed
+
+  @Test func aPanelExactlyAtTheSwitchingValueIsNoKeyDriveTarget() {
+    // The live hole, measured on the rig: the panel sat at stored 0.5 with the
+    // default switching value of 0.5, the instrument's first press went DOWN
+    // into the software zone (no write, by the app's design), and the press
+    // back up restored a register value the coalescer dropped. Zero writes, and
+    // the check blamed the Accessibility grant, the event tap and the DDC path:
+    // three named causes, none of them true.
+    #expect(!AppRegression.survivesDownStep(stored: 0.5, switchingValue: 0.5))
+  }
+
+  @Test func oneGridStepOfHeadroomIsEnough() {
+    // A press from here lands exactly ON the switching value, whose register
+    // portion is zero, so the delta is real and the write appears.
+    #expect(AppRegression.survivesDownStep(stored: 0.5625, switchingValue: 0.5))
+  }
+
+  @Test func lessThanAWholeStepIsNotHeadroom() {
+    // A press does not move by the difference, it snaps to the 1/16 grid, so
+    // anything under a full step lands below the switching value.
+    #expect(!AppRegression.survivesDownStep(stored: 0.53, switchingValue: 0.5))
+  }
+
+  @Test func aPanelInsideTheSoftwareZoneIsNoKeyDriveTargetEither() {
+    #expect(!AppRegression.survivesDownStep(stored: 0.375, switchingValue: 0.5))
+  }
+
   // MARK: - The sync fan-out
 
   @Test func aNoisyPreWindowContaminatesTheFanOutMeasurement() {
