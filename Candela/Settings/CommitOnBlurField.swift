@@ -19,9 +19,9 @@ import SwiftUI
 /// 4. Only then does any focus-change hook run, and it commits the old value.
 ///
 /// So the text lives here, in the field's own state, and nothing derives it
-/// from where focus is. That also means the commit hook can hang off the text
-/// field itself rather than off a container row, which is the placement the
-/// grouped `Form` treats reliably.
+/// from where focus is. That also means the commit hook hangs off the text
+/// field itself rather than off a container row: the hook lives on the thing it
+/// commits, so no container between the two can swallow it.
 ///
 /// `stored` is a closure rather than a value because it is re-read AFTER the
 /// write: it gives the normalized text on success (a stored 0 renders empty)
@@ -44,13 +44,15 @@ struct CommitOnBlurField: View {
 
   var body: some View {
     TextField("", text: $text, prompt: prompt)
-      // A grouped `Form` styles a bare `TextField` borderless, and with an empty
-      // value that renders as nothing at all: no border, no focus ring, no way
-      // to know a field is there. The explicit border is what makes the box a
-      // box.
+      // The explicit border is what makes the box a box. A bare `TextField`
+      // draws no edge of its own on a card, and with an empty value that
+      // renders as nothing at all: no border, no focus ring, no way to know a
+      // field is there. The system's rounded border is the one control here
+      // that is not on the window's palette; a themed field is a theme-layer
+      // addition nobody has written yet, so this stays until one exists.
       .textFieldStyle(.roundedBorder)
-      // The `Form` otherwise splits the field into a label column and a field,
-      // and the empty label still takes its share of the cell.
+      // The label is drawn by the row around the field, so the field's own
+      // empty label must not claim space beside it.
       .labelsHidden()
       .focused($focused)
       .onSubmit { apply() }

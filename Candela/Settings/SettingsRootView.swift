@@ -563,12 +563,11 @@ struct SettingsRootView: View {
     return Binding(get: { [] }, set: { _ in })
   }
 
-  /// One case per sub-page — all three pages are real. Each page owns its
-  /// own `Form` (a grouped `Form` only reliably sizes structure declared in
-  /// its own builder — see `DisplayHubView.body`), so this switch names a
-  /// view and nothing else. Every page starts with `SubPageHeader` — title
-  /// focus on push, and the display switcher that carries THIS sub-page onto
-  /// another display (SO23).
+  /// One case per sub-page; all three pages are real. Each page owns its own
+  /// `SettingsPageScaffold` (the scroll, the content column and the page
+  /// padding), so this switch names a view and nothing else. Every page starts
+  /// with `SubPageHeader`: title focus on push, and the display switcher that
+  /// carries THIS sub-page onto another display (SO23).
   @ViewBuilder
   private func subPage(_ page: DisplaySubPage, key: String, state: AppModel.DisplayState) -> some View {
     // Rename dependency, registered HERE because `switcherDisplays` is read at
