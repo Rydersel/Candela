@@ -37,7 +37,8 @@ struct AdvancedPage: View {
   private var persistenceKey: String { state.display.persistenceKey }
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: persistenceKey) }
   /// The two gates this page's sections hang off (`disableCombinedBrightness`,
-  /// `startupAction`) are app-level and live in General.
+  /// `startupAction`) are app-level; the startup policy's control lives on the
+  /// Protection pane (SC6).
   private var appPrefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
   private var writer: DisplayPrefWriter {
     DisplayPrefWriter(persistenceKey: persistenceKey, actions: actions)
@@ -451,7 +452,7 @@ struct AdvancedPage: View {
         }
         // D11: safe mode suppresses the startup readback outright, so a retry
         // policy shown as live here would describe behavior that is not
-        // happening — the same defect the General pane's notice exists to
+        // happening — the same defect the Protection pane's notice exists to
         // avoid. `appPrefs` is built without the safe-mode flag deliberately:
         // the picker shows the PERSISTED choice, which is right for a setting.
         if model.isSafeMode {
