@@ -101,7 +101,7 @@ struct AppMenuPane: View {
   private var menuIconRow: some View {
     SettingRow {
       VStack(alignment: .leading, spacing: 6) {
-        MenuChoiceRow(label: "Show the menu bar icon:", selection: Binding(
+        ThemedChoiceRow(label: "Show the menu bar icon:", selection: Binding(
           get: { prefs.menuIcon },
           set: { mode in
             prefs.menuIcon = mode
@@ -238,7 +238,7 @@ struct AppMenuPane: View {
     VStack(alignment: .leading, spacing: 8) {
       SettingsCardSection(title: "On-Screen Indicators") {
         SettingRow("One style for every indicator, on every display.") {
-          MenuChoiceRow(label: "Indicator style:", selection: Binding(
+          ThemedChoiceRow(label: "Indicator style:", selection: Binding(
             get: { prefs.hudStyle },
             set: { style in
               prefs.hudStyle = style
@@ -258,7 +258,7 @@ struct AppMenuPane: View {
         SettingsCardDivider()
 
         SettingRow("Contrast uses this position too.") {
-          MenuChoiceRow(label: "Brightness indicator position:", selection: Binding(
+          ThemedChoiceRow(label: "Brightness indicator position:", selection: Binding(
             get: { prefs.hudPositionBrightness },
             set: { position in
               prefs.hudPositionBrightness = position
@@ -279,7 +279,7 @@ struct AppMenuPane: View {
         SettingsCardDivider()
 
         SettingRow("Mute uses this position too. The indicator appears on the display the keys act on.") {
-          MenuChoiceRow(label: "Volume indicator position:", selection: Binding(
+          ThemedChoiceRow(label: "Volume indicator position:", selection: Binding(
             get: { prefs.hudPositionVolume },
             set: { position in
               prefs.hudPositionVolume = position
@@ -336,38 +336,5 @@ struct AppMenuPane: View {
     case .externalOnly: "When an external display is connected"
     case .hide: "Never"
     }
-  }
-}
-
-/// A pop-up at row weight: the label leads, the menu sits at the trailing edge.
-///
-/// The spread lives here because a `Picker` has no style point that can carry
-/// it, the way the theme's switch style carries it for a `Toggle`. The row is
-/// ONE accessibility element for the same reason the switch style is: the
-/// written label and the chosen value have to land on the thing that changes,
-/// and `SettingRow` attaches its caption as that element's hint. `combine`
-/// keeps the pop-up's own action, which `ignore` would drop.
-private struct MenuChoiceRow<Value: Hashable, Options: View>: View {
-  let label: LocalizedStringKey
-  @Binding var selection: Value
-  @ViewBuilder let options: Options
-
-  var body: some View {
-    HStack(spacing: 12) {
-      // Wraps rather than truncates: at large text sizes the pop-up keeps its
-      // ideal width, so the label is the half that has to give.
-      Text(label)
-        .fixedSize(horizontal: false, vertical: true)
-      Spacer(minLength: 16)
-      Picker(selection: $selection) {
-        options
-      } label: {
-        EmptyView()
-      }
-      .labelsHidden()
-      .fixedSize()
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .accessibilityElement(children: .combine)
   }
 }

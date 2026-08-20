@@ -212,6 +212,43 @@ struct SettingsBadge: View {
   }
 }
 
+/// A pop-up at row weight: the label leads, the menu sits at the trailing edge.
+///
+/// The guarantee: a written label, the native `Picker`'s own value, and one
+/// accessibility element carrying both, with a `prefIdentifier` attachable from
+/// the call site.
+///
+/// The spread lives here because a `Picker` has no style point that can carry
+/// it, the way the theme's switch style carries it for a `Toggle`. The row is
+/// ONE accessibility element for the same reason the switch style is: the
+/// written label and the chosen value have to land on the thing that changes,
+/// and `SettingRow` attaches its caption as that element's hint. `combine`
+/// keeps the pop-up's own action, which `ignore` would drop.
+struct ThemedChoiceRow<Value: Hashable, Options: View>: View {
+  let label: LocalizedStringKey
+  @Binding var selection: Value
+  @ViewBuilder let options: Options
+
+  var body: some View {
+    HStack(spacing: 12) {
+      // Wraps rather than truncates: at large text sizes the pop-up keeps its
+      // ideal width, so the label is the half that has to give.
+      Text(label)
+        .fixedSize(horizontal: false, vertical: true)
+      Spacer(minLength: 16)
+      Picker(selection: $selection) {
+        options
+      } label: {
+        EmptyView()
+      }
+      .labelsHidden()
+      .fixedSize()
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .accessibilityElement(children: .combine)
+  }
+}
+
 /// `LabeledContent` in the row grammar: label leading, control trailing, the
 /// same vertical rhythm `SettingRow` uses. Applied once by
 /// `SettingsPageScaffold`, so a page's existing `LabeledContent` rows land in
