@@ -179,6 +179,24 @@ struct RenderSmokeTests {
     expectPixels(render(page), "AllModesPage")
   }
 
+  /// The opening both display pages share: the lit glyph, the identity block
+  /// and the levels card. It gets its own render because neither page can put
+  /// it on screen from this bundle (the built-in slot is empty on a
+  /// hardware-free model, and the external hub needs a connected display), so
+  /// without this the whole hero composition would go unrendered.
+  ///
+  /// Width only: the hero sizes its own height, and pinning one would assert a
+  /// layout rather than the fact that it produced pixels.
+  @Test func theDisplayHeroRenders() {
+    let model = TestFixtures.appModel()
+    let state = TestFixtures.displayState(name: "Smoke Panel", persistenceKey: "smoke-panel")
+    let hero = DisplayHeroView(state: state)
+      .environment(model)
+      .environment(\.settingsAccent, .display(isBuiltIn: false, ordinal: 0))
+      .frame(width: SettingsTheme.pageWidth)
+    expectPixels(render(hero), "DisplayHeroView")
+  }
+
   /// The built-in display's page, which grew a Display section of its own.
   ///
   /// The catalog is absent here, and on a hardware-free fixture `model.builtIn`
@@ -188,6 +206,11 @@ struct RenderSmokeTests {
   /// `AllModesPage`'s reason (`catalogs` is `private(set)` and the only honest
   /// filler is a live display), so the section's own derivation is covered by
   /// the row-model suite instead.
+  ///
+  /// The frame is the page's own extent since the card conversion, not a round
+  /// number: the scaffold lays a `SettingsTheme.pageWidth` column out inside 32
+  /// pt of horizontal padding, so anything narrower than that sum renders the
+  /// cards compressed and covers a layout the window never shows.
   @Test func theBuiltInDisplayPaneRenders() {
     let model = TestFixtures.appModel()
     let pane = BuiltInDisplayPane(
@@ -195,7 +218,8 @@ struct RenderSmokeTests {
     )
     .environment(model)
     .environment(SettingsActions(model: model))
-    .frame(width: 640, height: 520)
+    .environment(\.settingsAccent, .display(isBuiltIn: true, ordinal: 0))
+    .frame(width: SettingsTheme.pageWidth + 64, height: 560)
     expectPixels(render(pane), "BuiltInDisplayPane")
   }
 

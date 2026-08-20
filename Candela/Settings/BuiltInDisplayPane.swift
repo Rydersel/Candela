@@ -45,7 +45,7 @@ struct BuiltInDisplayPane: View {
 
   var body: some View {
     let _ = model.prefsRevision
-    Form {
+    SettingsPageScaffold {
       // The same opening every external page gets, in the variant that drops
       // the external-only facts. Conditional on the slot rather than assumed:
       // in clamshell the built-in departs while this pane can still be the
@@ -53,28 +53,33 @@ struct BuiltInDisplayPane: View {
       if let state = model.builtIn {
         DisplayHeroView(state: state, variant: .builtIn)
       }
-      Section("Keyboard") {
+      SettingsCardSection(title: "Keyboard") {
         SettingRow("When off, the brightness keys skip the built-in display.") {
           Toggle("Control this display with the keyboard", isOn: Binding(
             get: { !prefs.isDisabled },
             set: { enabled in writer.write(.isDisabled) { $0.isDisabled = !enabled } }
           ))
+          .themedSwitch()
           .prefIdentifier(.isDisabled, persistenceKey: "builtIn")
         }
       }
 
       displaySection
 
-      Section("Brightness") {
+      SettingsCardSection(title: "Brightness") {
         // Renders nothing where the sensor or its symbols are missing, so on
-        // such a machine this section falls back to the caption alone.
+        // such a machine this card falls back to the caption alone. No hairline
+        // between the two: the sentence explains the card, and it has to read
+        // as the explanation whether or not the row above it exists.
         AmbientBrightnessRow()
         SettingsCaption("macOS controls the built-in display's brightness directly, so there is nothing else to set here. \(AppInfo.productName) reads its level to keep your other displays in step.")
+          .padding(.vertical, 6)
       }
 
-      Section("Menu Bar") {
+      SettingsCardSection(title: "Menu Bar") {
         SettingRow("Whether this display's slider appears in the menu bar is set under Menu Bar, so it stays reachable when the lid is closed and this display disappears.") {
           Button("Open Menu Bar Settings") { selection = .pane(.menuBar) }
+            .buttonStyle(SettingsSecondaryButtonStyle())
             .accessibilityLabel("Open Menu Bar Settings")
         }
       }
@@ -83,13 +88,13 @@ struct BuiltInDisplayPane: View {
       // reach my laptop screen?" is one of the questions that feature exists
       // to answer, and the route belongs on the page for the display it is
       // about. A chevron to the sub-page since Task 13 (spec §8); no readback
-      // preview — the built-in has no wire for a read verdict to be about.
-      Section {
+      // preview, because the built-in has no wire for a read verdict to be
+      // about.
+      SettingsCardSection {
         NavigationRow(title: "Diagnostics", value: nil) { path.append(.diagnostics) }
           .focused($focusedRow, equals: .diagnostics)
       }
     }
-    .formStyle(.grouped)
     .onChange(of: path) { old, new in
       if new.count < old.count, let popped = old.last {
         focusedRow = popped
@@ -102,9 +107,10 @@ struct BuiltInDisplayPane: View {
     // change, ours or System Settings' or a lid cycle, re-enumerates through the
     // coordinator's own screen-parameters observer, which runs whether or not
     // this page is on screen.
-    // Hung off the `Form` rather than the section for the reason
-    // recorded in `DisplayDetailView`: a lifecycle modifier on a `Section`
-    // inside a grouped Form is not reliably applied.
+    // Hung off the page root rather than off a card, which is where the
+    // grouped `Form` this page used to be required it (a lifecycle modifier on
+    // a `Section` was not reliably applied) and where it still belongs: the
+    // enumeration is the page's, not one card's.
     .task(id: model.builtIn?.id) {
       guard let id = model.builtIn?.id else { return }
       model.displayModes.refreshCatalog(for: id)
@@ -132,12 +138,16 @@ struct BuiltInDisplayPane: View {
     // built-in is never warmed at launch (that pass walks the external list),
     // so this page's own `.task` is what fills it, one frame in.
     if let catalog {
-      Section {
+      SettingsCardSection(title: "Display") {
         DisplaySizeRows(catalog: catalog)
 
         if !catalog.all.isEmpty {
+          // Never the card's first row: the size rows above always draw
+          // something once there is a catalog, and there is one here.
+          SettingsCardDivider()
           RememberResolutionRow(displayID: catalog.display.id, persistenceKey: "builtIn")
 
+          SettingsCardDivider()
           NavigationRow(
             title: DisplaySubPage.allModes.title,
             value: "\(catalog.all.count)",
@@ -145,8 +155,6 @@ struct BuiltInDisplayPane: View {
           ) { path.append(.allModes) }
             .focused($focusedRow, equals: .allModes)
         }
-      } header: {
-        Text("Display").settingsHeading()
       }
     }
   }

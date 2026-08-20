@@ -1,22 +1,22 @@
 import CandelaKit
 import SwiftUI
 
-/// The panel-flavored opening of an external display's page (A2/A4): a
-/// functional tile, the identity block, and the two live sliders.
+/// The lit opening of a display's page (SV9): the display drawn as an object,
+/// the identity block under it, and the live levels on their own card.
 ///
-/// **Centered header, full-width sliders.** The tile is the page's opening
-/// image, so it sits centered with the name and mode directly under it rather
-/// than off to one side — a tile beside the text pushed every slider's left
-/// edge past it, which read as an indent nothing else on the page had. The
-/// sliders and the consequence caption below run the hub row's full content
-/// width and stay leading-aligned with every other caption in the window.
+/// **Centered header, levels below.** The glyph is the page's opening image, so
+/// it sits centered with the name and mode directly under it rather than off to
+/// one side. The levels card below runs the page column's full width and stays
+/// leading-aligned with every other card in the window.
 ///
-/// **The tile earns its place by being functional** (A4). It carries the
-/// display's real shape — aspect ratio straight off the current mode, which is
+/// **The glyph earns its place by being functional** (A4). It carries the
+/// display's real shape: aspect ratio straight off the current mode, which is
 /// why a display mounted at 270° renders TALL with no rotation transform
-/// anywhere: `CGDisplayCopyDisplayMode` reports the rotated logical size, so
-/// the shape IS the orientation. It also carries the mirroring state. A tile
-/// that only decorated would have been cut.
+/// anywhere (`CGDisplayCopyDisplayMode` reports the rotated logical size, so
+/// the shape IS the orientation). Its face tracks the live brightness value
+/// (SV9), so the slider and the picture of the thing it drives are one object,
+/// and it carries the mirroring state. A glyph that only decorated would have
+/// been cut.
 ///
 /// **Two variants since 2026-08-19.** The external one is the original; the
 /// built-in pane now opens with the same header at Ryder's request, in the
@@ -25,9 +25,11 @@ import SwiftUI
 /// wire, so a visible slider would be a silently dead one) and the consequence
 /// caption (both of its sentences are about HDR routing and DDC readback,
 /// and on a constitutively native panel `.macOSDrivesBrightness` is normal
-/// life, not "HDR is live"). The tile, the identity block and the brightness
-/// slider are the shared shape, and the brightness slider drives the native
-/// path exactly as the menu bar's built-in row does.
+/// life, not "HDR is live"). It also draws as a laptop rather than as a
+/// monitor on a stand (SV9), which is what the built-in is everywhere else it
+/// is depicted. The identity block and the brightness slider are the shared
+/// shape, and the brightness slider drives the native path exactly as the menu
+/// bar's built-in row does.
 ///
 /// **It writes no pref** (no `PrefName`, no `DisplayPrefWriter`). The two
 /// sliders write through the engine's own controllers, which is the same path
@@ -46,20 +48,21 @@ struct DisplayHeroView: View {
   var variant: Variant = .external
 
   @Environment(AppModel.self) private var model
+  @Environment(\.settingsAccent) private var lighting
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-  /// The box the tile fits INSIDE, preserving its aspect ratio — never the
-  /// tile's own size. A fixed height with a derived width would run a 21:9
-  /// ultrawide off the page, and a fixed width would flatten a portrait
-  /// display to a sliver.
-  ///
-  /// Bigger than the beside-the-text version it replaced (120×56): centered
-  /// above the name it is the page's opening image and a tile the height of two
-  /// lines of text reads as a bullet, not as the display.
+  /// The box the glyph fits INSIDE, preserving its aspect ratio: the glyphs do
+  /// that fitting themselves, so a wide box never runs a 21:9 ultrawide off the
+  /// page and never flattens a portrait display to a sliver.
   ///
   /// Scaled, because it sits directly above scalable text (a11y contract 10):
   /// at large text sizes a fixed box would be dwarfed by the name under it.
-  @ScaledMetric(relativeTo: .headline) private var tileBoxWidth: CGFloat = 180
-  @ScaledMetric(relativeTo: .headline) private var tileBoxHeight: CGFloat = 80
+  @ScaledMetric(relativeTo: .headline) private var glyphBoxWidth: CGFloat = 230
+  @ScaledMetric(relativeTo: .headline) private var glyphBoxHeight: CGFloat = 168
+
+  /// The level sliders' own column. Wide enough to drag with precision, narrow
+  /// enough to leave the row's label and caption their half of the card.
+  @ScaledMetric(relativeTo: .body) private var sliderWidth: CGFloat = 240
 
   /// Keyboard/VoiceOver floor for brightness when the software leg can reach
   /// black (a11y contract 7). Low enough to still be "as dark as it goes",
@@ -94,61 +97,66 @@ struct DisplayHeroView: View {
     // is plain `UserDefaults` and is not observable, so without this read a
     // rename in the section below would leave the old name standing here.
     let _ = model.prefsRevision
-    VStack(alignment: .leading, spacing: 14) {
-      // Tile and identity are one centered header. The tile is decorative to
-      // VoiceOver, so the reading order this produces is still identity-then-
-      // sliders.
-      VStack(spacing: 6) {
-        tile
-        identity
-      }
-      .frame(maxWidth: .infinity)
-      VStack(alignment: .leading, spacing: 8) {
-        brightnessSlider
-        volumeSlider
-        if let consequenceSentence {
-          // Hidden from VoiceOver because the same sentence already travels in
-          // the brightness slider's LABEL (a11y contract 3) — leaving the
-          // caption readable announced it twice (T12 review).
-          SettingsCaption(verbatim: consequenceSentence)
-            .accessibilityHidden(true)
-        }
-      }
+    VStack(alignment: .leading, spacing: 15) {
+      header
+      levels
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .accessibilityElement(children: .contain)
   }
 
-  // MARK: - Tile
+  // MARK: - Header
+
+  /// The glyph and the identity block as one centered lockup, with the hero's
+  /// own deadspace around it (SV9): everything below this runs at the window's
+  /// tightened row spacing.
+  private var header: some View {
+    VStack(spacing: 12) {
+      glyph
+        .frame(width: glyphBoxWidth, height: glyphBoxHeight)
+        // Depth, not glow: the face's own brightness is the live signal.
+        .shadow(color: .black.opacity(0.45), radius: 16, y: 8)
+        // Deliberately outside the `Motion` vocabulary and faster than
+        // `Motion.value`: this tracks a live drag, and the shared value curve
+        // trails the pointer far enough to read as lag.
+        .animation(
+          reduceMotion ? nil : .easeOut(duration: 0.12), value: state.controller.brightness)
+        .accessibilityHidden(true)
+      identity
+    }
+    .frame(maxWidth: .infinity)
+    .padding(.top, 4)
+    .padding(.bottom, 2)
+  }
 
   /// Decoration for VoiceOver, by the arrangement canvas's own precedent: a
-  /// shape has no reading. What it draws is said in words by the sections this
-  /// page already carries — the mode caption right beside it, and Mirroring
-  /// below — so a hero that ever draws a fact NOT stated in words has broken
-  /// this, and the fix is the words, not an accessibility label on a rectangle.
-  private var tile: some View {
-    let box = tileFit
-    return RoundedRectangle(cornerRadius: 6, style: .continuous)
-      .fill(.quaternary)
-      .overlay {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-          .strokeBorder(.separator, lineWidth: 1)
-      }
-      .overlay {
-        if isMirroring {
-          Image(systemName: "rectangle.on.rectangle")
-            .font(.title3)
-            .foregroundStyle(.secondary)
-        }
-      }
-      .frame(width: box.width, height: box.height)
-      // The box's full HEIGHT is reserved, not just the tile's own, so the hero
-      // is the same height whatever shape the display is — a portrait Dell must
-      // not push the brightness slider 30 pt further down the page than the MAG
-      // does. Width is not reserved: nothing sits beside the tile now, and the
-      // centered header would center the reserved box rather than the tile.
-      .frame(height: tileBoxHeight)
-      .accessibilityHidden(true)
+  /// shape has no reading. What it draws is said in words by this page (the
+  /// mode line directly under it, the brightness level on the slider, and
+  /// Mirroring in the Display section), so a hero that ever draws a fact NOT
+  /// stated in words has broken this, and the fix is the words, not an
+  /// accessibility label on a picture.
+  @ViewBuilder private var glyph: some View {
+    let mirrorMark = isMirroring ? AnyView(mirroringFaceMark) : nil
+    switch variant {
+    case .builtIn:
+      LaptopGlyph(
+        aspect: Double(aspectRatio), accent: lighting.accent, lit: glyphLit,
+        faceOverlay: mirrorMark)
+    case .external:
+      DisplayGlyph(
+        aspect: Double(aspectRatio), accent: lighting.accent, lit: glyphLit,
+        faceOverlay: mirrorMark)
+    }
+  }
+
+  /// Never fully black (SV9): an unlit face reads as a broken page rather than
+  /// as a dim display.
+  private var glyphLit: Double { 0.18 + 0.82 * state.controller.brightness }
+
+  private var mirroringFaceMark: some View {
+    Image(systemName: "rectangle.on.rectangle")
+      .font(.title3)
+      .foregroundStyle(.white.opacity(0.8))
   }
 
   /// Aspect ratio from the CURRENT MODE's logical size, which already carries
@@ -159,12 +167,6 @@ struct DisplayHeroView: View {
       return 16.0 / 9.0
     }
     return CGFloat(mode.logicalWidth) / CGFloat(mode.logicalHeight)
-  }
-
-  /// Largest aspect-correct rectangle inside the box.
-  private var tileFit: CGSize {
-    let width = min(tileBoxWidth, tileBoxHeight * aspectRatio)
-    return CGSize(width: width, height: width / aspectRatio)
   }
 
   /// The coordinator's own topology sample, read the way `MirroringSection`
@@ -183,26 +185,47 @@ struct DisplayHeroView: View {
 
   // MARK: - Identity
 
-  /// ONE grouped element with a heading trait (a11y contract 4): the name and
-  /// the mode are one fact about one display, and reading them as two elements
-  /// makes the top of every display page twice as long to get past.
+  /// ONE grouped element with a heading trait (a11y contract 4): the name, the
+  /// mode, the badges and the control line are one fact about one display, and
+  /// reading them as five elements makes the top of every display page five
+  /// times as long to get past. Everything drawn here is spoken by
+  /// `spokenIdentity`, which is the price of collapsing the element.
   private var identity: some View {
-    VStack(spacing: 2) {
+    VStack(spacing: 6) {
       Text(verbatim: name)
-        .font(.headline)
+        .font(.system(size: 26, weight: .bold, design: .rounded))
+        .foregroundStyle(SettingsTheme.titleColor)
         .lineLimit(1)
         .truncationMode(.middle)
       if let modeCaption {
         Text(verbatim: modeCaption)
           .font(.callout)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(SettingsTheme.bodyColor)
       }
+      HStack(spacing: 6) {
+        // Enrollment, never a claim about the panel's technology: nothing in
+        // the app measures whether a display is OLED, so the badge names the
+        // decision the user made.
+        if prefs.oledCareEnrolled { SettingsBadge(text: "OLED Care") }
+        SettingsBadge(text: variant == .builtIn ? "Built-in" : "Connected")
+      }
+      .padding(.top, 2)
+      Text(verbatim: controlLine)
+        .font(.caption)
+        .foregroundStyle(SettingsTheme.faintColor)
     }
     .multilineTextAlignment(.center)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(spokenIdentity)
     .accessibilityAddTraits(.isHeader)
     .accessibilityHeading(.h1)
+  }
+
+  /// How this display's brightness is actually being driven, in the engine's
+  /// own words (the shared `DiagnosticsCopy` phrasing, so the hero and the
+  /// diagnostics page cannot describe one display two ways).
+  private var controlLine: String {
+    DiagnosticsCopy.brightnessPath(state.controller.brightnessPath)
   }
 
   /// `2560 × 1440 · 60 Hz`, with `(max 175 Hz)` only when this size really does
@@ -260,14 +283,67 @@ struct DisplayHeroView: View {
       }
     }
     if state.controller.isHDREngaged { parts.append("HDR on") }
+    if prefs.oledCareEnrolled { parts.append("OLED care") }
+    parts.append(variant == .builtIn ? "built-in" : "connected")
+    parts.append(controlLine)
     return parts.joined(separator: ", ")
   }
 
-  // MARK: - Sliders
+  // MARK: - Levels
   //
-  // The menu bar's own slider component, bound to the same controllers — not a
+  // The menu bar's own slider component, bound to the same controllers, not a
   // second control over one model. The app-level appearance prefs come with it,
-  // so snapping and the percent readout mean one thing everywhere.
+  // so snapping and the percent readout mean one thing everywhere. Only the
+  // container is this window's; the rows themselves are the panel's, D29 rule 4
+  // included.
+
+  /// The levels on their own card, in the section vocabulary the page's design
+  /// uses (SV14).
+  private var levels: some View {
+    SettingsCardSection(title: "Levels") {
+      levelRow(label: "Brightness", caption: consequenceSentence) { brightnessSlider }
+      volumeLevelRow
+    }
+  }
+
+  /// The volume command turned off for this display, or hardware control off
+  /// altogether, removes the row: the same conjunct the menu bar applies
+  /// (`DDCValueController.isAvailable`, which `setValue` self-gates on, so a
+  /// visible slider is never a silently dead one).
+  @ViewBuilder private var volumeLevelRow: some View {
+    if variant == .external, state.volume.isAvailable {
+      SettingsCardDivider()
+      levelRow(label: "Volume", caption: nil) { volumeSlider }
+    }
+  }
+
+  /// Label leading, level trailing, the row's own consequence sentence under
+  /// both. Not `SettingRow`: that publishes its caption as the control's
+  /// accessibility HINT, and the one caption here already travels in the
+  /// slider's label (a11y contract 3), where it would then be announced twice.
+  private func levelRow(
+    label: LocalizedStringKey, caption: String?, @ViewBuilder control: () -> some View
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 3) {
+      HStack(spacing: 12) {
+        // The slider is one accessibility element and carries the display's
+        // name in its own label; the drawn word is typography.
+        Text(label)
+          .foregroundStyle(SettingsTheme.titleColor)
+          .accessibilityHidden(true)
+        Spacer(minLength: 16)
+        control().frame(maxWidth: sliderWidth)
+      }
+      if let caption {
+        Text(verbatim: caption)
+          .font(.caption)
+          .foregroundStyle(SettingsTheme.faintColor)
+          .fixedSize(horizontal: false, vertical: true)
+          .accessibilityHidden(true)
+      }
+    }
+    .padding(.vertical, 6)
+  }
 
   private var appPrefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
@@ -284,34 +360,26 @@ struct DisplayHeroView: View {
     )
   }
 
-  /// The volume command turned off for this display, or hardware control off
-  /// altogether, removes the row — the same conjunct the menu bar applies
-  /// (`DDCValueController.isAvailable`, which `setValue` self-gates on, so a
-  /// visible slider is never a silently dead one).
-  ///
-  /// The row is the panel's own `ValueSliderRow`, so D29 rule 4 — a muting row
-  /// never snaps to 0 — is DERIVED from the muted glyph in one place rather
+  /// The row is the panel's own `ValueSliderRow`, so D29 rule 4 (a muting row
+  /// never snaps to 0) is DERIVED from the muted glyph in one place rather
   /// than passed by hand at a second construction site (T12 review).
   ///
   /// `hideVolumeSlider` is deliberately NOT read: that pref governs the menu
   /// bar's row, and this page is where you go to change it.
-  @ViewBuilder private var volumeSlider: some View {
-    if variant == .external, state.volume.isAvailable {
-      let enabled = model.volumeSliderEnabled(state)
-      ValueSliderRow(
-        controller: state.volume,
-        systemImage: "speaker.wave.2.fill",
-        accessibilityLabel: "\(name) volume",
-        snapsToStops: appPrefs.enableSliderSnap,
-        showsPercent: appPrefs.enableSliderPercent,
-        mutedSystemImage: "speaker.slash.fill"
-      )
-      .disabled(!enabled)
-      // D24: never greyed by CoreAudio. But the monitor's own denial is only
-      // ONE of the two causes, and this said so for both until 2026-08-10; the
-      // reason now comes from the policy that made the decision.
-      .help(model.volumeSliderDisabledReason(state, displayName: name) ?? "")
-    }
+  private var volumeSlider: some View {
+    ValueSliderRow(
+      controller: state.volume,
+      systemImage: "speaker.wave.2.fill",
+      accessibilityLabel: "\(name) volume",
+      snapsToStops: appPrefs.enableSliderSnap,
+      showsPercent: appPrefs.enableSliderPercent,
+      mutedSystemImage: "speaker.slash.fill"
+    )
+    .disabled(!model.volumeSliderEnabled(state))
+    // D24: never greyed by CoreAudio. But the monitor's own denial is only
+    // ONE of the two causes, and this said so for both until 2026-08-10; the
+    // reason now comes from the policy that made the decision.
+    .help(model.volumeSliderDisabledReason(state, displayName: name) ?? "")
   }
 
   /// Above black-screen for the keyboard and VoiceOver routes only (a11y

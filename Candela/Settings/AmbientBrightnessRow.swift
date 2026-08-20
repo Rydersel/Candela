@@ -17,8 +17,9 @@ enum AmbientRowState: Equatable {
 ///
 /// Self-contained on purpose: it reads the built-in display out of the
 /// environment itself, so a pane places it with a bare `AmbientBrightnessRow()`
-/// inside a `Form` section. It renders nothing at all where the sensor is
-/// absent, which is every external display on this rig.
+/// inside a card. It renders nothing at all where the sensor is absent, which
+/// is every external display on this rig, so the card hosting it must read
+/// correctly with the row gone.
 ///
 /// macOS is the store. There is no Candela pref behind this and nothing is
 /// mirrored into one: the state is read live, the same shape launch at login
@@ -52,6 +53,7 @@ struct AmbientBrightnessRow: View {
           get: { isOn },
           set: { request($0, for: displayID) }
         ))
+        .themedSwitch()
       }
       // Three re-reads, because macOS can move this setting underneath us and
       // there is no notification for it. Appearing covers navigating back to

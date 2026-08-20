@@ -10,12 +10,13 @@ private let resetLog = Logger(subsystem: "com.rydersel.Candela", category: "rese
 
 /// The external display hub (spec §4): everything you change or consult about
 /// one display, on one page, with Advanced / Diagnostics / the full mode list
-/// pushed as sub-pages (SO1/SO2). Owns the whole page — hero included —
-/// because the sections must sit directly in the `Form`'s builder (see the
-/// measured note in `body`); `DisplayDetailView` stays as the navigation
-/// shell's thin destination host.
+/// pushed as sub-pages (SO1/SO2). Owns the whole page, hero included;
+/// `DisplayDetailView` stays as the navigation shell's thin destination host.
 ///
-/// Section order is the spec's: identity, Display, Sound, navigation, reset.
+/// Row order is the spec's: identity, Display, Sound, navigation, reset. The
+/// identity block is drawn as three cards (the name, "In the Menu Bar",
+/// "Keyboard") rather than one headerless section, which changes where the
+/// hairlines fall and not what follows what.
 ///
 /// Banners — the countdown surface, start failures, reapply notices, the
 /// stranded-mute recovery, the first-sight line — are NOT this page's:
@@ -33,7 +34,7 @@ struct DisplayHubView: View {
 
   /// A11y contract 1, pop half: when the path shrinks, focus returns to the
   /// chevron row that pushed. Owned HERE, beside the rows that tag themselves
-  /// with it, and driven by the `onChange` on the `Form` below.
+  /// with it, and driven by the `onChange` on the page root below.
   @FocusState private var focusedRow: DisplaySubPage?
 
   @Environment(AppModel.self) private var model
@@ -53,10 +54,11 @@ struct DisplayHubView: View {
   ///
   /// Seeded at identity creation (the stack's `.id(key)` gives each display its
   /// own hub identity) and re-seeded on `prefsRevision` from `onChange`
-  /// modifiers ON THE FIELDS themselves — a lifecycle hook on a `Section` or
-  /// `Group` inside a grouped `Form` is not reliably applied (measured; see
-  /// `DisplayDetailView`), and a re-seed that silently never fired would revive
-  /// a wiped name on the next focus loss.
+  /// modifiers ON THE FIELDS themselves. That placement was forced by the
+  /// grouped `Form` this page used to be (a lifecycle hook on a `Section` was
+  /// not reliably applied) and is kept because it is also the right one: the
+  /// hook lives on the thing it re-seeds, so a re-seed cannot silently stop
+  /// firing and revive a wiped name on the next focus loss.
   @State private var nameDraft: String
   @State private var audioNameDraft: String
   @FocusState private var nameFocused: Bool
@@ -102,31 +104,28 @@ struct DisplayHubView: View {
     // re-evaluates the hub after a write anywhere else — and what makes the
     // chevron previews re-read (SO3).
     let _ = model.prefsRevision
-    // The hub owns the `Form` and every section sits DIRECTLY in its builder.
-    // Measured 2026-08-06: hosting the same five sections in a child view
-    // placed inside a parent's `Form` mis-sized the List's scrollable extent —
-    // the page pinned ~110 pt short of its end and the reset section was
-    // unreachable by scrolling. Same defect family as the Section-lifecycle
-    // no-op recorded on `DisplayDetailView`: a grouped `Form` only reliably
-    // handles structure declared in its own builder.
-    Form {
+    // The hub owns the whole page and every card sits directly in the
+    // scaffold's builder. The grouped `Form` this replaced could not host its
+    // sections from a child view at all (measured 2026-08-06: the scrollable
+    // extent came up ~110 pt short and the reset section was unreachable);
+    // the card stack has no such constraint, but the composition stays here
+    // because the page is one reading order, not seven fragments.
+    SettingsPageScaffold {
       DisplayHeroView(state: state)
-      identitySection
-      displaySection
-      soundSection
-      oledCareSection
-      navigationSection
-      resetSection
+      identityCard
+      menuBarCard
+      keyboardCard
+      displayCard
+      soundCard
+      oledCareCard
+      navigationCard
+      resetCard
     }
-    .formStyle(.grouped)
     // Mode enumeration is several CoreGraphics round-trips, so it runs here
-    // rather than per body evaluation. It hangs off the Form, not off a
-    // section: a modifier applied to a `Section` inside a grouped `Form` is
-    // not reliably applied to the section itself, and a lifecycle hook that
-    // silently never fires would leave the resolution list empty. Any LATER
-    // resolution change — ours, System Settings', or a replug — re-enumerates
-    // through the coordinator's own screen-parameters observer, which must run
-    // whether or not this page is on screen.
+    // rather than per body evaluation, and it hangs off the page root rather
+    // than off a card. Any LATER resolution change (ours, System Settings', or
+    // a replug) re-enumerates through the coordinator's own screen-parameters
+    // observer, which must run whether or not this page is on screen.
     .task(id: state.id) { model.displayModes.refreshCatalog(for: state.id) }
     // Pop restoration: the row that pushed the page just popped takes focus
     // back. Only ever a SHRINK is acted on — a push moves focus forward via
@@ -141,8 +140,11 @@ struct DisplayHubView: View {
 
   // MARK: - Identity
 
-  private var identitySection: some View {
-    Section {
+  /// The name and what it is shared with. Headerless: the hero above it is the
+  /// display, and a kicker naming the display again would be the third time on
+  /// one screen.
+  private var identityCard: some View {
+    SettingsCardSection {
       SettingRow("Shown in the menu bar.") {
         HStack(spacing: 2) {
           TextField("Name", text: $nameDraft, prompt: Text(verbatim: state.display.name))
@@ -191,30 +193,56 @@ struct DisplayHubView: View {
         .animation(Motion.disclosure(reduceMotion: reduceMotion), value: hasCustomName)
       }
       if model.isSharedIdentity(persistenceKey) {
-        // SO21: same persistence key, same prefs — every control on this page
+        // SO21: same persistence key, same prefs, so every control on this page
         // drives both units, and the user deserves to know before renaming one.
         SettingsCaption(verbatim: "Two identical displays are attached. They share these settings.")
+          .padding(.bottom, 6)
+      }
+    }
+  }
+
+  /// The two menu-bar questions, under the mock's own kicker for them (SV14).
+  /// The rows keep the order they had as one identity section: nothing moved,
+  /// the section boundaries did.
+  private var menuBarCard: some View {
+    SettingsCardSection(title: "In the Menu Bar") {
+      SettingRow {
+        Toggle("Show in the menu bar", isOn: Binding(
+          get: { !prefs.hideDisplay },
+          set: { shown in writer.write(.hideDisplay) { $0.hideDisplay = !shown } }
+        ))
+        .themedSwitch()
+        .prefIdentifier(.hideDisplay, persistenceKey: persistenceKey)
       }
 
-      Toggle("Show in the menu bar", isOn: Binding(
-        get: { !prefs.hideDisplay },
-        set: { shown in writer.write(.hideDisplay) { $0.hideDisplay = !shown } }
-      ))
-      .prefIdentifier(.hideDisplay, persistenceKey: persistenceKey)
+      SettingsCardDivider()
 
-      // Kept adjacent to the row above — same question (spec §4). Whether a
+      // Kept adjacent to the row above: same question (spec §4). Whether a
       // slider that IS shown accepts input is the Sound section's picker.
-      Toggle("Show the volume slider in the menu bar", isOn: Binding(
-        get: { !prefs.hideVolumeSlider },
-        set: { shown in writer.write(.hideVolumeSlider) { $0.hideVolumeSlider = !shown } }
-      ))
-      .prefIdentifier(.hideVolumeSlider, persistenceKey: persistenceKey)
+      SettingRow {
+        Toggle("Show the volume slider in the menu bar", isOn: Binding(
+          get: { !prefs.hideVolumeSlider },
+          set: { shown in writer.write(.hideVolumeSlider) { $0.hideVolumeSlider = !shown } }
+        ))
+        .themedSwitch()
+        .prefIdentifier(.hideVolumeSlider, persistenceKey: persistenceKey)
+      }
+    }
+  }
 
-      Toggle("Use brightness and volume keys for this display", isOn: Binding(
-        get: { !prefs.isDisabled },
-        set: { enabled in writer.write(.isDisabled) { $0.isDisabled = !enabled } }
-      ))
-      .prefIdentifier(.isDisabled, persistenceKey: persistenceKey)
+  /// Its own card rather than the menu-bar one, because it is not a menu-bar
+  /// setting: the same split, and the same kicker, the built-in display's page
+  /// already draws.
+  private var keyboardCard: some View {
+    SettingsCardSection(title: "Keyboard") {
+      SettingRow {
+        Toggle("Use brightness and volume keys for this display", isOn: Binding(
+          get: { !prefs.isDisabled },
+          set: { enabled in writer.write(.isDisabled) { $0.isDisabled = !enabled } }
+        ))
+        .themedSwitch()
+        .prefIdentifier(.isDisabled, persistenceKey: persistenceKey)
+      }
     }
   }
 
@@ -233,9 +261,14 @@ struct DisplayHubView: View {
 
   // MARK: - Display
 
-  @ViewBuilder private var displaySection: some View {
-    Section {
-      // A nil catalog is "not enumerated yet", NOT "no modes" — rendering the
+  /// One card, in the order the section always had. The dividers between the
+  /// blocks are decided HERE rather than inside the shared child views: only
+  /// this composition knows which neighbour renders, and a divider a child
+  /// drew for itself would open the card whenever the block above it was
+  /// absent.
+  private var displayCard: some View {
+    SettingsCardSection(title: "Display") {
+      // A nil catalog is "not enumerated yet", NOT "no modes": rendering the
       // empty state for it flashes false copy on every pane switch.
       if let catalog {
         // The size pop-up, the refresh picker and the empty states are shared
@@ -248,14 +281,22 @@ struct DisplayHubView: View {
         moreSizesRows(catalog)
 
         if !catalog.all.isEmpty {
+          SettingsCardDivider()
           RememberResolutionRow(displayID: displayID, persistenceKey: persistenceKey)
         }
+        // The mirroring status row always follows, so this closes the
+        // catalog block rather than opening the next one.
+        SettingsCardDivider()
       }
 
       RotationRows(state: state, coordinator: model.rotation)
+      // The same predicate `RotationRows` guards itself on, read off the same
+      // coordinator: the rows above exist exactly when this is true.
+      if model.rotation.canRotate { SettingsCardDivider() }
       MirroringSection(state: state, coordinator: model.mirroring)
 
       if let catalog, !catalog.all.isEmpty {
+        SettingsCardDivider()
         NavigationRow(
           title: "All Sizes & Refresh Rates",
           value: "\(catalog.all.count)",
@@ -263,8 +304,6 @@ struct DisplayHubView: View {
         ) { path.append(.allModes) }
           .focused($focusedRow, equals: .allModes)
       }
-    } header: {
-      Text("Display").settingsHeading()
     }
   }
 
@@ -302,24 +341,29 @@ struct DisplayHubView: View {
        !coordinator.sizeAppliedByUser.contains(displayID),
        let row = catalog.rows.first(where: { catalog.isRecommendedSize($0.mode) }),
        !catalog.isCurrentSize(row.mode) {
+      // Never the card's first row: the size rows above it always render when
+      // there is a catalog, and there is one here.
+      SettingsCardDivider()
       SettingRow(caption: SettingsCaption(verbatim: DisplayModeCopy.recommendationCallout(
         width: recommendation.logicalWidth, height: recommendation.logicalHeight,
         isNative: row.mode.isNative
       ))) {
-        HStack {
+        HStack(spacing: 10) {
           // The SAME apply the picker uses, countdown and all (PD9): a
           // recommended mode is no safer than any other, and the keep/revert
           // window is the only wire-timing detector that exists.
           Button(DisplayModeCopy.recommendationApply) {
             resolutionSelection.select(size: row, in: catalog)
           }
+            .buttonStyle(SettingsPrimaryButtonStyle())
             .accessibilityLabel(DisplayModeCopy.recommendationApply)
           Button(DisplayModeCopy.recommendationDismiss) {
             writer.write(.sizeRecommendationDismissed) { $0.sizeRecommendationDismissed = true }
           }
+          .buttonStyle(SettingsSecondaryButtonStyle())
           .accessibilityLabel(DisplayModeCopy.recommendationDismiss)
           .prefIdentifier(.sizeRecommendationDismissed, persistenceKey: persistenceKey)
-          Spacer()
+          Spacer(minLength: 0)
         }
       }
     }
@@ -344,11 +388,15 @@ struct DisplayHubView: View {
     _ catalog: DisplayModeCoordinator.Catalog
   ) -> some View {
     if !catalog.display.isBuiltIn {
+      // Same reasoning as the callout above: the size rows are always drawn
+      // before it, so this divider can never open the card.
+      SettingsCardDivider()
       SettingRow(caption: SettingsCaption(verbatim: SynthesisCopy.optInCaption)) {
         Toggle(SynthesisCopy.optInTitle, isOn: Binding(
           get: { prefs.offerSyntheticSizes },
           set: { on in setMoreSizes(on, on: catalog.display) }
         ))
+        .themedSwitch()
         // An engage or a teardown is a multi-second hardware sequence, and a
         // second flip queued behind one answers a question nobody is asking any
         // more. Courtesy, not the guard: the engine is non-reentrant and the
@@ -375,23 +423,25 @@ struct DisplayHubView: View {
 
   // MARK: - Sound
 
-  @ViewBuilder private var soundSection: some View {
+  @ViewBuilder private var soundCard: some View {
     // `defaultOutputDevice()` does a blocking HAL round-trip when the CoreAudio
-    // listener has not primed its cache — read it once, not once per consumer.
+    // listener has not primed its cache: read it once, not once per consumer.
     let currentOutput = model.audioDevices.defaultOutputDevice()
 
-    Section {
+    SettingsCardSection(title: "Sound") {
       LabeledContent("Volume keys") {
         HStack(spacing: 8) {
           Text(verbatim: volumeKeysStatus)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(SettingsTheme.bodyColor)
           // The #1 ordinary-user task must be findable from the display's page
           // (spec §4): the keys are configured app-wide under Keyboard.
           Button("Keyboard Settings…") { selection = .pane(.keyboard) }
-            .buttonStyle(.link)
+            .buttonStyle(SettingsSecondaryButtonStyle())
             .accessibilityLabel("Keyboard Settings…")
         }
       }
+
+      SettingsCardDivider()
 
       // A safety row (accessibility contract 3): what "On" costs is D29's mute
       // strand, so the sentence goes into the toggle's label rather than into a
@@ -423,15 +473,18 @@ struct DisplayHubView: View {
         // Disable, don't hide: the control does not apply while the volume
         // command is off, and saying so beats a missing row. Disabling it does
         // NOT make the D22 hazard unreachable, and the stranded-mute recovery
-        // in `BannerRegion` works regardless of `isAvailable` (D29 rule 3) —
+        // in `BannerRegion` works regardless of `isAvailable` (D29 rule 3),
         // rendered above this page and every sub-page, so it cannot be
         // scrolled out of existence by the state it recovers from.
+        .themedSwitch()
         .disabled(!state.volume.isAvailable)
         .prefIdentifier(.enableMuteUnmute, persistenceKey: persistenceKey)
       }
 
+      SettingsCardDivider()
+
       SettingRow("\(AppInfo.productName) asks the display, and the volume and mute keys follow the same answer; the slider is greyed only when it says no.") {
-        Picker("Volume slider", selection: Binding(
+        ThemedChoiceRow(label: "Volume slider", selection: Binding(
           get: { prefs.audioSinkOverride },
           set: { override in
             // D29 rule 1. "Always disabled" now takes the MUTE key away as well
@@ -454,6 +507,8 @@ struct DisplayHubView: View {
         .prefIdentifier(.audioSinkOverride, persistenceKey: persistenceKey)
       }
 
+      SettingsCardDivider()
+
       SettingRow("Used when the volume keys pick a display by audio output. Empty matches the display's name.") {
         LabeledContent("Audio device name") {
           HStack(spacing: 8) {
@@ -473,13 +528,12 @@ struct DisplayHubView: View {
               audioNameDraft = currentOutput?.name ?? ""
               commitAudioName()
             }
+            .buttonStyle(SettingsSecondaryButtonStyle())
             .accessibilityLabel("Use Current")
             .disabled(currentOutput == nil)
           }
         }
       }
-    } header: {
-      Text("Sound").settingsHeading()
     }
   }
 
@@ -521,19 +575,23 @@ struct DisplayHubView: View {
   /// D7). The link lands on this display's own OLED page, with Back leading
   /// to the OLED overview. SO3's live preview stays, as the row's value text
   /// beside the link.
-  private var oledCareSection: some View {
-    Section {
+  private var oledCareCard: some View {
+    SettingsCardSection(title: "OLED Care") {
       SettingRow("Enrolling applies the recommended settings; nothing changes until this display has been idle for a while.") {
         Toggle("Enroll this display in OLED care", isOn: Binding(
           get: { prefs.oledCareEnrolled },
           set: { on in writer.write(.oledCareEnrolled) { $0.oledCareEnrolled = on } }
         ))
+        .themedSwitch()
         .prefIdentifier(.oledCareEnrolled, persistenceKey: persistenceKey)
       }
+
+      SettingsCardDivider()
+
       LabeledContent("Care status") {
         HStack(spacing: 8) {
           Text(verbatim: oledCarePreview)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(SettingsTheme.bodyColor)
             .accessibilityLabel(Text(oledCareSpokenPreview))
           // Carries this display with the jump: a link from a display's own
           // hub that lands on the OLED overview would make the reader click
@@ -545,12 +603,10 @@ struct DisplayHubView: View {
             oledCarePath.wrappedValue = [.display(persistenceKey)]
             selection = .pane(.oledCare)
           }
-          .buttonStyle(.link)
+          .buttonStyle(SettingsSecondaryButtonStyle())
           .accessibilityLabel("All OLED Care Settings…")
         }
       }
-    } header: {
-      Text("OLED Care").settingsHeading()
     }
   }
 
@@ -602,14 +658,15 @@ struct DisplayHubView: View {
 
   // MARK: - Navigation
 
-  private var navigationSection: some View {
-    Section {
+  private var navigationCard: some View {
+    SettingsCardSection {
       // The only hedge on the page, and it sits before the navigation rather
       // than on the sub-page, where it would arrive too late to save the trip.
       SettingRow("Settings most displays don't need.") {
         NavigationRow(title: "Advanced", value: advancedPreview) { path.append(.advanced) }
           .focused($focusedRow, equals: .advanced)
       }
+      SettingsCardDivider()
       NavigationRow(title: "Diagnostics", value: readbackVerdict) { path.append(.diagnostics) }
         .focused($focusedRow, equals: .diagnostics)
     }
@@ -661,30 +718,38 @@ struct DisplayHubView: View {
 
   // MARK: - Reset
 
-  private var resetSection: some View {
-    Section {
-      // Plain at rest (SO20): the destructive role lives on the alert's confirm
-      // button, not on a red button waiting on every display's page.
-      // Disabled only WHILE a reset runs (a second or two), never as a state
-      // the page can get stuck in: the latch is released by a `defer` on the
-      // reset's own task.
-      Button("Reset Display Settings…") { confirmingReset = true }
-        .accessibilityLabel("Reset Display Settings…")
-        .accessibilityIdentifier("action.resetDisplay.\(persistenceKey)")
-        .disabled(model.isResetting)
-        .alert("Reset the settings for this display?", isPresented: $confirmingReset) {
-          Button("Reset", role: .destructive) { resetDisplay() }
-          Button("Cancel", role: .cancel) {}
-        } message: {
-          // Names the Advanced-page work explicitly (SO20), and names what is
-          // NOT lost: the saved levels are the only source of truth on a
-          // write-only panel, so a reset that took them would leave the display
-          // at an unknown brightness — and the pinned resolution and rotation
-          // are macOS-visible state this button deliberately leaves alone.
-          // Counted panel hours are wear data, kept for the same reason the
-          // levels are.
-          Text("This unmutes \(state.display.name), turns HDR off while it runs, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, \(SynthesisCopy.optInTitle), and everything under Advanced, including control-code remaps and response curves. A size \(AppInfo.productName) was rendering for this display is taken down first, so the display goes back to one of its own; if that does not finish, the page says so and the rest of the reset still runs. HDR that was turned on in System Settings goes back on at the end. If the display cannot be reached at the time, nothing is sent to it that cannot be confirmed, so some of these may be left for you to change yourself. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
-        }
+  private var resetCard: some View {
+    SettingsCardSection {
+      HStack {
+        // The window's destructive vocabulary (a red-tinted quiet button),
+        // which is what SO20 asked for in the grouped-form language: the button
+        // is still plain-weight at rest and the destructive ROLE is still on
+        // the alert's confirm button. The app-wide reset in General reads the
+        // same, so one act does not wear two looks.
+        // Disabled only WHILE a reset runs (a second or two), never as a state
+        // the page can get stuck in: the latch is released by a `defer` on the
+        // reset's own task.
+        Button("Reset Display Settings…") { confirmingReset = true }
+          .buttonStyle(SettingsDangerButtonStyle())
+          .accessibilityLabel("Reset Display Settings…")
+          .accessibilityIdentifier("action.resetDisplay.\(persistenceKey)")
+          .disabled(model.isResetting)
+          .alert("Reset the settings for this display?", isPresented: $confirmingReset) {
+            Button("Reset", role: .destructive) { resetDisplay() }
+            Button("Cancel", role: .cancel) {}
+          } message: {
+            // Names the Advanced-page work explicitly (SO20), and names what is
+            // NOT lost: the saved levels are the only source of truth on a
+            // write-only panel, so a reset that took them would leave the
+            // display at an unknown brightness, and the pinned resolution and
+            // rotation are macOS-visible state this button deliberately leaves
+            // alone. Counted panel hours are wear data, kept for the same
+            // reason the levels are.
+            Text("This unmutes \(state.display.name), turns HDR off while it runs, and clears its \(AppInfo.productName) settings: name, menu bar visibility, keyboard, sound, OLED care, \(SynthesisCopy.optInTitle), and everything under Advanced, including control-code remaps and response curves. A size \(AppInfo.productName) was rendering for this display is taken down first, so the display goes back to one of its own; if that does not finish, the page says so and the rest of the reset still runs. HDR that was turned on in System Settings goes back on at the end. If the display cannot be reached at the time, nothing is sent to it that cannot be confirmed, so some of these may be left for you to change yourself. Saved brightness, volume and contrast levels are kept, and so are its counted hours of use. The remembered resolution and rotation are not changed.")
+          }
+        Spacer(minLength: 0)
+      }
+      .padding(.vertical, 4)
     }
   }
 

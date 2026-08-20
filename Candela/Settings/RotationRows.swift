@@ -13,10 +13,13 @@ import SwiftUI
 /// `ModeReapplyPolicy` exists to prevent. If a reboot turns out not to preserve
 /// it, that is a measurement, and then a design change.
 ///
-/// A `Picker` rather than a segmented control, matching System Settings' own
-/// presentation of rotation (RT14) — and matching the Size row above it. No
+/// A pop-up rather than a segmented control, matching System Settings' own
+/// presentation of rotation (RT14) and matching the Size row above it. No
 /// countdown-duration caption (spec §4): the countdown is runtime feedback the
 /// confirmation window carries, not a description of the setting.
+///
+/// The hairline above and below these rows belongs to the card that hosts
+/// them: only the hub knows whether the size rows above rendered.
 ///
 /// `@MainActor` because a `View`'s stored properties are nonisolated under
 /// complete concurrency checking and this one stores main-actor types.
@@ -32,7 +35,7 @@ struct RotationRows: View {
     // cannot rotate is worse than its absence — it invites a click that will
     // only ever produce a report.
     if coordinator.canRotate {
-      Picker(RotationCopy.label, selection: Binding(
+      ThemedChoiceRow(label: RotationCopy.label, selection: Binding(
         get: { coordinator.displayedRotation(of: displayID) ?? .standard },
         set: { coordinator.rotate(displayID, to: $0) }
       )) {
