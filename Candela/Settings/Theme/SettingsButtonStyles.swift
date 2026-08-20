@@ -1,5 +1,10 @@
 import SwiftUI
 
+/// What `.disabled(true)` looks like on all three styles. The geometry never
+/// moves: a button that resized when it went unavailable would shift the row
+/// under whatever the person was about to click.
+private let disabledOpacity = 0.45
+
 /// The window's standard action button: macOS bordered-button geometry
 /// (rounded rect, compact padding) with the destination accent carrying the
 /// primary. Quieter than the guided setup flow's glowing capsule, which is a
@@ -13,6 +18,10 @@ struct SettingsPrimaryButtonStyle: ButtonStyle {
     let configuration: Configuration
     @State private var hovering = false
     @Environment(\.settingsAccent) private var lighting
+    @Environment(\.isEnabled) private var isEnabled
+
+    /// Hover lives on the pointer, which still moves over a disabled button.
+    private var lit: Bool { hovering && isEnabled }
 
     var body: some View {
       configuration.label
@@ -22,16 +31,17 @@ struct SettingsPrimaryButtonStyle: ButtonStyle {
         .padding(.vertical, 5.5)
         .background(
           RoundedRectangle(cornerRadius: 6.5, style: .continuous)
-            .fill(lighting.accent.opacity(hovering ? 0.9 : 0.78))
+            .fill(lighting.accent.opacity(lit ? 0.9 : 0.78))
         )
         .overlay(
           RoundedRectangle(cornerRadius: 6.5, style: .continuous)
             .stroke(Color.white.opacity(0.14), lineWidth: 0.5)
         )
         .scaleEffect(configuration.isPressed ? 0.98 : 1)
+        .opacity(isEnabled ? 1 : disabledOpacity)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
-        .animation(SettingsTheme.hoverMotion, value: hovering)
+        .animation(SettingsTheme.hoverMotion, value: lit)
     }
   }
 }
@@ -45,23 +55,27 @@ struct SettingsSecondaryButtonStyle: ButtonStyle {
   private struct HoverLabel: View {
     let configuration: Configuration
     @State private var hovering = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    private var lit: Bool { hovering && isEnabled }
 
     var body: some View {
       configuration.label
         .font(.callout)
-        .foregroundStyle(hovering ? SettingsTheme.titleColor : SettingsTheme.bodyColor)
+        .foregroundStyle(lit ? SettingsTheme.titleColor : SettingsTheme.bodyColor)
         .padding(.horizontal, 14)
         .padding(.vertical, 5.5)
         .background(
           RoundedRectangle(cornerRadius: 6.5, style: .continuous)
-            .fill(Color.white.opacity(configuration.isPressed ? 0.13 : (hovering ? 0.10 : 0.07)))
+            .fill(Color.white.opacity(configuration.isPressed ? 0.13 : (lit ? 0.10 : 0.07)))
         )
         .overlay(
           RoundedRectangle(cornerRadius: 6.5, style: .continuous)
             .stroke(Color.white.opacity(0.12), lineWidth: 1)
         )
+        .opacity(isEnabled ? 1 : disabledOpacity)
         .onHover { hovering = $0 }
-        .animation(SettingsTheme.hoverMotion, value: hovering)
+        .animation(SettingsTheme.hoverMotion, value: lit)
     }
   }
 }
@@ -76,25 +90,29 @@ struct SettingsDangerButtonStyle: ButtonStyle {
   private struct HoverLabel: View {
     let configuration: Configuration
     @State private var hovering = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    private var lit: Bool { hovering && isEnabled }
 
     var body: some View {
       configuration.label
         .font(.callout.weight(.medium))
-        .foregroundStyle(hovering ? Color.white : SettingsTheme.dangerTint)
+        .foregroundStyle(lit ? Color.white : SettingsTheme.dangerTint)
         .padding(.horizontal, 14)
         .padding(.vertical, 5.5)
         .background(
           RoundedRectangle(cornerRadius: 6.5, style: .continuous)
             .fill(
               SettingsTheme.dangerTint.opacity(
-                configuration.isPressed ? 0.38 : (hovering ? 0.28 : 0.12)))
+                configuration.isPressed ? 0.38 : (lit ? 0.28 : 0.12)))
         )
         .overlay(
           RoundedRectangle(cornerRadius: 6.5, style: .continuous)
-            .stroke(SettingsTheme.dangerTint.opacity(hovering ? 0.5 : 0.3), lineWidth: 1)
+            .stroke(SettingsTheme.dangerTint.opacity(lit ? 0.5 : 0.3), lineWidth: 1)
         )
+        .opacity(isEnabled ? 1 : disabledOpacity)
         .onHover { hovering = $0 }
-        .animation(SettingsTheme.hoverMotion, value: hovering)
+        .animation(SettingsTheme.hoverMotion, value: lit)
     }
   }
 }

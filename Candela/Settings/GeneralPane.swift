@@ -161,9 +161,6 @@ struct GeneralPane: View {
           .buttonStyle(SettingsDangerButtonStyle())
           .accessibilityLabel("Reset All Settings…")
           .disabled(model.isResetting)
-          // The themed styles paint no disabled state of their own, so the
-          // latch would otherwise be invisible for as long as it holds.
-          .opacity(model.isResetting ? 0.45 : 1)
         Spacer(minLength: 0)
       }
       .padding(.top, 8)
