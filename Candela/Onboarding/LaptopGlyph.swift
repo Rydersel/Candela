@@ -17,6 +17,8 @@ struct LaptopGlyph: View {
   var body: some View {
     GeometryReader { proxy in
       let bounds = proxy.size
+      // DisplayTile inverts these shares to land its glass on the arrangement
+      // rect; changing them moves the built-in tile off its neighbours.
       let deckHeight = max(5, bounds.height * 0.075)
       let faceHeight = bounds.height - deckHeight
       let faceWidth = min(bounds.width * 0.86, CGFloat(aspect) * faceHeight)

@@ -11,6 +11,10 @@ import SwiftUI
 /// the rows that commit on release rather than per frame, and an accessibility
 /// value for the rows whose stored number must never be spoken.
 ///
+/// It is operable by pointer, by VoiceOver and by the keyboard: Tab reaches it,
+/// the arrow keys step it, and all three routes go through the same grid and
+/// the same editing edges.
+///
 /// **Never bind this to a volume value (D29 rule 4).** It has no zero-free
 /// grid, and volume 0 is a hardware mute over VCP 0x8D; a volume row keeps the
 /// panel's `DisplaySliderRow`, which snaps and steps over
@@ -34,6 +38,7 @@ struct ThemedSlider: View {
   /// drag's opening edge. This one resets itself on a cancel, so the editing
   /// session closes either way.
   @GestureState private var dragging = false
+  @FocusState private var focused: Bool
 
   var body: some View {
     GeometryReader { proxy in
@@ -69,6 +74,17 @@ struct ThemedSlider: View {
     // they pair: an unopened `false` and a swallowed `true` are both
     // unreachable, and a cancelled drag still closes.
     .onChange(of: dragging) { _, isDragging in onEditingChanged?(isDragging) }
+    // Tab reaches it and the arrows move it, through the same stepping and
+    // committing path VoiceOver uses: one write per keypress, on the grid.
+    // A drawn ring rather than the system's, which has no shape to trace on a
+    // view made of loose capsules.
+    .focusable()
+    .focused($focused)
+    .overlay(focusRing)
+    .onKeyPress(.leftArrow) { commitStep(up: false); return .handled }
+    .onKeyPress(.downArrow) { commitStep(up: false); return .handled }
+    .onKeyPress(.rightArrow) { commitStep(up: true); return .handled }
+    .onKeyPress(.upArrow) { commitStep(up: true); return .handled }
     // The track, the fill and the knob are one control, not three shapes.
     .accessibilityElement(children: .ignore)
     .accessibilityValue(Text(verbatim: accessibilityValueText ?? SliderSnap.percentText(fraction)))
@@ -78,6 +94,15 @@ struct ThemedSlider: View {
       case .decrement: commitStep(up: false)
       @unknown default: break
       }
+    }
+  }
+
+  @ViewBuilder private var focusRing: some View {
+    if focused {
+      RoundedRectangle(cornerRadius: 7, style: .continuous)
+        .stroke(lighting.accent.opacity(0.8), lineWidth: 2)
+        .padding(-3)
+        .accessibilityHidden(true)
     }
   }
 

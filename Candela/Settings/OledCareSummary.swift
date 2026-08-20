@@ -230,7 +230,7 @@ struct OledCareDisplayCard: View {
       // An enrolled display sits a shade warmer than the rest, the card's own
       // lit state. The tint only underlines the badge's word; enrollment is
       // never carried by colour alone.
-      SettingsCard(isSelected: prefs.oledCareEnrolled) {
+      SettingsCard(isLit: prefs.oledCareEnrolled) {
         HStack(alignment: .center, spacing: 14) {
           miniSurface(summary: summary)
           VStack(alignment: .leading, spacing: 3) {

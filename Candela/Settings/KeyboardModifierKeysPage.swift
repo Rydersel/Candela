@@ -74,12 +74,10 @@ struct KeyboardModifierKeysPage: View {
   /// it is a fact about the five rows under it, and a separate notice would
   /// float free of them.
   private var inactiveNote: some View {
-    HStack(alignment: .top, spacing: 9) {
-      // Symbol AND text; never state by colour alone.
-      Image(systemName: "exclamationmark.triangle")
-        .foregroundStyle(SettingsTheme.faintColor)
+    // Surfaceless: it already sits on the legend's card, and a notice drawing a
+    // second surface inside the first is a box in a box.
+    SettingsNotice(drawsSurface: false) {
       Text("These combinations are inactive because the keyboard's brightness keys are currently left to macOS.")
-        .foregroundStyle(SettingsTheme.titleColor)
         .fixedSize(horizontal: false, vertical: true)
     }
     .padding(.vertical, 6)

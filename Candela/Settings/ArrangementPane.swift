@@ -497,32 +497,13 @@ struct ArrangementPane: View {
     }
   }
 
-  /// A notice inside a card: the arrangement pane's two, in the shape the rest
-  /// of the window uses. Symbol AND text, never state by colour alone
-  /// (color.md), and monochrome against the card so it cannot borrow the
-  /// meaning the accent carries everywhere else.
+  /// The theme's notice, plus this card's spacing around it.
   private func notice(
     symbol: String = "exclamationmark.triangle", @ViewBuilder content: () -> some View
   ) -> some View {
-    HStack(alignment: .top, spacing: 9) {
-      Image(systemName: symbol)
-        .foregroundStyle(SettingsTheme.faintColor)
-      VStack(alignment: .leading, spacing: 4) { content() }
-    }
-    .padding(11)
-    // The card's own tokens, not a second pair of literals: a notice inside a
-    // card is the card's surface again, and two panes writing the same shape by
-    // hand is how a fill drifts by 0.005.
-    .background(
-      RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
-        .fill(SettingsTheme.cardFill)
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
-        .stroke(SettingsTheme.cardStroke, lineWidth: 1)
-    )
-    .padding(.top, 10)
-    .padding(.bottom, 4)
+    SettingsNotice(symbol: symbol) { content() }
+      .padding(.top, 10)
+      .padding(.bottom, 4)
   }
 
   /// What the toggle will do — and, with one display attached, what there is to

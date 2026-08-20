@@ -35,7 +35,6 @@ extension EnvironmentValues {
 @MainActor
 struct OledCarePane: View {
   @Environment(AppModel.self) private var model
-  @Environment(\.settingsAccent) private var lighting
 
   /// The last chrome value we asked for and did not get, per control. Held
   /// because `ChromeAutoHideController` records what the SYSTEM reports rather
@@ -105,7 +104,7 @@ struct OledCarePane: View {
   /// sentence under them, not to the page's 15 pt section spacing.
   private var displaysSection: some View {
     VStack(alignment: .leading, spacing: 8) {
-      CareSectionTitle(text: "Displays", accent: lighting.accent)
+      SettingsSectionTitle(text: "Displays")
 
       // Identified by `persistenceKey`, NOT by `DisplayState.id` (which is
       // the `CGDirectDisplayID`). IDs reassign across a replug with both
@@ -254,24 +253,5 @@ struct OledCarePane: View {
     if let requested = dockRefused, chrome.dockAutoHide == requested {
       dockRefused = nil
     }
-  }
-}
-
-/// `SettingsCardSection`'s kicker without its card, for a stretch of the page
-/// that is several cards rather than one. Same type, same accent, same
-/// heading trait, so the two read as one vocabulary.
-private struct CareSectionTitle: View {
-  let text: String
-  let accent: Color
-
-  var body: some View {
-    Text(text.uppercased())
-      .font(.caption.weight(.semibold))
-      .kerning(1.1)
-      .foregroundStyle(accent.opacity(0.85))
-      .padding(.leading, 4)
-      // The uppercasing is typography; VoiceOver gets the written name.
-      .accessibilityLabel(Text(text))
-      .settingsHeading()
   }
 }

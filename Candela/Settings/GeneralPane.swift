@@ -372,28 +372,12 @@ struct GeneralPane: View {
   /// stops them disagreeing, and the enum is exhaustive so a fifth suppression
   /// cannot reach only one of them.
   private var safeModeNotice: some View {
-    HStack(alignment: .top, spacing: 9) {
-      // Symbol AND text: never state by color alone (color.md). No custom
-      // color; the notice is monochrome against the card.
-      Image(systemName: "exclamationmark.triangle")
-        .foregroundStyle(SettingsTheme.faintColor)
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Safe Mode is on for this session, so this setting is not in effect.")
-          .font(.callout.weight(.medium))
-          .foregroundStyle(SettingsTheme.titleColor)
-          .fixedSize(horizontal: false, vertical: true)
-        SettingsCaption(verbatim: SafeModeCopy.generalPaneCaption(app: AppInfo.productName))
-      }
+    SettingsNotice {
+      Text("Safe Mode is on for this session, so this setting is not in effect.")
+        .font(.callout.weight(.medium))
+        .fixedSize(horizontal: false, vertical: true)
+      SettingsCaption(verbatim: SafeModeCopy.generalPaneCaption(app: AppInfo.productName))
     }
-    .padding(11)
-    .background(
-      RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
-        .fill(SettingsTheme.cardFill)
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
-        .stroke(SettingsTheme.cardStroke, lineWidth: 1)
-    )
     .padding(.top, 10)
     .padding(.bottom, 4)
   }

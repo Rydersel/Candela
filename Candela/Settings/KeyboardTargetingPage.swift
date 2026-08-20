@@ -47,7 +47,7 @@ struct KeyboardTargetingPage: View {
           .prefIdentifier(.multiKeyboardBrightness)
           .disabled(prefs.keyboardBrightness == .disabled)
           if prefs.multiKeyboardBrightness == .focusInsteadOfMouse {
-            rowNote("Window focus may not resolve correctly for full-screen apps.")
+            SettingsRowNote("Window focus may not resolve correctly for full-screen apps.")
           }
         }
       }
@@ -67,18 +67,6 @@ struct KeyboardTargetingPage: View {
         .disabled(prefs.keyboardVolume == .disabled)
       }
     }
-  }
-
-  /// A sentence qualifying the row it follows, drawn the way `SettingRow` draws
-  /// its own caption: small and faint, so the two kinds of qualifier in one card
-  /// carry the same weight. Callers standing it alone on the card add the
-  /// row's bottom padding; inside a row the row already has it.
-  private func rowNote(_ sentence: LocalizedStringKey) -> some View {
-    SettingsCaption(sentence)
-      .text
-      .font(.caption)
-      .foregroundStyle(SettingsTheme.faintColor)
-      .fixedSize(horizontal: false, vertical: true)
   }
 
   private var volumeTargetCaption: LocalizedStringKey {
@@ -114,7 +102,7 @@ struct KeyboardTargetingPage: View {
         .prefIdentifier(.useFineScaleVolume)
         .disabled(prefs.keyboardVolume == .disabled)
       }
-      rowNote("Custom shortcuts have no modifiers of their own, so they always use the step size selected here.")
+      SettingsRowNote("Custom shortcuts have no modifiers of their own, so they always use the step size selected here.")
         .padding(.bottom, 6)
 
       SettingsCardDivider()

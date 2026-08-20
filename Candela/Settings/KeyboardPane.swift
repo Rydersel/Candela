@@ -83,32 +83,21 @@ struct KeyboardPane: View {
   /// up disagreeing on an all-custom rig.
   @ViewBuilder private var accessibilitySection: some View {
     if model.accessibility.isWarningWarranted {
-      SettingsCard {
-        HStack(alignment: .top, spacing: 9) {
-          // Symbol AND text: the state is never signalled by color alone
-          // (color.md, inclusive color). No custom color: the notice is
-          // monochrome against the card.
-          Image(systemName: "exclamationmark.triangle")
-            .foregroundStyle(SettingsTheme.faintColor)
-          VStack(alignment: .leading, spacing: 6) {
-            Text("Keyboard control needs Accessibility access")
-              .font(.callout.weight(.medium))
-              .foregroundStyle(SettingsTheme.titleColor)
-              .fixedSize(horizontal: false, vertical: true)
-            SettingsCaption(
-              "\(AppInfo.productName) watches the brightness and volume keys through the system event tap, which macOS gates behind Accessibility. Custom shortcuts work without it."
-            )
-            // The page's one action while the grant is missing, so it takes the
-            // primary style. Trailing ellipsis: it opens another app
-            // (buttons.md).
-            Button("Open System Settings…") {
-              AccessibilityPermission.openSystemSettings()
-            }
-            .buttonStyle(SettingsPrimaryButtonStyle())
-            .accessibilityLabel("Open System Settings…")
-            .padding(.top, 2)
-          }
+      SettingsNotice {
+        Text("Keyboard control needs Accessibility access")
+          .font(.callout.weight(.medium))
+          .fixedSize(horizontal: false, vertical: true)
+        SettingsCaption(
+          "\(AppInfo.productName) watches the brightness and volume keys through the system event tap, which macOS gates behind Accessibility. Custom shortcuts work without it."
+        )
+        // The page's one action while the grant is missing, so it takes the
+        // primary style. Trailing ellipsis: it opens another app (buttons.md).
+        Button("Open System Settings…") {
+          AccessibilityPermission.openSystemSettings()
         }
+        .buttonStyle(SettingsPrimaryButtonStyle())
+        .accessibilityLabel("Open System Settings…")
+        .padding(.top, 2)
       }
     }
   }
@@ -172,7 +161,7 @@ struct KeyboardPane: View {
         SettingRow(Self.modifierHint) {
           KeyboardShortcuts.Recorder("Contrast up:", name: .contrastUp)
         }
-        rowNote("Contrast works on displays controlled over their data cable (DDC) only.")
+        SettingsRowNote("Contrast works on displays controlled over their data cable (DDC) only.")
           .padding(.bottom, 6)
       }
 
@@ -188,17 +177,6 @@ struct KeyboardPane: View {
         }
       }
     }
-  }
-
-  /// A sentence that qualifies the rows above it, at row weight rather than
-  /// standalone weight: on a card a callout here would be the brightest line in
-  /// the group it only annotates.
-  private func rowNote(_ sentence: LocalizedStringKey) -> some View {
-    SettingsCaption(sentence)
-      .text
-      .font(.caption)
-      .foregroundStyle(SettingsTheme.faintColor)
-      .fixedSize(horizontal: false, vertical: true)
   }
 
   // MARK: - Volume
