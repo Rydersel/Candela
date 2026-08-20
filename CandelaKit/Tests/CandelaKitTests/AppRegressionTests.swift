@@ -304,7 +304,8 @@ struct AppRegressionTests {
       switching: DimmingMath.switchingValue(fromPoint: 0))
     #expect(split.sw == 1)
     #expect(
-      DimmingMath.valueToDDC(split.ddc, minDDC: 0, maxDDC: 100)
+      DimmingMath.valueToDDC(
+        split.ddc, minDDC: 0, maxDDC: AppRegression.assumedRegisterMaximum)
         == AppRegression.combinedCrossoverDDCValue)
   }
 
@@ -315,7 +316,9 @@ struct AppRegressionTests {
     // both assume a 0 to 100 linear, uninverted brightness command, which is
     // what `ddcTuningGate` refuses to assert through.
     #expect(
-      DimmingMath.valueToDDC(AppRegression.combinedFloorBrightness, minDDC: 0, maxDDC: 100)
+      DimmingMath.valueToDDC(
+        AppRegression.combinedFloorBrightness, minDDC: 0,
+        maxDDC: AppRegression.assumedRegisterMaximum)
         == AppRegression.combinedReleasedDDCValue)
   }
 

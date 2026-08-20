@@ -454,9 +454,19 @@ enum Regress {
       )
     }
     guard let targetingCaveat else { return check }
+    // A pass keeps its pass and gains the caveat: the writes really are the
+    // posted keys', which is the whole claim. A FAIL cannot stand, though. In
+    // the focused-display mode a key follows the active window, and if that is
+    // the built-in the app moves it natively and writes no DDC value at all,
+    // so a zero-write window is the operator's pref speaking rather than a
+    // grant, a tap or a transport being down. Convicting any of those on this
+    // evidence is a false verdict reachable from a supported setting.
     return note(
       check,
-      "the word aimed does not hold on this rig and these writes may belong to panels this check never pointed at: \(targetingCaveat)")
+      "the word aimed does not hold on this rig and these writes may belong to panels this check never pointed at: \(targetingCaveat)",
+      downgradingFail:
+        "a zero-write window is what this targeting mode produces when the keys follow the active window onto a display with a native brightness path, so it is not evidence that the grant, the event tap or the DDC transport is down"
+    )
   }
 
   private static func identifierInstrumentCheck(
@@ -713,7 +723,8 @@ enum Regress {
   /// than a measurement; a teardown note belongs on all four, because it is
   /// about the rig and not about the reading.
   private static func note(
-    _ check: PlatformConformance.Check, _ text: String, downgradingPass: Bool = false
+    _ check: PlatformConformance.Check, _ text: String, downgradingPass: Bool = false,
+    downgradingFail: String? = nil
   ) -> PlatformConformance.Check {
     let outcome: PlatformConformance.Outcome
     switch check.outcome {
@@ -722,7 +733,9 @@ enum Regress {
         ? .inconclusive(
           "\(detail); \(text), so the rig is not in the state this record says it was left in")
         : .pass("\(detail); \(text)")
-    case let .fail(detail): outcome = .fail("\(detail); \(text)")
+    case let .fail(detail):
+      outcome = downgradingFail.map { .inconclusive("\(detail); \(text); \($0)") }
+        ?? .fail("\(detail); \(text)")
     case let .inconclusive(detail): outcome = .inconclusive("\(detail); \(text)")
     case let .skip(detail): outcome = .skip("\(detail); \(text)")
     }
@@ -879,17 +892,25 @@ enum Regress {
   ///
   /// By measurement, like every other drive here, and a walk that cannot
   /// finish is noted rather than assumed.
+  /// `syncEnabledDuringWalk` is named in the failure note rather than acted
+  /// on. With sync on, the built-in's ambient hunting fans out onto this panel
+  /// and can push it back as fast as the keys walk it, so a walk that stalls
+  /// with sync on and a walk that stalls with sync off are two different
+  /// faults wearing one message. The note says which.
   private static func walkHome(
     _ instruments: RegressInstruments, check: PlatformConformance.Check,
-    display: Display, persistenceKey: String
+    display: Display, persistenceKey: String, syncEnabledDuringWalk: Bool
   ) -> PlatformConformance.Check {
     let home = converge(
       instruments: instruments, display: display, persistenceKey: persistenceKey,
       to: AppRegression.combinedFloorBrightness, limit: 24)
     guard !home.arrived else { return check }
+    let contention = syncEnabledDuringWalk
+      ? "brightness sync was ON for this walk, so the built-in's ambient hunting was free to fan out onto this panel while the keys walked it"
+      : "brightness sync was off for this walk, so nothing was pushing the panel back"
     return note(
       check,
-      "teardown: \(display.name) was not walked back to \(AppRegression.combinedFloorBrightness): \(home.failure ?? "the stored brightness never reached it")",
+      "teardown: \(display.name) was not walked back to \(AppRegression.combinedFloorBrightness): \(home.failure ?? "the stored brightness never reached it"); \(contention)",
       downgradingPass: true)
   }
 
@@ -904,30 +925,46 @@ enum Regress {
   /// the operator's own tuning is the one reachable false failure both
   /// constants still had. Absent means default, so unreadable keys are the
   /// pass here.
+  ///
+  /// It CALLS the app's own resolution rather than restating it. `CommandTuning`
+  /// decides what an override means (one at or below the minimum is not an
+  /// override) and what a curve index means (0 and 5 are both linear), and a
+  /// copy of those rules living here would agree with them until the day it
+  /// quietly did not. A second definition of "default" is exactly the drift
+  /// that turns a gate into a false verdict.
   private static func ddcTuningGate(
     _ instruments: RegressInstruments, _ persistenceKey: String
   ) -> String? {
     func integer(_ name: String) -> Int {
       instruments.defaultsRead("\(name).brightness.\(persistenceKey)").flatMap(Int.init) ?? 0
     }
-    let minimum = integer("minDDCOverride")
-    let maximumOverride = integer("maxDDCOverride")
-    // Mirrors `CommandTuning.effectiveMaxDDC`: an override at or below the
-    // minimum is not an override, and the read max is 100 on a panel that
-    // answers no capabilities read.
-    let maximum = maximumOverride > minimum ? maximumOverride : 100
-    let curveIndex = integer("curveDDC")
-    let inverted = integer("invertDDC") != 0
+    let tuning = CommandTuning(
+      unavailableDDC: false,
+      minDDCOverride: integer("minDDCOverride"),
+      maxDDCOverride: integer("maxDDCOverride"),
+      curveIndex: integer("curveDDC"),
+      invert: integer("invertDDC") != 0,
+      remapCodes: []
+    )
+    // readMax nil is this panel's own situation stated honestly: it answers no
+    // capabilities read, so there is no read maximum and the resolution falls
+    // back to the assumed one, which is the number the constants were derived
+    // against.
+    let maximum = tuning.effectiveMaxDDC(readMax: nil)
 
     var tuned: [String] = []
-    if minimum != 0 { tuned.append("minDDCOverride.brightness reads \(minimum), not 0") }
-    if maximum != 100 { tuned.append("maxDDCOverride.brightness makes the range end at \(maximum), not 100") }
-    // 0 is unset and 5 is the middle stop; both are linear.
-    if curveIndex != 0, curveIndex != 5 {
-      tuned.append(
-        "curveDDC.brightness reads \(curveIndex), a curve of \(DimmingMath.curveMultiplier(forIndex: curveIndex)) rather than linear")
+    if tuning.minDDCOverride != 0 {
+      tuned.append("minDDCOverride.brightness reads \(tuning.minDDCOverride), not 0")
     }
-    if inverted { tuned.append("invertDDC.brightness is set") }
+    if maximum != Int(AppRegression.assumedRegisterMaximum) {
+      tuned.append(
+        "maxDDCOverride.brightness makes the range end at \(maximum), not \(Int(AppRegression.assumedRegisterMaximum))")
+    }
+    if tuning.curveMultiplier != 1 {
+      tuned.append(
+        "curveDDC.brightness reads \(tuning.curveIndex), a curve of \(tuning.curveMultiplier) rather than linear")
+    }
+    if tuning.invert { tuned.append("invertDDC.brightness is set") }
 
     guard !tuned.isEmpty else { return nil }
     return "this panel's brightness command is tuned away from the mapping these constants describe (\(tuned.joined(separator: "; "))), so the register values \(AppRegression.combinedReleasedDDCValue) and \(AppRegression.combinedCrossoverDDCValue) are not what a healthy app would write here"
@@ -1026,7 +1063,7 @@ enum Regress {
     let check = walkHome(
       instruments,
       check: combinedDimmingDrive(instruments: instruments, mag: mag, persistenceKey: key),
-      display: mag, persistenceKey: key)
+      display: mag, persistenceKey: key, syncEnabledDuringWalk: false)
     return restore(instruments, check: check, switches: switches)
   }
 
@@ -1142,7 +1179,7 @@ enum Regress {
     let check = walkHome(
       instruments,
       check: crossoverDrive(instruments: instruments, mag: mag, persistenceKey: key),
-      display: mag, persistenceKey: key)
+      display: mag, persistenceKey: key, syncEnabledDuringWalk: false)
     return restore(instruments, check: check, switches: switches)
   }
 
@@ -1261,13 +1298,16 @@ enum Regress {
     // Sync goes back BEFORE the walk home, which is the opposite of the other
     // two checks and for a reason particular to this one: the switch it staged
     // is sync itself, not a pref the floor point is defined under, so nothing
-    // about the walk needs sync held. Walking with sync left ON does harm,
-    // though. The built-in's ambient auto-brightness hunts, every crossing of
-    // the deadband fans out onto this panel, and a walk that takes ten to
-    // twenty seconds spends them fighting that: the stall detector or the
-    // press limit then reports a teardown miss and downgrades a genuine pass
-    // to inconclusive. The other two checks have no such conflict because they
-    // hold sync OFF for their whole duration.
+    // about the walk needs sync held on.
+    //
+    // What the order buys is bounded, and worth stating exactly. `restore`
+    // returns sync to the RECORDED initial state, not to off, so this only
+    // guarantees a walk free of interference the CHECK introduced: when sync
+    // was found off, the walk now runs with it off instead of with the staged
+    // on. When sync was found ON, the walk still runs with it on and can still
+    // be fought by the built-in's ambient hunting. That case is diagnosable
+    // rather than fixed: the walk's failure note names sync's state.
+    let syncRestoredTo = switches.first { $0.identifier == syncIdentifier }?.initial ?? false
     var check = restore(instruments, check: driven, switches: switches)
 
     // Leave the panel where the next check expects to find it, by measurement:
@@ -1275,7 +1315,8 @@ enum Regress {
     // panel is not the arithmetic the source moved by.
     if case let .success(panel) = magPanel(displays) {
       check = walkHome(
-        instruments, check: check, display: panel.0, persistenceKey: panel.1)
+        instruments, check: check, display: panel.0, persistenceKey: panel.1,
+        syncEnabledDuringWalk: syncRestoredTo)
     }
     return check
   }

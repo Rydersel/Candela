@@ -57,6 +57,12 @@ public enum AppRegression {
   /// would still pass if something were is not asserting what it says.
   public static let combinedCrossoverDDCValue: UInt16 = 50
 
+  /// The register maximum both of the values above were derived against, and
+  /// the one a panel that answers no capabilities read falls back to. Named so
+  /// the derivation's one assumption is a symbol the checks can compare
+  /// against rather than a 100 spelled out in three places.
+  public static let assumedRegisterMaximum: Double = 100
+
   /// How close a native brightness write has to land to what it asked for
   /// before the read back counts as having achieved it. Named for the same
   /// reason every other threshold here is: a number spelled inline at its one
