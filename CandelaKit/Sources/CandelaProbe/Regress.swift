@@ -2087,6 +2087,15 @@ enum Regress {
 
   /// Wake restores values by read resync, not by a burst of writes.
   ///
+  /// Measured on both kinds of wake, which matters because they are different
+  /// paths into the same restore: on a panel sleep and wake when the wake
+  /// behaviour was first recorded, and again on 2026-08-19 through
+  /// `pmset displaysleepnow`, the route this check drives, where a quiet rig
+  /// carried zero writes across the cycle. That second run is also this
+  /// check's contamination control: the same cycle straight after the driven
+  /// checks produced seven, so the pre-sleep window is read before anything is
+  /// slept.
+  ///
   /// Destructive: it sleeps every display for about ten seconds, so it runs
   /// only under `--apply`.
   static func wakeCheck(
@@ -2121,10 +2130,28 @@ enum Regress {
         "setup: \(syncIdentifier) reads 1, so the built-in's ambient auto-brightness fans out onto every external as DDC writes; a write after wake would then be sync's and this check cannot tell the two apart. Turn brightness sync off before this run"
       ))
     }
-    return note(wakeDrive(instruments: instruments), describedAction)
+    // The pre-sleep window, read BEFORE anything is slept: the driven checks
+    // that ran a moment ago leave coalescer state parked on the panel, and the
+    // wake refresh releases it as a ramp of writes that looks exactly like the
+    // restore burst this check exists to catch. Refused here rather than at the
+    // verdict so a contaminated run does not blank the rig to learn nothing.
+    let preWindow = instruments.logWindow(since: Date().addingTimeInterval(-30))
+    guard !preWindow.queryFailed else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: the pre-sleep window's log query failed, so its silence is the query's and not the app's: \(preWindow.failureReason)"
+      ))
+    }
+    let preSleepWrites = AppRegression.ddcWriteValues(fromLogLines: preWindow.lines).count
+    if let reason = AppRegression.wakeContaminationReason(preSleepWrites: preSleepWrites) {
+      return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
+    }
+    return note(
+      wakeDrive(instruments: instruments, preSleepWrites: preSleepWrites), describedAction)
   }
 
-  private static func wakeDrive(instruments: RegressInstruments) -> PlatformConformance.Check {
+  private static func wakeDrive(
+    instruments: RegressInstruments, preSleepWrites: Int
+  ) -> PlatformConformance.Check {
     let name = "regress.wake.norestoreburst"
     let started = Date()
     let slept = RegressInstruments.execute("/usr/bin/pmset", ["displaysleepnow"])
@@ -2184,13 +2211,14 @@ enum Regress {
     let control: Control = measured.sleepIntakeSeen && measured.wakeIntakeSeen
       && measured.quietWindowSeen
       ? .fired(
-        "the sleep intake, the wake intake and the topology quiet window were all logged, in that order, in a \(window.count)-line window, and the writes are counted to 5 s after this run OBSERVED the quiet-window line on a 2 s poll, which is up to 2 s later than the line's own timestamp")
+        "the sleep intake, the wake intake and the topology quiet window were all logged, in that order, in a \(window.count)-line window, on a pre-sleep window that carried no DDC writes, and the writes are counted to 5 s after this run OBSERVED the quiet-window line on a 2 s poll, which is up to 2 s later than the line's own timestamp")
       : .didNotFire(
         "the control triple did not appear in order in the \(window.count)-line window (sleep intake \(seen(measured.sleepIntakeSeen)), a wake intake after it \(seen(measured.wakeIntakeSeen)), a quiet window after that \(seen(measured.quietWindowSeen))), so the app never observably saw the sleep or the wake this check drove"
       )
 
     return controlledCheck(name: name, control: control) {
       AppRegression.wakeVerdict(
+        preSleepWrites: preSleepWrites,
         sleepIntakeSeen: measured.sleepIntakeSeen,
         wakeIntakeSeen: measured.wakeIntakeSeen,
         quietWindowSeen: measured.quietWindowSeen,

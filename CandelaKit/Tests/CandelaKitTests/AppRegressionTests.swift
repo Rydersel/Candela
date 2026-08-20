@@ -573,6 +573,7 @@ struct AppRegressionTests {
 
   @Test func anIncompleteIntakeTripleIsInconclusive() {
     let outcome = AppRegression.wakeVerdict(
+      preSleepWrites: 0,
       sleepIntakeSeen: true, wakeIntakeSeen: false, quietWindowSeen: true, ddcWritesAfterWake: 0)
     #expect(isInconclusive(outcome))
     #expect(detail(outcome).contains("wake intake"))
@@ -580,13 +581,37 @@ struct AppRegressionTests {
 
   @Test func aWriteBurstAfterWakeFails() {
     let outcome = AppRegression.wakeVerdict(
+      preSleepWrites: 0,
       sleepIntakeSeen: true, wakeIntakeSeen: true, quietWindowSeen: true, ddcWritesAfterWake: 6)
     #expect(isFail(outcome))
     #expect(detail(outcome).contains("6"))
   }
 
+  @Test func aNoisyPreSleepWindowCannotBeChargedToTheWake() {
+    // Measured on the rig: seven writes after wake as a descending register
+    // ramp, from a run whose driven checks had just finished, against ZERO on
+    // the same wake cycle on a quiet rig. The burst is a parked coalescer
+    // remainder releasing on the wake refresh, not the restore path.
+    let outcome = AppRegression.wakeVerdict(
+      preSleepWrites: 12,
+      sleepIntakeSeen: true, wakeIntakeSeen: true, quietWindowSeen: true, ddcWritesAfterWake: 7)
+    #expect(isInconclusive(outcome))
+    #expect(detail(outcome).contains("before the sleep"))
+  }
+
+  @Test func aQuietPreSleepWindowStillConvictsAWriteBurst() {
+    // The signal this check exists for has to survive the contamination gate:
+    // a quiet run in and a burst out is still the regression.
+    let outcome = AppRegression.wakeVerdict(
+      preSleepWrites: 0,
+      sleepIntakeSeen: true, wakeIntakeSeen: true, quietWindowSeen: true, ddcWritesAfterWake: 7)
+    #expect(isFail(outcome))
+    #expect(detail(outcome).contains("7"))
+  }
+
   @Test func theQuietWakePasses() {
     let outcome = AppRegression.wakeVerdict(
+      preSleepWrites: 0,
       sleepIntakeSeen: true, wakeIntakeSeen: true, quietWindowSeen: true, ddcWritesAfterWake: 0)
     #expect(isPass(outcome))
   }

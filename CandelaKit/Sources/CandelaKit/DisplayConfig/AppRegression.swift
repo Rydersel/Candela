@@ -422,13 +422,43 @@ public enum AppRegression {
 
   // MARK: - The quiet wake
 
+  /// Why a wake measurement cannot be charged to the wake path, or nil when it
+  /// can.
+  ///
+  /// A run's own driven checks leave coalescer state parked on the panel, and
+  /// the wake refresh releases it: measured on the rig on 2026-08-19 as seven
+  /// writes in the 300 ms after the quiet-window line, a descending register
+  /// ramp (25, 20, 16, 8, 4, 0) that is a remainder draining rather than a
+  /// restore pass. The control that identifies it: the SAME wake cycle on a
+  /// quiet rig, with the intake triple proving the window live, carried zero
+  /// writes. So a noisy pre-sleep window makes the whole measurement
+  /// unattributable, exactly as a noisy pre-window does for the fan-out.
+  public static func wakeContaminationReason(preSleepWrites: Int) -> String? {
+    guard preSleepWrites > 0 else { return nil }
+    return "the 30 s window before the sleep already carried \(preSleepWrites) DDC writes, so the run's own drives had left coalescer state parked on the panel and the wake refresh releases it as a descending ramp: a burst after wake would not be attributable to the restore path. Re-run this check after a quiet interval, or run it before the driven checks"
+  }
+
   /// Wake restores brightness by read resync, not by a burst of writes. The
   /// intake pair plus the quiet-window line is the control triple: without it
   /// the app never saw the sleep or the wake at all, and an absence of writes
   /// afterwards is an absence of everything.
+  ///
+  /// The premise is measured on both kinds of wake, which is worth stating
+  /// because they are different code paths into the same restore: on a panel
+  /// sleep and wake when the wake behaviour was first recorded, and again on
+  /// 2026-08-19 with `pmset displaysleepnow` against the deployed build, where
+  /// a quiet rig carried zero writes across the whole cycle.
+  ///
+  /// `preSleepWrites` guards ahead of everything else. It is not a control (the
+  /// triple is): it is the question of whether this window belongs to the wake
+  /// at all, and no later branch means anything until it is answered.
   public static func wakeVerdict(
+    preSleepWrites: Int,
     sleepIntakeSeen: Bool, wakeIntakeSeen: Bool, quietWindowSeen: Bool, ddcWritesAfterWake: Int
   ) -> PlatformConformance.Outcome {
+    if let reason = wakeContaminationReason(preSleepWrites: preSleepWrites) {
+      return .inconclusive(reason)
+    }
     var missing: [String] = []
     if !sleepIntakeSeen { missing.append("the sleep intake line") }
     if !wakeIntakeSeen { missing.append("the wake intake line") }
