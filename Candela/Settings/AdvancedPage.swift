@@ -5,9 +5,8 @@ import SwiftUI
 /// displays never need, plus the escape hatches A1 promoted out of
 /// `defaults write`.
 ///
-/// Owns its own `Form` for the reason Task 13 measured on the hub — a grouped
-/// `Form` only reliably sizes structure declared in its own builder — so the
-/// navigation shell hands this view the header's inputs and nothing else.
+/// Owns its whole page: the navigation shell hands this view the header's
+/// inputs and nothing else.
 ///
 /// `@MainActor` because a `View`'s stored and computed properties other than
 /// `body` are nonisolated under complete concurrency, and these read
@@ -27,14 +26,10 @@ struct AdvancedPage: View {
   @State private var confirmingRestore = false
 
   /// The traffic block as the CAPTION renders it, mirroring `trafficBlock` one
-  /// update behind. The block is derived from the engine's brightness path, which
-  /// changes without this view writing anything, and neither placement of a keyed
-  /// `.animation` fades a `Form` row symmetrically (measured 2026-08-17): on a
-  /// `Group` wrapping the conditional row it animates nothing in either
-  /// direction, and on an always-present container inside the row the child fades
-  /// IN and then SNAPS out. That snap-out asymmetry is why a container-hung
-  /// `.animation` is not enough here; the mirror is what puts the explanation's
-  /// arrival AND departure inside one transaction. Only the caption reads it:
+  /// update behind. The block is derived from the engine's brightness path,
+  /// which changes without this view writing anything, so nothing here is
+  /// inside a transaction the way a click is: the mirror is what puts the
+  /// explanation's arrival AND departure inside one. Only the caption reads it:
   /// SO12's greying stays instant, and the safety sentence spoken on the
   /// hardware-control toggle keeps reading the live value.
   @State private var shownTrafficBlock: DDCTrafficBlock?
@@ -42,7 +37,8 @@ struct AdvancedPage: View {
   private var persistenceKey: String { state.display.persistenceKey }
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: persistenceKey) }
   /// The two gates this page's sections hang off (`disableCombinedBrightness`,
-  /// `startupAction`) are app-level and live in General.
+  /// `startupAction`) are app-level; the startup policy's control lives on the
+  /// Protection pane (SC6).
   private var appPrefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
   private var writer: DisplayPrefWriter {
     DisplayPrefWriter(persistenceKey: persistenceKey, actions: actions)
@@ -71,7 +67,7 @@ struct AdvancedPage: View {
     // re-evaluates the page after any write — including the hub's Advanced
     // preview going the other way (SO3).
     let _ = model.prefsRevision
-    Form {
+    SettingsPageScaffold {
       SubPageHeader(
         title: DisplaySubPage.advanced.title,
         currentKey: persistenceKey,
@@ -86,7 +82,7 @@ struct AdvancedPage: View {
       // that is constitutively native. This guard is what makes the
       // external-only claim in `blockExplanation` true rather than asserted.
       if isBuiltIn {
-        Section {
+        SettingsCardSection {
           SettingsCaption("This display has no hardware-control settings.")
         }
       } else {
@@ -97,7 +93,6 @@ struct AdvancedPage: View {
         restoreSection
       }
     }
-    .formStyle(.grouped)
   }
 
   // MARK: - DDC traffic blocking (SO12)
@@ -128,7 +123,7 @@ struct AdvancedPage: View {
   // MARK: - Control Method
 
   @ViewBuilder private var controlMethodSection: some View {
-    Section {
+    SettingsCardSection(title: "Control Method") {
       // A safety row (accessibility contract 3). Under live HDR this toggle is
       // the only control a block greys BEFORE the page's one explanation, which
       // sits at the foot of this section, so a VoiceOver user would otherwise
@@ -162,9 +157,12 @@ struct AdvancedPage: View {
         // `.software`), so disabling it there would be D29 rule 3 exactly: the
         // control that recovers the state, disabled in the state it recovers
         // from, with no other route back inside the app.
+        .themedSwitch()
         .disabled(trafficBlock == .macOSDrivesBrightness)
         .prefIdentifier(.forceSw, persistenceKey: persistenceKey)
       }
+
+      SettingsCardDivider()
 
       SettingRow("Use if another app keeps taking the color profile back, or on virtual displays.") {
         Toggle("Dim with a screen overlay", isOn: Binding(
@@ -179,8 +177,11 @@ struct AdvancedPage: View {
             writer.write(.avoidGamma) { $0.avoidGamma = overlay }
           }
         ))
+        .themedSwitch()
         .prefIdentifier(.avoidGamma, persistenceKey: persistenceKey)
       }
+
+      SettingsCardDivider()
 
       // Candela's OWN volume/mute HUD pills, and volume only — brightness and
       // contrast pills are unaffected, and the monitor's built-in OSD is not
@@ -190,6 +191,7 @@ struct AdvancedPage: View {
           get: { !prefs.hideOsd },
           set: { shown in writer.write(.hideOsd) { $0.hideOsd = !shown } }
         ))
+        .themedSwitch()
         .prefIdentifier(.hideOsd, persistenceKey: persistenceKey)
       }
       // The caption's mirror hooks hang on the row above, the last row of this
@@ -203,22 +205,28 @@ struct AdvancedPage: View {
       }
 
       if let shownTrafficBlock {
-        blockExplanation(shownTrafficBlock)
-          .transition(.opacity)
+        // A `Group`'s modifier reaches each child, so the hairline and the
+        // sentence arrive and leave together. Never the card's first row: the
+        // three switches above always render.
+        Group {
+          SettingsCardDivider()
+            .padding(.top, 6)
+          blockExplanation(shownTrafficBlock)
+            .padding(.top, 6)
+        }
+        .transition(.opacity)
       }
-    } header: {
-      Text("Control Method").settingsHeading()
     }
   }
 
   // MARK: - Command Tuning
 
   private var commandTuningSection: some View {
-    Section {
+    SettingsCardSection(title: "Command Tuning") {
       CommandTuningGrid(state: state, writer: writer)
+      SettingsCardDivider()
+        .padding(.vertical, 6)
       vcpOverrides
-    } header: {
-      Text("Command Tuning").settingsHeading()
     }
     // SO12: the whole section greys together, and the one explanation for it is
     // rendered above, in Control Method.
@@ -232,11 +240,20 @@ struct AdvancedPage: View {
   @ViewBuilder private var vcpOverrides: some View {
     Text("VCP Overrides")
       .font(.callout.weight(.semibold))
+      // A sub-header over a blocked section must not outshine it, and no
+      // theme component owns this one. Off the environment rather than
+      // `isBlocked`, so it cannot disagree with what greyed the section.
+      .settingsText(SettingsTheme.titleColor)
       .settingsHeading()
     SettingsCaption("For a display that puts a control somewhere non-standard, or responds unevenly across its range.")
+      .padding(.top, 2)
     ForEach(DDCCommand.allCases, id: \.self) { command in
-      Picker(
-        "\(DDCCommandCopy.title(command)) response curve",
+      // One hairline per command, so the curve and the control code below it
+      // read as that command's pair rather than as six loose rows.
+      SettingsCardDivider()
+        .padding(.vertical, 8)
+      ThemedChoiceRow(
+        label: "\(DDCCommandCopy.title(command)) response curve",
         selection: curveBinding(command)
       ) {
         // The engine's fine 1–9 range stays a `defaults write` key (SO13): only
@@ -254,22 +271,21 @@ struct AdvancedPage: View {
           Text(verbatim: "Custom (\(custom))").tag(custom)
         }
       }
-      // Belt, per control. The Section-level `.disabled` above is the
-      // documented spelling, but a modifier on a `Section` inside a grouped
-      // `Form` is the construct this repo has measured as unreliable — and the
-      // grid beside these fields carries its own belt for the same reason. A
-      // promoted control that stayed live under a traffic block would take a
-      // write that reaches nothing (SO12).
+      // Belt, per control, kept from the grouped-form shape this page used to
+      // be: the card's own `.disabled` reaches every row now, and a promoted
+      // control that stayed live under a traffic block would take a write that
+      // reaches nothing (SO12). The grid beside these fields carries the same
+      // belt.
       .disabled(isBlocked)
       .prefIdentifier(.curveDDC, command: command, persistenceKey: persistenceKey)
 
       LabeledContent("\(DDCCommandCopy.title(command)) control code") {
         // An empty title + explicit prompt, the audio-name field's shape: a
-        // TITLE of "Standard" is treated as a label by the grouped `Form` and
-        // rendered wrapped inside the 100 pt frame ("Stan-/dard", combined
-        // pass D6); a PROMPT lays out as single-line placeholder text. The
-        // border matches the tuning grid's fields one section up, and so does
-        // the commit: leaving the box applies the code (#144).
+        // TITLE of "Standard" was rendered wrapped inside the 100 pt frame
+        // ("Stan-/dard", combined pass D6); a PROMPT lays out as single-line
+        // placeholder text. The border matches the tuning grid's fields one
+        // section up, and so does the commit: leaving the box applies the code
+        // (#144).
         CommitOnBlurField(
           stored: { storedRemapText(command) },
           commit: { commitRemap(command, $0) },
@@ -280,6 +296,7 @@ struct AdvancedPage: View {
           fieldHint: Text("Hex control codes this display uses instead of the standard one."),
           width: 100
         )
+        .settingsEditableContent()
         // Keyed to the display, for the reason the tuning grid's fields are:
         // SO23's switcher can carry this page onto another display mid-edit.
         .id(persistenceKey)
@@ -304,29 +321,43 @@ struct AdvancedPage: View {
   /// here would be the "looks functional while `ddcTrafficBlock` voids it" case
   /// SO12 exists to forbid, wearing SO12's own exemption.
   @ViewBuilder private var combinedDimmingSection: some View {
-    Section {
+    SettingsCardSection(title: "Combined Dimming") {
       if appPrefs.combinedBrightness {
         SettingRow("Where dimming hands off from the display's hardware to software.") {
           VStack(alignment: .leading, spacing: 6) {
-            Slider(
-              value: crossoverBinding,
-              in: crossoverRange,
-              step: 1,
-              label: { Text("Hand off") },
-              minimumValueLabel: { Text("Earlier") },
-              maximumValueLabel: { Text("Later") }
-            )
-            // SO13: the stored −8…+7 never renders, in the readout OR to
-            // VoiceOver, which would otherwise announce the raw position.
-            .accessibilityValue(Text(verbatim: crossoverDescription))
-            .prefIdentifier(.combinedSwitchingPoint, persistenceKey: persistenceKey)
+            HStack(spacing: 10) {
+              // `ThemedSlider` carries no value labels of its own, so the two
+              // ends are composed beside it: they are this row's words, not
+              // the control's, and they name a DIRECTION rather than a number
+              // (SO13).
+              Text("Earlier")
+                .settingsText(SettingsTheme.faintColor)
+                .accessibilityHidden(true)
+              ThemedSlider(
+                value: crossoverBinding,
+                range: crossoverRange,
+                // The engine's integer detents: 16 stops across the whole
+                // sweep, which is also the grid a keyboard or VoiceOver step
+                // lands on.
+                step: 1,
+                // SO13: the stored −8…+7 never renders, in the readout OR to
+                // VoiceOver, which would otherwise announce the raw position.
+                accessibilityValueText: crossoverDescription
+              )
+              .accessibilityLabel(Text("Hand off"))
+              .prefIdentifier(.combinedSwitchingPoint, persistenceKey: persistenceKey)
+              Text("Later")
+                .settingsText(SettingsTheme.faintColor)
+                .accessibilityHidden(true)
+            }
             HStack {
               Text(verbatim: crossoverDescription)
-                .foregroundStyle(.secondary)
+                .settingsText(SettingsTheme.bodyColor)
               Spacer()
               Button("Reset") {
                 writer.write(.combinedSwitchingPoint) { $0.combinedSwitchingPoint = 0 }
               }
+              .buttonStyle(SettingsSecondaryButtonStyle())
               .accessibilityLabel("Reset")
               .accessibilityIdentifier("action.resetCrossover.\(persistenceKey)")
               .disabled(prefs.combinedSwitchingPoint == 0 || isBlocked)
@@ -339,6 +370,7 @@ struct AdvancedPage: View {
         // the write here — never a disabled control whose enabler lives on
         // another page.
         LabeledContent("Combined dimming", value: "Off")
+        SettingsCardDivider()
         SettingRow("A global setting: applies to every display.") {
           Button("Turn On Dim Past the Display's Minimum") {
             // No persistence key: `.disableCombinedBrightness` carries
@@ -349,13 +381,12 @@ struct AdvancedPage: View {
             appPrefs.combinedBrightness = true
             actions.prefDidChange(.disableCombinedBrightness)
           }
+          .buttonStyle(SettingsSecondaryButtonStyle())
           .accessibilityLabel("Turn On Dim Past the Display's Minimum")
           .prefIdentifier(.disableCombinedBrightness)
           .disabled(isBlocked)
         }
       }
-    } header: {
-      Text("Combined Dimming").settingsHeading()
     }
     .disabled(isBlocked)
   }
@@ -397,7 +428,7 @@ struct AdvancedPage: View {
   // MARK: - Reading Values From the Display
 
   @ViewBuilder private var readingValuesSection: some View {
-    Section {
+    SettingsCardSection(title: "Reading Values From the Display") {
       if readbackNeverAnswered {
         // SO25: state the verdict rather than offering escalation. Retrying a
         // panel that has already proved it never answers is not a decision
@@ -405,7 +436,7 @@ struct AdvancedPage: View {
         SettingsCaption(verbatim: "This display has never answered a read. Values are tracked as last written.")
       } else if appPrefs.startupAction == .read {
         SettingRow("How many times to ask before giving up.") {
-          Picker("Retries", selection: Binding(
+          ThemedChoiceRow(label: "Retries", selection: Binding(
             get: { prefs.pollingMode },
             set: { mode in writer.write(.pollingMode) { $0.pollingMode = mode } }
           )) {
@@ -421,37 +452,42 @@ struct AdvancedPage: View {
         }
         // D11: safe mode suppresses the startup readback outright, so a retry
         // policy shown as live here would describe behavior that is not
-        // happening — the same defect the General pane's notice exists to
+        // happening — the same defect the Protection pane's notice exists to
         // avoid. `appPrefs` is built without the safe-mode flag deliberately:
         // the picker shows the PERSISTED choice, which is right for a setting.
         if model.isSafeMode {
           SettingsCaption("Safe Mode is on for this session, so nothing is read from the display at startup.")
         }
         if prefs.pollingMode == .custom {
+          // Never the card's first row: the retries row above it always renders
+          // in this branch.
+          SettingsCardDivider()
           Stepper(value: Binding(
             get: { prefs.pollingCount },
             set: { count in writer.write(.pollingCount) { $0.pollingCount = count } }
           ), in: 0...99) {
             Text(verbatim: "Attempts: \(prefs.pollingCount)")
+              .foregroundStyle(SettingsTheme.titleColor)
           }
+          .padding(.vertical, 6)
           .disabled(isBlocked)
           .prefIdentifier(.pollingCount, persistenceKey: persistenceKey)
         }
       } else {
         // SO11 again — the same shape as Combined Dimming above.
         LabeledContent("Startup readback", value: "Off")
+        SettingsCardDivider()
         SettingRow("A global setting: applies to every display.") {
           Button("Ask the Display at Startup") {
             appPrefs.startupAction = .read
             actions.prefDidChange(.startupAction)
           }
+          .buttonStyle(SettingsSecondaryButtonStyle())
           .accessibilityLabel("Ask the Display at Startup")
           .prefIdentifier(.startupAction)
           .disabled(isBlocked)
         }
       }
-    } header: {
-      Text("Reading Values From the Display").settingsHeading()
     }
     .disabled(isBlocked)
   }
@@ -481,11 +517,17 @@ struct AdvancedPage: View {
   // MARK: - Restore
 
   private var restoreSection: some View {
-    Section {
-      // Plain at rest (SO20); the destructive role lives on the alert.
+    SettingsCardSection {
+      // The window's destructive style, red at rest and never the destination
+      // accent. SO20's "plain at rest" was presentation, which this redesign
+      // supersedes; what survives is the part that was never about looks, the
+      // destructive ROLE staying on the alert's confirm button rather than on
+      // the button that only opens the alert. The style reads `isEnabled`
+      // itself, so nothing here dims the button by hand.
       // Never disabled by `isBlocked`: under `.hardwareControlOff` this button
       // is the scoped way back out (D29 rule 3).
       Button("Restore Advanced Defaults…") { confirmingRestore = true }
+        .buttonStyle(SettingsDangerButtonStyle())
         .accessibilityLabel("Restore Advanced Defaults…")
         .accessibilityIdentifier("action.restoreAdvanced.\(persistenceKey)")
         .alert("Restore this display's advanced settings?", isPresented: $confirmingRestore) {

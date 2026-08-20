@@ -50,45 +50,28 @@ struct OledCarePane: View {
     // thing that re-reads them after a write from anywhere, including the
     // pushed pages, which write through `DisplayPrefWriter`.
     let _ = model.prefsRevision
-    Form {
+    SettingsPageScaffold {
+      // The two levers (OC11) at header weight, where the page says what it is.
+      // One sentence is not the opening paragraph that was cut from here, and
+      // the claim is bounded in the same breath it is made: the only two ways
+      // software can. "Enrolled" is load-bearing, because care runs on the
+      // displays that were enrolled and on no others, which is what the cards'
+      // badges say one screen down.
+      SettingsPageHeader(
+        title: "OLED Care",
+        subtitle:
+          "\(AppInfo.productName) protects an enrolled OLED display the only two ways software can: show fewer bright pixels, and show them for less time."
+      )
+
       // The exceptional state leads when it exists; prose never does. The
-      // page opens on the cards, which are its actual content: an
-      // introduction card ABOVE them read as the page's headline and made
-      // the overview open with a paragraph (Ryder, 2026-08-17).
+      // page opens on the cards, which are its actual content.
       if model.isSafeMode {
-        Section { safeModeNote }
+        safeModeNote
       }
 
-      // Identified by `persistenceKey`, NOT by `DisplayState.id` (which is
-      // the `CGDirectDisplayID`). IDs reassign across a replug with both
-      // displays still attached (measured: the MAG went 3 to 2 and the Dell
-      // 2 to 3 across one dock cycle), and a `ForEach` keyed on a reused id
-      // hands the OLD view instance to the OTHER display's card.
-      Section {
-        ForEach(model.displays, id: \.display.persistenceKey) { state in
-          OledCareDisplayCard(state: state)
-        }
-        if model.displays.isEmpty {
-          // The one place "external displays" must be said outright: with no
-          // cards on screen, nothing else on the page implies the scope.
-          SettingsCaption("Connect an external display to enroll it in OLED care. OLED care applies to external displays only.")
-        }
-      } header: {
-        Text("Displays").settingsHeading()
-      } footer: {
-        // The two-levers line (OC11), demoted from a leading card to the
-        // cards' own footer: it explains what the cards do, so it reads
-        // below them at caption weight. One sentence, one line: the cards'
-        // own status lines show what dimming does, the display pages explain
-        // it, and Screen Chrome's captions carry the auto-hide half. The
-        // page fits the default window without a scroll bar on this budget
-        // (Ryder, 2026-08-17); grow it back only with the height in hand.
-        SettingsCaption("Software can do two things about OLED wear: show fewer bright pixels, and show them for less time.")
-      }
-
+      displaysSection
       chromeSection
     }
-    .formStyle(.grouped)
     // The poll is cancelled when this pane goes away, which is the whole
     // requirement: the Dock has no change notification, so the only way to
     // reflect an external `com.apple.dock autohide` change is to re-read, and
@@ -113,6 +96,48 @@ struct OledCarePane: View {
     }
   }
 
+  // MARK: - Displays
+
+  /// Several cards rather than one, so the kicker stands on the canvas above
+  /// them instead of inside a card. The block is one scaffold child at the
+  /// mock's tighter internal rhythm: the cards belong to their title and to the
+  /// sentence under them, not to the page's 15 pt section spacing.
+  private var displaysSection: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      SettingsSectionTitle(text: "Displays")
+
+      // Identified by `persistenceKey`, NOT by `DisplayState.id` (which is
+      // the `CGDirectDisplayID`). IDs reassign across a replug with both
+      // displays still attached (measured: the MAG went 3 to 2 and the Dell
+      // 2 to 3 across one dock cycle), and a `ForEach` keyed on a reused id
+      // hands the OLD view instance to the OTHER display's card.
+      ForEach(model.displays, id: \.display.persistenceKey) { state in
+        OledCareDisplayCard(state: state)
+      }
+      if model.displays.isEmpty {
+        // The one place "external displays" must be said outright: with no
+        // cards on screen, nothing else on the page implies the scope. On a
+        // card of its own, because a bare sentence on the canvas where the
+        // cards would be reads as a page that failed to load.
+        SettingsCard {
+          SettingsCaption("Connect an external display to enroll it in OLED care. OLED care applies to external displays only.")
+        }
+      }
+
+      // What the cards are, now that the two levers are stated at the top: the
+      // wear fact and the one thing the pictures above can be trusted to show.
+      // Scoped to a measured display on purpose, because a card whose display
+      // has too few readings draws a blank frame and this line must not promise
+      // a picture that is not there.
+      SettingsCaption("Wear accumulates where bright, unchanging content sits, and a card shows where its display has been lit once there are enough readings.")
+        .text
+        .font(.caption)
+        .foregroundStyle(SettingsTheme.faintColor)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.leading, 4)
+    }
+  }
+
   /// D11's rule, applied here: say exactly what Safe Mode suppresses, where it
   /// changes what a control means. `OledCareCoordinator.start` returns at its
   /// safe-mode guard BEFORE the driver loop is built, so the dimming loop, the
@@ -123,14 +148,17 @@ struct OledCarePane: View {
   /// note that named only dimming and hours left the two measurement toggles
   /// looking live in a session that measures nothing.
   private var safeModeNote: some View {
-    VStack(alignment: .leading, spacing: 5) {
-      HStack(alignment: .firstTextBaseline, spacing: 6) {
-        // Symbol AND text; never state by colour alone.
-        Image(systemName: "exclamationmark.triangle")
-          .foregroundStyle(.secondary)
-        Text("Safe Mode is on for this session, so no display is being dimmed, no hours of use are being counted, and no measurements are being taken.")
+    SettingsCard {
+      // Surfaceless: the card is the surface.
+      SettingsNotice(drawsSurface: false) {
+        // `SafeModeCopy`'s, so this pane and Health cannot describe one
+        // session two ways.
+        Text(verbatim: SafeModeCopy.careSessionNotice)
+          .font(.callout.weight(.medium))
+          .fixedSize(horizontal: false, vertical: true)
+        SettingsCaption("Shift was held at launch. The two Screen Chrome settings below still work, and the settings you make here are saved for the next normal launch.")
       }
-      SettingsCaption("Shift was held at launch. The two Screen Chrome settings below still work, and the settings you make here are saved for the next normal launch.")
+      .padding(.vertical, 2)
     }
   }
 
@@ -141,11 +169,11 @@ struct OledCarePane: View {
   /// pane. Hiding the menu bar and the Dock stops driving those pixels rather
   /// than merely dimming them.
   @ViewBuilder private var chromeSection: some View {
-    Section {
+    SettingsCardSection(title: "Screen Chrome") {
       if let chrome = model.oledCare.chrome {
-        // The refusal note lives INSIDE the switch's own row: a note in a
-        // `Form` row of its own gets a divider and full padding, which reads
-        // as a separate setting rather than as this switch failing.
+        // The refusal note lives INSIDE the switch's own row: a note as a row
+        // of its own gets a divider and the row's full padding, which reads as
+        // a separate setting rather than as this switch failing.
         // One sentence (SO15): consequence plus its trade-off, and the
         // mechanism ("most static bright areas") stays because it IS the
         // consequence: hiding stops those pixels being driven (OC11).
@@ -158,11 +186,14 @@ struct OledCarePane: View {
                 menuBarRefused = chrome.menuBarAutoHide == on ? nil : on
               }
             ))
+            .themedSwitch()
             if menuBarRefused != nil {
               OledInlineNote(Text("macOS did not take that change. Menu bar auto-hiding can also be set in System Settings > Control Center."))
             }
           }
         }
+
+        SettingsCardDivider()
 
         SettingRow(caption: SettingsCaption("Changing this restarts the Dock, which takes a moment and is visible.")) {
           VStack(alignment: .leading, spacing: 6) {
@@ -173,31 +204,36 @@ struct OledCarePane: View {
                 dockRefused = chrome.dockAutoHide == on ? nil : on
               }
             ))
+            .themedSwitch()
             if dockRefused != nil {
               OledInlineNote(Text("macOS did not take that change. Dock auto-hiding can also be set in System Settings > Desktop & Dock."))
             }
           }
         }
-      } else {
-        SettingsCaption("These settings are not available yet. Reopen this window in a moment.")
-      }
-    } header: {
-      Text("Screen Chrome").settingsHeading()
-    } footer: {
-      // The section's footer, NOT a `Form` row of its own, which is what this
-      // was: a row gets a divider above it and full padding, so a sentence
-      // about BOTH switches read as a third setting. It cannot ride either
-      // switch's `SettingRow` either, because a `SettingRow` caption is
-      // republished as that ONE control's accessibility hint, and this sentence
-      // is about the pair.
-      //
-      // Suppressed while the controls are missing: a note about what "both
-      // settings" are is noise under a section that is currently showing
-      // neither.
-      // One line on the same height budget as the Displays footer; the
-      // trimmed words changed no claim (OC10's guarantee survives whole).
-      if model.oledCare.chrome != nil {
+
+        SettingsCardDivider()
+
+        // Last on the card and NOT a row of its own: a row gets the row
+        // padding, so a sentence about BOTH switches read as a third setting.
+        // It cannot ride either switch's `SettingRow` either, because a
+        // `SettingRow` caption is republished as that ONE control's
+        // accessibility hint, and this sentence is about the pair.
+        //
+        // Caption weight rather than the standalone `SettingsCaption` weight,
+        // for the same reason `SettingRow` draws its captions small: on a card
+        // the brighter sentence would compete with the switches' labels.
         SettingsCaption("Both settings belong to macOS: they apply to every display, and enrolling a display never changes them.")
+          .text
+          .font(.caption)
+          .foregroundStyle(SettingsTheme.faintColor)
+          .fixedSize(horizontal: false, vertical: true)
+          .padding(.top, 8)
+          .padding(.bottom, 2)
+      } else {
+        // The pairing sentence is suppressed with the controls: a note about
+        // what "both settings" are is noise under a section showing neither.
+        SettingsCaption("These settings are not available yet. Reopen this window in a moment.")
+          .padding(.vertical, 6)
       }
     }
   }

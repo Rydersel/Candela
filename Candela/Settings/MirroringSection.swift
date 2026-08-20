@@ -50,12 +50,14 @@ struct MirroringSection: View {
 
   /// The reason lines as RENDERED, mirroring the coordinator's three signals one
   /// update behind. Neither placement of a keyed `.animation` fades a `Form` row
-  /// symmetrically (measured 2026-08-17): on a `Group` wrapping the conditional
-  /// row it animates nothing in either direction, and on an always-present
-  /// container inside the row the child fades IN and then SNAPS out. A line that
-  /// snaps away is the half that matters here, so the only way these fade both
-  /// ways is for the write to happen inside a `withAnimation` in this view. Kept
-  /// in agreement by the two hooks on the status row and by nothing else.
+  /// symmetrically (measured 2026-08-17, on the grouped `Form` these rows were
+  /// then): on a `Group` wrapping the conditional row it animates nothing in
+  /// either direction, and on an always-present container inside the row the
+  /// child fades IN and then SNAPS out. A line that snaps away is the half that
+  /// matters here, so the only way these fade both ways is for the write to
+  /// happen inside a `withAnimation` in this view. Retained on the card layout
+  /// because the behavior is pinned, not because that trap was measured here.
+  /// Kept in agreement by the two hooks on the status row and by nothing else.
   @State private var shownReasons = ReasonLines.none
 
   private var displayID: CGDirectDisplayID { state.display.id }
@@ -150,7 +152,7 @@ struct MirroringSection: View {
         Text(verbatim: MirroringPredicates.statusLine(
           topology, displayID: displayID, name: name
         ))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(SettingsTheme.bodyColor)
       }
       // The mirror's two hooks hang HERE, on the one row of this section that is
       // always present: a hook on the reason lines' own container would only
@@ -162,9 +164,13 @@ struct MirroringSection: View {
         withAnimation(Motion.notice(reduceMotion: reduceMotion)) { shownReasons = lines }
       }
 
+      // The status row above is always drawn, so the control block always has
+      // a neighbour to be parted from.
+      SettingsCardDivider()
+
       if isLocked {
         // Named and DISABLED, never hidden, and the words travel in the SAME
-        // `Form` row as the dead button. `DisplayModeCoordinator` makes this
+        // row as the dead button. `DisplayModeCoordinator` makes this
         // argument for the mode picker and it holds here with more force:
         // mirroring is a hotkey in this app, so a control that vanished when a
         // set formed would appear and vanish under the user's hands. Which
@@ -300,17 +306,19 @@ struct MirroringSection: View {
   /// "what this button does" and "why this button is dead" are different facts.
   ///
   /// The caption is the row's own caption, never a `SettingsCaption` placed
-  /// after it: a caption as its own row gets a divider above it and full row
+  /// after it: a caption as its own row gets a hairline above it and full row
   /// padding, so it reads as a separate setting rather than as the explanation
-  /// for the button — measured in the forced-render capture for this task.
+  /// for the button (measured in the forced-render capture for this task, on
+  /// the grouped form; the card rhythm puts the hairline in the same place).
   private func stopControl(enabled: Bool, caption: SettingsCaption) -> some View {
     SettingRow(caption: caption) {
       Button(MirroringCopy.stopMirroring) {
-        // Fire-and-forget into the coordinator's queue — the queue is what
+        // Fire-and-forget into the coordinator's queue: the queue is what
         // serialises two fast clicks, so wrapping this in a `Task` here would
         // defeat it.
         coordinator.disengage(containing: displayID)
       }
+      .buttonStyle(SettingsSecondaryButtonStyle())
       .accessibilityLabel(Text(MirroringCopy.stopMirroring))
       .disabled(!enabled)
     }
@@ -355,7 +363,7 @@ struct MirroringSection: View {
         ? MirroringCopy.startExplanationSomeLocked
         : MirroringCopy.startExplanation
     ) {
-      Picker(MirroringCopy.pickMaster, selection: Binding(
+      ThemedChoiceRow(label: MirroringCopy.pickMaster, selection: Binding(
         get: { selectedMaster },
         set: { chosenMaster = $0 }
       )) {
@@ -374,6 +382,7 @@ struct MirroringSection: View {
         guard let selectedMaster else { return }
         coordinator.engage(master: selectedMaster)
       }
+      .buttonStyle(SettingsSecondaryButtonStyle())
       .accessibilityLabel(Text(MirroringCopy.startMirroring))
       .disabled(!canStart || selectedMaster == nil)
     }

@@ -3,11 +3,15 @@ import CoreGraphics
 import SwiftUI
 
 /// One display's OLED Care page, pushed from the pane's overview (OCR1):
-/// enrollment, the glanceable hero, everything that dims (OCR2: idle, lock,
-/// blackout, unfocused, never behind a second click), and the two drill-in
-/// rows. An un-enrolled display's page is the enrollment pitch (OCR10): the
-/// toggle, an empty map frame, and what the recommended settings would do,
-/// with no dead controls.
+/// enrollment, the glanceable hero, the two exposure findings, everything
+/// that dims (OCR2: idle, lock, blackout, unfocused, never behind a second
+/// click), and the two rows that lead on. An un-enrolled display's page is the
+/// enrollment pitch (OCR10): the toggle, an empty map frame, and what the
+/// recommended settings would do, with no dead controls.
+///
+/// Since SC5 this page pushes nothing: Measurement & Data retired to the
+/// Health pane and the row that pushed it now reveals that pane, so the page
+/// takes no navigation path of its own.
 ///
 /// The hero here is glanceable only (OCR5): map beside four stats, and the
 /// map is the doorway to Display Health. The lens picker, window outlines and
@@ -19,13 +23,13 @@ import SwiftUI
 @MainActor
 struct OledCareDisplayPage: View {
   let state: AppModel.DisplayState
-  let path: Binding<[OledCarePage]>
   let displays: [(key: String, name: String)]
   let onSwitch: (String) -> Void
 
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.settingsAccent) private var lighting
 
   /// `pmset -g` costs a 79 ms process spawn [MEASURED 2026-08-06]. Read ONCE
   /// per page appearance into state, never from `body` (which re-evaluates on
@@ -65,14 +69,14 @@ struct OledCareDisplayPage: View {
   var body: some View {
     let _ = model.prefsRevision
     let _ = hoursRevision
-    Form {
-      Section {
-        SubPageHeader(
-          title: name,
-          currentKey: persistenceKey,
-          displays: displays,
-          onSwitch: onSwitch)
+    SettingsPageScaffold {
+      SubPageHeader(
+        title: name,
+        currentKey: persistenceKey,
+        displays: displays,
+        onSwitch: onSwitch)
 
+      SettingsCardSection {
         // One sentence (SO15); the same caption rides the hub's enrollment
         // toggle so the two surfaces cannot describe enrollment differently.
         SettingRow("Enrolling applies the recommended settings; nothing changes until this display has been idle for a while.") {
@@ -80,11 +84,14 @@ struct OledCareDisplayPage: View {
             get: { prefs.oledCareEnrolled },
             set: { on in writer.write(.oledCareEnrolled) { $0.oledCareEnrolled = on } }
           ))
-          // Byte-identical to the hub's enrollment toggle on purpose: the two
-          // carriers are the same setting on the same display and are never in
-          // the rendered tree at the same time, so a walk finds exactly one.
+          .themedSwitch()
+          // The same identifier as the hub's enrollment toggle on purpose: the
+          // two carriers are the same setting on the same display and are never
+          // in the rendered tree at the same time, so a walk finds exactly one.
           .prefIdentifier(.oledCareEnrolled, persistenceKey: persistenceKey)
         }
+
+        SettingsCardDivider()
 
         if prefs.oledCareEnrolled {
           hero
@@ -92,30 +99,57 @@ struct OledCareDisplayPage: View {
         } else {
           unenrolledHero
         }
-      } footer: {
-        // OCR10's pitch: what enrolling would do, stated where the decision
-        // is. The numbers are the Recommended preset's (spec §5); change them
-        // together or the pitch lies.
-        if !prefs.oledCareEnrolled {
-          SettingsCaption("Enrolling applies the recommended settings: dim to 50% after 5 idle minutes, dim while locked, and count hours of use. Everything can be changed afterward, and nothing outside this display is touched.")
-        }
+      }
+
+      // OCR10's pitch: what enrolling would do, stated where the decision
+      // is. The numbers are the Recommended preset's (spec §5); change them
+      // together or the pitch lies.
+      if !prefs.oledCareEnrolled {
+        SettingsCaption("Enrolling applies the recommended settings: dim to 50% after 5 idle minutes, dim while locked, and count hours of use. Everything can be changed afterward, and nothing outside this display is touched.")
       }
 
       if prefs.oledCareEnrolled {
-        Section {
+        // The findings, above the settings they argue for (Ryder, 2026-08-20).
+        // Both moved off the Display Health window, which keeps the map and
+        // the instruments that interrogate it; a card that states a
+        // measurement in words belongs next to the controls that measurement
+        // is an argument about.
+        let findings = model.oledCare.healthSummary(for: persistenceKey)
+        PanelHottestAreaCard(summary: findings)
+        PanelDisplayTimeCard(summary: findings)
+
+        SettingsCardSection(title: "Dimming") {
           idleControls
+          SettingsCardDivider()
           lockControls
+          SettingsCardDivider()
           blackoutControls
+          SettingsCardDivider()
           unfocusedControls
-        } header: {
-          Text("Dimming").settingsHeading()
         }
 
-        Section {
+        SettingsCardSection(title: "More") {
+          // A sideways move, not a push (SC5): the Measurement & Data page
+          // retired and its controls are the Health pane's now, so this row
+          // changes the sidebar selection through the reveal seam rather than
+          // owning navigation state of its own. It keeps the chevron shape
+          // because it still leads somewhere, and it keeps the preview the
+          // pushed row had (SO3), which is the measuring status.
           NavigationRow(
-            title: "Measurement & Data",
+            title: "Health",
             value: measurementRowPreview,
-            action: { path.wrappedValue.append(.measurement(persistenceKey)) })
+            action: {
+              // The note below promises "this display", so the link carries
+              // which one. A pane reveal names no display on its own, and the
+              // Health pane's switcher would otherwise open on whichever
+              // external sorts first: the note, the preview above and the
+              // controls the user then touches would name three different
+              // things.
+              actions.pendingHealthScope = persistenceKey
+              actions.reveal(.pane(.health))
+            })
+          SettingsRowNote("Measuring is set for this display on the Health pane, where switching it off stops new readings and keeps everything recorded so far.")
+          SettingsCardDivider()
           NavigationRow(
             title: "Display Health",
             value: healthRowPreview,
@@ -123,12 +157,9 @@ struct OledCareDisplayPage: View {
             // resize to a portrait display's map, and a window sized to its
             // content can.
             action: { actions.openDisplayHealth(persistenceKey) })
-        } header: {
-          Text("More").settingsHeading()
         }
       }
     }
-    .formStyle(.grouped)
     .task {
       displaySleepMinutes = OledCareSignalSources.displaySleepMinutes()
     }
@@ -177,16 +208,10 @@ struct OledCareDisplayPage: View {
       } label: {
         VStack(alignment: .leading, spacing: 8) {
           if historyBlank {
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-              .fill(.quaternary)
-              .overlay {
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                  .strokeBorder(.separator, lineWidth: 1)
-              }
-              .aspectRatio(aspect, contentMode: .fit)
+            blankMapFrame(aspect: aspect)
             Text(verbatim: mapPlaceholder(summary))
               .font(.caption)
-              .foregroundStyle(.secondary)
+              .foregroundStyle(SettingsTheme.faintColor)
               .fixedSize(horizontal: false, vertical: true)
           } else {
             PanelExposureSurface(
@@ -207,10 +232,11 @@ struct OledCareDisplayPage: View {
             PanelExposureLegend()
           }
           // The visible affordance for the button this whole column is; on
-          // hover it brightens alongside the lift.
+          // hover it brightens alongside the lift. Brightness rather than the
+          // destination accent: an inactive window draws every accent grey.
           Text("Display Health ›")
             .font(.caption)
-            .foregroundStyle(heroHovering ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .foregroundStyle(heroHovering ? SettingsTheme.titleColor : SettingsTheme.bodyColor)
         }
         // A portrait display at the landscape width would tower over the stat
         // column AND push the Dimming section below the fold (measured on the
@@ -238,24 +264,11 @@ struct OledCareDisplayPage: View {
             .contentTransition(.numericText())
             .animation(Motion.value(reduceMotion: reduceMotion), value: hoursLine(tracker))
         }
-        if !historyBlank, let relative = summary.hottestRelative,
-          let multiple = PanelHealthCopy.multiple(relative)
-        {
-          heroStat("Hottest area") {
-            VStack(alignment: .leading, spacing: 2) {
-              Text(verbatim: "\(multiple) this display's average")
-                .monospacedDigit()
-                .contentTransition(.numericText())
-                .animation(Motion.value(reduceMotion: reduceMotion), value: multiple)
-              if let sentence = hottestSentence(summary) {
-                Text(verbatim: sentence)
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-                  .fixedSize(horizontal: false, vertical: true)
-              }
-            }
-          }
-        }
+        // No "Hottest area" stat here since 2026-08-20: `PanelHottestAreaCard`
+        // sits a few points below on this same page and states the identical
+        // measurement, under the identical gate, with the region named as
+        // well. Two readings of one number, one screen apart, is exactly how
+        // the two come to disagree.
         heroStat("Measurement") {
           VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
@@ -268,6 +281,9 @@ struct OledCareDisplayPage: View {
                   summary.sampleCount, ExposureAccumulator.minimumSamplesForAnalysis)),
                 total: Double(ExposureAccumulator.minimumSamplesForAnalysis))
                 .controlSize(.small)
+                // The destination's hue, never the system accent: that one is
+                // a user preference the rest of this window does not follow.
+                .tint(lighting.accent)
                 .frame(maxWidth: 140)
             }
           }
@@ -285,13 +301,7 @@ struct OledCareDisplayPage: View {
       OledPanelGeometry.displayAspect(for: state.display.id)
       ?? CGFloat(PanelGrid.cols) / CGFloat(PanelGrid.rows)
     HStack(alignment: .top, spacing: 20) {
-      RoundedRectangle(cornerRadius: 5, style: .continuous)
-        .fill(.quaternary)
-        .overlay {
-          RoundedRectangle(cornerRadius: 5, style: .continuous)
-            .strokeBorder(.separator, lineWidth: 1)
-        }
-        .aspectRatio(aspect, contentMode: .fit)
+      blankMapFrame(aspect: aspect)
         .frame(maxWidth: aspect < 1 ? 130 : 300)
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 10) {
@@ -303,21 +313,23 @@ struct OledCareDisplayPage: View {
   }
 
   /// A notice about the display, not a setting, so it stays beside the hours
-  /// it explains rather than moving to Measurement & Data with the toggle.
+  /// it explains.
   @ViewBuilder private var standbyNote: some View {
     // ONE tracker per display, from the coordinator. Never construct one here:
     // a second live instance reads a stale count and clobbers the real one on
     // its next write-through.
     let tracker = model.oledCare.hoursTracker(for: persistenceKey)
     if tracker.shouldShowStandbyNote {
+      SettingsCardDivider()
       SettingRow(caption: SettingsCaption("Most OLED displays run their own compensation cycle when they go into standby, and skip it while they are in use. Anything that puts the display to sleep counts: the monitor's own power button, or leaving the Mac idle.")) {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
           Text("This display has not been in standby for a while.")
-          Spacer(minLength: 0)
+          Spacer(minLength: 12)
           Button("Dismiss") {
             tracker.dismissStandbyNote()
             hoursRevision &+= 1
           }
+          .buttonStyle(SettingsSecondaryButtonStyle())
           .accessibilityLabel("Dismiss")
         }
       }
@@ -328,9 +340,23 @@ struct OledCareDisplayPage: View {
     VStack(alignment: .leading, spacing: 1) {
       Text(verbatim: label)
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(SettingsTheme.faintColor)
       value()
+        .foregroundStyle(SettingsTheme.bodyColor)
     }
+  }
+
+  /// The map's own footprint with nothing drawn in it: a recessed well rather
+  /// than a filled tile, so an empty hero reads as a place a picture will
+  /// arrive rather than as a broken one.
+  private func blankMapFrame(aspect: CGFloat) -> some View {
+    RoundedRectangle(cornerRadius: 5, style: .continuous)
+      .fill(Color.black.opacity(0.22))
+      .overlay {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+          .strokeBorder(SettingsTheme.cardStroke, lineWidth: 1)
+      }
+      .aspectRatio(aspect, contentMode: .fit)
   }
 
   /// Caption under a blank hero map. `summary.cells` stays populated whatever
@@ -372,14 +398,6 @@ struct OledCareDisplayPage: View {
     return Date().timeIntervalSince(last) < 180
   }
 
-  /// The tag is the pointer (OCR8); prose coordinates were cut as noise. Past
-  /// tense for the owner, the health page's reason: the snapshot behind it is
-  /// up to a minute old.
-  private func hottestSentence(_ summary: PanelHealthSummary) -> String? {
-    guard let owner = summary.hottestOwner else { return "Marked on the map." }
-    return "Marked on the map. \(owner) was there at the last reading."
-  }
-
   /// What the engine is doing right now. `dimStates` is the coordinator's own
   /// published state, never a second opinion computed here; a mirrored
   /// display's "paused" reading is the one spec §5 requires to be visible
@@ -415,16 +433,19 @@ struct OledCareDisplayPage: View {
   @ViewBuilder private var idleControls: some View {
     SettingRow(caption: SettingsCaption("Counted from the last keyboard or mouse activity anywhere on the Mac; video playback, calls and anything else holding the screen awake postpone it.")) {
       VStack(alignment: .leading, spacing: 6) {
-        Stepper(value: idleMinutesBinding, in: Self.idleMinuteRange) {
-          Text(verbatim: "Dim after \(Self.minutesPhrase(minutes(prefs.oledIdleDimSeconds))) of inactivity")
-        }
-        .prefIdentifier(.oledIdleDimSeconds, persistenceKey: persistenceKey)
+        minutesStepper(
+          phrase: "Dim after \(Self.minutesPhrase(minutes(prefs.oledIdleDimSeconds))) of inactivity",
+          prefIdentifier: .oledIdleDimSeconds,
+          value: idleMinutesBinding,
+          in: Self.idleMinuteRange)
         // In the SAME row as the control it is about: a divider between a
         // threshold and the sentence saying that threshold does nothing turns
         // the warning into what looks like an unrelated setting.
         displaySleepWarning(forThresholdSeconds: prefs.oledIdleDimSeconds)
       }
     }
+
+    SettingsCardDivider()
 
     levelRow(
       label: "Dim to",
@@ -446,6 +467,7 @@ struct OledCareDisplayPage: View {
         get: { prefs.oledLockDim },
         set: { on in writer.write(.oledLockDim) { $0.oledLockDim = on } }
       ))
+      .themedSwitch()
       .prefIdentifier(.oledLockDim, persistenceKey: persistenceKey)
     }
   }
@@ -461,9 +483,11 @@ struct OledCareDisplayPage: View {
         get: { prefs.oledBlackoutEnabled },
         set: { on in writer.write(.oledBlackoutEnabled) { $0.oledBlackoutEnabled = on } }
       ))
+      .themedSwitch()
       .prefIdentifier(.oledBlackoutEnabled, persistenceKey: persistenceKey)
     }
     if prefs.oledBlackoutEnabled {
+      SettingsCardDivider()
       // The lower bound is the engine's own floor, not a number chosen here:
       // `OledDimConfig` clamps the blackout threshold to at least idle + the
       // gap, so a control that could express anything lower would be a control
@@ -472,12 +496,14 @@ struct OledCareDisplayPage: View {
         // The label reads the BINDING, not the raw pref: the binding is the
         // clamped value, and a label showing a lower number than the stepper
         // holds would be the silent-rewrite this clamp exists to make visible.
-        Stepper(value: blackoutMinutesBinding, in: blackoutMinuteRange) {
-          Text(verbatim: "Go black after \(Self.minutesPhrase(blackoutMinutesBinding.wrappedValue)) of inactivity")
-        }
-        .prefIdentifier(.oledBlackoutSeconds, persistenceKey: persistenceKey)
+        minutesStepper(
+          phrase: "Go black after \(Self.minutesPhrase(blackoutMinutesBinding.wrappedValue)) of inactivity",
+          prefIdentifier: .oledBlackoutSeconds,
+          value: blackoutMinutesBinding,
+          in: blackoutMinuteRange)
         displaySleepWarning(forThresholdSeconds: prefs.oledBlackoutSeconds)
       }
+      .padding(.vertical, 6)
     }
   }
 
@@ -489,13 +515,18 @@ struct OledCareDisplayPage: View {
         get: { prefs.oledUnfocusedDimEnabled },
         set: { on in writer.write(.oledUnfocusedDimEnabled) { $0.oledUnfocusedDimEnabled = on } }
       ))
+      .themedSwitch()
       .prefIdentifier(.oledUnfocusedDimEnabled, persistenceKey: persistenceKey)
     }
     if prefs.oledUnfocusedDimEnabled {
-      Stepper(value: unfocusedMinutesBinding, in: Self.unfocusedMinuteRange) {
-        Text(verbatim: "Dim after \(Self.minutesPhrase(minutes(prefs.oledUnfocusedDimSeconds))) without focus")
-      }
-      .prefIdentifier(.oledUnfocusedDimSeconds, persistenceKey: persistenceKey)
+      SettingsCardDivider()
+      minutesStepper(
+        phrase: "Dim after \(Self.minutesPhrase(minutes(prefs.oledUnfocusedDimSeconds))) without focus",
+        prefIdentifier: .oledUnfocusedDimSeconds,
+        value: unfocusedMinutesBinding,
+        in: Self.unfocusedMinuteRange)
+        .padding(.vertical, 6)
+      SettingsCardDivider()
       levelRow(
         label: "Dim to",
         caption: "How bright an unfocused display is while dimmed. Usually higher than the idle dim, because the display is still in view.",
@@ -589,6 +620,34 @@ struct OledCareDisplayPage: View {
     )
   }
 
+  /// A threshold in whole minutes: the sentence at the leading edge, the
+  /// stepper at the trailing one, the way every other row in this window
+  /// spreads. The written phrase is the control's spoken label, so the drawn
+  /// copy leaves the accessibility tree and the stepper carries it.
+  ///
+  /// `prefIdentifier` comes from the CALLER for `levelRow`'s reason: one helper
+  /// serves three thresholds, and a name written in here would put one
+  /// identifier on all of them. Its tripwire applies here too: deleting the
+  /// `.prefIdentifier` call below while keeping the parameter leaves all three
+  /// steppers bare with the coverage test still green.
+  private func minutesStepper(
+    phrase: String,
+    prefIdentifier: PrefName,
+    value: Binding<Int>,
+    in range: ClosedRange<Int>
+  ) -> some View {
+    HStack(spacing: 12) {
+      Text(verbatim: phrase)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityHidden(true)
+      Spacer(minLength: 16)
+      Stepper(value: value, in: range) { EmptyView() }
+        .accessibilityLabel(Text(verbatim: phrase))
+        .prefIdentifier(prefIdentifier, persistenceKey: persistenceKey)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
   /// The system `displaysleep` setting makes a longer threshold dead
   /// configuration: the panel blanks before the dim would ever engage. Stated
   /// with both numbers, because the fix is to change one of them.
@@ -630,40 +689,42 @@ struct OledCareDisplayPage: View {
     commit: @MainActor @escaping (Double) -> Void
   ) -> some View {
     let live = draft.wrappedValue ?? value
+    let readout = Self.percent(live)
     return SettingRow(caption) {
-      VStack(alignment: .leading, spacing: 4) {
-        HStack {
-          Text(label)
-          Spacer(minLength: 12)
-          Text(verbatim: Self.percent(live))
-            .foregroundStyle(.secondary)
-            .monospacedDigit()
-        }
-        Slider(
+      HStack(spacing: 12) {
+        // Drawn here and spoken by the slider, which carries the name of the
+        // setting rather than this shared two-word label.
+        Text(label).accessibilityHidden(true)
+        Spacer(minLength: 16)
+        ThemedSlider(
           value: Binding(get: { live }, set: { draft.wrappedValue = $0 }),
-          in: OledDimConfig.brightnessRange,
-          // 10% steps: SwiftUI draws a tick per step on macOS, and a finer
-          // step turned the row into a comb of seventeen marks. Ten percent is
-          // also the smallest change anyone can see in a dim.
+          range: OledDimConfig.brightnessRange,
+          // 10% steps: the smallest change anyone can see in a dim, and the
+          // grid a keyboard or VoiceOver step lands on.
           step: 0.1,
+          // The stored number is a fraction; the row says what the display
+          // will be left at, so the readout is what VoiceOver reads too.
+          accessibilityValueText: readout,
           onEditingChanged: { editing in
             guard !editing else { return }
             // Written once, when the drag ends. Dropping the draft afterwards
-            // is what lets the row start reading the pref again.
+            // is what lets the row start reading the pref again. An adjustable
+            // action opens and closes an editing session of its own, so a
+            // keyboard or VoiceOver step commits per step BY DESIGN: the
+            // accessibility path must never be debounced into silence.
             if let dragged = draft.wrappedValue {
               draft.wrappedValue = nil
               if dragged != value { commit(dragged) }
             }
           }
         )
+        .frame(width: 150)
         .accessibilityLabel(Text(verbatim: accessibilityName))
-        .accessibilityValue(Text(verbatim: Self.percent(live)))
         .prefIdentifier(prefIdentifier, persistenceKey: persistenceKey)
-        // The keyboard path. `onEditingChanged` is a DRAG boundary: adjusting a
-        // focused slider with the arrow keys moves the draft and never ends an
-        // edit, so without this the value would show as changed and never be
-        // written, and would snap back on the next re-render. Restarted by
-        // every change, so it commits half a second after the user stops.
+        // The keyboard path for a slider whose edit never closes: the draft
+        // would show as changed and never be written, and would snap back on
+        // the next re-render. Restarted by every change, so it commits half a
+        // second after the user stops.
         .task(id: live) {
           guard draft.wrappedValue != nil else { return }
           try? await Task.sleep(for: .milliseconds(500))
@@ -671,6 +732,10 @@ struct OledCareDisplayPage: View {
           draft.wrappedValue = nil
           if pending != value { commit(pending) }
         }
+        Text(verbatim: readout)
+          .foregroundStyle(SettingsTheme.bodyColor)
+          .monospacedDigit()
+          .frame(width: 42, alignment: .trailing)
       }
     }
   }

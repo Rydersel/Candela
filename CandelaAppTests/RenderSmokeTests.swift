@@ -29,6 +29,14 @@ struct RenderSmokeTests {
     ImageRenderer(content: view).cgImage
   }
 
+  /// The rendered bytes, for the one comparison in this suite that is between
+  /// two renders rather than against a floor. Never used to assert a COLOR,
+  /// which is a human's job: only whether two renders of the same view differ.
+  private func pixels(_ image: CGImage?) -> Data? {
+    guard let data = image?.dataProvider?.data else { return nil }
+    return data as Data
+  }
+
   private func expectPixels(
     _ image: CGImage?, _ label: Comment, sourceLocation: SourceLocation = #_sourceLocation
   ) {
@@ -124,21 +132,41 @@ struct RenderSmokeTests {
 
   // MARK: - The settings window
 
-  /// Every static pane row plus the empty-display-list message, which is the
-  /// sidebar the fixture model produces. The shared-identity ordinals the
-  /// structural tests cover need display rows and so are not on screen here.
+  /// The wordmark, every static pane row and the empty-display-list message,
+  /// which is the sidebar the fixture model produces. The shared-identity
+  /// ordinals the structural tests cover need display rows and so are not on
+  /// screen here.
+  ///
+  /// No accent is injected, deliberately: `settingsAccent` defaults to
+  /// neutral, so this also covers the sidebar drawn outside the shell that
+  /// normally publishes one.
   @Test func theSettingsSidebarRenders() {
     let model = TestFixtures.appModel()
     let sidebar = SettingsSidebar(selection: .constant(.pane(SettingsRegistry.panes[0].id)))
       .environment(model)
       // A `ScrollView` proposes nothing of its own, so the render needs a
-      // window-shaped frame to fill: roughly the sidebar column of the real
-      // settings window.
-      .frame(width: 215, height: 520)
+      // frame to fill: the sidebar column's real fixed width, and a height
+      // that clears the wordmark above every pane row.
+      .frame(width: 224, height: 560)
     expectPixels(render(sidebar), "SettingsSidebar")
   }
 
-  /// The page's header and its grouped form chrome. The mode list is NOT on
+  /// The whole shell: the canvas, the sidebar, the hairline, and the detail
+  /// column's `NavigationStack` on its opening destination. Nothing else
+  /// reaches the composition itself, which is where the hand-built shell can
+  /// fail: the canvas is a `TimelineView` and the detail column resolves its
+  /// content through `presentation`, so a shell that resolved to nothing would
+  /// render an empty window rather than crash.
+  @Test func theSettingsShellRenders() {
+    let model = TestFixtures.appModel()
+    let shell = SettingsRootView()
+      .environment(model)
+      .environment(SettingsActions(model: model))
+      .frame(width: SettingsWindowMetrics.idealWidth, height: SettingsWindowMetrics.idealHeight)
+    expectPixels(render(shell), "SettingsRootView")
+  }
+
+  /// The page's header and the scaffold's card chrome. The mode list is NOT on
   /// screen: it renders from `DisplayModeCoordinator.catalogs`, which is
   /// `private(set)` on the coordinator the page reads out of the environment
   /// model, so the only honest routes to a populated list are a live display
@@ -146,6 +174,12 @@ struct RenderSmokeTests {
   /// state the page has to survive anyway (it is what a push renders before
   /// enumeration lands), so this covers that state and the row derivation
   /// stays covered structurally instead.
+  ///
+  /// The frame is the page's own extent since the card conversion, the way the
+  /// built-in pane's render is: the scaffold lays a `SettingsTheme.pageWidth`
+  /// column out inside 32 pt of horizontal padding, so anything narrower than
+  /// that sum renders the cards compressed. The accent is injected because the
+  /// list's selection ring and its checkmark both read from it.
   @Test func theAllModesPageRendersWithoutACatalog() {
     let model = TestFixtures.appModel()
     let state = TestFixtures.displayState(name: "Smoke Panel", persistenceKey: "smoke-panel")
@@ -155,8 +189,33 @@ struct RenderSmokeTests {
       onSwitch: { _ in }
     )
     .environment(model)
-    .frame(width: 640, height: 520)
+    .environment(\.settingsAccent, .display(isBuiltIn: false, ordinal: 0))
+    .frame(width: SettingsTheme.pageWidth + 64, height: 520)
     expectPixels(render(page), "AllModesPage")
+  }
+
+  /// The opening both display pages share: the lit glyph, the identity block
+  /// and the levels card. It gets its own render because neither page can put
+  /// it on screen from this bundle (the built-in slot is empty on a
+  /// hardware-free model, and the external hub needs a connected display), so
+  /// without this the whole hero composition would go unrendered.
+  ///
+  /// Width only: the hero sizes its own height, and pinning one would assert a
+  /// layout rather than the fact that it produced pixels.
+  ///
+  /// Both variants, because they are different drawings and not a parameter of
+  /// one: the built-in draws `LaptopGlyph` and drops the volume row, so a
+  /// break in the laptop path is invisible to the external render.
+  @Test(arguments: [DisplayHeroView.Variant.external, .builtIn])
+  func theDisplayHeroRenders(variant: DisplayHeroView.Variant) {
+    let model = TestFixtures.appModel()
+    let state = TestFixtures.displayState(name: "Smoke Panel", persistenceKey: "smoke-panel")
+    let isBuiltIn = variant == .builtIn
+    let hero = DisplayHeroView(state: state, variant: variant)
+      .environment(model)
+      .environment(\.settingsAccent, .display(isBuiltIn: isBuiltIn, ordinal: 0))
+      .frame(width: SettingsTheme.pageWidth)
+    expectPixels(render(hero), "DisplayHeroView, \(isBuiltIn ? "built-in" : "external")")
   }
 
   /// The built-in display's page, which grew a Display section of its own.
@@ -168,6 +227,11 @@ struct RenderSmokeTests {
   /// `AllModesPage`'s reason (`catalogs` is `private(set)` and the only honest
   /// filler is a live display), so the section's own derivation is covered by
   /// the row-model suite instead.
+  ///
+  /// The frame is the page's own extent since the card conversion, not a round
+  /// number: the scaffold lays a `SettingsTheme.pageWidth` column out inside 32
+  /// pt of horizontal padding, so anything narrower than that sum renders the
+  /// cards compressed and covers a layout the window never shows.
   @Test func theBuiltInDisplayPaneRenders() {
     let model = TestFixtures.appModel()
     let pane = BuiltInDisplayPane(
@@ -175,8 +239,90 @@ struct RenderSmokeTests {
     )
     .environment(model)
     .environment(SettingsActions(model: model))
-    .frame(width: 640, height: 520)
+    .environment(\.settingsAccent, .display(isBuiltIn: true, ordinal: 0))
+    .frame(width: SettingsTheme.pageWidth + 64, height: 560)
     expectPixels(render(pane), "BuiltInDisplayPane")
+  }
+
+  /// The theme layer composed the way a restyled page composes it: the
+  /// scaffold's scroll and content column, a card section, and the two shared
+  /// rows inside it. Nothing here is a real pane, which is the point: it covers
+  /// the shared components before any page adopts them, so a collapsed card or
+  /// a crashing row surfaces here rather than in whichever page happens to be
+  /// migrated first.
+  @Test func theThemeComponentsRender() {
+    let page = SettingsPageScaffold {
+      SettingsPageHeader(title: "Levels", subtitle: "The shared components on one card.")
+      SettingsCardSection(title: "Levels") {
+        SettingRow("What this switch changes.") {
+          Toggle("A themed switch", isOn: .constant(true)).themedSwitch()
+        }
+        SettingsCardDivider()
+        NavigationRow(title: "All Sizes", value: "3440 x 1440", action: {})
+      }
+    }
+    .environment(\.settingsAccent, .display(isBuiltIn: false, ordinal: 1))
+    .frame(width: 640, height: 420)
+    expectPixels(render(page), "settings theme components")
+  }
+
+  // MARK: - The menu-bar preview
+
+  /// The Menu Bar pane's preview, and SV13's faithfulness contract with it: the
+  /// depicted widgets follow the SYSTEM appearance, so the settings window's own
+  /// pinned-dark scheme must not reach them.
+  ///
+  /// The regression this catches shipped once. The grounds already tracked the
+  /// system through the appearance observer, but the labels ("Color LCD", the
+  /// pill's display name, "Settings…", "Quit", the percent readouts) resolved
+  /// `.primary` and `.secondary` against the WINDOW, so a light-mode system got
+  /// white text on the light panel and pills the preview had correctly drawn.
+  /// Byte-identical renders under the two window schemes is exactly the property
+  /// that was missing.
+  ///
+  /// Not a color assertion: nothing here says which scheme the widgets drew in,
+  /// only that the window's did not decide it. Whether the depiction MATCHES the
+  /// real widgets stays a human's look at the window.
+  @Test func theMenuBarPreviewIgnoresTheWindowsColorScheme() {
+    let model = TestFixtures.appModel()
+    func shot(_ scheme: ColorScheme) -> CGImage? {
+      render(
+        MenuBarPreviewView { _ in }
+          .environment(model)
+          .environment(\.colorScheme, scheme)
+          .frame(width: SettingsTheme.pageWidth))
+    }
+    let inDarkWindow = shot(.dark)
+    let inLightWindow = shot(.light)
+    expectPixels(inDarkWindow, "MenuBarPreviewView in a dark window")
+    expectPixels(inLightWindow, "MenuBarPreviewView in a light window")
+    #expect(
+      pixels(inDarkWindow) == pixels(inLightWindow),
+      "the window's scheme must not reach the depicted widgets (SV13)")
+  }
+
+  /// The positive control the case above is worth nothing without: two renders
+  /// of a view that DOES follow the ambient scheme must differ by these same
+  /// bytes. Without it, a preview that rendered nothing, a renderer that
+  /// ignores the scheme override, or a comparison that cannot see a color
+  /// change would all report the equality above as a pass.
+  @Test func theSchemeComparisonCanSeeAScheme() {
+    func shot(_ scheme: ColorScheme) -> CGImage? {
+      render(
+        Text("Aa")
+          .font(.system(size: 40))
+          .foregroundStyle(.primary)
+          .padding(20)
+          .background(Color.gray)
+          .environment(\.colorScheme, scheme))
+    }
+    let dark = shot(.dark)
+    let light = shot(.light)
+    expectPixels(dark, "scheme control, dark")
+    expectPixels(light, "scheme control, light")
+    #expect(
+      pixels(dark) != pixels(light),
+      "an ambient scheme flip must be visible to this comparison")
   }
 
   // MARK: - The guided setup flow

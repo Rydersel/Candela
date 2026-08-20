@@ -3,17 +3,19 @@ import CoreGraphics
 import SwiftUI
 
 /// EM9's gate instrument, as amended by OCR7: scores the estimated exposure
-/// model against the measured readings, on the Measurement & Data page and
-/// revertable, never inside the health view it might one day change. Shown
-/// once measurement is on or a stored comparison exists, so a user who turns
-/// measurement off keeps their score.
+/// model against the measured readings, beside the measurement controls and
+/// revertable, never inside the health view it might one day change. It rode
+/// the Measurement & Data page until SC5 retired that page, and moved to the
+/// Health pane with the controls it sits under. Shown once measurement is on
+/// or a stored comparison exists, so a user who turns measurement off keeps
+/// their score.
 ///
 /// **TEMPORARY, built to be deleted (OCR7).** This section exists to judge the
 /// estimate during the current soak. Once Ryder records the verdict on the
 /// comparison gate, deletion is: remove this file, remove the one call site in
-/// `OledCareMeasurementPage`, and move the stalled-sampling note below up to
-/// ride the "Measure how bright each part of this display is" toggle, because
-/// that note proved necessary independently of the comparison.
+/// `HealthPane`, and move the stalled-sampling note below up to ride the
+/// "Measure how bright each part of this display is" toggle, because that note
+/// proved necessary independently of the comparison.
 @MainActor
 struct OledModelComparisonSection: View {
   let persistenceKey: String
@@ -25,39 +27,39 @@ struct OledModelComparisonSection: View {
   var body: some View {
     let comparison = model.oledCare.modelComparison(for: persistenceKey)
     if prefs.oledTelemetry || comparison.pairCount > 0 {
-      Section {
+      SettingsCardSection(title: "Model Comparison") {
         SettingRow(caption: SettingsCaption("Scores an estimate built only from window positions, the wallpaper, and light or dark appearance against the measured readings above. If the two keep agreeing, the estimate can stand in when Screen Recording is off. Estimated figures are never presented as measured.")) {
           VStack(alignment: .leading, spacing: 6) {
             SettingsCaption("A temporary instrument: it exists to judge the estimate during the current soak, and it is removed once that verdict is recorded.")
             LabeledContent("Paired readings") {
               Text(verbatim: pairedReadingsLine(comparison))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(SettingsTheme.bodyColor)
             }
             if let last = comparison.lastPair {
               LabeledContent("Last pair") {
                 Text(verbatim: Self.relativePhrase(last))
-                  .foregroundStyle(.secondary)
+                  .foregroundStyle(SettingsTheme.bodyColor)
               }
             }
             if let stats = comparison.statistics() {
               LabeledContent("Correlation") {
                 Text(verbatim: String(format: "%.2f", stats.pearson))
-                  .foregroundStyle(.secondary)
+                  .foregroundStyle(SettingsTheme.bodyColor)
               }
               LabeledContent("Rank agreement") {
                 Text(verbatim: String(format: "%.2f", stats.spearmanRank))
-                  .foregroundStyle(.secondary)
+                  .foregroundStyle(SettingsTheme.bodyColor)
               }
               LabeledContent("Hottest regions in common") {
                 Text(verbatim: Self.overlapPhrase(stats.hottestDecileOverlap))
-                  .foregroundStyle(.secondary)
+                  .foregroundStyle(SettingsTheme.bodyColor)
               }
               if let measured = PanelHealthCopy.multiple(stats.measuredHottestMultiple),
                 let modelled = PanelHealthCopy.multiple(stats.modelledHottestMultiple)
               {
                 LabeledContent("Hottest region") {
                   Text(verbatim: "measured \(measured), estimated \(modelled)")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SettingsTheme.bodyColor)
                 }
               }
             } else if comparison.pairCount > 0 {
@@ -68,8 +70,6 @@ struct OledModelComparisonSection: View {
             }
           }
         }
-      } header: {
-        Text("Model Comparison").settingsHeading()
       }
     }
   }

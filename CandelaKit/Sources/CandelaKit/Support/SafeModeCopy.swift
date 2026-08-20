@@ -21,6 +21,12 @@ import Foundation
 /// deliberately short, local, and about one control, and D11's visibility rule
 /// wants them phrased in the terms of the control they sit under.
 ///
+/// `careSessionNotice` is the borderline case, and it is here rather than in a
+/// pane because it belongs to no control: it is the lead OLED Care and Health
+/// both open with during a safe-mode session, and Health only exists as a
+/// separate pane at all since the care restructure, which is what turned one
+/// pane's literal into two panes' shared sentence.
+///
 /// Returns `String`, never `LocalizedStringKey`, which is why this can live in
 /// Kit at all (CandelaKit imports no SwiftUI). `app` is the product name, passed
 /// in for the same reason `DiagnosticsCopy` passes it: `AppInfo.productName`
@@ -137,4 +143,23 @@ public enum SafeModeCopy {
   public static func generalPaneCaption(app: String) -> String {
     "Shift was held at launch. \(suppressions(app: app)) The sliders and keys still work, your settings are unchanged, and relaunching without Shift restores normal behavior."
   }
+
+  /// The care panes' pane-level lead: the `oledCare` suppression said in the
+  /// terms those panes are read in, for a reader looking at figures and
+  /// switches rather than at a list of what the session gates.
+  ///
+  /// A summary, not a per-control note, which is why it is here: OLED Care and
+  /// Health both open on it, and two panes describing one session in two
+  /// wordings is #147 again one notch smaller. Each pane still writes its own
+  /// second sentence, because what the reader should do next differs (Screen
+  /// Chrome still works on one; the figures below are stored history on the
+  /// other).
+  ///
+  /// Hard-coded rather than assembled from `clause(.oledCare)`: that clause is
+  /// written to follow "won't" and reads as one item in a list, and this is a
+  /// standalone sentence about the session. Both must stay true of the same
+  /// guard, so a change to `OledCareCoordinator.start`'s safe-mode return
+  /// belongs in both.
+  public static let careSessionNotice =
+    "Safe Mode is on for this session, so no display is being dimmed, no hours of use are being counted, and no measurements are being taken."
 }

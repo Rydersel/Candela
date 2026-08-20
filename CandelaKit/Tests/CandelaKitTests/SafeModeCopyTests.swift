@@ -135,9 +135,23 @@ struct SafeModeCopyTests {
       SafeModeCopy.brightnessSyncParagraph,
       SafeModeCopy.diagnosticsRow(app: Self.app),
       SafeModeCopy.generalPaneCaption(app: Self.app),
+      SafeModeCopy.careSessionNotice,
     ]
     for text in texts {
       #expect(!text.contains("\u{2014}"))
     }
+  }
+
+  /// The one sentence OLED Care and Health both open on during a safe-mode
+  /// session, pinned verbatim: its three effects (no dimming, no hours, no
+  /// measurements) restate `OledCareCoordinator.start`'s safe-mode return, and
+  /// the doc comment on the member says a change there belongs in both. It
+  /// takes no app parameter, so the product-name guarantee here is only that
+  /// no literal is baked in.
+  @Test func theCareSessionNoticeIsPinned() {
+    #expect(
+      SafeModeCopy.careSessionNotice
+        == "Safe Mode is on for this session, so no display is being dimmed, no hours of use are being counted, and no measurements are being taken.")
+    #expect(!SafeModeCopy.careSessionNotice.contains("Candela"))
   }
 }

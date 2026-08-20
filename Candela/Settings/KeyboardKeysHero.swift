@@ -120,11 +120,14 @@ struct KeyboardKeysHero: View {
   let alternateAccepted: Bool
   let accessibilityGranted: Bool
 
+  @Environment(\.settingsAccent) private var lighting
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   var body: some View {
     VStack(spacing: 12) {
       // Wraps rather than clips when the window is narrow; each cluster
       // stays intact because it is its own unit.
-      HStack(alignment: .top, spacing: 22) {
+      HStack(alignment: .top, spacing: 18) {
         cluster(
           heading: "Brightness & contrast",
           line: KeyboardHeroModel.brightnessLine(mode: brightnessMode, target: brightnessTarget),
@@ -147,53 +150,64 @@ struct KeyboardKeysHero: View {
         )
       }
       .frame(maxWidth: .infinity)
+      // A crossfade between two renderings of the same data, which `Motion`
+      // leaves to its own site with its own Reduce Motion guard. Keys relight
+      // under a mode change rather than snapping, so the eye follows what the
+      // control below just did.
+      .animation(relight, value: brightnessMode)
+      .animation(relight, value: volumeMode)
+      .animation(relight, value: alternateAccepted)
 
       if KeyboardHeroModel.showsAccessibilityLine(
         granted: accessibilityGranted, brightnessMode: brightnessMode, volumeMode: volumeMode
       ) {
-        HStack(spacing: 5) {
+        HStack(spacing: 7) {
           // Decoration beside the words, never instead of them.
           Circle()
-            .fill(.green)
+            .fill(Color.green.opacity(0.7))
             .frame(width: 7, height: 7)
             .accessibilityHidden(true)
           Text("Accessibility granted, so the lit keys reach \(AppInfo.productName)")
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(SettingsTheme.faintColor)
         }
         .frame(maxWidth: .infinity)
       }
     }
-    .padding(.vertical, 6)
+    .padding(.vertical, 4)
+  }
+
+  private var relight: Animation? {
+    reduceMotion ? nil : .easeOut(duration: 0.25)
   }
 
   private func cluster(
     heading: String, line: String, lit: Bool, keys: [(glyph: String, label: String)]
   ) -> some View {
     VStack(spacing: 0) {
-      HStack(spacing: 5) {
+      HStack(spacing: 7) {
         ForEach(keys, id: \.label) { key in
           keycap(glyph: key.glyph, label: key.label, lit: lit)
         }
       }
       ClusterBracket()
-        .stroke(lit ? AnyShapeStyle(Color.accentColor.opacity(0.45)) : AnyShapeStyle(.quaternary), lineWidth: 1)
-        .frame(height: 7)
-        .padding(.horizontal, 5)
-        .padding(.top, 8)
-        .padding(.bottom, 7)
-      VStack(spacing: 1) {
+        .stroke(lit ? lighting.accent.opacity(0.4) : Color.white.opacity(0.12), lineWidth: 1)
+        .frame(height: 8)
+        .padding(.horizontal, 6)
+        .padding(.top, 7)
+        .padding(.bottom, 6)
+      VStack(spacing: 3) {
         Text(verbatim: heading)
           .font(.caption.weight(.semibold))
-          .foregroundStyle(lit ? .primary : .secondary)
+          .foregroundStyle(lit ? SettingsTheme.titleColor : SettingsTheme.bodyColor)
         Text(verbatim: line)
           .font(.caption2)
-          .foregroundStyle(lit ? .secondary : .tertiary)
+          .foregroundStyle(lit ? SettingsTheme.bodyColor : SettingsTheme.faintColor)
           .multilineTextAlignment(.center)
       }
-      .frame(maxWidth: 185)
       .fixedSize(horizontal: false, vertical: true)
     }
+    .frame(maxWidth: .infinity, alignment: .top)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(Text(verbatim: "\(heading) keys: \(spoken(line))"))
   }
@@ -203,26 +217,28 @@ struct KeyboardKeysHero: View {
     line.replacingOccurrences(of: " · ", with: ", ")
   }
 
+  /// A drawn key: flat face, hairline edge. Watched keys read as lit through a
+  /// brighter face and an accent edge, never through a glow.
   private func keycap(glyph: String, label: String, lit: Bool) -> some View {
-    VStack(spacing: 2) {
+    VStack(spacing: 3) {
       Image(systemName: glyph)
-        .font(.system(size: 13))
-        .foregroundStyle(lit ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+        .font(.system(size: 15, weight: .medium))
+        .foregroundStyle(lit ? lighting.accent : Color.white.opacity(0.38))
       Text(verbatim: label)
-        .font(.system(size: 7.5, weight: .medium))
-        .foregroundStyle(.tertiary)
+        .font(.system(size: 8, weight: .medium))
+        .foregroundStyle(SettingsTheme.faintColor)
     }
-    .frame(width: 38, height: 38)
+    .frame(width: 46, height: 46)
     .background(
-      RoundedRectangle(cornerRadius: 7)
-        .fill(.quaternary.opacity(0.4))
+      RoundedRectangle(cornerRadius: 11, style: .continuous)
+        .fill(Color.white.opacity(lit ? 0.11 : 0.05))
     )
     .overlay(
-      RoundedRectangle(cornerRadius: 7)
+      RoundedRectangle(cornerRadius: 11, style: .continuous)
         .stroke(
-          lit ? AnyShapeStyle(Color.accentColor.opacity(0.55)) : AnyShapeStyle(.quaternary),
-          lineWidth: 1)
+          lit ? lighting.accent.opacity(0.4) : Color.white.opacity(0.10), lineWidth: 1)
     )
+    .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
     .accessibilityHidden(true)
   }
 }

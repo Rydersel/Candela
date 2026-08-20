@@ -5,17 +5,23 @@ import Foundation
 /// rather than a sidebar row that navigates nowhere. Same guarantee `PrefName`
 /// gives the propagation seam.
 enum PaneID: String, CaseIterable, Hashable {
-  // Order is the sidebar's order. `arrangement` sits after `menuBar` because it
-  // is about the desktop rather than about the app, and before the input and
-  // informational panes. `oledCare` follows it: it is also about the displays
-  // themselves, and its per-display sections read as a continuation of the
-  // arrangement pane's subject rather than of the app's own settings.
-  // `virtualDisplays` follows `oledCare` for the same reason `oledCare`
-  // follows `arrangement`: it is about the desktop's displays rather than
-  // about the app, and it CREATES the things the arrangement pane places.
-  // `updates` sits with the app-and-informational tail, directly above
-  // `about`, whose version line it shares a subject with.
-  case general, menuBar, arrangement, oledCare, virtualDisplays, keyboard, updates, about
+  // This list is NO LONGER the sidebar's order (SC1). Render order comes from
+  // `SettingsRegistry.sections`, which groups the panes under CARE and
+  // CONTROLS; `allCases` is now only the id space, and a test pins that every
+  // case appears in exactly one section.
+  //
+  // Raw values are shipped schema (the `CANDELA_DEBUG_SETTINGS` route ids, and
+  // whatever else stores a pane id): append, never rename and never renumber.
+  // The care panes are appended for that reason alone, and their position here
+  // says nothing about where they draw.
+  //
+  // `updates` was a case until 2026-08-20, when its controls moved onto the
+  // About page. Removing an id is the one edit this list otherwise forbids, and
+  // it is safe here only because nothing stores a pane id on disk: the window's
+  // selection is `@State`, seeded at General every time it opens. The one
+  // reader of a raw value is the debug route, which names the retirement.
+  case general, menuBar, arrangement, oledCare, virtualDisplays, keyboard, about
+  case health, protection, checkup
 }
 
 /// The split view's selection type.
@@ -51,21 +57,24 @@ enum DisplaySubPage: String, CaseIterable, Hashable {
 /// Display Health is deliberately NOT a case (OCR-A1, #185): it opens in its
 /// own content-sized window, because a pushed page cannot resize the settings
 /// window to a portrait display's map. Navigation-only state, not on-disk
-/// schema, so the case's removal cost nothing stored.
+/// schema, so a case's removal costs nothing stored.
+///
+/// Measurement & Data was the second case until SC5 retired the page; its
+/// controls are the Health pane's now, which is a sidebar destination rather
+/// than a push. One case left, kept as an enum because the pane's stack, its
+/// switcher and its departure rule are all written against this type.
 enum OledCarePage: Hashable {
   case display(String)
-  case measurement(String)
 
   var displayKey: String {
     switch self {
-    case let .display(key), let .measurement(key): key
+    case let .display(key): key
     }
   }
 
   func withDisplayKey(_ key: String) -> OledCarePage {
     switch self {
     case .display: .display(key)
-    case .measurement: .measurement(key)
     }
   }
 }

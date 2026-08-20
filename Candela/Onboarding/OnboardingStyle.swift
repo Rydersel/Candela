@@ -160,6 +160,9 @@ struct OnboardingFloatModifier: ViewModifier {
       .offset(y: up ? -4 : 3)
       .onAppear { updateFloat() }
       .onChange(of: active) { updateFloat() }
+      // Reduce Motion turned on while the page is open stops the float now,
+      // not at the next rebuild.
+      .onChange(of: reduceMotion) { updateFloat() }
   }
 
   private func updateFloat() {

@@ -46,6 +46,9 @@ struct ArrangementCanvasView: View {
   /// owns the desktop, so it is the member of the pair a layout can move (AR6).
   /// Asked, not decided, for `name`'s reason.
   var isSynthesisPair: (CGDirectDisplayID) -> Bool = { _ in false }
+  /// Is this the built-in display, which draws as a laptop rather than as a
+  /// monitor (SV9). Asked, not decided, for `name`'s reason.
+  var isBuiltIn: (CGDirectDisplayID) -> Bool = { _ in false }
   /// Whether the coordinator has a reconfiguration in flight.
   ///
   /// It is what makes `arrangement` above readable: the pane holds its request
@@ -81,17 +84,15 @@ struct ArrangementCanvasView: View {
   @State private var drag: TileDrag?
   @FocusState private var focused: CGDirectDisplayID?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.settingsAccent) private var lighting
 
-  /// Sized to fit INSIDE the grouped form's section card at the settings
-  /// window's 720 pt minimum width, measured rather than budgeted: the card's
-  /// interior there is about 454 pt (2x captures, 2026-08-18). The previous 480
-  /// was derived from the detail COLUMN's width and never actually fit the
-  /// card, which stayed latent while the saved frame was wide; at a saved
-  /// 720 pt frame, NavigationSplitView resolves the over-constraint by
-  /// confiscating the sidebar's margins, so the sidebar sits flush against the
-  /// window edge, and the theft persists on every other pane until relaunch.
-  /// 440 leaves ~14 pt of slack for scroller and inset variance.
-  ///
+  /// Sized to fit INSIDE the card that holds it, which no longer depends on the
+  /// window at all: the page's content column is capped at
+  /// `SettingsTheme.pageWidth`, so the card's interior is about 528 pt at every
+  /// width the window can take, and the map is centred on the stage floor with
+  /// the rest as deadspace. It stays a fixed size for the two reasons in this
+  /// view's own header, neither of which is about the column: a rescaling
+  /// transform under the pointer, and reproducible screenshot checks.
   static let canvasSize = CanvasSize(width: 440, height: 250)
   private static let spaceName = "candela.arrangement.canvas"
   private static let margin: Double = 14
@@ -105,7 +106,7 @@ struct ArrangementCanvasView: View {
   /// This is not a claim about what `DragGesture` produces; it is a boundary
   /// this view can enforce and the policy cannot, at the cost of one comparison
   /// per frame. The bound is far outside any reachable drag: the canvas is
-  /// 480 pt wide.
+  /// 440 pt wide.
   private static let translationLimit: Double = 1_000_000
 
   /// Everything a drag needs, as ONE optional value — not three `@State`
@@ -226,11 +227,11 @@ struct ArrangementCanvasView: View {
 
   var body: some View {
     ZStack(alignment: .topLeading) {
-      // No fill and no border. The map is drawn ON the pane's field, which
-      // spans the whole row; a card here as well nests one bordered container
-      // inside another and is what made the map read as an island floating off
-      // the section's leading edge. `contentShape` below still gives the
-      // background its tap target.
+      // No fill and no border. The map is drawn ON the pane's stage floor,
+      // which spans the card; a second surface here nests one bordered
+      // container inside another and is what made the map read as an island
+      // floating off the card's leading edge. `contentShape` below still gives
+      // the background its tap target.
       Color.clear
 
       ForEach(displayed.tiles) { tile in
@@ -242,6 +243,14 @@ struct ArrangementCanvasView: View {
     .frame(width: Self.canvasSize.width, height: Self.canvasSize.height)
     .coordinateSpace(.named(Self.spaceName))
     .contentShape(Rectangle())
+    // The whole map, tiles and background alike, is exempt from the settings
+    // window's move-by-background dragging: AppKit asks the hit view whether a
+    // mouse-down may move the window, the hosting view says yes, and a tile's
+    // drag would lose every gesture to the window move. On the canvas rather
+    // than on a tile, deliberately: the per-tile chain above `.position` is
+    // load-bearing (see below), and the background's own click target belongs
+    // to the map too.
+    .blocksWindowDrag()
     // A click on the background deselects. Without it the only way out of a
     // selection is to select something else, and "Use as Main Display" then has
     // no off state.
@@ -266,6 +275,7 @@ struct ArrangementCanvasView: View {
       isInvalid: invalidIDs.contains(tile.id),
       isDragging: isDragging,
       isVirtual: presentsAsVirtual(tile.id),
+      isBuiltIn: isBuiltIn(tile.id),
       labels: labelStyle
     )
     // ORDER IS LOAD-BEARING, and this is the top-ranked risk in the feature.
@@ -338,19 +348,11 @@ struct ArrangementCanvasView: View {
     // resizes every tile. With only the centres keyed the tiles slid to their
     // new positions while snapping to their new sizes in the same frame.
     //
-    // A keyed `.animation` here is MEASURED to work despite this canvas living
-    // in a grouped `Form` [2026-08-18]: an `Animatable` probe counted 168
-    // interpolated frames for this shape in a `Form` section, the same as for
-    // the control outside one. The harness that produced that number was not
-    // committed; skill `candela-ui-verification` describes its shape well
-    // enough to rebuild, which is the citation to follow rather than any
-    // scratch path.
-    //
-    // The skill's "a keyed animation in a Form animates nothing" is about a
-    // CONDITIONAL ROW arriving and leaving, which is a transition; a persistent
-    // child moving is not the same question, and conflating the two cost a
-    // deploy here. Replacing this with a bare ambient transaction was tried and
-    // reverted: it animates too, and buys nothing this does not already do.
+    // A keyed `.animation` on a persistent child that MOVES is not the
+    // conditional-row question skill `candela-ui-verification` answers; an
+    // `Animatable` probe counted 168 interpolated frames for this shape
+    // [MEASURED 2026-08-18]. Replacing it with a bare ambient transaction was
+    // tried and reverted: it animates too, and buys nothing this does not.
     .animation(isDragging ? nil : motion, value: rect)
     .zIndex(isDragging ? 2 : (selection == tile.id ? 1 : 0))
   }
@@ -558,7 +560,9 @@ struct ArrangementCanvasView: View {
       path.addLine(to: CGPoint(x: end.x, y: end.y))
     }
     .stroke(
-      .tint,
+      // The destination's own accent, so a guide belongs to the same light as
+      // the tile it is naming an edge on.
+      lighting.accent,
       style: guide.isLanding
         ? StrokeStyle(lineWidth: 1.5)
         : StrokeStyle(lineWidth: 1, dash: [3, 3])

@@ -103,9 +103,9 @@ struct DisplaySizeRows: View {
       // Every size this panel reports is under the usability floor. The curated
       // list is empty, the full one is not, so the sub-page is the whole feature
       // here, and saying "no resolutions" while holding dozens would be false.
-      SettingsCaption("Every size this display reports is too small to use as a desktop. All Sizes & Refresh Rates lists them anyway.")
+      SettingsRowNote("Every size this display reports is too small to use as a desktop. All Sizes & Refresh Rates lists them anyway.")
     } else {
-      SettingsCaption("\(AppInfo.productName) found no resolutions it can switch between on this display.")
+      SettingsRowNote("\(AppInfo.productName) found no resolutions it can switch between on this display.")
     }
   }
 
@@ -121,7 +121,7 @@ struct DisplaySizeRows: View {
   /// the change lands, which is the truth: nothing is applied until the preview
   /// is kept.
   private var sizePicker: some View {
-    Picker("Size", selection: Binding(
+    ThemedChoiceRow(label: "Size", selection: Binding(
       get: { Self.curatedSelection(in: catalog) },
       set: { id in
         guard let id, let row = catalog.rows.first(where: { $0.id == id }) else { return }
@@ -261,7 +261,10 @@ struct DisplaySizeRows: View {
       )
       let rates = dedupedQuantized(raw)
       if rates.count > 1 {
-        Picker("Refresh rate", selection: Binding(
+        // Never this card's first row: the size row above is drawn by the same
+        // branch that reaches here.
+        SettingsCardDivider()
+        ThemedChoiceRow(label: "Refresh rate", selection: Binding(
           get: { DisplayMode.quantizedRefresh(current.refreshHz) },
           set: { hz in selection.select(refreshHz: hz, in: catalog) }
         )) {
@@ -282,8 +285,12 @@ struct DisplaySizeRows: View {
   /// having taken the rate away.
   @ViewBuilder private var synthesizedRateRow: some View {
     if catalog.engagedSyntheticSize != nil {
+      // Same reasoning as the picker it replaces: the size row is always drawn
+      // before it.
+      SettingsCardDivider()
       LabeledContent("Refresh rate") {
-        Text(verbatim: SynthesisCopy.keepsPanelRefresh).foregroundStyle(.secondary)
+        Text(verbatim: SynthesisCopy.keepsPanelRefresh)
+          .foregroundStyle(SettingsTheme.bodyColor)
       }
     }
   }
@@ -357,6 +364,7 @@ struct RememberResolutionRow: View {
             actions.prefDidChange(.rememberDisplayMode, persistenceKey: persistenceKey)
           }
         ))
+        .themedSwitch()
         .prefIdentifier(.rememberDisplayMode, persistenceKey: persistenceKey)
         switch Self.pinnedRow(
           isRemembering: coordinator.isRemembering(displayID),
@@ -372,14 +380,14 @@ struct RememberResolutionRow: View {
           // The pin button comes along, because otherwise the only route back
           // to a pin is a toggle off and on.
           HStack {
-            Text("Nothing pinned.").foregroundStyle(.secondary)
+            Text("Nothing pinned.").foregroundStyle(SettingsTheme.bodyColor)
             Spacer()
             setToCurrentButton(isRedundant: false)
           }
         case .pinned(let stored):
           HStack {
             Text(verbatim: "\(DisplayModeCopy.size(stored)) · \(DisplayModeCopy.refresh(stored.refreshHz))")
-              .foregroundStyle(.secondary)
+              .foregroundStyle(SettingsTheme.bodyColor)
             Spacer()
             setToCurrentButton(isRedundant: pinnedMatchesCurrent(stored))
             // Never disabled, deliberately, and not for symmetry with the
@@ -391,6 +399,7 @@ struct RememberResolutionRow: View {
             // preview afterwards pins the mode the user just accepted, which
             // is a fresh answer rather than the forgotten one coming back.
             Button("Forget") { coordinator.forgetStoredMode(on: displayID) }
+              .buttonStyle(SettingsSecondaryButtonStyle())
               .accessibilityLabel("Forget the Pinned Resolution")
               .help("Removes the pinned resolution. This display goes on remembering, so the next resolution you keep is pinned in its place.")
           }
@@ -409,6 +418,7 @@ struct RememberResolutionRow: View {
   /// pinned, so the empty row passes false rather than computing it.
   private func setToCurrentButton(isRedundant: Bool) -> some View {
     Button("Set to Current") { coordinator.pinCurrentMode(on: displayID) }
+      .buttonStyle(SettingsSecondaryButtonStyle())
       .accessibilityLabel("Set to Current")
       .disabled(isRedundant || coordinator.preview?.displayID == displayID)
   }

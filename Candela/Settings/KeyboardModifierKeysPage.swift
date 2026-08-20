@@ -20,21 +20,15 @@ struct KeyboardModifierKeysPage: View {
     // The inactive note follows the mode picker on the root; prefs are plain
     // UserDefaults, so the revision bump is the only re-read.
     let _ = model.prefsRevision
-    Form {
-      Section {
-        SubPageHeader(
-          title: KeyboardPage.modifiers.title,
-          currentKey: "", displays: [], onSwitch: { _ in })
-      }
+    SettingsPageScaffold {
+      SubPageHeader(
+        title: KeyboardPage.modifiers.title,
+        currentKey: "", displays: [], onSwitch: { _ in })
 
-      Section {
+      SettingsCardSection {
         if !KeyModePolicy.watchesMediaKeys(prefs.keyboardBrightness) {
-          HStack(alignment: .firstTextBaseline, spacing: 6) {
-            // Symbol AND text; never state by colour alone.
-            Image(systemName: "exclamationmark.triangle")
-              .foregroundStyle(.secondary)
-            Text("These combinations are inactive because the keyboard's brightness keys are currently left to macOS.")
-          }
+          inactiveNote
+          SettingsCardDivider()
         }
         // Spoken labels preserved verbatim from the legend this page replaced
         // (SO16: the sentence IS the accessibility label).
@@ -43,33 +37,50 @@ struct KeyboardModifierKeysPage: View {
           modifiers: ["⌃"], suffix: "+ brightness key",
           spoken: "Control plus a brightness key adjusts the built-in display."
         )
+        SettingsCardDivider()
         ModifierLegendRow(
           title: "All external displays",
           modifiers: ["⌃", "⌘"], suffix: "+ brightness key",
           spoken: "Control Command plus a brightness key adjusts every external display."
         )
+        SettingsCardDivider()
         ModifierLegendRow(
           title: "Contrast",
           modifiers: ["⌃", "⌥", "⌘"], suffix: "+ brightness key",
           spoken: "Control Option Command plus a brightness key adjusts contrast."
         )
+        SettingsCardDivider()
         ModifierLegendRow(
           title: "Open Displays settings",
           modifiers: ["⌥"], suffix: "+ brightness key",
           spoken: "Option with a brightness key opens Displays settings."
         )
+        SettingsCardDivider()
         ModifierLegendRow(
           title: "Toggle mirroring",
           modifiers: ["⌘"], suffix: "+ brightness down",
           spoken: "Command with the brightness-down key switches mirroring on or off."
         )
-      } footer: {
-        // The scope, stated once for the page: media-key handling only, the
-        // fine-step modifiers, and the custom-shortcut exemption (KMR5).
-        SettingsCaption("These combinations work while the keyboard's brightness keys are handled by \(AppInfo.productName). Holding Shift and Option with any adjustment makes a fine step. Custom shortcuts carry their own modifiers, and none of these rules apply to them.")
       }
+
+      // The scope, stated once for the page under the card the section footer
+      // used to sit beneath: media-key handling only, the fine-step modifiers,
+      // and the custom-shortcut exemption (KMR5).
+      SettingsCaption("These combinations work while the keyboard's brightness keys are handled by \(AppInfo.productName). Holding Shift and Option with any adjustment makes a fine step. Custom shortcuts carry their own modifiers, and none of these rules apply to them.")
     }
-    .formStyle(.grouped)
+  }
+
+  /// Stays at the head of the legend rather than becoming a card of its own:
+  /// it is a fact about the five rows under it, and a separate notice would
+  /// float free of them.
+  private var inactiveNote: some View {
+    // Surfaceless: it already sits on the legend's card, and a notice drawing a
+    // second surface inside the first is a box in a box.
+    SettingsNotice(drawsSurface: false) {
+      Text("These combinations are inactive because the keyboard's brightness keys are currently left to macOS.")
+        .fixedSize(horizontal: false, vertical: true)
+    }
+    .padding(.vertical, 6)
   }
 }
 
@@ -90,34 +101,46 @@ private struct ModifierLegendRow: View {
 
   var body: some View {
     ViewThatFits(in: .horizontal) {
-      HStack(spacing: 8) {
+      HStack(spacing: 12) {
         Text(title)
-        Spacer(minLength: 8)
+        Spacer(minLength: 16)
         // Only on this candidate: a wrapping combination would let the row
         // "fit" at any width and the fallback would never be reached.
         combination.lineLimit(1)
       }
-      VStack(alignment: .leading, spacing: 3) {
+      VStack(alignment: .leading, spacing: 4) {
         Text(title)
         combination
       }
     }
+    .foregroundStyle(SettingsTheme.titleColor)
+    .padding(.vertical, 6)
+    .frame(maxWidth: .infinity, alignment: .leading)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(spoken)
   }
 
+  /// Chips in the hero's keycap vocabulary at row scale: a flat face and a
+  /// hairline edge, the same two whites the caps use.
   private var combination: some View {
-    HStack(spacing: 3) {
+    HStack(spacing: 4) {
       ForEach(modifiers, id: \.self) { glyph in
         Text(verbatim: glyph)
           .font(.callout)
-          .padding(.horizontal, 5)
-          .padding(.vertical, 1)
-          .background(RoundedRectangle(cornerRadius: 4).fill(.quaternary.opacity(0.4)))
-          .overlay(RoundedRectangle(cornerRadius: 4).stroke(.quaternary, lineWidth: 1))
+          .frame(minWidth: 16)
+          .padding(.horizontal, 6)
+          .padding(.vertical, 3)
+          .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+              .fill(Color.white.opacity(0.08))
+          )
+          .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+              .stroke(Color.white.opacity(0.12), lineWidth: 1)
+          )
       }
       Text(verbatim: suffix)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(SettingsTheme.bodyColor)
     }
   }
 }

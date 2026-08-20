@@ -86,49 +86,52 @@ struct AllModesPage: View {
   private var listMode: ListMode { chosenListMode ?? .recommended }
 
   var body: some View {
-    ScrollViewReader { proxy in
-      Form {
-        SubPageHeader(
-          title: DisplaySubPage.allModes.title,
-          currentKey: state.display.persistenceKey,
-          displays: displays,
-          onSwitch: onSwitch
-        )
-        // A nil catalog is "not enumerated yet", NOT "no modes" — the same
-        // distinction the hub draws. It renders as nothing rather than as an
-        // empty state that would flash on every push.
-        if let catalog {
-          listControls(catalog)
-          modeList(catalog)
-        }
-      }
-      .formStyle(.grouped)
-      // Enumeration is several CoreGraphics round-trips, so it runs once per
-      // display rather than per body evaluation — and it runs HERE as well as
-      // on the hub because a push is exactly when the modes are worth
-      // re-reading, and because the debug screenshot hook can open this page
-      // with the hub's own `.task` never having appeared.
-      .task(id: state.id) {
-        coordinator.refreshCatalog(for: state.id)
-        seedListMode()
-      }
+    // The scaffold's reading variant: it owns the scroller, and the two hooks
+    // that land the page on the mode in use need that scroller's proxy.
+    SettingsPageScaffold(reading: { proxy in
+      SubPageHeader(
+        title: DisplaySubPage.allModes.title,
+        currentKey: state.display.persistenceKey,
+        displays: displays,
+        onSwitch: onSwitch
+      )
+      // The proxy exists only inside the reader, so the scroll hooks hang on
+      // the header: the one view of this page that is always present. A hook on
+      // the list would stop existing whenever the catalog does.
       .onAppear { scrollToCurrent(proxy) }
       // Switching to All lands on 332 rows, and the row worth landing on is the
-      // one the display is running. Focus stays on the segmented control (Ana
-      // #5) — scrolling does not move it. Keyed on the RESOLVED mode, so the
+      // one the display is running. Focus stays on the list-mode control (Ana
+      // #5): scrolling does not move it. Keyed on the RESOLVED mode, so the
       // catalog arriving and flipping the default scrolls too.
       .onChange(of: listMode) { _, _ in scrollToCurrent(proxy) }
-      // A filter naming a rate the display no longer offers would render an
-      // empty list under a pop-up showing a blank value. Re-enumeration is the
-      // one thing that can take a rate away.
-      .onChange(of: rateChoices) { _, choices in
-        if let rate = rateFilter, !choices.contains(rate) { rateFilter = nil }
+
+      // A nil catalog is "not enumerated yet", NOT "no modes" — the same
+      // distinction the hub draws. It renders as nothing rather than as an
+      // empty state that would flash on every push.
+      if let catalog {
+        listControls(catalog)
+        modeList(catalog)
       }
-      .onMoveCommand { move($0) }
-      .accessibilityRotor("Resolutions") {
-        ForEach(rotorEntries) { entry in
-          AccessibilityRotorEntry(entry.label, id: entry.id)
-        }
+    })
+    // Enumeration is several CoreGraphics round-trips, so it runs once per
+    // display rather than per body evaluation — and it runs HERE as well as
+    // on the hub because a push is exactly when the modes are worth
+    // re-reading, and because the debug screenshot hook can open this page
+    // with the hub's own `.task` never having appeared.
+    .task(id: state.id) {
+      coordinator.refreshCatalog(for: state.id)
+      seedListMode()
+    }
+    // A filter naming a rate the display no longer offers would render an
+    // empty list under a pop-up showing a blank value. Re-enumeration is the
+    // one thing that can take a rate away.
+    .onChange(of: rateChoices) { _, choices in
+      if let rate = rateFilter, !choices.contains(rate) { rateFilter = nil }
+    }
+    .onMoveCommand { move($0) }
+    .accessibilityRotor("Resolutions") {
+      ForEach(rotorEntries) { entry in
+        AccessibilityRotorEntry(entry.label, id: entry.id)
       }
     }
   }
@@ -136,59 +139,89 @@ struct AllModesPage: View {
   // MARK: - Controls
 
   @ViewBuilder private func listControls(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
-    Section {
-      // The announcement rides on the SETTER, not on a change of `listMode`:
-      // the resolved value can also change when the catalog arrives, and a page
-      // that announced its own opening default would talk over the title
-      // `SubPageHeader` just took the cursor to (a11y contract 1).
-      Picker("Show", selection: Binding(
-        get: { listMode },
-        set: { mode in
-          // A write-back equal to what `get` just returned is not a choice, and
-          // a segmented control cannot send one from a real click. Ignoring it
-          // keeps a picker's own initial-selection write from being recorded as
-          // the user having answered.
-          guard mode != listMode else { return }
-          // Animated at the SETTER, not by an `.animation` on the list: only a
-          // real choice should move. The seed in `seedListMode` decides the
-          // opening list before anything is on screen, and a catalog arriving
-          // mid-page must land instantly.
-          withAnimation(Motion.disclosure(reduceMotion: reduceMotion)) {
-            chosenListMode = mode
-          }
-          announce(mode, in: catalog)
+    SettingsCardSection {
+      SettingRow {
+        HStack(spacing: 12) {
+          // Drawn here and hidden from VoiceOver, which reads it off the
+          // segments' own container instead: the same split `ThemedChoiceRow`
+          // makes, so the group is named once.
+          Text("Show").accessibilityHidden(true)
+          Spacer(minLength: 16)
+          ThemedSegments(options: Self.listModeNames, selection: listModeSelection(catalog))
+            // A container element, because the segments themselves are the
+            // buttons: the written label names the group, each segment keeps
+            // its own name and its selected trait.
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Show")
         }
-      )) {
-        ForEach(ListMode.allCases, id: \.self) { mode in
-          Text(verbatim: mode.rawValue).tag(mode)
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .pickerStyle(.segmented)
 
       // Only the full list is long enough to want filtering, and a filter with
       // one rate in it is a control that cannot do anything.
       if listMode == .all, rateChoices.count > 1 {
-        Picker("Refresh rate", selection: Binding<Double?>(
-          get: { rateFilter },
-          set: { rate in
-            // A rate bulk-expands every size that offers it (see `isExpanded`),
-            // so this is the size rows' own disclosure made thirty times at
-            // once, and it unfurls as one movement. Animating the SETTER leaves
-            // the correction in `onChange(of: rateChoices)` instant, which is
-            // right: nobody asked for that one.
-            withAnimation(Motion.disclosure(reduceMotion: reduceMotion)) { rateFilter = rate }
-          }
-        )) {
-          Text("Any").tag(Double?.none)
-          ForEach(rateChoices, id: \.self) { hz in
-            Text(verbatim: DisplayModeCopy.refresh(hz)).tag(Double?.some(hz))
+        // A `Group`'s modifier reaches each child, so the divider and the row
+        // arrive and leave together under the switch to All, as one movement.
+        Group {
+          SettingsCardDivider()
+          SettingRow {
+            ThemedChoiceRow(label: "Refresh rate", selection: Binding<Double?>(
+              get: { rateFilter },
+              set: { rate in
+                // A rate bulk-expands every size that offers it (see
+                // `isExpanded`), so this is the size rows' own disclosure made
+                // thirty times at once, and it unfurls as one movement.
+                // Animating the SETTER leaves the correction in
+                // `onChange(of: rateChoices)` instant, which is right: nobody
+                // asked for that one.
+                withAnimation(Motion.disclosure(reduceMotion: reduceMotion)) { rateFilter = rate }
+              }
+            )) {
+              Text("Any").tag(Double?.none)
+              ForEach(rateChoices, id: \.self) { hz in
+                Text(verbatim: DisplayModeCopy.refresh(hz)).tag(Double?.some(hz))
+              }
+            }
           }
         }
-        // Arrives and leaves with the switch to All, under that switch's own
-        // animation.
         .transition(.opacity)
       }
     }
+  }
+
+  /// The segment names in `ListMode`'s own order, so the control and the
+  /// binding below cannot come to disagree about which one index 0 is.
+  private static let listModeNames = ListMode.allCases.map(\.rawValue)
+
+  /// `ThemedSegments` chooses by index; this page reasons in list modes. One
+  /// adapter, and an out-of-range write lands on the curated list rather than
+  /// on nothing.
+  ///
+  /// The announcement rides on the SETTER, not on a change of `listMode`: the
+  /// resolved value can also change when the catalog arrives, and a page that
+  /// announced its own opening default would talk over the title
+  /// `SubPageHeader` just took the cursor to (a11y contract 1).
+  private func listModeSelection(_ catalog: DisplayModeCoordinator.Catalog) -> Binding<Int> {
+    Binding(
+      get: { Self.listModeNames.firstIndex(of: listMode.rawValue) ?? 0 },
+      set: { index in
+        let mode = ListMode.allCases.indices.contains(index)
+          ? ListMode.allCases[index] : .recommended
+        // A write-back equal to what `get` just returned is not a choice, and a
+        // segmented control cannot send one from a real click. Ignoring it
+        // keeps an initial-selection write from being recorded as the user
+        // having answered.
+        guard mode != listMode else { return }
+        // Animated at the SETTER, not by an `.animation` on the list: only a
+        // real choice should move. The seed in `seedListMode` decides the
+        // opening list before anything is on screen, and a catalog arriving
+        // mid-page must land instantly.
+        withAnimation(Motion.disclosure(reduceMotion: reduceMotion)) {
+          chosenListMode = mode
+        }
+        announce(mode, in: catalog)
+      }
+    )
   }
 
   private var rateChoices: [Double] {
@@ -253,9 +286,11 @@ struct AllModesPage: View {
   /// window), and that trap is exactly what the old full-list disclosure died
   /// of. The chevron here is decoration on a row that is entirely hit-target.
   ///
-  /// The sections sit directly in the `Form`'s builder — a grouped `Form` only
-  /// reliably handles structure declared there (measured; see
-  /// `DisplayHubView.body`).
+  /// **No hairline between mode rows**, unlike every other card in this window.
+  /// A card's divider separates settings that are unrelated to each other;
+  /// these are one list of one kind of thing, up to 332 entries long, and a
+  /// rule between every pair is a grid. What tells the rows apart is the hover
+  /// wash and the accent ring on the row in use.
   @ViewBuilder private func modeList(_ catalog: DisplayModeCoordinator.Catalog) -> some View {
     // A11y 6 asks for the rows to read as one radio group. `.contain` names the
     // group without collapsing its children, which is the whole point — it must
@@ -263,21 +298,19 @@ struct AllModesPage: View {
     Group {
       switch listMode {
       case .recommended:
-        Section {
+        SettingsCardSection(title: "Recommended Sizes") {
           ForEach(catalog.rows) { row in
             choice(Self.recommendedRowModel(row, in: catalog), in: catalog)
           }
-        } header: {
-          Text("Recommended Sizes").settingsHeading()
         }
       case .all:
         // Computed here, not per row: the answer depends on a mode's siblings
         // at the same logical size, and an expanded group renders every one.
         let lowResolution = DisplayModeCatalog.lowResolutionDuplicates(catalog.all)
-        // ONE section, not one per size: the size rows are now content rather
+        // ONE card, not one per size: the size rows are now content rather
         // than headers, and a header repeating the row directly under it is the
         // same words twice.
-        Section {
+        SettingsCardSection(title: "Sizes") {
           // SS4's All clause. This list enumerates what the DISPLAY reports, so
           // a synthesized stop has no row here and, while one is engaged, the
           // checkmark is on nothing at all. Saying so beats a list that reads as
@@ -292,6 +325,11 @@ struct AllModesPage: View {
           // stop is engaged.
           if Self.showsEngagedSizeNotice(in: catalog) {
             SettingsCaption(verbatim: SynthesisCopy.engagedSizeNotListed)
+              .padding(.bottom, 6)
+            // The one hairline on this card: it separates a sentence about the
+            // list from the list, which is the divider's ordinary job.
+            SettingsCardDivider()
+              .padding(.bottom, 6)
           }
           ForEach(filteredGroups(catalog), id: \.header) { group in
             choice(
@@ -300,12 +338,10 @@ struct AllModesPage: View {
             if isExpanded(group) {
               // One transition site for the opened block, and a `Group` rather
               // than a real container: a `Group`'s modifier reaches each child,
-              // so every rate stays its OWN form row. A `VStack` would fade as
-              // one block and collapse the whole size into a single row, taking
-              // the separators and the row insets with it, which is the
-              // grouped-`Form` trap `.focusSection()` fell into below. The fade
-              // is the transition; the vertical unfurl is the animated layout
-              // the toggle site opens.
+              // so every rate stays its OWN row. A `VStack` would fade as one
+              // block and collapse the whole size into a single row, taking the
+              // row insets with it. The fade is the transition; the vertical
+              // unfurl is the animated layout the toggle site opens.
               Group {
                 ForEach(group.modes) { mode in
                   choice(
@@ -318,17 +354,15 @@ struct AllModesPage: View {
               .transition(.opacity)
             }
           }
-        } header: {
-          Text("Sizes").settingsHeading()
         }
       }
     }
-    // `.focusSection()` belongs here on paper — it is the primitive for a11y
-    // 6's "arrows within" — and it is deliberately ABSENT. Applied to this
-    // Group inside the grouped `Form` it took the form styling with it
-    // (measured 2026-08-06: the size header centred and the rows lost their
-    // card and separators). A focus affordance that cannot be verified is not
-    // worth a visibly broken list; see `move(_:)` for what is implemented.
+    // `.focusSection()` belongs here on paper (it is the primitive for a11y 6's
+    // "arrows within") and it is still ABSENT. The reason it was left out,
+    // that applied inside the grouped `Form` it took the form styling with it,
+    // died with the Form; nothing here can verify the affordance either, so it
+    // stays out of a restyle. See `move(_:)` for what is implemented, and for
+    // why synthetic keystrokes cannot reach this app.
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Sizes")
   }
@@ -698,17 +732,18 @@ struct AllModesPage: View {
   /// takes the page's own title and its list controls out of view, and a push
   /// that lands on a clipped control row reads as a rendering fault.
   ///
-  /// The threshold is a measurement, not a guess: at the window's default
-  /// 900×568 the header and controls cost ~100 pt and a row is ~43 pt, so the
-  /// first EIGHT rows are on screen from the top (counted in a capture, with
-  /// the ninth clipped). It is still a heuristic — the window resizes and this
-  /// number does not — but its two failure modes are a scroll that centres a
-  /// row already visible and a row left one line below the fold, neither of
-  /// which loses anything.
+  /// The threshold began as a measurement: at the settings window's former
+  /// 900×568 default the header and controls cost ~100 pt and a row was ~43 pt,
+  /// so the first EIGHT rows were on screen from the top (counted in a
+  /// capture, with the ninth clipped). The window is taller now and the card
+  /// rows are tighter, so eight is a floor rather than a count, and it is left
+  /// alone: the two failure modes are a scroll that centres a row already
+  /// visible and a row left one line below the fold, neither of which loses
+  /// anything.
   ///
-  /// One main-actor hop, deliberately: a grouped `Form`'s rows are not laid out
-  /// when the page's `onAppear` fires, and scrolling in the same turn lands on
-  /// nothing at all.
+  /// One main-actor hop, deliberately: the rows are not laid out when the
+  /// page's `onAppear` fires, and scrolling in the same turn lands on nothing
+  /// at all.
   private func scrollToCurrent(_ proxy: ScrollViewProxy) {
     guard let id = currentRowID,
           let index = visibleRowIDs.firstIndex(of: id),
@@ -816,14 +851,13 @@ struct AllModesPage: View {
   /// so Tab still visits each one. SwiftUI offers no supported way to keep a
   /// control focusable while taking it out of the Tab loop, and the one
   /// primitive that would have helped with directional movement,
-  /// `.focusSection()`, breaks the grouped form's styling here (see
-  /// `modeList`).
+  /// `.focusSection()`, is still unused (see `modeList`).
   ///
   /// Neither half is verified either: synthetic keystrokes cannot be delivered
   /// to an `LSUIElement` app from the shell (they go to the terminal), so
-  /// whether the enclosing `List` consumes the arrows before `onMoveCommand`
-  /// sees them is unknown. Both are hardware-checklist items, filed with the
-  /// task report — not measured behaviour.
+  /// whether anything consumes the arrows before `onMoveCommand` sees them is
+  /// unknown. Both are hardware-checklist items, filed with the task report:
+  /// not measured behaviour.
   ///
   /// Collapsing the sizes is what makes the shortfall survivable rather than
   /// disqualifying: Tab now walks about thirty size rows instead of 332 mode
@@ -937,30 +971,34 @@ private struct ModeChoice: View {
   let action: () -> Void
 
   @State private var isHovering = false
+  @Environment(\.settingsAccent) private var lighting
 
   var body: some View {
     Button(action: action) {
       HStack(spacing: 8) {
         Image(systemName: "checkmark")
-          .foregroundStyle(.tint)
+          .foregroundStyle(lighting.accent)
           .opacity(isCurrent ? 1 : 0)
           .accessibilityHidden(true)
         Text(verbatim: title)
+          .foregroundStyle(SettingsTheme.titleColor)
         Text(verbatim: detail)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(SettingsTheme.bodyColor)
         Spacer(minLength: 8)
         if let badge {
-          // The app's own badge shape, to the point: same font, padding, radius
-          // and fill as the menu bar's HDR marker (`PanelView`). Two badges
-          // differing by a point of radius is how one shape becomes two. A tint
-          // would compete with the checkmark, which is the only thing in this
-          // list that says "you are here".
+          // Deliberately NOT `SettingsBadge`, which is the window's accent
+          // capsule: the accent already carries the ring and the checkmark on
+          // the row in use, and a badge in the same hue would read as a second
+          // "you are here" on every row that wears one.
           Text(verbatim: badge)
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 4)
+            .foregroundStyle(SettingsTheme.faintColor)
+            .padding(.horizontal, 5)
             .padding(.vertical, 1)
-            .background(RoundedRectangle(cornerRadius: 3, style: .continuous).fill(.quaternary))
+            .background(
+              RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Color.white.opacity(0.08))
+            )
             .accessibilityHidden(true)
         }
         if let chevronExpanded {
@@ -970,42 +1008,61 @@ private struct ModeChoice: View {
           // surfaces move alike.
           Image(systemName: "chevron.down")
             .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(SettingsTheme.faintColor)
             .rotationEffect(.degrees(chevronExpanded ? 180 : 0))
             .accessibilityHidden(true)
         }
       }
-      .padding(.vertical, 3)
-      .padding(.horizontal, 4)
+      .padding(.vertical, 4)
+      .padding(.horizontal, 6)
       .frame(maxWidth: .infinity, alignment: .leading)
       .contentShape(Rectangle())
     }
-    .buttonStyle(ModeChoiceButtonStyle(isHovering: isHovering))
+    .buttonStyle(
+      ModeChoiceButtonStyle(
+        isHovering: isHovering, isCurrent: isCurrent, accent: lighting.accent))
     .onHover { isHovering = $0 }
+    .animation(SettingsTheme.hoverMotion, value: isHovering)
     .accessibilityLabel(Text(verbatim: spoken))
     .accessibilityValue(Text(verbatim: spokenValue ?? ""))
     .accessibilityAddTraits(isCurrent ? [.isSelected] : [])
   }
 }
 
-/// Hover and — required for any custom button (`buttons.md`) — a pressed state.
-/// Without one the row feels unresponsive and people wonder whether the click
-/// registered, which on a control that reconfigures the screen invites a second
-/// click.
+/// Hover, the selection ring, and a pressed state, which `buttons.md` requires
+/// of any custom button. Without one the row feels unresponsive and people
+/// wonder whether the click registered, which on a control that reconfigures
+/// the screen invites a second click.
+///
+/// The ring is the accent's job in this window: a card lights in the
+/// destination hue when its subject is the one in force, and one row of this
+/// list is exactly that. The checkmark stays beside it, so the state is never
+/// carried by colour alone.
 private struct ModeChoiceButtonStyle: ButtonStyle {
   let isHovering: Bool
+  let isCurrent: Bool
+  let accent: Color
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .background(
-        RoundedRectangle(cornerRadius: 5)
-          .fill(fill(pressed: configuration.isPressed))
-      )
+      .background(shape.fill(fill(pressed: configuration.isPressed)))
+      .overlay(ring)
       .opacity(configuration.isPressed ? 0.85 : 1)
   }
 
-  private func fill(pressed: Bool) -> AnyShapeStyle {
-    if pressed { return AnyShapeStyle(.quaternary) }
-    return isHovering ? AnyShapeStyle(.quinary) : AnyShapeStyle(.clear)
+  private var shape: RoundedRectangle {
+    RoundedRectangle(cornerRadius: 6, style: .continuous)
+  }
+
+  @ViewBuilder private var ring: some View {
+    if isCurrent {
+      shape.stroke(accent.opacity(0.5), lineWidth: 1)
+    }
+  }
+
+  private func fill(pressed: Bool) -> Color {
+    if pressed { return .white.opacity(0.13) }
+    if isCurrent { return accent.opacity(0.12) }
+    return .white.opacity(isHovering ? 0.06 : 0)
   }
 }

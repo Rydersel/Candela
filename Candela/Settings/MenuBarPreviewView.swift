@@ -50,7 +50,16 @@ enum MenuBarPreviewJump {
 @MainActor
 struct MenuBarPreviewView: View {
   @Environment(AppModel.self) private var model
-  @Environment(\.colorScheme) private var colorScheme
+
+  /// The widgets follow the SYSTEM appearance, and the settings window is dark
+  /// by rule, so the window's own color scheme would make the preview draw a
+  /// dark panel and pill to someone whose real ones are light. It feeds the
+  /// grounds below AND the depicted subtree's whole color scheme (see `body`),
+  /// because the labels and glyphs adapt too.
+  @State private var systemAppearance = SystemAppearance()
+
+  /// What the widgets resolve their adaptive colors against.
+  private var depictedScheme: ColorScheme { systemAppearance.isDark ? .dark : .light }
 
   /// Scrolls the pane; supplied by `AppMenuPane`, which owns the
   /// `ScrollViewReader`.
@@ -81,13 +90,31 @@ struct MenuBarPreviewView: View {
       anchorColumn(.topCenter, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
       anchorColumn(.topRight, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
     }
+    // SV13 covers the INK as well as the grounds. Every adaptive color inside a
+    // widget (`.primary` labels, `.secondary` headers and glyphs, `.quaternary`
+    // tracks, the panel's `.separator` edge) resolves against the environment's
+    // color scheme, and this window pins that dark, so in a light-mode system
+    // the panel and pills drew light with white text on them: illegible, and a
+    // claim about the real widgets that is simply false. Resolving the depicted
+    // subtree from the tracked system appearance flips text, glyphs and grounds
+    // together. The literal whites below are NOT covered by this and must not
+    // be: they copy `CandelaSlider`'s own literals, which are white in both
+    // appearances (Control Center's fill is), and the fixed-dark menu bar's.
+    //
+    // Applied to the scene, not to the whole `body`: the card frame added
+    // beneath this line is the settings window's chrome and stays themed.
+    .environment(\.colorScheme, depictedScheme)
     // Sized for the tallest realistic column: both pills at top right above a
     // panel showing a built-in row plus two externals with volume and
     // contrast. Columns top-align, so smaller content just leaves ground.
     .frame(height: 300)
     .frame(maxWidth: .infinity)
-    .clipShape(RoundedRectangle(cornerRadius: 9))
-    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.separator, lineWidth: 1))
+    // The frame is the settings window's (SV13): the widgets inside it keep
+    // the real look, and only what surrounds them is themed.
+    .clipShape(RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous))
+    .overlay(
+      RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
+        .strokeBorder(SettingsTheme.cardStroke, lineWidth: 1))
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Preview of the menu bar and the on-screen indicators")
   }
@@ -204,7 +231,7 @@ struct MenuBarPreviewView: View {
   // MARK: - Panel miniature
 
   private var panelGround: Color {
-    colorScheme == .dark ? Color(white: 0.16) : Color(white: 0.95)
+    systemAppearance.isDark ? Color(white: 0.16) : Color(white: 0.95)
   }
 
   private func panelMiniature(externals: [AppModel.DisplayState], showsBuiltIn: Bool) -> some View {
@@ -338,13 +365,14 @@ struct MenuBarPreviewView: View {
   /// brighter than `.hudWindow` did, and the real HUD is being corrected the
   /// same direction.
   private var pillGround: Color {
-    colorScheme == .dark ? Color(white: 0.27).opacity(0.97) : Color(white: 0.95).opacity(0.97)
+    systemAppearance.isDark
+      ? Color(white: 0.27).opacity(0.97) : Color(white: 0.95).opacity(0.97)
   }
 
   /// A LIGHT edge, never a dark one: the black-reading `separatorColor` border
   /// is one of the deltas KMR-A4 names against the native pill.
   private var pillHairline: Color {
-    colorScheme == .dark ? .white.opacity(0.22) : .black.opacity(0.08)
+    systemAppearance.isDark ? .white.opacity(0.22) : .black.opacity(0.08)
   }
 
   /// The display a pill names, its live value, and whether it is muted:
@@ -489,6 +517,33 @@ private struct PillChrome: ViewModifier {
       .clipShape(RoundedRectangle(cornerRadius: radius))
       .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(hairline, lineWidth: 0.5))
       .shadow(color: .black.opacity(0.22), radius: 5, y: 2)
+  }
+}
+
+/// Whether the system is drawing in dark, live. The preview depicts widgets
+/// that follow the system appearance while the settings window is pinned dark,
+/// so it cannot read the window's color scheme (SV13).
+///
+/// KVO on `NSApp.effectiveAppearance`: an appearance flip made while this window
+/// is open has to relight the miniatures, and an activation notification would
+/// miss it.
+@MainActor
+@Observable
+private final class SystemAppearance {
+  private(set) var isDark = SystemAppearance.currentIsDark()
+
+  @ObservationIgnored private var observation: NSKeyValueObservation?
+
+  init() {
+    observation = NSApp?.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+      // The value is re-read on the main actor rather than taken from the
+      // change: the closure is nonisolated and `NSApplication` is not.
+      Task { @MainActor in self?.isDark = SystemAppearance.currentIsDark() }
+    }
+  }
+
+  private static func currentIsDark() -> Bool {
+    NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
   }
 }
 

@@ -23,17 +23,16 @@
   ///
   ///   CANDELA_DEBUG_SETTINGS=pane:general    Candela.app/Contents/MacOS/Candela
   ///   CANDELA_DEBUG_SETTINGS=pane:menuBar    (also: pane:arrangement,
-  ///                                           pane:keyboard, pane:about)
+  ///                                           pane:keyboard, pane:about,
+  ///                                           pane:health, pane:protection,
+  ///                                           pane:checkup)
   ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/first        (also /<persistenceKey>
   ///                                           : opens OLED Care with that
   ///                                           display's page pushed, as the
   ///                                           hub's "All OLED Care Settings…"
   ///                                           link does)
-  ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/first/measurement
   ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/first/health
   ///                                           (a further /<page>:
-  ///                                           /measurement pushes that page
-  ///                                           on top of the display's;
   ///                                           /display is the spelled-out
   ///                                           default; /health opens the
   ///                                           Display Health WINDOW over the
@@ -55,11 +54,6 @@
   ///                                           onboarding overhaul and the
   ///                                           permanent screenshot route for
   ///                                           the flow's pages.)
-  ///   CANDELA_DEBUG_SETTINGS=setup:settingsMock  (the settings surface
-  ///                                           re-imagined in the flow's
-  ///                                           visual style, over fixtures:
-  ///                                           a taste exploration, nothing
-  ///                                           written.)
   ///   CANDELA_DEBUG_SETTINGS=display:builtIn
   ///   CANDELA_DEBUG_SETTINGS=display:first
   ///   CANDELA_DEBUG_SETTINGS=display:<persistenceKey>
@@ -123,8 +117,6 @@
       /// `setup:mock`: not a settings destination at all; the guided setup
       /// flow in its own window, over the fixture environment.
       case presentSetupMock
-      /// `setup:settingsMock`: the settings visual mock in its own window.
-      case presentSettingsMock
       case rejected(String)
     }
 
@@ -149,10 +141,9 @@
       case "setup":
         switch body {
         case "mock": return .presentSetupMock
-        case "settingsMock": return .presentSettingsMock
         default:
           return .rejected(
-            "unknown setup value \(quoted(body)); ids are case-sensitive: mock, settingsMock")
+            "unknown setup value \(quoted(body)); ids are case-sensitive: mock")
         }
       case "pane":
         // Optional suffixes, accepted only on the panes with pushed pages:
@@ -161,6 +152,13 @@
         // a suffix that silently did nothing would capture the top of a pane
         // and look like evidence that the landing position was tested.
         let segments = body.split(separator: "/", omittingEmptySubsequences: false)
+        // Named rather than left to the unknown-pane message, for the retired
+        // measurement page's reason: capture scripts written before the merge
+        // still ask for it, and a bare "unknown pane" would not say where the
+        // update controls went.
+        if segments[0] == "updates" {
+          return .rejected("the Updates pane merged into About; its controls are the About page's now, so use 'pane:about'")
+        }
         guard let id = PaneID(rawValue: String(segments[0])) else {
           let known = PaneID.allCases.map(\.rawValue).joined(separator: ", ")
           return .rejected("unknown pane \(quoted(String(segments[0]))); ids are case-sensitive: \(known)")
@@ -198,18 +196,22 @@
           }
           key = targetBody
         }
-        var path: [OledCarePage] = [.display(key)]
+        let path: [OledCarePage] = [.display(key)]
         var healthWindowKey: String?
         if segments.count == 3 {
           // Validated like everything else here: a typo'd page must not
           // silently capture the display page.
           switch String(segments[2]) {
           case "display": break
-          case "measurement": path.append(.measurement(key))
           // A window, not a page (OCR-A1): the display page stays behind it.
           case "health": healthWindowKey = key
+          // Named rather than left to the default, because capture scripts
+          // written before SC5 still ask for it and "unknown page" would not
+          // tell anyone where the controls went.
+          case "measurement":
+            return .rejected("the OLED Care measurement page retired; its controls are on the Health pane, so use 'pane:health'")
           default:
-            return .rejected("unknown OLED page \(quoted(String(segments[2]))); ids are case-sensitive: display, measurement, health")
+            return .rejected("unknown OLED page \(quoted(String(segments[2]))); ids are case-sensitive: display, health")
           }
         }
         return .resolved(
@@ -283,9 +285,6 @@
       case .presentSetupMock:
         log("presenting the guided setup mock")
         OnboardingMockPresenter.present()
-      case .presentSettingsMock:
-        log("presenting the settings visual mock")
-        SettingsMockPresenter.present()
       case let .rejected(reason):
         log("ignored: \(reason)")
       }
@@ -309,7 +308,6 @@
     private static func describe(_ page: OledCarePage) -> String {
       switch page {
       case let .display(key): "display(\(key))"
-      case .measurement: "measurement"
       }
     }
 

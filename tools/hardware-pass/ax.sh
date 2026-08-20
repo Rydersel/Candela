@@ -171,10 +171,10 @@ EOF
 }
 
 # title: the settings window's own name. Read it back after every `nav`: the
-# sidebar index table is a property of the current build, and index 8 is an
-# inert header that leaves the title on the PREVIOUS pane rather than erroring,
-# so a script that trusts the table reads the wrong pane's controls while every
-# call reports success.
+# sidebar index table is a property of the current build, and the headers
+# (indices 2, 7 and 14 since the SC1 restructure) are inert rows that leave the
+# title on the PREVIOUS pane rather than erroring, so a script that trusts the
+# table reads the wrong pane's controls while every call reports success.
 title() {
   osascript <<EOF 2>&1
 tell application "System Events"
