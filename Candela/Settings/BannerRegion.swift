@@ -83,20 +83,35 @@ struct BannerRegion: View {
     }
   }
 
-  /// One banner's chrome: the theme's card, laid out in the same content column
-  /// `SettingsPageScaffold` gives the page below, so a banner lines up with the
-  /// cards it sits above instead of running to the window edges. Applied per
-  /// banner so an empty region is exactly zero-height.
-  private func card(@ViewBuilder _ content: () -> some View) -> some View {
-    SettingsCard { content() }
-      .frame(maxWidth: SettingsTheme.pageWidth, alignment: .leading)
-      .padding(.horizontal, 32)
-      .frame(maxWidth: .infinity)
-      .padding(.top, 10)
-      // Opacity only, per card: the stack's animated layout supplies the
-      // collapse and the growth, so nothing slides sideways and the cards below
-      // a departing one keep their order.
-      .transition(.opacity)
+  /// One banner's chrome: the theme's card carrying the theme's notice, laid
+  /// out in the same content column `SettingsPageScaffold` gives the page below,
+  /// so a banner lines up with the cards it sits above instead of running to
+  /// the window edges. Applied per banner so an empty region is exactly
+  /// zero-height.
+  ///
+  /// The notice is what keeps a window-level banner from reading quieter than
+  /// an in-page one: the leading symbol and the title-weight body are the
+  /// window's notice language, and without them a timed keep-or-revert decision
+  /// looked exactly like an ordinary section on the page beneath it. `symbol:
+  /// nil` for a banner that already carries its own inside its headline.
+  private func card(
+    symbol: String? = "exclamationmark.triangle", @ViewBuilder _ content: () -> some View
+  ) -> some View {
+    SettingsCard {
+      if let symbol {
+        SettingsNotice(symbol: symbol, drawsSurface: false) { content() }
+      } else {
+        content()
+      }
+    }
+    .frame(maxWidth: SettingsTheme.pageWidth, alignment: .leading)
+    .padding(.horizontal, 32)
+    .frame(maxWidth: .infinity)
+    .padding(.top, 10)
+    // Opacity only, per card: the stack's animated layout supplies the
+    // collapse and the growth, so nothing slides sideways and the cards below
+    // a departing one keep their order.
+    .transition(.opacity)
   }
 
   // MARK: - What is on screen
@@ -305,7 +320,8 @@ struct BannerRegion: View {
   /// started obeying the same verdict as the slider.
   @ViewBuilder private var strandedMuteBanner: some View {
     if showsStrandedMute {
-      card {
+      // No leading symbol: this banner's headline is a `Label` carrying its own.
+      card(symbol: nil) {
         VStack(alignment: .leading, spacing: 6) {
           HStack {
             // Symbol AND text, never state by color alone, so the headline
