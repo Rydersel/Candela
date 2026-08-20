@@ -32,6 +32,23 @@ final class SettingsActions {
   /// outside the shell (tests, previews) navigates nowhere rather than
   /// crashing.
   @ObservationIgnored var reveal: (SettingsDestination) -> Void = { _ in }
+  /// A one-shot handoff for the care cross-links that promise a display (SC4):
+  /// set to a persistence key by the link just before `reveal(.pane(.health))`,
+  /// adopted into the Health pane's switcher when that pane appears, and
+  /// cleared on adoption. Nil means the pane keeps whatever scope it had.
+  ///
+  /// Not folded into `reveal`'s argument, because `SettingsDestination` is the
+  /// sidebar's vocabulary and `.pane(.health)` names a pane rather than a
+  /// display; the scope belongs to the link and dies with it. Without it the
+  /// OLED Care page's Health row lands on whichever external sorts first, and
+  /// every per-display write below the switcher then names the wrong monitor
+  /// while the row's own note promised "this display" (SC10).
+  ///
+  /// `@ObservationIgnored` like the closures above, and that is not an
+  /// oversight: nothing observes this. The only writer is a cross-link on
+  /// another pane, so Health is never on screen when it is set and the value is
+  /// always read by a fresh appearance.
+  @ObservationIgnored var pendingHealthScope: String?
   @ObservationIgnored private weak var model: AppModel?
 
   init(model: AppModel) {

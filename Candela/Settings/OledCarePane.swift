@@ -151,7 +151,9 @@ struct OledCarePane: View {
     SettingsCard {
       // Surfaceless: the card is the surface.
       SettingsNotice(drawsSurface: false) {
-        Text("Safe Mode is on for this session, so no display is being dimmed, no hours of use are being counted, and no measurements are being taken.")
+        // `SafeModeCopy`'s, so this pane and Health cannot describe one
+        // session two ways.
+        Text(verbatim: SafeModeCopy.careSessionNotice)
           .font(.callout.weight(.medium))
           .fixedSize(horizontal: false, vertical: true)
         SettingsCaption("Shift was held at launch. The two Screen Chrome settings below still work, and the settings you make here are saved for the next normal launch.")

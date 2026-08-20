@@ -120,7 +120,26 @@ struct SettingsRootView: View {
     // The care cross-links' navigation seam (SC4, SC6): wired here because
     // this view owns the selection, and re-wired on every appearance so a
     // reopened window binds the closure to the live view identity.
-    .onAppear { actions.reveal = { select($0) } }
+    //
+    // A reveal lands on the destination's ROOT: a cross-link names a page, not
+    // wherever the reader last was, so the destination's retained stack is
+    // cleared before the selection moves. Otherwise a row promising "the
+    // display's own page" opens on whatever sub-page that display was left on,
+    // which for Advanced or All Sizes is a page the promised control is not on.
+    //
+    // SO23's retention is untouched by this: sidebar clicks do not come
+    // through the seam, so ordinary navigation still returns where it left.
+    .onAppear {
+      actions.reveal = { destination in
+        switch destination {
+        case let .display(key): subPagePaths[key] = []
+        case .pane(.oledCare): oledCarePath = []
+        case .pane(.keyboard): keyboardPath = []
+        case .pane: break
+        }
+        select(destination)
+      }
+    }
     // Replaces the fork-era fixed `.frame(width: 620)`.
     //
     // The maxima are load-bearing, not decoration: a bare `minWidth/minHeight`

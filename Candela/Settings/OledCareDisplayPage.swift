@@ -138,7 +138,16 @@ struct OledCareDisplayPage: View {
           NavigationRow(
             title: "Health",
             value: measurementRowPreview,
-            action: { actions.reveal(.pane(.health)) })
+            action: {
+              // The note below promises "this display", so the link carries
+              // which one. A pane reveal names no display on its own, and the
+              // Health pane's switcher would otherwise open on whichever
+              // external sorts first: the note, the preview above and the
+              // controls the user then touches would name three different
+              // things.
+              actions.pendingHealthScope = persistenceKey
+              actions.reveal(.pane(.health))
+            })
           SettingsRowNote("Measuring is set for this display on the Health pane, where switching it off stops new readings and keeps everything recorded so far.")
           SettingsCardDivider()
           NavigationRow(
@@ -304,7 +313,7 @@ struct OledCareDisplayPage: View {
   }
 
   /// A notice about the display, not a setting, so it stays beside the hours
-  /// it explains rather than moving to Measurement & Data with the toggle.
+  /// it explains.
   @ViewBuilder private var standbyNote: some View {
     // ONE tracker per display, from the coordinator. Never construct one here:
     // a second live instance reads a stale count and clobbers the real one on

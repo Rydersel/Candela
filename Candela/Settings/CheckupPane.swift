@@ -13,7 +13,7 @@ struct CheckupPane: View {
       SettingsPageHeader(
         title: "Checkup",
         subtitle: "A new display is easiest to send back in its first days. "
-          + "Checkup will examine one while that window is still open."
+          + "Checkup will examine one while the return window is still open."
       )
 
       SettingsCard {

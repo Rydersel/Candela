@@ -55,6 +55,27 @@ struct HealthPaneRenderTests {
     expectPixels(render(pane), "HealthPane with no displays")
   }
 
+  /// The pane-level Safe Mode note, which is the one thing on this pane telling
+  /// a safe-mode reader that the figures are stored history and the hours
+  /// switch is not counting. Compared against the same pane out of Safe Mode,
+  /// content-sized, so the assertion fails if the note stops rendering rather
+  /// than merely if the pane crashes.
+  @Test func theHealthPaneLeadsWithTheSafeModeNote() {
+    func pane(safeMode: Bool) -> some View {
+      let model = TestFixtures.appModel(safeMode: safeMode)
+      return HealthPane()
+        .environment(model)
+        .environment(SettingsActions(model: model))
+        .environment(\.settingsAccent, SettingsRegistry.descriptor(for: .health).accent)
+        .frame(width: SettingsTheme.pageWidth + 64)
+    }
+    let safe = render(pane(safeMode: true))
+    let normal = render(pane(safeMode: false))
+    expectPixels(safe, "HealthPane in Safe Mode")
+    guard let safe, let normal else { return }
+    #expect(safe.height > normal.height, "the Safe Mode note must lead the pane")
+  }
+
   /// The pane with two externals: two summary cards, the switcher (which only
   /// exists past one display), and the whole moved control stack under it.
   /// Taller than the empty state is the real assertion; a size floor alone
@@ -89,9 +110,71 @@ struct HealthPaneRenderTests {
 
     expectPixels(populated, "HealthPane with two displays")
     guard let populated, let empty else { return }
+    // A DELTA floor, not a bare `populated > empty`: two summary cards alone
+    // clear the bare comparison, so it passes even when `scoped` resolves to
+    // nil and the whole moved control stack, the collected section and the
+    // comparison section render nothing. That branch is the one thing the
+    // scope resolution can get wrong, and it is the one thing the bare
+    // assertion cannot see.
+    //
+    // Chosen over rendering one display against two, which the review also
+    // offered: that pair differs by a card and a switcher whether or not the
+    // stack renders, so it does not reach this branch either.
+    //
+    // The margin is four captioned rows deep (three `SettingRow`s with
+    // multi-line captions, the grid mark, and the hours toggle) plus the
+    // section title and the scope caption. Measured 2026-08-20: 720 pt against
+    // the empty state's 189, so the real difference is 531. 400 leaves room for
+    // a font-metric shift while staying far above what two summary cards can
+    // reach on their own.
     #expect(
-      populated.height > empty.height,
-      "two cards and the measurement controls must make the pane taller than the empty state")
+      populated.height > empty.height + 400,
+      "the two cards AND the measurement control stack must be on the pane, not the cards alone")
+  }
+
+  /// The enrolled OLED Care display page: the two exposure cards, the Dimming
+  /// section and the rebuilt More section, which is the composition the care
+  /// restructure actually rearranged. All of it is behind `oledCareEnrolled`,
+  /// so the un-enrolled render above reaches none of it.
+  ///
+  /// Enrollment is written into the process defaults under a key unique to this
+  /// run and taken back out in a `defer`: the page builds its own
+  /// `DisplayPrefs(persistenceKey:)`, which reads `UserDefaults.standard`, so
+  /// there is no suite to inject and a fixed key would leak into another run.
+  ///
+  /// Height-compared against the un-enrolled page rather than rendered into a
+  /// fixed frame, because a fixed frame returns the frame's height whatever the
+  /// branch did: the comparison is what proves the enrolled composition is the
+  /// one that drew.
+  @Test func theEnrolledOledCareDisplayPageRenders() {
+    let key = "care-smoke-enrolled-\(UUID().uuidString)"
+    DisplayPrefs(persistenceKey: key).oledCareEnrolled = true
+    defer { UserDefaults.standard.removeObject(forKey: "oledCareEnrolled.\(key)") }
+
+    let enrolled = render(carePage(key: key, name: "Care Smoke Enrolled"))
+    let unenrolled = render(
+      carePage(key: "care-smoke-unenrolled-\(UUID().uuidString)", name: "Care Smoke Plain"))
+
+    expectPixels(enrolled, "enrolled OledCareDisplayPage")
+    guard let enrolled, let unenrolled else { return }
+    #expect(
+      enrolled.height > unenrolled.height,
+      "the exposure cards, the Dimming section and More must be on the enrolled page")
+  }
+
+  /// One display's OLED Care page over a fixture display, sized by its content.
+  private func carePage(key: String, name: String) -> some View {
+    let model = TestFixtures.appModel()
+    let state = TestFixtures.displayState(name: name, persistenceKey: key)
+    return OledCareDisplayPage(
+      state: state,
+      displays: [(key: key, name: name)],
+      onSwitch: { _ in }
+    )
+    .environment(model)
+    .environment(SettingsActions(model: model))
+    .environment(\.settingsAccent, .display(isBuiltIn: false, ordinal: 0))
+    .frame(width: SettingsTheme.pageWidth + 64)
   }
 
   /// An un-enrolled display's OLED Care page: the enrollment toggle, the blank

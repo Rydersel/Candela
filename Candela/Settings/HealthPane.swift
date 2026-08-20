@@ -44,9 +44,17 @@ struct HealthPane: View {
     SettingsPageScaffold {
       SettingsPageHeader(
         title: "Health",
-        subtitle: "A display keeps no record of its own wear. "
-          + "Health is where Candela's record is read: hours lit, and where on the screen the light has fallen."
+        subtitle: "A display does not tell you what it has been through. "
+          + "Health is where Candela's record is read: hours of use, and where on the screen the light has fallen."
       )
+
+      // The exceptional state leads, before the cards, which is the OLED Care
+      // overview's placement rule and for a sharper reason here: every figure
+      // below is stored history, and the hours switch reads ON for a counter
+      // that is not counting.
+      if model.isSafeMode {
+        safeModeNote
+      }
 
       displaysSection
 
@@ -55,6 +63,48 @@ struct HealthPane: View {
         collectedSection(for: scoped.display.persistenceKey)
         OledModelComparisonSection(persistenceKey: scoped.display.persistenceKey)
       }
+    }
+    // The care cross-link's one-shot scope handoff (SC4). Adopted here rather
+    // than observed: `pendingHealthScope` is set by a link on ANOTHER pane, so
+    // this pane is never on screen when it is written and every reveal reaches
+    // it through a fresh appearance. Cleared on adoption, so a later visit by
+    // the sidebar keeps the pane's own state.
+    .onAppear {
+      guard let pending = actions.pendingHealthScope else { return }
+      actions.pendingHealthScope = nil
+      // A key that no longer names a connected display is dropped rather than
+      // stored: `scoped` would fall back anyway, but a stale key parked in
+      // `scopedKey` would move the switcher by itself when that display came
+      // back.
+      if displays.contains(where: { $0.display.persistenceKey == pending }) {
+        scopedKey = pending
+      }
+    }
+  }
+
+  // MARK: - Safe Mode
+
+  /// D11's visibility rule on the pane that most needs it. `OledCareCoordinator.start`
+  /// returns at its safe-mode guard before the driver loop is built, so nothing
+  /// on this pane is measuring, sampling or counting, while the cards' figures
+  /// and the hours switch below both look live.
+  ///
+  /// Pane-level rather than per-card: `OledCareCardCopy.measurementLine` returns
+  /// the bare hours string under safe mode by design (its own test pins that),
+  /// and the OLED Care overview's card prepends the pause itself. Saying it once
+  /// at the top covers the cards, the hours switch and the histogram together,
+  /// which no per-control note reaches.
+  private var safeModeNote: some View {
+    SettingsCard {
+      // Surfaceless: the card is the surface. Same shape as the OLED Care
+      // overview's note, same sentence, from `SafeModeCopy`.
+      SettingsNotice(drawsSurface: false) {
+        Text(verbatim: SafeModeCopy.careSessionNotice)
+          .font(.callout.weight(.medium))
+          .fixedSize(horizontal: false, vertical: true)
+        SettingsCaption("Shift was held at launch. The figures below are what was recorded before this session, and the settings you make here are saved for the next normal launch.")
+      }
+      .padding(.vertical, 2)
     }
   }
 
@@ -358,9 +408,15 @@ private struct MeasurementControls: View {
         // (turning measurement off asks for nothing), so without this
         // a safe-mode session grants a system permission to a sampler that
         // cannot run until the next normal launch, with every visible signal
-        // (switch on, no not-granted note) saying it worked. Every other
-        // control here is covered by the cards above and by the OLED Care
-        // overview's pane-level note.
+        // (switch on, no not-granted note) saying it worked.
+        //
+        // What covers everything else on this pane is the pane-level note at
+        // the top, NOT the cards: `OledCareCardCopy.measurementLine` returns
+        // the bare hours string under safe mode (pinned by
+        // `HealthCardCopyTests.safeModeSaysNothingAboutReadings`) and this
+        // pane's card adds no prefix of its own. An earlier version of this
+        // comment claimed the cards said it, which was a justification a test
+        // contradicted.
         //
         // Safe Mode WINS over the grant note rather than joining it: both are
         // true at once, but two notes giving two reasons for one silence read
