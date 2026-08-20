@@ -113,11 +113,17 @@ final class OledCareCoordinator {
     /// gates its own states on it, but `.active` never passes through
     /// `mayShow`, and `.active` is exactly when detection dimming runs.
     var assertionHeld = false
-    /// The current nomination in PANEL space, recomputed only when a new
-    /// luminance sample lands. Nil means "nothing qualifies", which is
-    /// deliberately distinguishable from an all-zero mask: the render then
-    /// skips the mask path entirely and keeps the cheaper scalar one.
+    /// The current nomination in PANEL space. The LUMINANCE half changes only
+    /// when a new sample lands; the WINDOW half is also re-read on the fast
+    /// loop while a nomination is displayed (`refreshNominationGeometry`), so
+    /// a moved window sheds its dim in about a second instead of sitting
+    /// stale until the next sampling slot. Nil means "nothing qualifies",
+    /// which is deliberately distinguishable from an all-zero mask: the
+    /// render then skips the mask path entirely and keeps the cheaper scalar
+    /// one.
     var nominatedMask: OverlayMask?
+    /// Throttle for `refreshNominationGeometry`; nil until a mask first shows.
+    var lastNominationRefreshAt: SuspendingClock.Instant?
     /// OC12: the last render mutated window-server state; verify it on a
     /// LATER tick than the one that mutated.
     var needsVerify = false
@@ -178,6 +184,13 @@ final class OledCareCoordinator {
   /// Spec §4: one capture per enrolled display per 60 s, and the window list on
   /// the same clock.
   private static let samplingInterval: Duration = .seconds(60)
+  /// How often a DISPLAYED nomination re-checks window geometry. One second:
+  /// a dim clearing within a second reads as cleanup, while a dim that sits
+  /// on moved content for up to a sampling slot reads as burn-in, the exact
+  /// symptom the feature exists to prevent. The poll under it is a measured
+  /// 0.46 ms, and the cost exists only while a mask is on screen (which is
+  /// also when the loop is already at the fast cadence).
+  private static let nominationGeometryInterval: Duration = .seconds(1)
   /// "At most every few minutes, plus at termination" (spec §4). A defaults
   /// write per sample would put one on a permanent 60 s timer per panel for a
   /// value that is only ever read by a settings view.
@@ -951,9 +964,13 @@ final class OledCareCoordinator {
       // suspension authority, not a second reading of the same signals. The
       // target is built from THIS tick's topology sample, so the surface it
       // resolves and the `isSynthesis` verdict above describe one instant.
-      updateTelemetry(
-        for: key, state: &state, dimState: newState,
-        on: OledTelemetryTarget(panel: id, topology: topology), at: now)
+      let target = OledTelemetryTarget(panel: id, topology: topology)
+      updateTelemetry(for: key, state: &state, dimState: newState, on: target, at: now)
+      // Mutates the LOCAL copy, deliberately before this tick's render: the
+      // sample path's `renominate` writes `states[key]` because it lands
+      // between ticks, but a mid-tick write there would be clobbered by the
+      // `states[key] = state` below.
+      refreshNominationGeometry(for: key, state: &state, on: target, at: now)
 
       // OC12 ordering: last tick's mutation is verified BEFORE this tick's
       // render, so the check always runs a full tick after the change it is
@@ -1217,7 +1234,8 @@ final class OledCareCoordinator {
   }
 
   /// Recomputes #20's nomination for one display. Called when a new luminance
-  /// sample lands, which is the only thing that can change the answer.
+  /// sample lands; `refreshNominationGeometry` covers the window half between
+  /// samples while a mask is displayed.
   ///
   /// Stored in PANEL space, not display space: the render composes it with the
   /// uniform dim and orients the result, so keeping it panel-side means one
@@ -1342,6 +1360,46 @@ final class OledCareCoordinator {
       captureExposure(for: key, on: target, through: transform)
     }
     persistExposureHistoryIfDue(at: now)
+  }
+
+  /// Re-checks the WINDOW half of a displayed nomination on the fast loop.
+  ///
+  /// The sampling clock alone left the mask frozen against window geometry
+  /// for up to a minute, so a dim sat on whatever slid under it after a move,
+  /// which is exactly what burn-in looks like. This re-reads the window list
+  /// and re-runs the pure rule against the cached most-recent panel grid; the
+  /// luminance half still changes only when a sample lands, so between slots
+  /// the only thing this can change is what the window geometry says. Gated
+  /// on a mask being DISPLAYED: a nomination appearing one slot late is fine,
+  /// one lingering a slot too long is the defect.
+  ///
+  /// Books NOTHING. Owner hours accumulate at the nominal sampling interval
+  /// per observation in `observeWindows`; booking here would multiply them by
+  /// the refresh rate. Refreshing the shared observer is safe because its
+  /// ages are wall-clock spans, not per-call accumulation.
+  private func refreshNominationGeometry(
+    for key: String, state: inout PerDisplay, on target: OledTelemetryTarget,
+    at now: SuspendingClock.Instant
+  ) {
+    guard state.nominatedMask != nil, state.detectionDimmingEnabled,
+      state.windowObservationEnabled
+    else { return }
+    if let last = state.lastNominationRefreshAt,
+      now - last < Self.nominationGeometryInterval { return }
+    state.lastNominationRefreshAt = now
+    guard let transform = Self.transform(target),
+      let cached = latestSamples[key]
+    else { return }
+    let windows = CGWindowListSource(displayID: target.surface).onScreenWindows()
+    var observer = observers[key] ?? WindowObserver()
+    let observation = observer.observe(windows, through: transform, at: Date())
+    observers[key] = observer
+    latestObservations[key] = observation
+    latestWindows[key] = windows
+    // `cells` is already panel-native (re-binned at accept time), matching
+    // what `renominate` derives before calling the same rule.
+    state.nominatedMask = StaticRegionDetector.nominate(
+      recentGrid: cached.cells, observation: observation, thresholds: .default)
   }
 
   /// The panel-to-surface resolution against the topology AS IT STANDS NOW.
@@ -1576,9 +1634,10 @@ final class OledCareCoordinator {
       fromDisplayGrid: sample.grid, cols: sample.cols, rows: sample.rows)
     latestSamples[key] = (panelGrid, Date())
     bookComparisonPair(for: key, on: current, measured: panelGrid, through: transform)
-    // #20 nominates off the sampling clock, not the 10 Hz tick: the grid it
-    // reads changes once a minute, so re-nominating per tick would burn CPU to
-    // reach the same answer 600 times.
+    // #20's luminance half nominates here, off the sampling clock: the grid
+    // changes once a minute, so recomputing it faster reaches the same answer.
+    // The window half does NOT wait for this: `refreshNominationGeometry`
+    // re-checks geometry every second while a mask is displayed.
     renominate(for: key, grid: sample.grid, cols: sample.cols, rows: sample.rows,
                through: transform)
     log.debug("""
