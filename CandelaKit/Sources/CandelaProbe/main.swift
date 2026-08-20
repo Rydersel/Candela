@@ -59,7 +59,14 @@ usage: candela-probe [--display <id>] <subcommand>
 /// the built-in, and including an external whose DDC is locked by HDR mode.
 struct ProbeDisplay {
   let id: CGDirectDisplayID
-  let name: String
+  /// The display's own title, as the app itself publishes it: its sidebar row's
+  /// accessibility description and its settings window title.
+  let title: String
+  /// The label the probe PRINTS, which appends the display id so two panels of
+  /// the same model can be told apart. Kept as a separate reading of the same
+  /// display because the two are consumed by different things: a person reads
+  /// this one, and the accessibility layer matches the title.
+  var name: String { "\(title) [\(id)]" }
 }
 
 let online: [ProbeDisplay] = {
@@ -69,7 +76,7 @@ let online: [ProbeDisplay] = {
   return ids.prefix(Int(count)).map { id in
     let ddcName = found.first { $0.display.id == id }?.display.name
     let fallback = CGDisplayIsBuiltin(id) != 0 ? "Built-in Display" : "Display \(id)"
-    return ProbeDisplay(id: id, name: "\(ddcName ?? fallback) [\(id)]")
+    return ProbeDisplay(id: id, title: ddcName ?? fallback)
   }.filter { displayFilter == nil || $0.id == displayFilter }
 }()
 
@@ -515,6 +522,7 @@ case "regress":
       Regress.Display(
         id: display.id,
         name: display.name,
+        title: display.title,
         persistenceKey: found.first { $0.display.id == display.id }?.display.persistenceKey,
         isBuiltIn: CGDisplayIsBuiltin(display.id) != 0
       )

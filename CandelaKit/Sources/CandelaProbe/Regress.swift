@@ -29,7 +29,15 @@ enum Regress {
   /// not appear in the DDC pool, so the key is optional).
   struct Display {
     let id: CGDirectDisplayID
+    /// The probe's own label, which carries the display id (`MAG 341C OLED
+    /// [2]`). Good prose for a detail string, and never an accessibility
+    /// description: nothing in the app publishes it.
     let name: String
+    /// The bare title the APP publishes: its sidebar row's accessibility
+    /// description and its window title. Threaded from the DDC pool rather than
+    /// stripped back out of the label, because a decorated string is a display
+    /// name plus a decoration nobody can reliably take off again.
+    let title: String
     let persistenceKey: String?
     let isBuiltIn: Bool
   }
@@ -1879,7 +1887,10 @@ enum Regress {
   private static func advancedPage(
     _ instruments: RegressInstruments, display: Display, showing identifier: String
   ) -> String? {
-    if let reason = settingsPane(instruments, showing: display.name) { return reason }
+    // The sidebar row publishes the display's bare title, not the probe's
+    // label: searching for the label found no row at all and reported the
+    // check inconclusive on a rig where the row was right there.
+    if let reason = settingsPane(instruments, showing: display.title) { return reason }
     if instruments.axReading(identifier: identifier).presentText != nil { return nil }
     guard instruments.axPress(describedAs: "Advanced") else {
       return "the Advanced row could not be pressed on \(display.name)'s page: \(instruments.lastAXError ?? "no reason reported")"
@@ -2362,8 +2373,12 @@ enum Regress {
         "teardown: \(aim) and it did not come back: \(instruments.lastProcessError ?? "no reason reported"); the rig is left with no Candela running",
         downgradingPass: true)
     }
+    // Compared as FILES, not as spellings: `ps` reports the resolved path, and
+    // a worktree bundle handed over as /tmp/... comes back as /private/tmp/...
+    // On the rig that reported a correct relaunch as a rig left in the wrong
+    // state, which is a false conviction on the teardown line.
     let expected = "\(path)/Contents/MacOS/Candela"
-    guard back.path == expected else {
+    guard AppRegression.sameFile(back.path, expected) else {
       return note(
         check,
         "teardown: \(aim) and what came back is \(back.described), not \(expected); open goes through LaunchServices, which resolves a bundle to the registered copy, so the rig is running a build this check did not put back",

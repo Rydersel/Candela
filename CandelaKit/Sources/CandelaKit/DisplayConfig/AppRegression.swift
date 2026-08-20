@@ -591,6 +591,44 @@ public enum AppRegression {
     return panelDumpVolumeSupport(fromLogLines: rows).contains { $0 != "unknown" }
   }
 
+  // MARK: - Comparing two paths to the same file
+
+  /// Whether two paths name the same file, symlink aliases included.
+  ///
+  /// `ps` reports a process's executable by its RESOLVED path, while the path a
+  /// check was handed is whatever a person typed. On macOS `/tmp` is a symlink
+  /// to `/private/tmp`, as `/var` is to `/private/var`, so a build launched
+  /// from a worktree under `/tmp` comes back spelled `/private/tmp`. Compared
+  /// as strings, a rig that IS in the state its teardown claims reports that it
+  /// is not: the same false conviction this file exists to refuse, in
+  /// miniature.
+  public static func sameFile(_ lhs: String, _ rhs: String) -> Bool {
+    resolvedPath(lhs) == resolvedPath(rhs)
+  }
+
+  /// A path with its symlinks resolved and its components standardized, so that
+  /// two spellings of one file compare equal.
+  ///
+  /// Resolved from the deepest ancestor that EXISTS, with the rest of the path
+  /// re-appended, because `resolvingSymlinksInPath` leaves a path alone when
+  /// its own components are not on disk [MEASURED: `/tmp/x/y` stayed `/tmp/x/y`
+  /// while `/tmp` alone resolves]. Anchoring on the ancestor makes the answer
+  /// the same for a bundle that is there and for one that is not, which is what
+  /// stops this from being a comparison that only works on the happy path.
+  public static func resolvedPath(_ path: String) -> String {
+    var missing: [String] = []
+    var url = URL(fileURLWithPath: path)
+    while !FileManager.default.fileExists(atPath: url.path) {
+      let parent = url.deletingLastPathComponent()
+      guard parent.path != url.path else { break }
+      missing.append(url.lastPathComponent)
+      url = parent
+    }
+    var resolved = url.resolvingSymlinksInPath()
+    for component in missing.reversed() { resolved.appendPathComponent(component) }
+    return resolved.path
+  }
+
   // MARK: - The ledger's filename
 
   /// `<yyyy-MM-dd>-<sha7>.json`, in UTC.

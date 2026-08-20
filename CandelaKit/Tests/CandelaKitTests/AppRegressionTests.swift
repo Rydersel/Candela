@@ -825,6 +825,29 @@ struct AppRegressionTests {
     #expect(rows.count == 2)
   }
 
+  // MARK: - Comparing two paths to the same file
+
+  #if os(macOS)
+    @Test func theTmpAliasNamesTheSameFile() {
+      // `ps` reports a process's executable by its RESOLVED path, so a build
+      // launched from a path spelled through /tmp comes back spelled through
+      // /private/tmp. Compared as strings, a rig that IS in the state its
+      // teardown claims reports that it is not. /tmp is a symlink on every
+      // macOS, so these two literals are an honest fixture on this platform.
+      #expect(AppRegression.sameFile("/tmp/candela/Candela.app", "/private/tmp/candela/Candela.app"))
+    }
+
+    @Test func twoDifferentPathsAreStillDifferentFiles() {
+      // The other half of the control: a comparison that resolved everything
+      // onto one answer would report every relaunch as correct.
+      #expect(!AppRegression.sameFile("/tmp/candela/Candela.app", "/tmp/other/Candela.app"))
+    }
+  #endif
+
+  @Test func aPathIsTheSameFileAsItself() {
+    #expect(AppRegression.sameFile("/Applications/Candela.app", "/Applications/Candela.app"))
+  }
+
   // MARK: - The ledger's filename
 
   private func date(_ iso: String) -> Date {
