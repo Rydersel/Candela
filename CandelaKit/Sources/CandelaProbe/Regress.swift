@@ -1053,6 +1053,18 @@ enum Regress {
       downgradingPass: true)
   }
 
+  /// The gamma table is not the only place the software leg can go: with
+  /// `avoidGamma` set it runs through the shade overlay and the table reads
+  /// 1.0 at the floor with nothing wrong. The verdict is red-tested in the
+  /// Kit; this reads the key, and absent means default as in every gate here.
+  private static func avoidGammaGate(
+    _ instruments: RegressInstruments, _ persistenceKey: String
+  ) -> String? {
+    AppRegression.avoidGammaGate(
+      prefValue: instruments.defaultsRead("avoidGamma.\(persistenceKey)"),
+      persistenceKey: persistenceKey)
+  }
+
   /// The register values these checks assert (37 released, 50 at the
   /// crossover) are the untuned mapping's answers: `valueToDDC` over a 0 to
   /// 100 range, linear, not inverted. Every one of those is an operator
@@ -1071,18 +1083,6 @@ enum Regress {
   /// copy of those rules living here would agree with them until the day it
   /// quietly did not. A second definition of "default" is exactly the drift
   /// that turns a gate into a false verdict.
-  /// The gamma table is not the only place the software leg can go: with
-  /// `avoidGamma` set it runs through the shade overlay and the table stays at
-  /// 1.0. The verdict lives in the Kit, where it is red-tested; this reads the
-  /// key. Absent means default, as with every other gate here.
-  private static func avoidGammaGate(
-    _ instruments: RegressInstruments, _ persistenceKey: String
-  ) -> String? {
-    AppRegression.avoidGammaGate(
-      prefValue: instruments.defaultsRead("avoidGamma.\(persistenceKey)"),
-      persistenceKey: persistenceKey)
-  }
-
   private static func ddcTuningGate(
     _ instruments: RegressInstruments, _ persistenceKey: String
   ) -> String? {
@@ -1247,7 +1247,7 @@ enum Regress {
     // this rig: with the laptop speakers as the output, a posted mute key never
     // reached the app and the window carried no write at all, which the check
     // could only report as a dead instrument.
-    return audioRoutingGate(mode: .mouse)
+    return audioRoutingGate()
   }
 
   /// nil when a posted volume or mute key would reach the app, otherwise why it
@@ -1258,17 +1258,30 @@ enum Regress {
   /// that family's actionable count), and a second copy of the routing policy
   /// living here would agree with it until the day it did not.
   ///
-  /// `actionableDisplayCount` is 1 because the caller has already established a
-  /// panel whose volume command is available. That is the optimistic direction
-  /// on purpose: the count can only make the rule MORE likely to watch, so a
-  /// refusal from here is one the real tap would also have made, and this gate
-  /// can never invent a reason the app would not have had.
-  private static func audioRoutingGate(mode: MultiKeyboardVolume) -> String? {
+  /// Two of the four inputs are hardcoded optimistically, and for one reason:
+  /// the rule consults `actionableDisplayCount` only as `> 0`, so 1 stands for
+  /// any count of at least one, and `ddcDisplaysExist` is true wherever this
+  /// runs (the caller has a DDC panel it is about to drive). Both push the rule
+  /// towards WATCHING, so a refusal from here is one the real tap would also
+  /// have made: this gate can report a released key that is not released, never
+  /// invent a reason the app would not have had.
+  ///
+  /// The mode is `.mouse` by construction rather than by parameter: the caller
+  /// has already returned for every non-default `multiKeyboardVolume`, so the
+  /// only mode that reaches here is the pointer-targeted one, which is not the
+  /// name-matching mode this rule treats differently.
+  private static func audioRoutingGate() -> String? {
     guard let device = CoreAudioDeviceProvider().defaultOutputDevice() else { return nil }
     guard !AudioRoutingPolicy.shouldWatchVolumeKeys(
-      mode: mode, ddcDisplaysExist: true, actionableDisplayCount: 1, defaultOutput: device)
+      mode: .mouse, ddcDisplaysExist: true, actionableDisplayCount: 1, defaultOutput: device)
     else { return nil }
-    return "the default sound output is \(device.name), which sets its own volume, so outside the audio-device name-matching mode the app releases the volume and mute keys to macOS: a posted mute key never reaches it, and an empty window would read as a dead panel rather than as a key that went elsewhere. Route sound output to the display's own audio device before this run"
+    // Never a bare empty name: an unnamed device is exactly the state where the
+    // operator needs the refusal to say WHICH output it is talking about, and
+    // an interpolated "" would drop the one identifying thing this sentence has.
+    let described = device.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      ? "an unnamed output device [\(device.id)]"
+      : "\(device.name) [\(device.id)]"
+    return "the default sound output is \(described), which sets its own volume, so outside the audio-device name-matching mode the app releases the volume and mute keys to macOS: a posted mute key never reaches it, and an empty window would read as a dead panel rather than as a key that went elsewhere. Route sound output to the display's own audio device before this run"
   }
 
   /// Which family of media keys a driven check posts, and therefore which
