@@ -25,24 +25,22 @@ struct OledCareMeasurementPage: View {
 
   var body: some View {
     let _ = model.prefsRevision
-    Form {
-      Section {
-        SubPageHeader(
-          title: "Measurement & Data",
-          currentKey: persistenceKey,
-          displays: displays,
-          onSwitch: onSwitch)
-      }
+    SettingsPageScaffold {
+      SubPageHeader(
+        title: "Measurement & Data",
+        currentKey: persistenceKey,
+        displays: displays,
+        onSwitch: onSwitch)
 
-      Section {
+      SettingsCardSection {
         measurementControls
+        SettingsCardDivider()
         hoursToggle
       }
 
       collectedSection
       OledModelComparisonSection(persistenceKey: persistenceKey)
     }
-    .formStyle(.grouped)
   }
 
   // MARK: - Measurement
@@ -76,6 +74,7 @@ struct OledCareMeasurementPage: View {
             writer.write(.oledTelemetry) { $0.oledTelemetry = on }
           }
         ))
+        .themedSwitch()
         .prefIdentifier(.oledTelemetry, persistenceKey: persistenceKey)
         // What "the resolution of this grid" means, at the size it means it.
         PanelGridMark()
@@ -101,6 +100,8 @@ struct OledCareMeasurementPage: View {
       }
     }
 
+    SettingsCardDivider()
+
     // The battery clause is stated ONCE, on the last row of the measurement
     // group, because `OledCareCoordinator.samplingQualifies` gates BOTH toggles
     // on the same signal: below the threshold both counters freeze, and nothing
@@ -113,10 +114,13 @@ struct OledCareMeasurementPage: View {
         get: { prefs.oledWindowObservation },
         set: { on in writer.write(.oledWindowObservation) { $0.oledWindowObservation = on } }
       ))
+      .themedSwitch()
       .prefIdentifier(.oledWindowObservation, persistenceKey: persistenceKey)
     }
 
-    // #20. Last in the group and off by default, and the copy leads with what
+    SettingsCardDivider()
+
+    // Last in the group and off by default, and the copy leads with what
     // it does to the screen rather than with what it protects.
     //
     // Every other control in OLED care acts while the user is away or the
@@ -144,6 +148,7 @@ struct OledCareMeasurementPage: View {
         get: { prefs.oledDetectionDimming },
         set: { on in writer.write(.oledDetectionDimming) { $0.oledDetectionDimming = on } }
       ))
+      .themedSwitch()
       .prefIdentifier(.oledDetectionDimming, persistenceKey: persistenceKey)
     }
   }
@@ -168,6 +173,7 @@ struct OledCareMeasurementPage: View {
         get: { prefs.oledHoursTracking },
         set: { on in writer.write(.oledHoursTracking) { $0.oledHoursTracking = on } }
       ))
+      .themedSwitch()
       .prefIdentifier(.oledHoursTracking, persistenceKey: persistenceKey)
     }
   }
@@ -180,18 +186,20 @@ struct OledCareMeasurementPage: View {
     let buckets = tracker.secondsByBucket()
     let hasHistogram = buckets.contains(where: { $0 > 0 })
     if hasHistogram || prefs.oledTelemetry {
-      Section {
+      SettingsCardSection(title: "Collected so far") {
         if hasHistogram {
           usageHistogram(tracker: tracker, buckets: buckets)
+        }
+        if hasHistogram, prefs.oledTelemetry {
+          SettingsCardDivider()
         }
         if prefs.oledTelemetry {
           OledTelemetryTicker(
             sampleCount: summary.sampleCount,
             lastSample: summary.lastSample,
             grantPresent: CGPreflightScreenCaptureAccess())
+            .padding(.vertical, 6)
         }
-      } header: {
-        Text("Collected so far").settingsHeading()
       }
     }
   }
@@ -211,12 +219,12 @@ struct OledCareMeasurementPage: View {
       HStack(alignment: .firstTextBaseline) {
         Text("Time at brightness")
           .font(.caption)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(SettingsTheme.faintColor)
         Spacer(minLength: 8)
         if let fraction, fraction > 0 {
           Text(verbatim: "\(Int((fraction * 100).rounded()))% of tracked time in a protective dim")
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(SettingsTheme.faintColor)
         }
       }
       OledBrightnessHistogram(secondsByBucket: buckets)
@@ -225,9 +233,9 @@ struct OledCareMeasurementPage: View {
       if let fraction, fraction > 0 {
         Text(verbatim: OledCareCopy.wearFractionScope)
           .font(.caption)
-          .foregroundStyle(.secondary)
+          .foregroundStyle(SettingsTheme.faintColor)
       }
     }
-    .padding(.vertical, 2)
+    .padding(.vertical, 6)
   }
 }

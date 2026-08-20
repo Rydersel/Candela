@@ -25,7 +25,7 @@ struct OledModelComparisonSection: View {
   var body: some View {
     let comparison = model.oledCare.modelComparison(for: persistenceKey)
     if prefs.oledTelemetry || comparison.pairCount > 0 {
-      Section {
+      SettingsCardSection(title: "Model Comparison") {
         SettingRow(caption: SettingsCaption("Scores an estimate built only from window positions, the wallpaper, and light or dark appearance against the measured readings above. If the two keep agreeing, the estimate can stand in when Screen Recording is off. Estimated figures are never presented as measured.")) {
           VStack(alignment: .leading, spacing: 6) {
             SettingsCaption("A temporary instrument: it exists to judge the estimate during the current soak, and it is removed once that verdict is recorded.")
@@ -68,8 +68,6 @@ struct OledModelComparisonSection: View {
             }
           }
         }
-      } header: {
-        Text("Model Comparison").settingsHeading()
       }
     }
   }
