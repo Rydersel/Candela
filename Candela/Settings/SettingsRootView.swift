@@ -355,6 +355,20 @@ struct SettingsRootView: View {
   private var detail: some View {
     NavigationStack(path: currentPathBinding) {
       detailRoot
+        // On macOS the stack keeps its ROOT rendered underneath the destination
+        // for the whole time a page is pushed, and the restyle is what made that
+        // visible: every page used to sit on an opaque grouped `Form`, which hid
+        // it, and these pages are deliberately transparent so the canvas shows
+        // through. What showed through instead was both destinations at once,
+        // two titles over one another and the overview's cards ghosting under
+        // the pushed page's rows. Hidden, not removed: `displayRoot`'s
+        // countdown-ownership rule needs the root to keep existing behind the
+        // page, and taking it out of the hierarchy would also drop the stack's
+        // root while it is presenting, which is the orphaned-page defect above.
+        // Hit testing goes with the opacity, so an invisible control cannot
+        // catch a click meant for the page over it.
+        .opacity(hasPushedPage ? 0 : 1)
+        .allowsHitTesting(!hasPushedPage)
         .navigationDestination(for: SettingsPushedPage.self) { pushed in
           Group {
             switch pushed {
@@ -373,6 +387,15 @@ struct SettingsRootView: View {
         }
     }
   }
+
+  /// Whether the stack is PRESENTING a page, which is exactly what
+  /// `currentPathBinding` hands the stack: a display's retained path counts only
+  /// while that display is presented, and a pane's only while that pane is
+  /// selected. Derived from `currentPathDepth` rather than from a second read of
+  /// the three stores, so the hidden root and the window configurator's token
+  /// can never disagree about whether a page is on screen. A read, so the
+  /// binding's stale-write contract is untouched.
+  private var hasPushedPage: Bool { currentPathDepth > 0 }
 
   @ViewBuilder private var detailRoot: some View {
     switch presentation {
@@ -404,9 +427,11 @@ struct SettingsRootView: View {
   ) -> some View {
     VStack(spacing: 0) {
       // The root stays in the stack behind a pushed page and keeps rendering,
-      // so both placements would draw the SAME answerable countdown. The pushed
+      // hidden at zero opacity rather than removed (see `detail`), so both
+      // placements would still build the SAME answerable countdown. The pushed
       // page is the one the reader is looking at, so it owns the answer; this
-      // one yields while a page is PRESENTED and keeps every passive banner.
+      // one yields while a page is PRESENTED and keeps every passive banner,
+      // which the page's own `BannerRegion` is what actually shows meanwhile.
       // Presented, not retained: a page held for a display that cannot be shown
       // is not on screen to own anything, and reading `subPagePaths` directly
       // here handed the answer to a page nobody could see.
