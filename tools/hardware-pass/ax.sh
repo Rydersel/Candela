@@ -37,7 +37,7 @@
 # a selector that errors on them misdiagnoses a successful pick as a selector
 # failure. They are excluded like the decoys; axprobe reaches INTO them (it
 # walks every candidate), which is how Keep is pressed.
-BIND='set cands to (every window whose name does not start with "Candela Gamma Activity Enforcer" and name does not start with "Candela OLED Care Overlay" and name does not start with "Display resolution" and name does not start with "Display mirroring")
+BIND='set cands to (every window whose name does not start with "Candela Gamma Activity Enforcer" and name does not start with "Candela OLED Care Overlay" and name does not start with "Display resolution" and name does not start with "Display mirroring" and name is not "Display Health")
     if (count of cands) is not 1 then
       set seen to ""
       repeat with x in windows
@@ -50,8 +50,13 @@ BIND='set cands to (every window whose name does not start with "Candela Gamma A
       error "ax.sh: settings window not uniquely identified: " & (count of cands) & " candidates. Open windows:" & linefeed & seen
     end if
     set w to item 1 of cands'
-SB="UI element 1 of UI element 1 of UI element 1 of UI element 1 of w"
-DETAIL="UI element 1 of UI element 3 of UI element 1 of UI element 1 of w"
+# MEASURED 2026-08-20 against the restyled hand-built shell (SV4): the window
+# is one AXGroup holding two scroll areas, sidebar first, detail second. The
+# old four-level paths were the NavigationSplitView's and stopped resolving
+# the day the shell changed; "Display Health" joined the exclusions the same
+# day, since that window now coexists with settings (OCR-A1).
+SB="UI element 1 of UI element 1 of w"
+DETAIL="UI element 2 of UI element 1 of w"
 
 # nav <sidebar-index>
 nav() {
@@ -77,6 +82,23 @@ tell application "System Events"
     set i to 0
     repeat with t in (UI elements of dg)
       set i to i + 1
+      -- The restyled shell's detail area holds controls DIRECTLY (measured
+      -- 2026-08-20); classify the child itself, then still descend one level
+      -- for any row that nests its control.
+      set cl to (class of t as text)
+      set nm to ""
+      try
+        set nm to name of t as text
+      end try
+      set vl to ""
+      try
+        set vl to value of t as text
+      end try
+      if cl is "checkbox" or cl is "pop up button" or cl is "slider" or cl is "text field" then
+        set out to out & i & " [" & cl & "] " & nm & " = " & vl & linefeed
+      else if cl is "static text" then
+        set out to out & i & " . " & vl & linefeed
+      end if
       try
         repeat with u in (UI elements of t)
           set cl to (class of u as text)
@@ -110,6 +132,17 @@ tell application "System Events"
     $BIND
     set dg to $DETAIL
     repeat with t in (UI elements of dg)
+      set nm to ""
+      try
+        set nm to name of t as text
+      end try
+      if (class of t as text) is "checkbox" and nm is "$1" then
+        set b to value of t as text
+        click t
+        delay 1.2
+        set a to value of t as text
+        return "$1: " & b & " -> " & a
+      end if
       try
         repeat with u in (UI elements of t)
           set nm to ""
@@ -140,6 +173,21 @@ tell application "System Events"
     $BIND
     set dg to $DETAIL
     repeat with t in (UI elements of dg)
+      set nm to ""
+      try
+        set nm to name of t as text
+      end try
+      if (class of t as text) is "pop up button" and nm is "$1" then
+        click t
+        delay 0.6
+        click menu item "$2" of menu 1 of t
+        delay 1.2
+        set v to "(value unreadable: reconfigure in flight)"
+        try
+          set v to value of t as text
+        end try
+        return "$1 -> " & v
+      end if
       try
         repeat with u in (UI elements of t)
           set nm to ""
@@ -171,8 +219,8 @@ EOF
 }
 
 # title: the settings window's own name. Read it back after every `nav`: the
-# sidebar index table is a property of the current build, and the headers
-# (indices 2, 7 and 14 since the SC1 restructure) are inert rows that leave the
+# sidebar index table is a property of the current build, and the inert rows
+# (measured 2026-08-20: the wordmark at 1, headers at 3, 8 and 14) leave the
 # title on the PREVIOUS pane rather than erroring, so a script that trusts the
 # table reads the wrong pane's controls while every call reports success.
 title() {
@@ -199,6 +247,25 @@ tell application "System Events"
     $BIND
     set dg to $DETAIL
     repeat with t in (UI elements of dg)
+      set nm to ""
+      try
+        set nm to name of t as text
+      end try
+      if (class of t as text) is "pop up button" and nm is "$1" then
+        click t
+        delay 0.6
+        set out to ""
+        repeat with mi in (menu items of menu 1 of t)
+          set mn to ""
+          try
+            set mn to name of mi as text
+          end try
+          set out to out & mn & linefeed
+        end repeat
+        key code 53
+        delay 0.3
+        return out
+      end if
       try
         repeat with u in (UI elements of t)
           set nm to ""
