@@ -70,7 +70,23 @@ final class OnboardingFlowModel {
 
   /// Per-display protection choice on the care page, default on for every
   /// designated display (OB3).
-  var careEnabled: Set<String>
+  var careEnabled: Set<String> {
+    didSet {
+      // Same rule as the designation set, one layer in: a protection-off is a
+      // decision, and it is recorded wherever it happens rather than by the
+      // care page, so a re-harvest cannot mistake it for an unseeded key.
+      declinedCare.formUnion(oldValue.subtracting(careEnabled))
+      declinedCare.subtract(careEnabled)
+    }
+  }
+
+  /// Keys whose Protect toggle the user turned off. `designatedOleds` cannot
+  /// carry this: a care-page toggle-off leaves the display designated, so
+  /// absence from `careEnabled` is the ONLY trace of the decision, and a
+  /// re-harvest that reseeded the toggle would flip it back on under the user
+  /// and enroll a display they had just declined.
+  private var declinedCare: Set<String> = []
+
   /// True when the user took the recommended measured path (OB5).
   var measuredTelemetry: Bool = true
   /// The size decision per display. A kept apply records `.recommended` or
@@ -298,18 +314,23 @@ final class OnboardingFlowModel {
     // un-enroll a display the user never touched. Only displays the user has
     // not deselected are re-designated, so a deliberate deselect is never
     // resurrected by a replug.
-    for entry in environment.displays
-    where entry.enrolledInCare && !deselectedOleds.contains(entry.persistenceKey) {
-      designatedOleds.insert(entry.persistenceKey)
-      careEnabled.insert(entry.persistenceKey)
-    }
-    // A departure is not a decision. The prune below drops departed keys,
-    // which the didSet would otherwise record as deselections and hold
-    // against them when they come back.
+    let seeded = environment.displays
+      .filter { $0.enrolledInCare && !deselectedOleds.contains($0.persistenceKey) }
+      .map(\.persistenceKey)
+    // Protection is seeded on only for a key the user has not declined. Both
+    // decisions outlive a departure, so a display that leaves and comes back
+    // returns the way the user left it: designated with protection on if they
+    // never touched it, still off if they turned it off.
+    careEnabled.formUnion(seeded.filter { !declinedCare.contains($0) })
+    // A departure is not a decision, so the keys dropped here are subtracted
+    // from `deselectedOleds` afterwards; without that the didSet would record
+    // them as deselections and hold them against the display on its return.
+    // Union and prune in ONE assignment: each write to `designatedOleds`
+    // replans, and the plan only needs deriving once per update.
     let departed = designatedOleds.filter { key in
       !environment.displays.contains { $0.persistenceKey == key }
     }
-    designatedOleds.subtract(departed)
+    designatedOleds = designatedOleds.union(seeded).subtracting(departed)
     deselectedOleds.subtract(departed)
     // didSet already replanned; clamp in case the list shrank.
     index = min(index, pages.count - 1)

@@ -597,8 +597,50 @@ struct OnboardingFlowModelTests {
     #expect(model.designatedOleds == ["mag"])
     model.update(environment: environment(both, firstRun: false))
     #expect(model.designatedOleds == ["mag", "dell"])
+    // Untouched by the user, so it returns protected as well as designated.
+    #expect(model.careEnabled.contains("dell"))
     model.advance()
     #expect(model.committed.isEmpty)
+  }
+
+  /// The care page's toggle leaves the display designated, so absence from
+  /// `careEnabled` is the only trace of the decision. A reconfiguration while
+  /// the window is up must not reseed the toggle and enroll a display the user
+  /// has just declined.
+  @Test func aProtectionOffSurvivesATopologyTick() {
+    let displays = [entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true)]
+    let model = OnboardingFlowModel(environment: environment(displays, firstRun: false))
+    walk(model, to: .oledCare)
+    model.careEnabled.remove("mag")
+    model.update(environment: environment(displays, firstRun: false))
+    #expect(!model.careEnabled.contains("mag"))
+    #expect(model.designatedOleds == ["mag"])
+    model.advance()
+    #expect(model.committed == [.unenrollFromCare(displayKey: "mag")])
+  }
+
+  /// An explicit protection-off survives a departure round trip, the same way
+  /// a designation deselect does. Only a toggle the user never touched is
+  /// reseeded on return.
+  @Test func aProtectionOffSurvivesADepartureAndReturn() {
+    let both = [
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
+      entry(key: "dell", productName: "DELL OLED", enrolled: true),
+    ]
+    let model = OnboardingFlowModel(environment: environment(both, firstRun: false))
+    walk(model, to: .oledCare)
+    model.careEnabled.remove("dell")
+    model.update(environment: environment([both[0]], firstRun: false))
+    model.update(environment: environment(both, firstRun: false))
+    // Designated again, so the user can still change their mind on the page,
+    // but protection stays off and the advance un-enrolls it.
+    #expect(model.designatedOleds == ["mag", "dell"])
+    #expect(!model.careEnabled.contains("dell"))
+    model.advance()
+    #expect(model.committed == [
+      .unenrollFromCare(displayKey: "dell"),
+      .enrollInCare(displayKey: "mag"),
+    ])
   }
 
   /// The other side of the same rule: a deliberate deselect IS a decision, and
