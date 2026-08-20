@@ -9,10 +9,12 @@ import Observation
 /// `DisplayModeCoordinator.selectFromList`), so the real keep and revert
 /// countdown guards it (PD9: expiry reverts, never silently keeps). Second,
 /// the shipped countdown's answering surface is fixed at preview start and
-/// renders in the settings window, never here, so the Setup window renders its
+/// none of those surfaces is this window, so the Setup window renders its
 /// OWN Keep and Revert from the coordinator's observable preview state and
 /// answers with `confirm`/`revert` directly, carrying the exact preview it
-/// rendered: an answer can only resolve what the user was looking at.
+/// rendered: an answer can only resolve what the user was looking at. The
+/// preview it starts therefore carries `.guidedSetup`, the surface that takes
+/// every other one off screen (DM11).
 ///
 /// This object reports into the model (`applyCountdownTicked`, `applyKept`,
 /// `applyReverted`, `applyFailed`) and owns no meaning of its own; the model
@@ -106,16 +108,15 @@ final class OnboardingLiveApplier {
     sawPreview = false
     answerInFlight = false
     requestedAnswerBeforePreview = nil
-    // `.settingsBanner` is the surface that presents NO floating confirmation
-    // window: the Setup page renders the answer, and a second button row on
-    // the display that just changed would be the two-surfaces defect the
-    // surface model exists to prevent. `.floatingPanel` would present one.
-    // Known residue, same class the settings window accepts: a background
-    // settings window left open on this display's page also renders the
-    // answerable banner; both surfaces answer with the preview they render,
-    // so a stale answer is refused by the session either way.
+    // This flow OWNS the answer (DM11): the Setup page renders the countdown
+    // and both buttons itself, so every shipped surface stands down for
+    // `.guidedSetup`. The floating confirmation window is not presented and
+    // the settings banner renders nothing, including in a background settings
+    // window sitting on this display's page. Ownership is the guarantee;
+    // the session's stale-answer refusal stays what it always was, a backstop
+    // rather than the thing keeping two button rows from disagreeing.
     let selection = ResolutionSelection(
-      coordinator: coordinator, displayID: state.id, surface: .settingsBanner)
+      coordinator: coordinator, displayID: state.id, surface: .guidedSetup)
     selection.select(size: row, in: catalog)
     startTrackingIfNeeded()
   }

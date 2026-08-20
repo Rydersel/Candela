@@ -3,11 +3,12 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// The "Keep this resolution?" surface — the DEFAULT owner of the answer
-/// (SO6). The coordinator presents it for every preview except one whose
-/// `surface` is `.settingsBanner` (a change started from a key settings
-/// window), where the banner region answers instead and this window is never
-/// shown: one answerable surface per preview, decided at start.
+/// The "Keep this resolution?" surface, the DEFAULT owner of the answer
+/// (SO6). The coordinator presents it for every preview except one that
+/// another surface owns: `.settingsBanner` (a change started from a key
+/// settings window), where the banner region answers instead, and
+/// `.guidedSetup`, where the setup window does (DM11). In both this window is
+/// never shown: one answerable surface per preview, decided at start.
 ///
 /// Why it is a window at all, and why its buttons take the first click, are
 /// `ConfirmationPanel`'s to explain — this type owns only the two things that are

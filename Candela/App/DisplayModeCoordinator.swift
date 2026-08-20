@@ -45,18 +45,23 @@ final class DisplayModeCoordinator {
 
   /// Which surface ANSWERS the outstanding preview (SO6): exactly one is
   /// answerable per preview. Decided at preview start and carried on the
-  /// preview — never re-derived mid-countdown, so the buttons cannot migrate
+  /// preview, never re-derived mid-countdown, so the buttons cannot migrate
   /// under the user's pointer.
   ///
-  /// `.settingsBanner` iff the change originated from the settings window while
-  /// that window was key (the caller reads its own `controlActiveState` at the
-  /// click); everything else — the panel, and a settings surface in a non-key
-  /// window — is answered by the floating `ConfirmationPanel`, which then does
-  /// not show while a banner owns the answer. The non-owning surface renders
-  /// passive text only.
+  /// THREE owners, not two (DM11). `.settingsBanner` iff the change originated
+  /// from the settings window while that window was key (the caller reads its
+  /// own `controlActiveState` at the click). `.guidedSetup` iff the guided
+  /// setup flow started the apply: that window draws its own Keep and Revert
+  /// out of the observable preview state, so it owns the answer and every
+  /// shipped surface stands down for it, the settings banner included, which
+  /// renders nothing at all rather than a passive line. Everything else, the
+  /// panel and a settings surface in a non-key window included, is answered by
+  /// the floating `ConfirmationPanel`, which then does not show while another
+  /// owner holds the answer. A non-owning surface renders passive text at most.
   enum PreviewSurface: Sendable {
     case floatingPanel
     case settingsBanner
+    case guidedSetup
   }
 
   /// Everything one display's UI renders, computed once per enumeration.
@@ -1095,7 +1100,8 @@ final class DisplayModeCoordinator {
   /// failure is reported and where the answer will be offered, because getting
   /// either wrong is invisible until a countdown expires against nobody. The
   /// settings callers decide `surface` from their own window's key state at the
-  /// click (SO6); everything else passes `.floatingPanel`.
+  /// click (SO6), the guided setup flow passes `.guidedSetup` because its own
+  /// window answers (DM11), and everything else passes `.floatingPanel`.
   func select(
     _ mode: DisplayMode, on displayID: CGDirectDisplayID,
     from origin: PreviewOrigin, surface: PreviewSurface
@@ -1957,14 +1963,16 @@ final class DisplayModeCoordinator {
     // failure before it begins.)
     //
     // **The preview's own `surface` decides this window (SO6), fixed at
-    // start.** The floating window is the default owner — macOS puts this
+    // start.** The floating window is the default owner: macOS puts this
     // question in a dialog on the display it is about, and so do we for the
-    // panel and every other origin. The settings banner owns the answer only
-    // when the change came from a key settings window: the user is already
+    // panel and every other origin. The settings banner owns the answer when
+    // the change came from a key settings window, because the user is already
     // reading that window, and two button rows asking one question is the
-    // two-surfaces defect #54 exists to prevent. When the banner owns, this
-    // window does not show — the banner region renders the buttons and the
-    // hub's other renderings are passive text.
+    // two-surfaces defect the surface model exists to prevent. The guided
+    // setup flow owns it when the setup window started the apply: that window
+    // draws its own Keep and Revert out of the observable preview state
+    // (DM11). Either owner takes this window off screen; when the banner owns,
+    // it renders the buttons and the hub's other renderings are passive text.
     //
     // Known residue, accepted with SO6: nothing keeps the owning banner on
     // screen, and ownership does not migrate mid-preview. The banner region
@@ -1980,7 +1988,7 @@ final class DisplayModeCoordinator {
       switch preview.surface {
       case .floatingPanel:
         confirmation?.presentConfirmation(.preview(preview.displayID))
-      case .settingsBanner:
+      case .settingsBanner, .guidedSetup:
         confirmation?.dismissConfirmation()
       }
       return
