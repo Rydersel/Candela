@@ -479,7 +479,9 @@ private struct MeasurementControls: View {
     // fifth instance this wave of copy outrunning its producer (A-16, A-17,
     // OC17's gate, the stale `hottestOwner`). It goes back in when it exists.
     SettingRow("Areas that stay bright and unchanged, like a toolbar or a sidebar, are dimmed a little while you work. Full-screen video is never dimmed. This needs both measurements above: without them nothing is dimmed.") {
-      Toggle("Dim parts of the display that never change", isOn: Binding(
+      // Renamed on main (2026-08-20) while this control's page was being
+      // retired; the rename rides the move (Ryder's call at merge time).
+      Toggle("Automatic static-region dimming", isOn: Binding(
         get: { prefs.oledDetectionDimming },
         set: { on in writer.write(.oledDetectionDimming) { $0.oledDetectionDimming = on } }
       ))

@@ -55,13 +55,22 @@ struct OverlayWindowConfig: Equatable {
   /// once the window exists.
   var initialContentAlpha: CGFloat
 
+  /// False: the window server computes a shadow from the NON-TRANSPARENT
+  /// content shape, and the detection mask is mostly transparent, so the
+  /// default shadow draws a hairline rim around every dimmed region (and
+  /// recomputes lazily, so a stale outline lingers as the mask changes).
+  /// Upstream's shade never exposed this because its content covered the whole
+  /// screen, which put the outline at the screen edge.
+  var hasShadow: Bool
+
   static let dimming = OverlayWindowConfig(
     level: NSWindow.Level(rawValue: Int(CGShieldingWindowLevel())),
     collectionBehavior: [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle],
     ignoresMouseEvents: true,
     isReleasedWhenClosed: false,
     isMovableByWindowBackground: false,
-    initialContentAlpha: 0)
+    initialContentAlpha: 0,
+    hasShadow: false)
 }
 
 /// Applies `OverlayWindowConfig` to a window, plus the small pieces of geometry
@@ -110,6 +119,7 @@ enum OverlayWindow {
     window.ignoresMouseEvents = config.ignoresMouseEvents
     window.level = config.level
     window.collectionBehavior = config.collectionBehavior
+    window.hasShadow = config.hasShadow
     window.setFrame(frame, display: true)
     window.contentView?.wantsLayer = true
     window.contentView?.alphaValue = config.initialContentAlpha
