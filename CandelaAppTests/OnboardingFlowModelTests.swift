@@ -11,7 +11,9 @@ struct OnboardingFlowModelTests {
   private func entry(
     key: String,
     productName: String = "Generic Display",
-    suggestion: OnboardingSizeSuggestion? = nil
+    suggestion: OnboardingSizeSuggestion? = nil,
+    enrolled: Bool = false,
+    measuredTelemetry: Bool = false
   ) -> OnboardingDisplayEntry {
     OnboardingDisplayEntry(
       persistenceKey: key,
@@ -26,13 +28,16 @@ struct OnboardingFlowModelTests {
       refreshHz: 60,
       volume: .unknown,
       sizeSuggestion: suggestion,
-      enrolledInCare: false
+      enrolledInCare: enrolled,
+      measuredTelemetry: measuredTelemetry
     )
   }
 
-  private func environment(_ displays: [OnboardingDisplayEntry]) -> OnboardingEnvironment {
+  private func environment(
+    _ displays: [OnboardingDisplayEntry], firstRun: Bool = true
+  ) -> OnboardingEnvironment {
     OnboardingEnvironment(
-      accessibilityGranted: false, loginItemEnabled: false, isFirstRun: true,
+      accessibilityGranted: false, loginItemEnabled: false, isFirstRun: firstRun,
       displays: displays)
   }
 
@@ -270,6 +275,58 @@ struct OnboardingFlowModelTests {
     #expect(model.applyState == .idle)
   }
 
+  @Test func aMidCountdownReharvestWithoutTheSuggestionKeepsThePage() {
+    let model = modelOnSizePage()
+    let pageIndex = model.index
+    model.applySize(displayKey: "dell", choice: .recommended)
+    // The live apply changes the display's mode, which fires a re-harvest
+    // that sees the previewed size as current: the fresh entry arrives with
+    // no suggestion while the display itself is still present. The page must
+    // survive, or its disappearance reverts the apply the user asked for.
+    model.update(environment: environment([
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      entry(key: "dell"),
+    ]))
+    #expect(model.currentPage == .size(displayKey: "dell"))
+    #expect(model.index == pageIndex)
+    // The countdown lives on, and keep still resolves and advances with the
+    // kept size's record.
+    #expect(model.applyCountdownSecondsRemaining(forKey: "dell") != nil)
+    model.keepSize()
+    #expect(model.sizeChoices["dell"] == .recommended)
+    #expect(model.index == pageIndex + 1)
+    #expect(model.committed == [
+      .applySize(displayKey: "dell", looksLikeWidth: 2560, looksLikeHeight: 1440)
+    ])
+  }
+
+  @Test func afterAKeptApplyAReharvestWithoutTheSuggestionDropsThePage() {
+    let model = modelOnSizePage()
+    model.applySize(displayKey: "dell", choice: .recommended)
+    model.keepSize()
+    // Resolved: the carry-over must not outlive the apply, so a later
+    // harvest with no suggestion drops the page normally.
+    model.update(environment: environment([
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      entry(key: "dell"),
+    ]))
+    #expect(!model.pages.contains(.size(displayKey: "dell")))
+    #expect(model.index < model.pages.count)
+  }
+
+  @Test func afterARevertedApplyAReharvestWithoutTheSuggestionDropsThePage() {
+    let model = modelOnSizePage()
+    model.applySize(displayKey: "dell", choice: .recommended)
+    model.revertSize()
+    #expect(model.applyState == .reverted)
+    model.update(environment: environment([
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      entry(key: "dell"),
+    ]))
+    #expect(!model.pages.contains(.size(displayKey: "dell")))
+    #expect(model.index < model.pages.count)
+  }
+
   @Test func aMidCountdownUnplugForgetsTheCountdown() {
     let model = modelOnSizePage()
     model.applySize(displayKey: "dell", choice: .recommended)
@@ -310,6 +367,57 @@ struct OnboardingFlowModelTests {
     #expect(!model.screenRecordingGranted)
     model.requestScreenRecording()
     #expect(model.screenRecordingGranted)
+  }
+
+  // MARK: - Telemetry prefill (OB3 on a first run, the stored pref after)
+
+  @Test func aReRunSeedsTheMeasurementChoiceFromTheEnrolledDisplaysPref() {
+    // A returning user who chose Estimated arrives with the pref false on
+    // their enrolled display; the flow must not silently re-recommend
+    // measured over that decision.
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true)],
+      firstRun: false))
+    #expect(!model.measuredTelemetry)
+  }
+
+  @Test func aReRunSeedsTrueFromAMeasuredEnrolledDisplay() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(
+        key: "mag", productName: "MAG 341CQPX QD-OLED",
+        enrolled: true, measuredTelemetry: true)],
+      firstRun: false))
+    #expect(model.measuredTelemetry)
+  }
+
+  @Test func aFirstRunKeepsTheRecommendedMeasuredDefault() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true)],
+      firstRun: true))
+    #expect(model.measuredTelemetry)
+  }
+
+  @Test func aReRunWithNoEnrolledDisplayKeepsTheMeasuredDefault() {
+    // An unenrolled display's pref is the unwritten default and encodes no
+    // decision, so it never flips the recommendation.
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED")],
+      firstRun: false))
+    #expect(model.measuredTelemetry)
+  }
+
+  // MARK: - Display names
+
+  @Test func aRenameThatTrimsToEmptyFallsBackToTheEnvironmentName() {
+    let model = OnboardingFlowModel(environment: environment([
+      entry(key: "dell", suggestion: suggestion)
+    ]))
+    model.renames["dell"] = ""
+    #expect(model.displayName(forKey: "dell") == "Generic Display")
+    model.renames["dell"] = "   "
+    #expect(model.displayName(forKey: "dell") == "Generic Display")
+    model.renames["dell"] = "Desk Display"
+    #expect(model.displayName(forKey: "dell") == "Desk Display")
   }
 
   // MARK: - Stage 1 behaviours that must not regress

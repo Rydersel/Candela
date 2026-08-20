@@ -46,6 +46,11 @@ struct OnboardingDisplayEntry: Equatable, Sendable, Identifiable {
   /// existing at all is OB8's decision made before the flow begins.
   var sizeSuggestion: OnboardingSizeSuggestion?
   var enrolledInCare: Bool
+  /// The stored telemetry choice (the oledTelemetry pref), meaningful only
+  /// alongside `enrolledInCare`: a re-run seeds the measurement choice from
+  /// it instead of silently re-recommending measured. Defaulted to the
+  /// pref's own unwritten value so fixtures carry no decision.
+  var measuredTelemetry: Bool = false
 
   var id: String { persistenceKey }
 

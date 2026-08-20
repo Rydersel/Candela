@@ -49,7 +49,8 @@ struct OnboardingLiveEnvironmentTests {
     curatedRows: [DisplayModeRow] = [],
     dismissed: Bool = false,
     appliedThisSession: Bool = false,
-    enrolled: Bool = false
+    enrolled: Bool = false,
+    measuredTelemetry: Bool = false
   ) -> OnboardingDisplayInput {
     OnboardingDisplayInput(
       persistenceKey: key,
@@ -68,7 +69,8 @@ struct OnboardingLiveEnvironmentTests {
       curatedRows: curatedRows,
       recommendationDismissed: dismissed,
       sizeAppliedThisSession: appliedThisSession,
-      enrolledInCare: enrolled
+      enrolledInCare: enrolled,
+      measuredTelemetry: measuredTelemetry
     )
   }
 
@@ -348,6 +350,15 @@ struct OnboardingLiveEnvironmentTests {
 
     #expect(entry.refreshHz == 175)
     #expect(entry.enrolledInCare)
+  }
+
+  @Test func theTelemetryPrefArrivesOnTheEntry() {
+    // A re-run's measurement choice is seeded from this, so the harvested
+    // pref must survive the mapping in both states.
+    #expect(OnboardingEnvironmentBuilder.entry(for: Self.input(
+      enrolled: true, measuredTelemetry: true)).measuredTelemetry)
+    #expect(!OnboardingEnvironmentBuilder.entry(for: Self.input(
+      enrolled: true)).measuredTelemetry)
   }
 
   // MARK: - The plan reads what this builds

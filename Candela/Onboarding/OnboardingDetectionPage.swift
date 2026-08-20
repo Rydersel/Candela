@@ -161,11 +161,16 @@ struct OnboardingDetectionPage: View {
   }
 
   /// OB9: state what works; the display's own denial is its report, and
-  /// unknown is never called a failure.
+  /// unknown is never called a failure. Unknown is also never called
+  /// verified: a display that answers no reads (the write-only case) cannot
+  /// confirm anything, so its line states what the app offers, not what the
+  /// display responded to.
   private func controlLine(for display: OnboardingDisplayEntry) -> String {
     switch display.volume {
-    case .works, .unknown:
+    case .works:
       "Brightness, contrast and volume respond to \(AppInfo.productName)"
+    case .unknown:
+      "\(AppInfo.productName) offers brightness, contrast and volume controls"
     case .declinedByDisplay:
       "Brightness and contrast respond; this display reports no volume control"
     }

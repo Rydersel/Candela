@@ -45,6 +45,9 @@ struct OnboardingDisplayInput {
   var recommendationDismissed: Bool
   var sizeAppliedThisSession: Bool
   var enrolledInCare: Bool
+  /// The stored oledTelemetry pref, harvested so a re-run prefills the
+  /// measurement choice a returning user already made.
+  var measuredTelemetry: Bool = false
 }
 
 /// The pure half of environment assembly: values in, `OnboardingEnvironment`
@@ -84,7 +87,8 @@ enum OnboardingEnvironmentBuilder {
       refreshHz: input.refreshHz,
       volume: volume(from: input.volumeSupport),
       sizeSuggestion: sizeSuggestion(for: input),
-      enrolledInCare: input.enrolledInCare
+      enrolledInCare: input.enrolledInCare,
+      measuredTelemetry: input.measuredTelemetry
     )
   }
 
@@ -254,7 +258,8 @@ enum OnboardingLiveEnvironment {
       curatedRows: catalog?.rows ?? [],
       recommendationDismissed: prefs.sizeRecommendationDismissed,
       sizeAppliedThisSession: coordinator.sizeAppliedByUser.contains(state.id),
-      enrolledInCare: prefs.oledCareEnrolled
+      enrolledInCare: prefs.oledCareEnrolled,
+      measuredTelemetry: prefs.oledTelemetry
     )
   }
 }

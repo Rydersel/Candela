@@ -157,6 +157,15 @@ final class OnboardingFlowModel {
     designatedOleds = designated
     careEnabled = designated
     launchAtLogin = environment.isFirstRun ? true : environment.loginItemEnabled
+    // A re-run arrives at the prior telemetry decision (OB3 keeps the
+    // recommended measured default for a first run). Only an enrolled
+    // display's pref carries a decision: an unenrolled display's stored
+    // value is the unwritten default and must not flip the recommendation.
+    if !environment.isFirstRun,
+      let prior = environment.displays.first(where: \.enrolledInCare)
+    {
+      measuredTelemetry = prior.measuredTelemetry
+    }
     accessibilityGranted = environment.accessibilityGranted
     onCommit = { _ in }
     onApplySize = { _, _, _ in }
@@ -179,7 +188,15 @@ final class OnboardingFlowModel {
   }
 
   func displayName(forKey key: String) -> String {
-    renames[key] ?? display(forKey: key)?.name ?? key
+    // A cleared name field stores an empty rename, which every later page
+    // would render as a blank title; a rename that trims to nothing falls
+    // back to the environment's name instead.
+    if let rename = renames[key],
+      !rename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    {
+      return rename
+    }
+    return display(forKey: key)?.name ?? key
   }
 
   /// Commit the current page's decisions, then move forward (OB7). The last
@@ -217,6 +234,22 @@ final class OnboardingFlowModel {
   /// Mid-flow environment change (a display unplugged): re-derive and keep
   /// the position on a still-valid page.
   func update(environment: OnboardingEnvironment) {
+    var environment = environment
+    // An in-flight apply changes the display's mode, and the re-harvest that
+    // follows sees the previewed size as current, so the fresh entry arrives
+    // with no suggestion (the suppression working as designed for a display
+    // already at its best size). Without the prior suggestion the size page
+    // would vanish mid-countdown and its disappearance would revert the very
+    // apply the user asked for. Carry the old suggestion forward while the
+    // apply is unresolved; once it resolves, the next harvest drops the page
+    // normally.
+    if applyState != .idle, let pending = pendingApply,
+      let prior = display(forKey: pending.displayKey)?.sizeSuggestion,
+      let present = environment.displays.firstIndex(
+        where: { $0.persistenceKey == pending.displayKey })
+    {
+      environment.displays[present].sizeSuggestion = prior
+    }
     self.environment = environment
     if let pending = pendingApply,
       !environment.displays.contains(where: { $0.persistenceKey == pending.displayKey })
