@@ -178,4 +178,105 @@ struct RenderSmokeTests {
     .frame(width: 640, height: 520)
     expectPixels(render(pane), "BuiltInDisplayPane")
   }
+
+  // MARK: - The guided setup flow
+
+  /// The window the flow asks for is 760x560 at its minimum, so every render
+  /// below gets a frame a little larger than that: `OnboardingFlowView` sizes
+  /// itself from its host, and an unframed render of it has nothing to fill.
+  private static let flowSize = (width: 820.0, height: 620.0)
+
+  /// A flow model walked to `page`. Advancing is the only route the model
+  /// offers (`index` is `private(set)`, and the page list derives from the
+  /// environment plus the designation set), and in fixture mode advancing
+  /// records commits into the model instead of writing anything, so the walk
+  /// touches no prefs and no display.
+  ///
+  /// `designating` is passed where the page under test depends on the OLED
+  /// designation, so the test does not ride on the fixture's product name
+  /// still containing "OLED".
+  private func flow(
+    to page: OnboardingPage,
+    environment: OnboardingEnvironment = OnboardingFixtures.rig,
+    designating oleds: Set<String>? = nil,
+    sourceLocation: SourceLocation = #_sourceLocation
+  ) -> OnboardingFlowModel? {
+    let model = OnboardingFlowModel(environment: environment)
+    if let oleds { model.designatedOleds = oleds }
+    while model.currentPage != page {
+      guard !model.isLastPage else {
+        Issue.record(
+          "the flow never reached \(page.id); pages were \(model.pages.map(\.id))",
+          sourceLocation: sourceLocation)
+        return nil
+      }
+      model.advance()
+    }
+    return model
+  }
+
+  private func renderFlow(
+    _ page: OnboardingPage,
+    environment: OnboardingEnvironment = OnboardingFixtures.rig,
+    designating oleds: Set<String>? = nil,
+    sourceLocation: SourceLocation = #_sourceLocation
+  ) {
+    guard
+      let model = flow(
+        to: page, environment: environment, designating: oleds,
+        sourceLocation: sourceLocation)
+    else { return }
+    let view = OnboardingFlowView(model: model)
+      .frame(width: Self.flowSize.width, height: Self.flowSize.height)
+    expectPixels(render(view), "OnboardingFlowView at \(page.id)", sourceLocation: sourceLocation)
+  }
+
+  /// The opening page over the persistent canvas. The canvas drives its glow
+  /// from a `TimelineView`, which renders its first frame like any other view,
+  /// so this covers the canvas for every page below as well.
+  @Test func theOnboardingWelcomePageRenders() {
+    renderFlow(.welcome)
+  }
+
+  /// The detection page, which starts a scripted scan on appear. The render is
+  /// whatever frame the scan is on when the renderer runs, and either end of
+  /// that walk is a real state the page has to draw, so nothing here waits for
+  /// or pins a phase.
+  @Test func theOnboardingDetectionPageRenders() {
+    renderFlow(.detection)
+  }
+
+  /// A size page. The fixture's rotated 4K display is the one carrying a
+  /// suggestion, so it is the only size page the rig produces.
+  @Test func theOnboardingSizePageRenders() {
+    renderFlow(.size(displayKey: "fixture-dell"))
+  }
+
+  @Test func theOnboardingAccessibilityPageRenders() {
+    renderFlow(.accessibility)
+  }
+
+  /// The OLED designation page, rendered with both fixture displays selectable
+  /// and the ultrawide designated.
+  @Test func theOnboardingDesignationPageRenders() {
+    renderFlow(.oledSelect, designating: ["fixture-mag"])
+  }
+
+  /// The care page, which exists only while something is designated.
+  @Test func theOnboardingCarePageRenders() {
+    renderFlow(.oledCare, designating: ["fixture-mag"])
+  }
+
+  @Test func theOnboardingFinishPageRenders() {
+    renderFlow(.finish, designating: ["fixture-mag"])
+  }
+
+  /// The slim flow's pivot page. Nothing is attached, so the plan drops
+  /// detection, every size page and the OLED pages, and this is what the
+  /// second page of that flow draws.
+  @Test func theOnboardingNoDisplaysPageRenders() {
+    let empty = OnboardingEnvironment(
+      accessibilityGranted: false, loginItemEnabled: false, isFirstRun: true, displays: [])
+    renderFlow(.noDisplays, environment: empty)
+  }
 }
