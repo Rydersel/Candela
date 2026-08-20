@@ -424,15 +424,27 @@ enum Regress {
   ) -> (display: Display, inHardwareZone: Bool)? {
     let candidates = displays.filter { $0.persistenceKey != nil && !$0.isBuiltIn }
     guard let first = candidates.first else { return nil }
-    for display in candidates {
-      guard let key = display.persistenceKey,
-            let text = instruments.defaultsRead("combinedBrightness.\(key)"),
-            let stored = Double(text)
-      else { continue }
-      let point = instruments.defaultsRead("combinedSwitchingPoint.\(key)").flatMap(Int.init) ?? 0
-      if stored >= DimmingMath.switchingValue(fromPoint: point) { return (display, true) }
+    for display in candidates where isInHardwareZone(instruments, display) {
+      return (display, true)
     }
     return (first, false)
+  }
+
+  /// Whether this panel's stored brightness sits at or above its switching
+  /// value, which is where a change has to reach the DDC register.
+  ///
+  /// One predicate, two consumers: where the key drive aims, and whether a
+  /// fan-out could produce a write at all. A second copy of this arithmetic
+  /// would agree with the first until one of them was updated.
+  private static func isInHardwareZone(
+    _ instruments: RegressInstruments, _ display: Display
+  ) -> Bool {
+    guard let key = display.persistenceKey,
+          let text = instruments.defaultsRead("combinedBrightness.\(key)"),
+          let stored = Double(text)
+    else { return false }
+    let point = instruments.defaultsRead("combinedSwitchingPoint.\(key)").flatMap(Int.init) ?? 0
+    return stored >= DimmingMath.switchingValue(fromPoint: point)
   }
 
   /// `targetingCaveat` is what the key-targeting gate found when the pointer
@@ -610,7 +622,7 @@ enum Regress {
     return controlledCheck(name: name, control: control) {
       guard let value = audit.targetValue else {
         return .fail(
-          "no element in the settings window carries the accessibility identifier \(wanted) (\(audit.walked) elements walked on the General pane); three causes to tell apart: the running build predates the identifier pass, the composer no longer emits the bare pref name for an app-level pref, or the reader cannot see identifiers set through SwiftUI on this build"
+          "no element in the settings window carries the accessibility identifier \(wanted) (\(audit.walked) elements walked on the General pane); four causes to tell apart: the running build predates the identifier pass, the composer no longer emits the bare pref name for an app-level pref, the reader cannot see identifiers set through SwiftUI on this build, or the control sits deeper than the walk's 24-level cap, where a present identifier reads exactly like an absent one"
         )
       }
       return .pass("the General pane's \(wanted) control carries that identifier, reading \(value)")
@@ -1059,6 +1071,18 @@ enum Regress {
   /// copy of those rules living here would agree with them until the day it
   /// quietly did not. A second definition of "default" is exactly the drift
   /// that turns a gate into a false verdict.
+  /// The gamma table is not the only place the software leg can go: with
+  /// `avoidGamma` set it runs through the shade overlay and the table stays at
+  /// 1.0. The verdict lives in the Kit, where it is red-tested; this reads the
+  /// key. Absent means default, as with every other gate here.
+  private static func avoidGammaGate(
+    _ instruments: RegressInstruments, _ persistenceKey: String
+  ) -> String? {
+    AppRegression.avoidGammaGate(
+      prefValue: instruments.defaultsRead("avoidGamma.\(persistenceKey)"),
+      persistenceKey: persistenceKey)
+  }
+
   private static func ddcTuningGate(
     _ instruments: RegressInstruments, _ persistenceKey: String
   ) -> String? {
@@ -1207,15 +1231,44 @@ enum Regress {
       .trimmingCharacters(in: .whitespaces) == "1" {
       return "audioSinkOverride.\(persistenceKey) reads 1, the always-off override, which refuses the mute key on this display as well as greying its volume control: a posted mute key would reach the app and be dropped there rather than reaching the panel"
     }
-    guard let raw = instruments.defaultsRead("multiKeyboardVolume") else { return nil }
-    let text = raw.trimmingCharacters(in: .whitespaces)
-    guard text != "0" else { return nil }
-    let mode = switch text {
-    case "1": "every display"
-    case "2": "the display matching the audio output device"
-    default: "an unrecognised mode"
+    let text = instruments.defaultsRead("multiKeyboardVolume")?
+      .trimmingCharacters(in: .whitespaces) ?? "0"
+    if text != "0" {
+      let mode = switch text {
+      case "1": "every display"
+      case "2": "the display matching the audio output device"
+      default: "an unrecognised mode"
+      }
+      return "multiKeyboardVolume reads \(text) (\(mode)) rather than the pointer-targeted default; a posted mute key would not go to the panel this check aims at, so the mute would land on displays the record does not name. The Keyboard pane's volume-key target has to be back on the display under the pointer before this check can measure anything"
     }
-    return "multiKeyboardVolume reads \(text) (\(mode)) rather than the pointer-targeted default; a posted mute key would not go to the panel this check aims at, so the mute would land on displays the record does not name. The Keyboard pane's volume-key target has to be back on the display under the pointer before this check can measure anything"
+    // Reaching here means the pointer-targeted default, which is NOT the
+    // name-matching mode, so the app's tap rule releases both key families to
+    // macOS whenever the default output can set its own volume. Measured on
+    // this rig: with the laptop speakers as the output, a posted mute key never
+    // reached the app and the window carried no write at all, which the check
+    // could only report as a dead instrument.
+    return audioRoutingGate(mode: .mouse)
+  }
+
+  /// nil when a posted volume or mute key would reach the app, otherwise why it
+  /// would not.
+  ///
+  /// It CALLS the app's own rule rather than restating it. `shouldWatchVolumeKeys`
+  /// is what arms the tap, mute included (the app asks it once per family, with
+  /// that family's actionable count), and a second copy of the routing policy
+  /// living here would agree with it until the day it did not.
+  ///
+  /// `actionableDisplayCount` is 1 because the caller has already established a
+  /// panel whose volume command is available. That is the optimistic direction
+  /// on purpose: the count can only make the rule MORE likely to watch, so a
+  /// refusal from here is one the real tap would also have made, and this gate
+  /// can never invent a reason the app would not have had.
+  private static func audioRoutingGate(mode: MultiKeyboardVolume) -> String? {
+    guard let device = CoreAudioDeviceProvider().defaultOutputDevice() else { return nil }
+    guard !AudioRoutingPolicy.shouldWatchVolumeKeys(
+      mode: mode, ddcDisplaysExist: true, actionableDisplayCount: 1, defaultOutput: device)
+    else { return nil }
+    return "the default sound output is \(device.name), which sets its own volume, so outside the audio-device name-matching mode the app releases the volume and mute keys to macOS: a posted mute key never reaches it, and an empty window would read as a dead panel rather than as a key that went elsewhere. Route sound output to the display's own audio device before this run"
   }
 
   /// Which family of media keys a driven check posts, and therefore which
@@ -1304,7 +1357,7 @@ enum Regress {
     instruments: RegressInstruments, mag: Display, persistenceKey: String
   ) -> PlatformConformance.Check {
     let name = "regress.d28.combined"
-    for gate in [switchingPointGate, ddcTuningGate] {
+    for gate in [switchingPointGate, avoidGammaGate, ddcTuningGate] {
       if let reason = gate(instruments, persistenceKey) {
         return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
       }
@@ -1421,7 +1474,7 @@ enum Regress {
     instruments: RegressInstruments, mag: Display, persistenceKey: String
   ) -> PlatformConformance.Check {
     let name = "regress.combined.crossover"
-    for gate in [switchingPointGate, ddcTuningGate] {
+    for gate in [switchingPointGate, avoidGammaGate, ddcTuningGate] {
       if let reason = gate(instruments, persistenceKey) {
         return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
       }
@@ -1527,8 +1580,16 @@ enum Regress {
       return refusal
     }
 
+    // Read BEFORE the drive and after the pre-window, because it describes the
+    // rig this check is about to measure: the two combined-dimming checks park
+    // the panel at its floor, which is inside the software zone, so this is
+    // routinely false on a healthy run.
+    let anyTargetInHardwareZone = displays.contains {
+      !$0.isBuiltIn && isInHardwareZone(instruments, $0)
+    }
     let driven = fanOutDrive(
-      instruments: instruments, builtIn: builtIn, preWindowFanOuts: preFanOuts)
+      instruments: instruments, builtIn: builtIn, preWindowFanOuts: preFanOuts,
+      anyTargetInHardwareZone: anyTargetInHardwareZone)
 
     // Sync goes back BEFORE the walk home, which is the opposite of the other
     // two checks and for a reason particular to this one: the switch it staged
@@ -1562,7 +1623,8 @@ enum Regress {
   }
 
   private static func fanOutDrive(
-    instruments: RegressInstruments, builtIn: Display, preWindowFanOuts: Int
+    instruments: RegressInstruments, builtIn: Display, preWindowFanOuts: Int,
+    anyTargetInHardwareZone: Bool
   ) -> PlatformConformance.Check {
     let name = "regress.sync.fanout"
     guard let before = instruments.nativeBrightness(builtIn.id) else {
@@ -1597,8 +1659,24 @@ enum Regress {
         "the built-in moved from \(formatted(before)) to \(formatted(observed)), past the \(SyncDeadband.threshold) deadband and confirmed by a read back rather than by the write's own return"
       )
     } else {
+      // Keyed on the OBSERVED delta, never on whether the write landed where it
+      // aimed: a source that moved and undershot is not a source that never
+      // moved, and reporting it as one sends the reader after the wrong fault.
+      let shortfall: String
+      if let observed {
+        let delta = abs(observed - before)
+        shortfall = if delta == 0 {
+          "never moved"
+        } else if !cleared {
+          "moved by \(formatted(delta)), which does not clear the \(SyncDeadband.threshold) deadband"
+        } else {
+          "moved past the deadband but not onto the \(formatted(target)) it was written"
+        }
+      } else {
+        shortfall = "did not answer a read back at all"
+      }
       control = .didNotFire(
-        "the built-in was written \(formatted(target)) and reads back \(observed.map(formatted) ?? "nothing") against \(formatted(before)) before it: the source \(landed ? "did not clear the \(SyncDeadband.threshold) deadband" : "never moved"), so an absent fan-out would say nothing about sync"
+        "the built-in was written \(formatted(target)) and reads back \(observed.map(formatted) ?? "nothing") against \(formatted(before)) before it: the source \(shortfall), so an absent fan-out would say nothing about sync"
       )
     }
 
@@ -1612,7 +1690,8 @@ enum Regress {
       return AppRegression.fanOutVerdict(
         preWindowFanOuts: preWindowFanOuts,
         fanOutLinesFromSource: fromBuiltIn,
-        ddcWrites: AppRegression.ddcWriteValues(fromLogLines: window.lines).count)
+        ddcWrites: AppRegression.ddcWriteValues(fromLogLines: window.lines).count,
+        anyTargetInHardwareZone: anyTargetInHardwareZone)
     }
 
     // The source goes back whatever the verdict was, and the restore is read
@@ -1642,7 +1721,7 @@ enum Regress {
   /// control D29 rule 1 governs. Composed the way the app composes it: the
   /// on-disk pref name, the command, then the display's persistence key.
   static func volumeCommandIdentifier(_ persistenceKey: String) -> String {
-    "unavailableDDC.volume.\(persistenceKey)"
+    AppRegression.volumeCommandIdentifier(persistenceKey: persistenceKey)
   }
 
   static func mutedPrefKey(_ persistenceKey: String) -> String { "muted.\(persistenceKey)" }
@@ -3147,20 +3226,17 @@ final class RegressInstruments {
     return matches[0]
   }
 
-  /// A control's value, located by its accessibility identifier rather than by
-  /// its display string: a label is user-visible copy that can be reworded,
-  /// and a selector written against one silently matches nothing the day it is.
-  func axRead(identifier: String) -> String? {
-    guard let element = element(carrying: identifier) else { return nil }
-    return read(element, kAXValueAttribute as String).presentText
-  }
-
-  /// The same read, three-state. `axRead` collapses absent, empty and
-  /// unreadable into one nil, which is the right shape for "what does this
-  /// control say" and the wrong shape for "may I press it": a drive gated on
-  /// nil-ness presses a control whose state before the press was never
-  /// established, and the readback afterwards then has nothing to be a change
-  /// FROM.
+  /// A control's value, three-state, located by its accessibility identifier
+  /// rather than by its display string: a label is user-visible copy that can
+  /// be reworded, and a selector written against one silently matches nothing
+  /// the day it is.
+  ///
+  /// Absent, present-but-empty and unreadable stay apart, and the two-state
+  /// reader that collapsed them was deleted rather than kept beside this one.
+  /// "What does this control say" tolerates one nil; "may I press it" does
+  /// not, because a drive gated on nil-ness presses a control whose state
+  /// before the press was never established, and the readback afterwards then
+  /// has nothing to be a change FROM.
   func axReading(identifier: String) -> Reading {
     guard let element = element(carrying: identifier) else {
       return .unreadable(lastAXError ?? "the control could not be located")

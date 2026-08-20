@@ -305,14 +305,60 @@ public enum AppRegression {
     return current < target ? .pressUp : .pressDown
   }
 
+  // MARK: - The gates a driven check reads before it judges anything
+
+  /// nil when the software dimming leg is observable through the gamma table on
+  /// this display, otherwise why it is not.
+  ///
+  /// `avoidGamma` routes the software leg to the shade overlay instead of the
+  /// gamma table, so a panel carrying it reads 1.0 at the floor with nothing
+  /// wrong. The DDC control still fires, so the check would run all the way to
+  /// its verdict and FAIL a healthy app on a gamma number that describes a leg
+  /// it is no longer using. It is a state rigs ARRIVE in: accepting the app's
+  /// own gamma-interference prompt sets it.
+  ///
+  /// Absent means default, so an unreadable key is the pass here, as in every
+  /// other gate: the constants describe the default configuration and a gate
+  /// that refused on silence would refuse on most rigs.
+  public static func avoidGammaGate(prefValue: String?, persistenceKey: String) -> String? {
+    guard let text = prefValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !text.isEmpty, text != "0"
+    else { return nil }
+    return "avoidGamma.\(persistenceKey) reads \(text), so this panel's software dimming leg runs through the shade overlay rather than the gamma table; the gamma read would sit at 1.0 with the leg working perfectly, and the floor constants describe the gamma leg"
+  }
+
+  /// The accessibility identifier, and the on-disk key, of a display's volume
+  /// availability switch.
+  ///
+  /// Composed here rather than in the driver so this spelling is pinned by a
+  /// test on this side too. The settings pane composes the same string from
+  /// `PrefName` and the command, and the app suite pins that: two spellings of
+  /// one identifier agree until the day one of them quietly does not, and the
+  /// symptom would be a check that reports a control missing on a rig where it
+  /// is on screen.
+  public static func volumeCommandIdentifier(persistenceKey: String) -> String {
+    "unavailableDDC.volume.\(persistenceKey)"
+  }
+
   // MARK: - The sync fan-out
 
   /// Brightness sync fans a change on one display out to the others. The
   /// control is a QUIET pre-window: the built-in's ambient auto-brightness
   /// fans out continuously when the room light moves, and fan-out lines from
   /// that source would be read as the ones this check drove.
+  ///
+  /// `anyTargetInHardwareZone` is whether any panel a fan-out could land on
+  /// sits at or above its switching value. Below it, a fan-out computes the
+  /// register value the panel already holds, the coalescer drops the repeat,
+  /// and the line is logged BEFORE the value is applied: the window then
+  /// carries fan-out lines and zero writes on a perfectly healthy app. That is
+  /// not a hypothetical state, it is where the two combined-dimming checks
+  /// leave the panel, so the zero-write branch softens to inconclusive naming
+  /// the zone. It softens that branch and no other: an absent fan-out LINE is
+  /// the app failing to fan out at all, which the zone explains nothing about.
   public static func fanOutVerdict(
-    preWindowFanOuts: Int, fanOutLinesFromSource: Int, ddcWrites: Int
+    preWindowFanOuts: Int, fanOutLinesFromSource: Int, ddcWrites: Int,
+    anyTargetInHardwareZone: Bool
   ) -> PlatformConformance.Outcome {
     guard preWindowFanOuts == 0 else {
       return .inconclusive(
@@ -324,6 +370,11 @@ public enum AppRegression {
         "the source display's brightness moved and no sync fan-out line names it as the source")
     }
     guard ddcWrites > 0 else {
+      guard anyTargetInHardwareZone else {
+        return .inconclusive(
+          "\(fanOutLinesFromSource) sync fan-out lines and no DDC write, with every DDC-capable panel below its switching value: down there a fan-out computes the register value the panel already holds and the coalescer drops the repeat, so no write can appear whatever the app does and an absent one says nothing about sync"
+        )
+      }
       return .fail(
         "\(fanOutLinesFromSource) sync fan-out lines and not one DDC write: the fan-out never reached a panel"
       )

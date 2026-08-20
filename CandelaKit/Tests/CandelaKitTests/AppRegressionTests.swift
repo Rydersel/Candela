@@ -456,28 +456,81 @@ struct AppRegressionTests {
 
   @Test func aNoisyPreWindowContaminatesTheFanOutMeasurement() {
     let outcome = AppRegression.fanOutVerdict(
-      preWindowFanOuts: 4, fanOutLinesFromSource: 9, ddcWrites: 9)
+      preWindowFanOuts: 4, fanOutLinesFromSource: 9, ddcWrites: 9,
+      anyTargetInHardwareZone: true)
     #expect(isInconclusive(outcome))
     #expect(detail(outcome).contains("ambient"))
   }
 
   @Test func aBuiltInMoveThatFansOutToNothingFails() {
     let outcome = AppRegression.fanOutVerdict(
-      preWindowFanOuts: 0, fanOutLinesFromSource: 0, ddcWrites: 0)
+      preWindowFanOuts: 0, fanOutLinesFromSource: 0, ddcWrites: 0,
+      anyTargetInHardwareZone: true)
     #expect(isFail(outcome))
   }
 
   @Test func aFanOutThatReachesNoPanelFails() {
     let outcome = AppRegression.fanOutVerdict(
-      preWindowFanOuts: 0, fanOutLinesFromSource: 3, ddcWrites: 0)
+      preWindowFanOuts: 0, fanOutLinesFromSource: 3, ddcWrites: 0,
+      anyTargetInHardwareZone: true)
     #expect(isFail(outcome))
     #expect(detail(outcome).contains("DDC"))
   }
 
+  @Test func aFanOutIntoTheSoftwareZoneAloneCannotProduceAWrite() {
+    // Every DDC panel sitting below its switching value is the state the two
+    // combined-dimming checks LEAVE the rig in: a fan-out there computes the
+    // register value the panel already holds, the coalescer drops the repeat,
+    // and no write can appear whatever the app does. Convicting the app of
+    // that is a false failure the run reaches by construction.
+    let outcome = AppRegression.fanOutVerdict(
+      preWindowFanOuts: 0, fanOutLinesFromSource: 3, ddcWrites: 0,
+      anyTargetInHardwareZone: false)
+    #expect(isInconclusive(outcome))
+    #expect(detail(outcome).contains("switching value"))
+  }
+
+  @Test func theSoftwareZoneNeverExcusesAFanOutThatDidNotHappen() {
+    // The zone explains an absent WRITE. It says nothing about an absent
+    // fan-out line, which is the app failing to fan out at all.
+    let outcome = AppRegression.fanOutVerdict(
+      preWindowFanOuts: 0, fanOutLinesFromSource: 0, ddcWrites: 0,
+      anyTargetInHardwareZone: false)
+    #expect(isFail(outcome))
+  }
+
   @Test func aCleanWindowWithFanOutAndWritesPasses() {
     let outcome = AppRegression.fanOutVerdict(
-      preWindowFanOuts: 0, fanOutLinesFromSource: 3, ddcWrites: 2)
+      preWindowFanOuts: 0, fanOutLinesFromSource: 3, ddcWrites: 2,
+      anyTargetInHardwareZone: true)
     #expect(isPass(outcome))
+  }
+
+  // MARK: - The gamma table is not the only software leg
+
+  @Test func anAbsentAvoidGammaKeyIsTheDefault() {
+    #expect(AppRegression.avoidGammaGate(prefValue: nil, persistenceKey: "PK1") == nil)
+    #expect(AppRegression.avoidGammaGate(prefValue: " 0 ", persistenceKey: "PK1") == nil)
+  }
+
+  @Test func avoidGammaMakesTheSoftwareLegUnreadable() {
+    // With it set, the software leg goes to the shade overlay and the gamma
+    // table stays at 1.0 at the floor. The DDC control still fires, so the
+    // check would run to its verdict and FAIL a healthy app. Rigs arrive in
+    // this state: accepting the gamma-interference prompt sets it.
+    let reason = AppRegression.avoidGammaGate(prefValue: "1", persistenceKey: "PK1")
+    #expect(reason?.contains("avoidGamma.PK1") == true)
+    #expect(reason?.contains("overlay") == true)
+  }
+
+  // MARK: - The volume availability switch, spelled once
+
+  @Test func theVolumeCommandIdentifierIsComposedAsTheSettingsPaneComposesIt() {
+    // The app's composer pins this same string in the app suite. Two spellings
+    // of one identifier agree until the day they do not, so both are pinned.
+    #expect(
+      AppRegression.volumeCommandIdentifier(persistenceKey: "PK1")
+        == "unavailableDDC.volume.PK1")
   }
 
   // MARK: - D29, proven by outcome
