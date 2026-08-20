@@ -61,8 +61,9 @@ struct OledCareMeasurementPage: View {
         Toggle("Measure how bright each part of this display is", isOn: Binding(
           get: { prefs.oledTelemetry },
           set: { on in
-            // The ONE place in the app that raises the Screen Recording
-            // prompt. The sampler itself is preflight-only on purpose: a
+            // One of the two places in the app that raise the Screen
+            // Recording prompt; the guided setup flow's measured choice is
+            // the other. The sampler itself is preflight-only on purpose: a
             // background loop that raises a TCC dialog on its own schedule is
             // a permission request with no explanation attached to it.
             //

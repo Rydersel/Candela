@@ -48,6 +48,13 @@
   ///                                           Keyboard pane with that pushed
   ///                                           page presented, KMR11; ids are
   ///                                           KeyboardPage raw values)
+  ///   CANDELA_DEBUG_SETTINGS=setup:mock          (the guided setup flow over
+  ///                                           the committed rig fixture:
+  ///                                           commits recorded, permissions
+  ///                                           simulated. Stage 1 of the
+  ///                                           onboarding overhaul and the
+  ///                                           permanent screenshot route for
+  ///                                           the flow's pages.)
   ///   CANDELA_DEBUG_SETTINGS=display:builtIn
   ///   CANDELA_DEBUG_SETTINGS=display:first
   ///   CANDELA_DEBUG_SETTINGS=display:<persistenceKey>
@@ -108,6 +115,9 @@
       case resolved(
         SettingsDestination, subPage: DisplaySubPage?, oledPath: [OledCarePage]?,
         keyboardPath: [KeyboardPage]?, healthWindowKey: String?)
+      /// `setup:mock`: not a settings destination at all; the guided setup
+      /// flow in its own window, over the fixture environment.
+      case presentSetupMock
       case rejected(String)
     }
 
@@ -124,10 +134,16 @@
     static func resolve(_ value: String, externalKeys: [String]) -> Resolution {
       let parts = value.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
       guard parts.count == 2 else {
-        return .rejected("\(quoted(value)) is not <kind>:<id>; expected pane:<id> or display:<key>")
+        return .rejected(
+          "\(quoted(value)) is not <kind>:<id>; expected pane:<id>, display:<key> or setup:mock")
       }
       let body = String(parts[1])
       switch parts[0] {
+      case "setup":
+        guard body == "mock" else {
+          return .rejected("unknown setup value \(quoted(body)); the only one is 'mock'")
+        }
+        return .presentSetupMock
       case "pane":
         // Optional suffixes, accepted only on the panes with pushed pages:
         // `oledCare` takes `/<displayKey>[/<page>]`, `keyboard` takes
@@ -219,7 +235,7 @@
         }
         return .resolved(.display(keyBody), subPage: subPage, oledPath: nil, keyboardPath: nil, healthWindowKey: nil)
       default:
-        return .rejected("unknown kind \(quoted(String(parts[0]))); expected pane or display")
+        return .rejected("unknown kind \(quoted(String(parts[0]))); expected pane, display or setup")
       }
     }
 
@@ -254,6 +270,9 @@
         pendingKeyboardPath = keyboardPath
         pendingHealthWindowKey = healthWindowKey
         SettingsOpener.open()
+      case .presentSetupMock:
+        log("presenting the guided setup mock")
+        OnboardingMockPresenter.present()
       case let .rejected(reason):
         log("ignored: \(reason)")
       }
