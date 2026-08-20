@@ -477,6 +477,11 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         self.wireInterferenceHooks()
         self.warmModeCatalogs()
         self.restoreUnattended()
+        // Setup re-derives its pages from the post-event display list. Inside
+        // this loop because the stream has ONE consumer; a second `for await`
+        // would split the events between them. After `refresh()` and the
+        // catalog warm so the harvest reads the new topology.
+        self.onboardingController?.displayTopologyChanged()
         // Fork parity: the counter zeroes on every configure so unrelated
         // events across a long session never add up to an offer.
         // `suspendedForSession` survives.
@@ -622,6 +627,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         self.mediaKeyTap?.stop()
         self.model.noteTapDisarmed()
       }
+      // Setup's permission page mirrors the grant from THIS closure, extended
+      // here rather than given its own `startMonitoring`: a second call
+      // REPLACES the observer and callback, and the tap lifecycle above must
+      // keep them. Reads nil until Setup has been presented, and the flow
+      // model ignores it once its window is gone.
+      self.onboardingController?.accessibilityGrantChanged(granted)
     }
 
     // Warm the display list before the first open. Menu tracking can hold the
@@ -765,7 +776,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// The Setup window (user-facing name; "onboarding" is internal only).
   private func presentOnboarding() {
     let controller = onboardingController ?? OnboardingWindowController(
-      permission: model.accessibility,
+      model: model,
+      actions: settingsActions,
       onCompletion: {
         // D14: completion is recorded HERE — on close, by any route — not at
         // launch. A force-quit mid-Setup leaves the key absent and the next
