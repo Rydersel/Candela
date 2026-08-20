@@ -157,9 +157,15 @@ struct HealthPaneRenderTests {
 
     expectPixels(enrolled, "enrolled OledCareDisplayPage")
     guard let enrolled, let unenrolled else { return }
+    // What this comparison proves is the enrolled BRANCH: Dimming and More.
+    // The two exposure cards render only over a measured summary, and this
+    // fixture's coordinator has measured nothing, so deleting the cards would
+    // not fail this test; their derivation is covered standalone below, and
+    // their placement on the page is the interactive pass's to see (a measured
+    // page-level fixture would mean seeding the real exposure store).
     #expect(
       enrolled.height > unenrolled.height,
-      "the exposure cards, the Dimming section and More must be on the enrolled page")
+      "the Dimming section and More must be on the enrolled page")
   }
 
   /// One display's OLED Care page over a fixture display, sized by its content.
