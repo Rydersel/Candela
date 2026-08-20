@@ -34,11 +34,11 @@ struct GeneralPane: View {
   /// The login-item failure as RENDERED, mirroring `loginItem.lastError` one
   /// update behind. `LoginItem` writes it only from `setEnabled` (a refresh
   /// does not clear it), and neither placement of a keyed `.animation` fades a
-  /// `Form` row symmetrically (measured 2026-08-17): on a `Group` wrapping the
-  /// conditional row it animates nothing in either direction, and on an
-  /// always-present container inside the row the child fades IN and then SNAPS
-  /// out. The snap-out asymmetry is why the container-hung `.animation` is not
-  /// enough; the mirror is what puts the arrival AND the departure inside one
+  /// conditional row symmetrically (measured 2026-08-17): on a `Group` wrapping
+  /// the row it animates nothing in either direction, and on an always-present
+  /// container inside the row the child fades IN and then SNAPS out. The
+  /// snap-out asymmetry is why the container-hung `.animation` is not enough;
+  /// the mirror is what puts the arrival AND the departure inside one
   /// transaction. Kept in agreement by the two hooks on the toggle below and by
   /// nothing else.
   @State private var shownLoginError: String?
@@ -51,13 +51,17 @@ struct GeneralPane: View {
     // that re-evaluates this body after a write. Without this reference the
     // startup caption below would never follow its own picker.
     let _ = model.prefsRevision
-    Form {
+    SettingsPageScaffold {
+      SettingsPageHeader(
+        title: "General",
+        subtitle:
+          "How \(AppInfo.productName) starts, how far it dims, and what it does with your saved levels."
+      )
       applicationSection
       brightnessSection
       syncSection
       startupSection
     }
-    .formStyle(.grouped)
     // D10: `SMAppService.mainApp.status` is the single source of truth, but a
     // live read is not a live *render*. `LoginItem.isEnabled` registers its
     // observation on `refreshToken`, and nothing outside this app mutates that
@@ -95,38 +99,44 @@ struct GeneralPane: View {
   // MARK: - Application
 
   private var applicationSection: some View {
-    Section("Application") {
-      // "Open at Login" rather than the fork's "Start at Login": it is the
-      // system's own wording in System Settings → General → Login Items, and
-      // Setup uses the identical string (D25 — familiarity beats novelty).
-      Toggle("Open at Login", isOn: Binding(
-        get: { loginItem.isEnabled },
-        set: { loginItem.setEnabled($0) } // D10: the readback happens inside
-      ))
-      // The failure row's mirror hooks hang on the toggle, the row that caused
-      // the failure and the one row here that is always present: hooks on the
-      // failure row itself would only exist while the failure does, so nothing
-      // would be watching for it to arrive. Un-animated on appear, or an error
-      // still standing when the pane opens would fade in as though it were new.
-      .onAppear { shownLoginError = loginItem.lastError }
-      .onChange(of: loginItem.lastError) { _, error in
-        withAnimation(Motion.notice(reduceMotion: reduceMotion)) { shownLoginError = error }
+    SettingsCardSection(title: "Application") {
+      SettingRow {
+        // "Open at Login" rather than the fork's "Start at Login": it is the
+        // system's own wording in System Settings → General → Login Items, and
+        // Setup uses the identical string (D25 — familiarity beats novelty).
+        Toggle("Open at Login", isOn: Binding(
+          get: { loginItem.isEnabled },
+          set: { loginItem.setEnabled($0) } // D10: the readback happens inside
+        ))
+        .themedSwitch()
+        // The failure row's mirror hooks hang on the toggle, the row that
+        // caused the failure and the one row here that is always present: hooks
+        // on the failure row itself would only exist while the failure does, so
+        // nothing would be watching for it to arrive. Un-animated on appear, or
+        // an error still standing when the pane opens would fade in as though
+        // it were new.
+        .onAppear { shownLoginError = loginItem.lastError }
+        .onChange(of: loginItem.lastError) { _, error in
+          withAnimation(Motion.notice(reduceMotion: reduceMotion)) { shownLoginError = error }
+        }
       }
       if let error = shownLoginError {
         // A failed register() leaves the toggle reading OFF (the fork's lying
         // checkbox is exactly what D10 exists to fix), so the reason has to be
         // visible or the control looks broken. The symbol is not decoration:
         // color.md forbids communicating essential information by color alone.
-        HStack(alignment: .firstTextBaseline, spacing: 4) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
           Image(systemName: "exclamationmark.triangle.fill")
           Text(verbatim: error) // system error text, never a lookup key
         }
         .font(.callout)
-        .foregroundStyle(.red)
+        .foregroundStyle(SettingsTheme.dangerTint)
         .fixedSize(horizontal: false, vertical: true)
+        .padding(.bottom, 6)
         .transition(.opacity)
       }
-      HStack(spacing: 8) {
+      SettingsCardDivider()
+      HStack(spacing: 10) {
         // Both titles are stated twice on purpose. SwiftUI does not publish a
         // `Button`'s own title to the accessibility layer, so without the
         // explicit label these two announce as "button" and "button": the two
@@ -139,6 +149,7 @@ struct GeneralPane: View {
         // menu bar icon is hidden ("You can quit it from General") — with no
         // icon and no Dock tile there is otherwise no way out.
         Button(quit) { NSApplication.shared.terminate(nil) }
+          .buttonStyle(SettingsSecondaryButtonStyle())
           .accessibilityLabel(Text(verbatim: quit))
         // Trailing ellipsis per buttons.md: the click opens a confirmation
         // rather than destroying anything. No `.destructive` role here — the
@@ -147,16 +158,23 @@ struct GeneralPane: View {
         // share one latch, because the pair overlapping is what strands a
         // display behind a controller the rebuild replaced.
         Button("Reset All Settings…") { confirmingReset = true }
+          .buttonStyle(SettingsDangerButtonStyle())
           .accessibilityLabel("Reset All Settings…")
           .disabled(model.isResetting)
+          // The themed styles paint no disabled state of their own, so the
+          // latch would otherwise be invisible for as long as it holds.
+          .opacity(model.isResetting ? 0.45 : 1)
+        Spacer(minLength: 0)
       }
+      .padding(.top, 8)
+      .padding(.bottom, 2)
     }
   }
 
   // MARK: - Brightness
 
   private var brightnessSection: some View {
-    Section("Brightness") {
+    SettingsCardSection(title: "Brightness") {
       // The fork's "Combine hardware and software dimming" named the
       // mechanism; this names the outcome and moves the mechanism into the
       // caption (D25).
@@ -178,8 +196,11 @@ struct GeneralPane: View {
             actions.prefDidChange(.disableCombinedBrightness)
           }
         ))
+        .themedSwitch()
         .prefIdentifier(.disableCombinedBrightness)
       }
+
+      SettingsCardDivider()
 
       // Deliberately NOT disabled when combined dimming is off: `applySoftware`
       // passes `allowZero:` on the software-only path too, where the whole
@@ -198,6 +219,7 @@ struct GeneralPane: View {
             actions.prefDidChange(.allowZeroSwBrightness)
           }
         ))
+        .themedSwitch()
         .prefIdentifier(.allowZeroSwBrightness)
       }
     }
@@ -206,7 +228,7 @@ struct GeneralPane: View {
   // MARK: - Sync
 
   private var syncSection: some View {
-    Section("Sync") {
+    SettingsCardSection(title: "Sync") {
       SettingRow("Brightness changes made by the ambient light sensor, Control Center or System Settings are mirrored to your other displays.") {
         Toggle("Match other displays to the built-in display", isOn: Binding(
           get: { prefs.enableBrightnessSync },
@@ -215,6 +237,7 @@ struct GeneralPane: View {
             actions.prefDidChange(.enableBrightnessSync)
           }
         ))
+        .themedSwitch()
         .prefIdentifier(.enableBrightnessSync)
       }
     }
@@ -223,7 +246,7 @@ struct GeneralPane: View {
   // MARK: - Startup
 
   private var startupSection: some View {
-    Section("Startup") {
+    SettingsCardSection(title: "Startup") {
       SettingRow(startupCaption) {
         Picker("On startup and wake:", selection: Binding(
           get: { prefs.startupAction },
@@ -238,34 +261,6 @@ struct GeneralPane: View {
         }
         .prefIdentifier(.startupAction)
       }
-      // The picker deliberately shows the PERSISTED choice even in a safe-mode
-      // session: this pane's `DisplayPrefs` is built without the safe-mode
-      // flag, so the getter reports what is on disk rather than the `.doNothing`
-      // the engine is running on, and the setter writes through for the next
-      // normal launch. That is right for a settings control — but on its own it
-      // is also a control describing behavior that is not happening, so safe
-      // mode has to be visible right here or the pane quietly lies (D11).
-      if model.isSafeMode {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-          // Symbol AND text — never state by color alone (color.md). No custom
-          // color; the row is monochrome in both appearances.
-          Image(systemName: "exclamationmark.triangle")
-            .foregroundStyle(.secondary)
-          Text("Safe Mode is on for this session, so this setting is not in effect.")
-        }
-        // The full scope is VISIBLE here, in the state it describes, and in no
-        // always-on form: a paragraph explaining a mode nobody is in was the
-        // pane's longest block of text, and D11's visibility rule is about the
-        // ACTIVE state, which keeps its status row above and this caption.
-        //
-        // The words themselves are `SafeModeCopy`'s (#147). This pane was the
-        // only one of the three summaries that named all four suppressions, so
-        // for a milestone the launch alert and the Diagnostics row described a
-        // narrower feature than the one the app was running. Whichever surface
-        // is right, one list is what stops them disagreeing, and the enum is
-        // exhaustive so a fifth suppression cannot reach only one of them.
-        SettingsCaption(verbatim: SafeModeCopy.generalPaneCaption(app: AppInfo.productName))
-      }
       // `startupCaption` is NOT repeated here: `SettingRow` above already
       // renders it beneath the picker. Rendering it a second time printed the
       // same sentence twice, once tight under the control and once adrift
@@ -274,16 +269,74 @@ struct GeneralPane: View {
         // "Write-only panels" was the house term for these; SO14 makes the
         // hardware a display everywhere in UI copy.
         SettingsCaption("Some displays never answer DDC reads; values then stay as last saved.")
+          .padding(.bottom, 6)
       }
-      // One line when nobody is in it, and nothing at all during a safe-mode
-      // session — the branch above already says it, at length, in the state it
-      // is about. Safe mode's real, final scope (D11) must NEVER be written as
-      // "no DDC commands" in either place, which is the same false copy D11
+      SettingsCardDivider()
+      // The picker deliberately shows the PERSISTED choice even in a safe-mode
+      // session: this pane's `DisplayPrefs` is built without the safe-mode
+      // flag, so the getter reports what is on disk rather than the `.doNothing`
+      // the engine is running on, and the setter writes through for the next
+      // normal launch. That is right for a settings control — but on its own it
+      // is also a control describing behavior that is not happening, so safe
+      // mode has to be visible right here or the pane quietly lies (D11).
+      //
+      // One line when nobody is in it, and the notice instead during a
+      // safe-mode session: the notice already says it, at length, in the state
+      // it is about. Safe mode's real, final scope (D11) must NEVER be written
+      // as "no DDC commands" in either place, which is the same false copy D11
       // exists to fix: sliders and keys still work and still send DDC.
-      if !model.isSafeMode {
-        SettingsCaption("Hold Shift while launching for Safe Mode: saved values aren't restored.")
+      if model.isSafeMode {
+        safeModeNotice
+      } else {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+          Image(systemName: "shift")
+          Text("Hold Shift while launching for Safe Mode: saved values aren't restored.")
+        }
+        .font(.caption)
+        .foregroundStyle(SettingsTheme.faintColor)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
       }
     }
+  }
+
+  /// The active state D11 requires to be visible, as a notice inside the card
+  /// rather than a paragraph on the page: the full scope is shown HERE, in the
+  /// state it describes, and in no always-on form. A paragraph explaining a
+  /// mode nobody is in was this pane's longest block of text.
+  ///
+  /// The words themselves are `SafeModeCopy`'s. This pane was the only one of
+  /// the three summaries that named all four suppressions, so for a milestone
+  /// the launch alert and the Diagnostics row described a narrower feature than
+  /// the one the app was running. Whichever surface is right, one list is what
+  /// stops them disagreeing, and the enum is exhaustive so a fifth suppression
+  /// cannot reach only one of them.
+  private var safeModeNotice: some View {
+    HStack(alignment: .top, spacing: 9) {
+      // Symbol AND text: never state by color alone (color.md). No custom
+      // color; the notice is monochrome against the card.
+      Image(systemName: "exclamationmark.triangle")
+        .foregroundStyle(SettingsTheme.faintColor)
+      VStack(alignment: .leading, spacing: 4) {
+        Text("Safe Mode is on for this session, so this setting is not in effect.")
+          .font(.callout.weight(.medium))
+          .foregroundStyle(SettingsTheme.titleColor)
+          .fixedSize(horizontal: false, vertical: true)
+        SettingsCaption(verbatim: SafeModeCopy.generalPaneCaption(app: AppInfo.productName))
+      }
+    }
+    .padding(11)
+    .background(
+      RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
+        .fill(Color.white.opacity(0.05))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
+        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+    )
+    .padding(.top, 10)
+    .padding(.bottom, 4)
   }
 
   /// Exhaustive, so a future `StartupAction` case is a compile error here
