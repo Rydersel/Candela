@@ -239,12 +239,10 @@ struct AdvancedPage: View {
   @ViewBuilder private var vcpOverrides: some View {
     Text("VCP Overrides")
       .font(.callout.weight(.semibold))
-      // Hand-rolled rather than a theme component, so it dims here or nowhere:
-      // a sub-header over a blocked section must not outshine it.
-      .foregroundStyle(
-        isBlocked
-          ? SettingsTheme.titleColor.opacity(SettingsTheme.disabledOpacity)
-          : SettingsTheme.titleColor)
+      // A sub-header over a blocked section must not outshine it, and no
+      // theme component owns this one. Off the environment rather than
+      // `isBlocked`, so it cannot disagree with what greyed the section.
+      .settingsText(SettingsTheme.titleColor)
       .settingsHeading()
     SettingsCaption("For a display that puts a control somewhere non-standard, or responds unevenly across its range.")
       .padding(.top, 2)
@@ -297,6 +295,7 @@ struct AdvancedPage: View {
           fieldHint: Text("Hex control codes this display uses instead of the standard one."),
           width: 100
         )
+        .settingsEditableContent()
         // Keyed to the display, for the reason the tuning grid's fields are:
         // SO23's switcher can carry this page onto another display mid-edit.
         .id(persistenceKey)
@@ -331,7 +330,7 @@ struct AdvancedPage: View {
               // the control's, and they name a DIRECTION rather than a number
               // (SO13).
               Text("Earlier")
-                .foregroundStyle(SettingsTheme.faintColor)
+                .settingsText(SettingsTheme.faintColor)
                 .accessibilityHidden(true)
               ThemedSlider(
                 value: crossoverBinding,
@@ -347,12 +346,12 @@ struct AdvancedPage: View {
               .accessibilityLabel(Text("Hand off"))
               .prefIdentifier(.combinedSwitchingPoint, persistenceKey: persistenceKey)
               Text("Later")
-                .foregroundStyle(SettingsTheme.faintColor)
+                .settingsText(SettingsTheme.faintColor)
                 .accessibilityHidden(true)
             }
             HStack {
               Text(verbatim: crossoverDescription)
-                .foregroundStyle(SettingsTheme.bodyColor)
+                .settingsText(SettingsTheme.bodyColor)
               Spacer()
               Button("Reset") {
                 writer.write(.combinedSwitchingPoint) { $0.combinedSwitchingPoint = 0 }

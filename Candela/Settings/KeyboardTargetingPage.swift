@@ -103,7 +103,6 @@ struct KeyboardTargetingPage: View {
         .disabled(prefs.keyboardVolume == .disabled)
       }
       SettingsRowNote("Custom shortcuts have no modifiers of their own, so they always use the step size selected here.")
-        .padding(.bottom, 6)
 
       SettingsCardDivider()
 

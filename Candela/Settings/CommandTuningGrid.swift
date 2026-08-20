@@ -133,7 +133,7 @@ struct CommandTuningGrid: View {
         ForEach(DDCCommand.allCases, id: \.self) { command in
           GridRow {
             Text(verbatim: DDCCommandCopy.title(command))
-              .foregroundStyle(SettingsTheme.titleColor)
+              .settingsText(SettingsTheme.titleColor)
             // The native switch under the window's tint, NOT `themedSwitch()`:
             // that style draws the label at the leading edge and spreads the
             // row, and here the label is the grid's own first column and the
@@ -182,7 +182,7 @@ struct CommandTuningGrid: View {
   private func columnHeader(_ title: LocalizedStringKey) -> some View {
     Text(title)
       .font(.caption)
-      .foregroundStyle(SettingsTheme.faintColor)
+      .settingsText(SettingsTheme.faintColor)
       .gridColumnAlignment(.center)
   }
 

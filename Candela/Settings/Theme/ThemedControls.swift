@@ -350,9 +350,12 @@ struct ThemedLabeledContentStyle: LabeledContentStyle {
           .foregroundStyle(dimmed(SettingsTheme.titleColor))
         Spacer(minLength: 16)
         // A value is quieter than the label naming it. Colour rather than
-        // opacity, because this slot sometimes holds a real control (a
-        // commit-on-blur field), which dims itself and must not be dimmed
-        // twice.
+        // opacity, because this slot sometimes holds a control, which dims
+        // itself and must not be dimmed twice. A control a person TYPES into
+        // is the exception and says so with `settingsEditableContent()`: a
+        // text field honours an inherited foreground style, so it would take
+        // both the secondary weight and, disabled, a second dimming on top of
+        // AppKit's own.
         configuration.content
           .foregroundStyle(dimmed(SettingsTheme.bodyColor))
       }
@@ -366,6 +369,18 @@ struct ThemedLabeledContentStyle: LabeledContentStyle {
       isEnabled ? color : color.opacity(SettingsTheme.disabledOpacity)
     }
   }
+}
+
+extension View {
+  /// Marks the content of a `LabeledContent` as something a person types into,
+  /// so it keeps the system's own text colour and dims once, natively.
+  ///
+  /// The exemption lives here at the two call sites rather than in
+  /// `ThemedLabeledContentStyle`, which cannot tell a field from a value: the
+  /// style keeps its default, so a value row added later cannot silently lose
+  /// its weight, and a field added later renders visibly wrong rather than
+  /// invisibly wrong.
+  func settingsEditableContent() -> some View { foregroundStyle(Color.primary) }
 }
 
 /// The native switch under the destination tint, with the label held at the

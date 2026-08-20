@@ -39,6 +39,33 @@ enum SettingsTheme {
   /// What `.disabled(true)` looks like on anything this theme paints itself.
   /// Native controls dim themselves and must never be given this on top.
   static let disabledOpacity = 0.45
+
+  /// A theme colour at the weight the surrounding enabled state calls for.
+  static func dimmed(_ color: Color, isEnabled: Bool) -> Color {
+    isEnabled ? color : color.opacity(disabledOpacity)
+  }
+}
+
+private struct SettingsTextModifier: ViewModifier {
+  let color: Color
+  @Environment(\.isEnabled) private var isEnabled
+
+  func body(content: Content) -> some View {
+    content.foregroundStyle(SettingsTheme.dimmed(color, isEnabled: isEnabled))
+  }
+}
+
+extension View {
+  /// Text a page paints itself, which is therefore text nothing else dims: a
+  /// page drawing its own labels beside themed controls reaches for this
+  /// instead of a bare `foregroundStyle`, or its card half-dims, which reads
+  /// worse than not dimming at all.
+  ///
+  /// It reads `\.isEnabled` rather than the page's own predicate, so a section
+  /// disabled from an enclosing view dims with it.
+  func settingsText(_ color: Color) -> some View {
+    modifier(SettingsTextModifier(color: color))
+  }
 }
 
 /// Set by whichever wrapper already supplied a row's vertical rhythm, so a row

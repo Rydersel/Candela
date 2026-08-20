@@ -162,7 +162,6 @@ struct KeyboardPane: View {
           KeyboardShortcuts.Recorder("Contrast up:", name: .contrastUp)
         }
         SettingsRowNote("Contrast works on displays controlled over their data cable (DDC) only.")
-          .padding(.bottom, 6)
       }
 
       if KeyModePolicy.watchesMediaKeys(prefs.keyboardBrightness) {

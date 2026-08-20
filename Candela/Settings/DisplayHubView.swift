@@ -512,6 +512,7 @@ struct DisplayHubView: View {
         LabeledContent("Audio device name") {
           HStack(spacing: 8) {
             TextField("", text: $audioNameDraft, prompt: Text("Automatic"))
+              .settingsEditableContent()
               .focused($audioNameFocused)
               .onSubmit { commitAudioName() }
               .onChange(of: audioNameFocused) { _, focused in
