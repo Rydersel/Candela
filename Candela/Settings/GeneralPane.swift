@@ -298,7 +298,7 @@ struct GeneralPane: View {
   private var startupSection: some View {
     SettingsCardSection(title: "Startup") {
       SettingRow(startupCaption) {
-        Picker("On startup and wake:", selection: Binding(
+        ThemedChoiceRow(label: "On startup and wake:", selection: Binding(
           get: { prefs.startupAction },
           set: { action in
             prefs.startupAction = action
