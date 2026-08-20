@@ -57,10 +57,15 @@ public enum AppRegression {
   /// would still pass if something were is not asserting what it says.
   public static let combinedCrossoverDDCValue: UInt16 = 50
 
-  /// The register maximum both of the values above were derived against, and
-  /// the one a panel that answers no capabilities read falls back to. Named so
-  /// the derivation's one assumption is a symbol the checks can compare
-  /// against rather than a 100 spelled out in three places.
+  /// The register maximum both of the values above were derived against. Named
+  /// so the derivation's one assumption is a symbol the checks and their pins
+  /// compare against rather than a 100 spelled out in several places.
+  ///
+  /// It is an ASSUMPTION about this panel, not a reading of it: the panel
+  /// answers no capabilities read, so nothing here has ever seen its real
+  /// maximum. The pin beside the derivations ties this to
+  /// `CommandTuning.effectiveMaxDDC`'s untuned fallback, which is the same
+  /// number by construction; it does not verify that the panel agrees.
   public static let assumedRegisterMaximum: Double = 100
 
   /// How close a native brightness write has to land to what it asked for
@@ -81,6 +86,55 @@ public enum AppRegression {
   /// Far below the 1/16 key grid, so two adjacent grid points can never both
   /// count as arrived.
   public static let storedBrightnessTolerance = 0.0005
+
+  // MARK: - Composing a controlled check
+
+  /// The ONE rule for building a check that carries a positive control, kept
+  /// here rather than in the driver because it is a judgement and this repo's
+  /// history says a judgement nobody has watched fail is not yet a test. It
+  /// lived in the probe, where nothing could reach it, and drifted: an
+  /// inconclusive verdict was demoting the control to failed.
+  ///
+  /// Two states in, three out, and the third is the point of the whole design:
+  ///
+  /// - **The control did not fire.** The verdict is never consulted, the
+  ///   outcome is inconclusive carrying the control's own reason, and the
+  ///   control records as failed. Nothing was demonstrated.
+  /// - **The control fired.** The control records as FIRED whatever the
+  ///   verdict says, inconclusive included, and the control's evidence
+  ///   sentence is appended to the detail. A fired control over an unjudgeable
+  ///   measurement is a distinct, recordable state: it separates "the
+  ///   instrument is dead" from "the instrument worked and the answer could
+  ///   not be read", and collapsing the two throws away the sentence that
+  ///   tells them apart.
+  ///
+  /// There is therefore no path that pairs a pass with a failed control, and
+  /// none that reports a control as failed when it was observed firing.
+  public static func controlledCheck(
+    name: String, controlFired: Bool, control sentence: String,
+    verdict: () -> PlatformConformance.Outcome
+  ) -> PlatformConformance.Check {
+    guard controlFired else {
+      return .init(name: name, outcome: .inconclusive(sentence), control: .failed)
+    }
+    return .init(
+      name: name, outcome: annotating(verdict(), with: "control: \(sentence)"), control: .fired)
+  }
+
+  /// Appends a measurement's aside to an outcome that carries a measurement.
+  /// A skip's reason names why the check did not run at all, so it takes
+  /// nothing; an inconclusive DOES take one, because under a fired control it
+  /// is a result rather than an absence.
+  public static func annotating(_ outcome: PlatformConformance.Outcome, with note: String)
+    -> PlatformConformance.Outcome
+  {
+    switch outcome {
+    case let .pass(detail): .pass("\(detail); \(note)")
+    case let .fail(detail): .fail("\(detail); \(note)")
+    case let .inconclusive(detail): .inconclusive("\(detail); \(note)")
+    case .skip: outcome
+    }
+  }
 
   // MARK: - The log window's own control
 

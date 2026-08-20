@@ -109,26 +109,22 @@ enum Regress {
     case didNotFire(String)
   }
 
-  /// The ONE builder for a driven check, so the record's invariant holds by
-  /// construction rather than by everyone remembering it: the verdict closure
-  /// is consulted only when the control fired, and a control that did not fire
-  /// produces `.inconclusive` with the control recorded as failed. An
-  /// inconclusive verdict downgrades the control too, because an inconclusive
-  /// outcome means some control half was absent whichever half it was. There
-  /// is therefore no path through this function that pairs a pass with a
-  /// failed control.
+  /// The ONE builder for a driven check, adapting this file's `Control` enum
+  /// onto `AppRegression.controlledCheck`, where the rule itself lives and is
+  /// red-tested. The rule used to live here, which is exactly why it could
+  /// drift unobserved: it was demoting a FIRED control to failed whenever the
+  /// verdict came back inconclusive, so a caveated measurement recorded as a
+  /// dead instrument and lost the control's evidence sentence.
   static func controlledCheck(
     name: String, control: Control, verdict: () -> PlatformConformance.Outcome
   ) -> PlatformConformance.Check {
     switch control {
     case let .didNotFire(reason):
-      return .init(name: name, outcome: .inconclusive(reason), control: .failed)
+      return AppRegression.controlledCheck(
+        name: name, controlFired: false, control: reason, verdict: verdict)
     case let .fired(fired):
-      let outcome = verdict()
-      if case .inconclusive = outcome {
-        return .init(name: name, outcome: outcome, control: .failed)
-      }
-      return .init(name: name, outcome: annotate(outcome, with: "control: \(fired)"), control: .fired)
+      return AppRegression.controlledCheck(
+        name: name, controlFired: true, control: fired, verdict: verdict)
     }
   }
 
@@ -143,19 +139,6 @@ enum Regress {
 
   static func skippedCheck(name: String, reason: String) -> PlatformConformance.Check {
     .init(name: name, outcome: .skip(reason))
-  }
-
-  /// Appends to a pass or a fail detail only. A skip's reason names why the
-  /// check did not run, and an inconclusive's names the control that did not
-  /// fire; neither wants a measurement's aside stapled to it.
-  private static func annotate(_ outcome: PlatformConformance.Outcome, with note: String)
-    -> PlatformConformance.Outcome
-  {
-    switch outcome {
-    case let .pass(detail): .pass("\(detail); \(note)")
-    case let .fail(detail): .fail("\(detail); \(note)")
-    default: outcome
-    }
   }
 
   // MARK: - The run
@@ -270,7 +253,7 @@ enum Regress {
     }
     let logOutcome: PlatformConformance.Outcome = queryFailure.map {
       .fail("the log query itself failed over the last \(answeredSpan): \($0)")
-    } ?? annotate(
+    } ?? AppRegression.annotating(
       AppRegression.logWindowControl(lineCount: answeredCount),
       with: "window: the last \(answeredSpan)")
     checks.append(plainCheck(name: "regress.instrument.log", outcome: logOutcome))

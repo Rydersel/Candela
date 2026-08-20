@@ -36,6 +36,73 @@ struct AppRegressionTests {
     return false
   }
 
+  // MARK: - R-B's third state: a control that fired over an inconclusive verdict
+
+  private static let controlSentence =
+    "a quiet 3 s pre-window carried no DDC writes, so the writes below are the posted keys"
+
+  @Test func aControlThatDidNotFireIsInconclusiveAndRecordsAFailedControl() {
+    let check = AppRegression.controlledCheck(
+      name: "regress.instrument.keys", controlFired: false, control: "the log query is unproven"
+    ) { .pass("never consulted") }
+    #expect(isInconclusive(check.outcome))
+    #expect(detail(check.outcome) == "the log query is unproven")
+    #expect(check.control == .failed)
+  }
+
+  @Test func aFiredControlSurvivesAnInconclusiveVerdict() {
+    // The whole point of the third state: the control demonstrably fired and
+    // the measurement still could not be judged. Demoting the control here
+    // both misreports the run and drops the evidence sentence, which is what
+    // the operator needs to tell "the instrument is dead" from "the instrument
+    // worked and the answer was unreadable".
+    let check = AppRegression.controlledCheck(
+      name: "regress.instrument.keys", controlFired: true, control: Self.controlSentence
+    ) { .inconclusive("the targeting mode was not the pointer") }
+    #expect(isInconclusive(check.outcome))
+    #expect(check.control == .fired)
+    #expect(detail(check.outcome).contains("the targeting mode was not the pointer"))
+    #expect(detail(check.outcome).contains(Self.controlSentence))
+  }
+
+  @Test func aFiredControlSurvivesAnInconclusiveVerdictIntoTheRunRecord() {
+    let report = PC.Report(platform: "test", checks: [
+      AppRegression.controlledCheck(
+        name: "regress.instrument.keys", controlFired: true, control: Self.controlSentence
+      ) { .inconclusive("the targeting mode was not the pointer") },
+    ])
+    let record = report.runRecord(label: "regress", commit: "abc123", timestamp: Date())
+    #expect(record.checks.count == 1)
+    #expect(record.checks[0].outcome == "inconclusive")
+    #expect(record.checks[0].control == "fired")
+    #expect(record.inconclusive == 1)
+  }
+
+  @Test func aFiredControlAnnotatesAPassAndAFailAlike() {
+    let passed = AppRegression.controlledCheck(
+      name: "c", controlFired: true, control: Self.controlSentence) { .pass("measured") }
+    #expect(isPass(passed.outcome))
+    #expect(passed.control == .fired)
+    #expect(detail(passed.outcome).contains(Self.controlSentence))
+
+    let failed = AppRegression.controlledCheck(
+      name: "c", controlFired: true, control: Self.controlSentence) { .fail("measured wrong") }
+    #expect(isFail(failed.outcome))
+    #expect(failed.control == .fired)
+    #expect(detail(failed.outcome).contains(Self.controlSentence))
+  }
+
+  @Test func theVerdictIsNotConsultedWhenTheControlDidNotFire() {
+    var consulted = false
+    _ = AppRegression.controlledCheck(
+      name: "c", controlFired: false, control: "no control"
+    ) {
+      consulted = true
+      return .pass("should never run")
+    }
+    #expect(!consulted)
+  }
+
   // MARK: - The log window's own control
 
   @Test func aZeroLineWindowIsABrokenQueryRatherThanAQuietApp() {
@@ -311,9 +378,18 @@ struct AppRegressionTests {
 
   @Test func theAssumedRegisterMaximumIsTheAppsOwnUntunedFallback() {
     // Couples the constant to the app rather than to a comment. Both
-    // derivation pins take the register maximum as given, so a change to what
-    // the app falls back to when a panel answers no capabilities read would
-    // leave them both green while describing a mapping the app no longer uses.
+    // derivation pins take the register maximum as given, so a change to it
+    // would otherwise leave them green while describing a mapping the app no
+    // longer uses.
+    //
+    // What this binds, exactly: `CommandTuning.effectiveMaxDDC`'s fallback for
+    // an untuned command with no read maximum supplied. It does NOT bind
+    // `BrightnessController.assumedMaxDDC`, which is private and unreachable
+    // from here, and it does not describe the live write path, which always
+    // passes a real `readMax` taken from `maxDDCValue`. So it guards the
+    // arithmetic premise the 37 and 50 derivations rest on, and the two
+    // constants can still be wrong together if the panel's own maximum is not
+    // the assumed one. That remains the run-card item.
     let untuned = CommandTuning(
       unavailableDDC: false, minDDCOverride: 0, maxDDCOverride: 0,
       curveIndex: 0, invert: false, remapCodes: [])
