@@ -76,8 +76,12 @@ public final class ModePersistence: @unchecked Sendable {
   /// or nothing at all to offer, the better-ranked outcome wins and the literal
   /// arm takes ties.
   ///
-  /// An un-rotated display keeps exactly the path it always had: the literal
-  /// arm answers at the stored size and returns before the second pass exists.
+  /// Whenever the literal arm answers at the stored size, this returns before a
+  /// second pass exists, so that case is bit-for-bit the resolution it always
+  /// was. It is the stored size being present that decides this, not the
+  /// display's orientation: an un-rotated display whose stored size has since
+  /// vanished from the list does run the second pass, and finds nothing there
+  /// to prefer.
   ///
   /// A transposed exact match reports `.exact` and so applies silently, on
   /// purpose: it is the same panel-native picture the user chose, and a

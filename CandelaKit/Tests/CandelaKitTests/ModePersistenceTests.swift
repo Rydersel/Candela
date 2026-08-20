@@ -310,6 +310,21 @@ struct ModePersistenceTests {
       == .scaleDiffers(otherScale))
   }
 
+  /// The other side of that line, and the reason it is drawn at the stored SIZE
+  /// rather than anywhere lower. A nearest-size substitute is not an answer at
+  /// the stored size, so it settles nothing: the exact portrait twin outranks it
+  /// and wins. Letting `.sizeDiffers` short-circuit too would strand a rotated
+  /// display on a resized desktop with its own mode sitting in the list.
+  @Test func aNearestSizeSubstituteLosesToTheExactTransposedTwin() {
+    let stored = DisplayModeFixtures.mode(1, logical: (2560, 1440), pixels: (5120, 2880)).descriptor
+    let smallerSameShape = DisplayModeFixtures.mode(2, logical: (2400, 1350), pixels: (4800, 2700))
+    let sidewaysExact = DisplayModeFixtures.mode(3, logical: (1440, 2560), pixels: (2880, 5120))
+    #expect(ModePersistence.resolve(stored, in: [smallerSameShape, sidewaysExact])
+      == .exact(sidewaysExact))
+    #expect(ModePersistence.resolve(stored, in: [sidewaysExact, smallerSameShape])
+      == .exact(sidewaysExact))
+  }
+
   /// Below the same-logical-size line the two arms are genuinely comparable,
   /// and there the stored orientation takes ties: both of these are a
   /// nearest-size substitute, so the one in the user's own frame wins.
