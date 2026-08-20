@@ -24,6 +24,14 @@ final class SettingsActions {
   /// AppKit island the views cannot see, wired by `StatusItemController` at
   /// launch. The argument is the display's persistence key.
   @ObservationIgnored var openDisplayHealth: (String) -> Void = { _ in }
+  /// Cross-pane navigation for the care cross-links (SC4, SC6): a pane that
+  /// points at another destination (OLED Care to Health, Protection to a
+  /// display's page) changes the sidebar selection through this, never by
+  /// owning selection state of its own. Wired by `SettingsRootView`, which is
+  /// where the selection lives; the default is a no-op so a view rendered
+  /// outside the shell (tests, previews) navigates nowhere rather than
+  /// crashing.
+  @ObservationIgnored var reveal: (SettingsDestination) -> Void = { _ in }
   @ObservationIgnored private weak var model: AppModel?
 
   init(model: AppModel) {

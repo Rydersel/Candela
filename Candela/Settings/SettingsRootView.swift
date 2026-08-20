@@ -117,6 +117,10 @@ struct SettingsRootView: View {
     // Dark-only (SV2). Every colour in this window comes from the theme layer,
     // and none of them has a light-appearance answer.
     .preferredColorScheme(.dark)
+    // The care cross-links' navigation seam (SC4, SC6): wired here because
+    // this view owns the selection, and re-wired on every appearance so a
+    // reopened window binds the closure to the live view identity.
+    .onAppear { actions.reveal = { select($0) } }
     // Replaces the fork-era fixed `.frame(width: 620)`.
     //
     // The maxima are load-bearing, not decoration: a bare `minWidth/minHeight`
