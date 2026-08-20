@@ -190,7 +190,79 @@ enum Regress {
     // it would measure a rig that had just been slept.
     report.checks.append(
       wakeCheck(instruments: instruments, preflight: preflight, options: options))
+    // Last of all: it quits the deployed app and runs another build in its
+    // place, so every check that measures the deployed build has to be behind
+    // it, and the preflight that bound one instance describes a rig this check
+    // deliberately changes.
+    report.checks.append(
+      panelDumpCheck(instruments: instruments, preflight: preflight, options: options))
     return report
+  }
+
+  // MARK: - The run record
+
+  /// The commit a `--json` record names when the run did not carry one. Spelled
+  /// out rather than left empty: a reader has to be able to tell an unnamed
+  /// build from a sha, and the ledger's own leg refuses `--record` without
+  /// `--commit` precisely so this can never reach it quietly.
+  static let unnamedCommit = "unspecified"
+
+  /// Writes the run record wherever the flags asked for it, and hands back the
+  /// paths so the run says out loud where its verdict landed.
+  ///
+  /// Both destinations carry the SAME bytes, from the same `Report` the printed
+  /// lines come from, so a ledger record and an ad-hoc dump can never disagree
+  /// about what a run found. A write that cannot happen is a hard failure with
+  /// its reason, never a flag that accepts a path and quietly does nothing.
+  static func writeRecords(
+    report: PlatformConformance.Report, options: Options, timestamp: Date
+  ) -> Result<[String], UsageError> {
+    guard options.jsonPath != nil || options.recordDir != nil else { return .success([]) }
+    let commit = options.commit ?? unnamedCommit
+    let data: Data
+    do {
+      data = try report.jsonData(label: "regress", commit: commit, timestamp: timestamp)
+    } catch {
+      return .failure(UsageError(message: "regress: the run record could not be encoded: \(error)"))
+    }
+
+    var written: [String] = []
+    if let directory = options.recordDir {
+      var isDirectory: ObjCBool = false
+      guard FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory),
+            isDirectory.boolValue
+      else {
+        // Never created here: a typo would otherwise leave a stray directory
+        // holding the one record of a run nobody can find again.
+        return .failure(UsageError(
+          message: "regress: --record \(directory) is not an existing directory; create the ledger directory first"
+        ))
+      }
+      // The filename's shape is the ledger's contract, so it comes from the one
+      // function a test pins rather than from a format string spelled here.
+      let path = (directory as NSString).appendingPathComponent(
+        AppRegression.recordFilename(commit: commit, date: timestamp))
+      if let failure = write(data, to: path) {
+        return .failure(UsageError(message: "regress: the run record could not be written to \(path): \(failure)"))
+      }
+      written.append(path)
+    }
+    if let path = options.jsonPath {
+      if let failure = write(data, to: path) {
+        return .failure(UsageError(message: "regress: the run record could not be written to \(path): \(failure)"))
+      }
+      written.append(path)
+    }
+    return .success(written)
+  }
+
+  private static func write(_ data: Data, to path: String) -> String? {
+    do {
+      try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+      return nil
+    } catch {
+      return "\(error)"
+    }
   }
 
   // MARK: Preflight
@@ -566,6 +638,12 @@ enum Regress {
   /// rather than by persistence key: the key is a hardware identity that moves
   /// with the cable, and these numbers belong to a panel, not to a port.
   static let magNameFragment = "MAG 341C"
+
+  /// The panel whose capabilities string parsed cleanly with no volume command,
+  /// which is the only reason D24 ever greys a slider. Matched by name fragment
+  /// for the same reason the write-only panel is: the verdict belongs to a
+  /// monitor, not to a port.
+  static let dellNameFragment = "U2725QE"
 
   /// The General pane's two app-level switches, addressed by the accessibility
   /// identifier the pref composer emits.
@@ -2018,6 +2096,230 @@ enum Regress {
     }
   }
 
+  // MARK: D24 through the panel dump
+
+  /// Where the deployed app is put back when its running path does not name a
+  /// bundle, so a relaunch always has somewhere honest to aim.
+  static let deployedBundlePath = "/Applications/Candela.app"
+
+  /// The menu-bar panel's row model, read out of the Debug build's dump.
+  ///
+  /// The panel is the least observable surface in the app: an `NSMenu`-hosted
+  /// hosting view publishes nothing to Accessibility and `screencapture` cannot
+  /// reach the menu's tracking window. The dump is the only route to its
+  /// content, and it is compiled out of Release entirely, so asserting D24 live
+  /// means running a Debug build in the deployed one's place for a moment.
+  ///
+  /// Destructive twice over, which is why it needs `--apply` AND a Debug bundle
+  /// named: it quits the deployed app, runs another build, and puts the first
+  /// one back. It runs LAST for the same reason: every check before it measures
+  /// the deployed build, and nothing should follow a swap.
+  ///
+  /// **Why the sole-instance preflight gate does not apply mid-check.** That
+  /// gate refuses a rig where two builds are running because every instrument
+  /// downstream would be reading a build nobody named. This check IS the writer
+  /// swap, so it cannot hold that condition still: instead it holds the
+  /// stronger one, that exactly one build is running at any INSTANT. It never
+  /// proceeds past a failed quit, it confirms zero instances before launching
+  /// anything, it confirms each launch is the only instance, and it stops each
+  /// child before starting the next. Every window it reads is therefore taken
+  /// while exactly one build is running, and every boundary is re-verified
+  /// rather than assumed.
+  static func panelDumpCheck(
+    instruments: RegressInstruments, preflight: Preflight, options: Options
+  ) -> PlatformConformance.Check {
+    let name = "regress.panel.dump"
+    var missing: [String] = []
+    if !options.applyDestructive {
+      missing.append("--apply, because it quits the deployed app and runs a Debug build in its place")
+    }
+    if options.debugAppPath == nil {
+      missing.append(
+        "--debug-app <path to a Debug Candela.app>, because the dump is compiled out of Release and a deployed build has nothing to dump")
+    }
+    guard missing.isEmpty, let debugApp = options.debugAppPath else {
+      return skippedCheck(name: name, reason: "this check needs \(missing.joined(separator: "; and "))")
+    }
+    let executable = "\(debugApp)/Contents/MacOS/Candela"
+    guard FileManager.default.isExecutableFile(atPath: executable) else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: nothing executable at \(executable); --debug-app takes the path to a Debug Candela.app bundle, not to the binary inside it"
+      ))
+    }
+    if let refusal = drivenGate(
+      name: name, instruments: instruments, preflight: preflight,
+      needing: .log, keyTargeting: nil, sidebarRow: nil) {
+      return refusal
+    }
+
+    // Boundary 1: exactly one build is running, and this is where its path is
+    // read, so the relaunch puts back the build that was actually there rather
+    // than whatever happens to be installed.
+    guard let deployed = instruments.soleRunningInstance() else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: \(instruments.lastAXError ?? "no single Candela instance could be bound"), so there is no build to swap out and back"
+      ))
+    }
+    let bundle = bundlePath(forExecutable: deployed.path)
+    guard instruments.quitCandela() else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: the deployed app did not answer the quit request: \(instruments.lastProcessError ?? "no reason reported")"
+      ))
+    }
+    // Boundary 2, and the one this check never proceeds past: a Debug build
+    // launched beside a deployed one that would not quit is a second DDC
+    // writer, which is refused rather than measured around.
+    guard instruments.waitForNoRunningInstances(timeout: 20) else {
+      return plainCheck(name: name, outcome: .inconclusive(
+        "setup: \(instruments.runningInstances().map(\.described).joined(separator: "; ")) is still running 20 s after the quit; nothing is launched beside it, because only one DDC writer may run at a time"
+      ))
+    }
+
+    let check = panelDumpDrive(instruments: instruments, executable: executable)
+    return relaunchDeployed(instruments, check: check, bundle: bundle)
+  }
+
+  /// The `.app` a running executable belongs to, or nil when its path does not
+  /// name one.
+  private static func bundlePath(forExecutable path: String) -> String? {
+    let suffix = "/Contents/MacOS/Candela"
+    guard path.hasSuffix(suffix) else { return nil }
+    return String(path.dropLast(suffix.count))
+  }
+
+  /// Two launches of the same Debug build: one instrumented, one as the control
+  /// that proves the grep can come back empty. Sequential and never
+  /// overlapping, and each one stopped and confirmed gone before the next
+  /// begins.
+  private static func panelDumpDrive(
+    instruments: RegressInstruments, executable: String
+  ) -> PlatformConformance.Check {
+    let name = "regress.panel.dump"
+    func setupMiss(_ reason: String) -> PlatformConformance.Check {
+      plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
+    }
+
+    let instrumentedStart = Date()
+    guard let instrumented = instruments.launchDetached(executable: executable, panelDump: true)
+    else {
+      return setupMiss(instruments.lastProcessError ?? "the Debug build did not launch")
+    }
+    // Boundary 3: the launched build is the only one running. A stray instance
+    // here would put another build's rows in the window this check judges.
+    guard let running = instruments.waitForSoleRunningInstance(timeout: 20) else {
+      _ = instruments.terminate(instrumented)
+      return setupMiss(
+        "the instrumented Debug launch did not settle as the only running build: \(instruments.lastProcessError ?? "no reason reported")"
+      )
+    }
+
+    // The verdict lands asynchronously, so this waits for the dump that KNOWS
+    // rather than for a pass number: the launch dump reports both panels
+    // unknown by construction, and judging it would convict the denying panel
+    // of the app's own not-yet-knowing.
+    var window = instruments.logWindow(since: instrumentedStart)
+    let deadline = Date().addingTimeInterval(20)
+    while !window.queryFailed,
+          !AppRegression.panelDumpVerdictLanded(inLogLines: window.lines),
+          Date() < deadline {
+      Thread.sleep(forTimeInterval: 2)
+      window = instruments.logWindow(since: instrumentedStart)
+    }
+    let rows = AppRegression.panelDumpRows(fromLogLines: window.lines)
+    let landed = AppRegression.panelDumpVerdictLanded(inLogLines: window.lines)
+    let queryFailed = window.queryFailed
+    let queryFailure = window.failureReason
+    let instrumentedLines = window.count
+    guard instruments.terminate(instrumented) else {
+      return setupMiss(
+        "the instrumented Debug instance could not be stopped, so the control launch is not started: \(instruments.lastProcessError ?? "no reason reported")"
+      )
+    }
+    if queryFailed {
+      return setupMiss(
+        "the instrumented launch's log query failed, so its silence is the query's and not the build's: \(queryFailure)"
+      )
+    }
+    guard landed else {
+      return setupMiss(
+        "no dump row carried a volume verdict other than unknown within 20 s of launching \(running.described) (\(rows.count) rows in a \(instrumentedLines)-line window); the launch dump reports every panel unknown by construction and the capabilities verdict lands after it, so the D24 pair was never observable. With no rows at all the likeliest cause is a Release bundle behind --debug-app: the dump is compiled out of Release entirely, which looks exactly like this"
+      )
+    }
+
+    // The control: the SAME build, launched without the variable. Its window is
+    // read fresh, so a dump line in it can only be this launch's.
+    let controlStart = Date()
+    guard let control = instruments.launchDetached(executable: executable, panelDump: false) else {
+      return setupMiss(
+        instruments.lastProcessError ?? "the control launch of the Debug build did not start")
+    }
+    guard instruments.waitForSoleRunningInstance(timeout: 20) != nil else {
+      _ = instruments.terminate(control)
+      return setupMiss(
+        "the control launch did not settle as the only running build: \(instruments.lastProcessError ?? "no reason reported")"
+      )
+    }
+    Thread.sleep(forTimeInterval: 10)
+    let controlWindow = instruments.logWindow(since: controlStart)
+    guard instruments.terminate(control) else {
+      return setupMiss(
+        "the control Debug instance could not be stopped: \(instruments.lastProcessError ?? "no reason reported")"
+      )
+    }
+    if controlWindow.queryFailed {
+      return setupMiss(
+        "the control launch's log query failed, so its emptiness is the query's and not the build's: \(controlWindow.failureReason)"
+      )
+    }
+    let controlDumpLines = AppRegression.panelDumpLines(fromLogLines: controlWindow.lines).count
+
+    // The control's own control: a window carrying no lines AT ALL cannot
+    // demonstrate that a dump line would have shown up in it. Zero dump lines
+    // out of zero lines is a broken query wearing the shape of a clean result.
+    let positiveControl: Control
+    if controlWindow.count == 0 {
+      positiveControl = .didNotFire(
+        "the control launch's 10 s window came back with no lines from the app at all, so its zero dump lines are the query's silence rather than the build's"
+      )
+    } else if controlDumpLines > 0 {
+      positiveControl = .didNotFire(
+        "the same build launched without \(RegressInstruments.panelDumpVariable) still wrote \(controlDumpLines) dump lines in a \(controlWindow.count)-line window, so the query cannot come back empty and an empty result would have proven nothing"
+      )
+    } else {
+      positiveControl = .fired(
+        "the same build launched without \(RegressInstruments.panelDumpVariable) wrote no dump lines in a \(controlWindow.count)-line window, so the query can come back empty and the \(rows.count) rows read from the instrumented launch are the variable's"
+      )
+    }
+
+    return controlledCheck(name: name, control: positiveControl) {
+      AppRegression.panelDumpVerdict(
+        dumpLines: rows, noVarDumpLineCount: controlDumpLines,
+        magTitleFragment: magNameFragment, dellTitleFragment: dellNameFragment)
+    }
+  }
+
+  /// Puts the deployed build back and says so in the record: the rig leaves as
+  /// it arrived, or the record says it did not. A failed relaunch downgrades a
+  /// pass for the same reason a failed teardown does, and more sharply here:
+  /// the run would otherwise print a green line beside a rig with no app on it.
+  private static func relaunchDeployed(
+    _ instruments: RegressInstruments, check: PlatformConformance.Check, bundle: String?
+  ) -> PlatformConformance.Check {
+    let path = bundle ?? deployedBundlePath
+    let aim = bundle == nil
+      ? "the running build's path did not name a bundle, so the deployed \(path) was relaunched instead"
+      : "the deployed app at \(path) was relaunched"
+    guard instruments.openBundle(path),
+          let back = instruments.waitForSoleRunningInstance(timeout: 30)
+    else {
+      return note(
+        check,
+        "teardown: \(aim) and it did not come back: \(instruments.lastProcessError ?? "no reason reported"); the rig is left with no Candela running",
+        downgradingPass: true)
+    }
+    return note(check, "teardown: \(aim) and answers as \(back.described)")
+  }
+
   private static func seen(_ value: Bool) -> String { value ? "seen" : "not seen" }
 
   /// A tool's stderr on one line, never an empty string: a failure reported as
@@ -2390,6 +2692,133 @@ final class RegressInstruments {
   // answered the any-instance question, and every honest caller here needs the
   // one-instance question instead: `runningInstances()` to report what is
   // running, `soleRunningInstance()` to address it.
+
+  // MARK: Swapping which build is running
+
+  /// Why the last process step did not do what it was asked, so a check's
+  /// detail can name the step rather than report a swap that half happened.
+  private(set) var lastProcessError: String?
+
+  static let panelDumpVariable = "CANDELA_DEBUG_PANEL"
+
+  /// Quits the running app through its own scripting terminate, the way a
+  /// person would. A signal would skip the app's shutdown, and the whole
+  /// premise of a build swap is that the outgoing build has STOPPED writing
+  /// DDC before another one starts.
+  func quitCandela() -> Bool {
+    let result = Self.execute("/usr/bin/osascript", ["-e", "tell application \"Candela\" to quit"])
+    guard result.status == 0 else {
+      lastProcessError =
+        "osascript exited \(result.status) asking Candela to quit: \(Self.oneLine(result.err))"
+      return false
+    }
+    return true
+  }
+
+  /// Polls until no Candela is running at all. The ONE precondition a build
+  /// swap will not proceed past: only one DDC writer at a time.
+  func waitForNoRunningInstances(timeout: TimeInterval) -> Bool {
+    poll(timeout: timeout) { self.runningInstances().isEmpty }
+  }
+
+  /// Polls until exactly one Candela is running, and hands it back. Two is a
+  /// refusal here for the same reason it is everywhere else in this file.
+  func waitForSoleRunningInstance(timeout: TimeInterval) -> RunningInstance? {
+    guard poll(timeout: timeout, until: { self.runningInstances().count == 1 }) else {
+      let instances = runningInstances()
+      lastProcessError = instances.isEmpty
+        ? "no Candela process appeared within \(Int(timeout)) s"
+        : "\(instances.count) Candela instances are running (\(instances.map(\.described).joined(separator: "; ")))"
+      return nil
+    }
+    return runningInstances().first
+  }
+
+  private func poll(timeout: TimeInterval, until condition: () -> Bool) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+      if condition() { return true }
+      Thread.sleep(forTimeInterval: 0.5)
+    }
+    return condition()
+  }
+
+  /// Launches a bundle's executable DIRECTLY as a child process, never `open`.
+  ///
+  /// `open` and `open -b` both go through LaunchServices, which resolves a
+  /// bundle identifier to the REGISTERED copy rather than to the path given:
+  /// pointed at a Debug build out of a worktree it starts the deployed one
+  /// instead, and pointing at both produced a second-instance storm on this rig
+  /// [MEASURED]. It also hands the child no environment, so the dump variable
+  /// would never reach it.
+  ///
+  /// The variable is SET or REMOVED explicitly rather than left to whatever the
+  /// probe inherited. A probe run that happened to carry it would otherwise
+  /// instrument its own control launch, and the control whose entire job is to
+  /// prove the grep can come back empty would be the one thing contaminated.
+  func launchDetached(executable: String, panelDump: Bool) -> Process? {
+    var environment = ProcessInfo.processInfo.environment
+    if panelDump {
+      environment[Self.panelDumpVariable] = "1"
+    } else {
+      environment.removeValue(forKey: Self.panelDumpVariable)
+    }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: executable)
+    process.environment = environment
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    do {
+      try process.run()
+    } catch {
+      lastProcessError = "\(executable) did not launch: \(error)"
+      return nil
+    }
+    return process
+  }
+
+  /// Stops a child and CONFIRMS it is gone, twice over: the child itself, then
+  /// the process table. A terminate that reported success while a second
+  /// instance stayed up would leave two DDC writers running under a record that
+  /// says one.
+  func terminate(_ process: Process) -> Bool {
+    let pid = process.processIdentifier
+    process.terminate()
+    if !poll(timeout: 10, until: { !process.isRunning }) {
+      Self.execute("/bin/kill", ["-9", "\(pid)"])
+      guard poll(timeout: 5, until: { !process.isRunning }) else {
+        lastProcessError =
+          "the Debug instance (pid \(pid)) is still running after a terminate and a kill -9"
+        return false
+      }
+    }
+    guard waitForNoRunningInstances(timeout: 5) else {
+      lastProcessError =
+        "the Debug instance (pid \(pid)) stopped, but \(runningInstances().map(\.described).joined(separator: "; ")) is still running"
+      return false
+    }
+    return true
+  }
+
+  /// Puts a deployed bundle back the way a person or a login item would,
+  /// through LaunchServices. `open` is the right instrument HERE and the wrong
+  /// one above: this bundle IS the registered copy, so there is nothing for
+  /// LaunchServices to resolve to instead.
+  func openBundle(_ path: String) -> Bool {
+    let result = Self.execute("/usr/bin/open", ["-a", path])
+    guard result.status == 0 else {
+      lastProcessError = "open -a \(path) exited \(result.status): \(Self.oneLine(result.err))"
+      return false
+    }
+    return true
+  }
+
+  private static func oneLine(_ text: String) -> String {
+    let flattened = text
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .replacingOccurrences(of: "\n", with: "; ")
+    return flattened.isEmpty ? "nothing on stderr" : flattened
+  }
 
   // MARK: The accessibility layer
 

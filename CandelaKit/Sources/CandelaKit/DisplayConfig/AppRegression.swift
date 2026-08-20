@@ -484,6 +484,73 @@ public enum AppRegression {
     )
   }
 
+  // MARK: - Reading a panel dump out of a window
+
+  /// Every panel-dump line in a window, headers included.
+  ///
+  /// The CONTROL counts these rather than the rows. A launch that wrote a
+  /// header and no rows is still an instrumented launch, and a control that
+  /// counted rows alone would report it clean: the one measurement whose whole
+  /// job is to prove the query can come back empty would be the one that
+  /// cannot fail.
+  public static func panelDumpLines(fromLogLines lines: [String]) -> [String] {
+    lines.filter { $0.contains("paneldump=") }
+  }
+
+  /// The row lines alone, which are the ones carrying a display's title and its
+  /// slider verdicts. The header carries neither, so judging it would look for
+  /// a panel in a line that never names one.
+  public static func panelDumpRows(fromLogLines lines: [String]) -> [String] {
+    lines.filter { $0.contains("paneldump=row") }
+  }
+
+  /// The `volumeSupport=` value of every dump row, in line order. Parsed to the
+  /// end of its own token, so `unsupported` is never read as a longer spelling
+  /// of something else and a neighbouring `muteSupport=` is never read as this
+  /// field.
+  public static func panelDumpVolumeSupport(fromLogLines lines: [String]) -> [String] {
+    panelDumpRows(fromLogLines: lines).compactMap { line in
+      guard let marker = line.range(of: "volumeSupport=") else { return nil }
+      let value = String(line[marker.upperBound...].prefix { !$0.isWhitespace })
+      return value.isEmpty ? nil : value
+    }
+  }
+
+  /// Whether a window carries the verdict-landing dump rather than only the
+  /// launch one.
+  ///
+  /// The capabilities verdict lands asynchronously, so the launch dump reports
+  /// every panel `unknown` by construction; a run that judged it would convict
+  /// the denying panel of the app's own not-yet-knowing. Waiting on a verdict
+  /// rather than on the pass counter is deliberate: the counter says how many
+  /// dumps have happened, and what the D24 pair needs is one that knows.
+  public static func panelDumpVerdictLanded(inLogLines lines: [String]) -> Bool {
+    panelDumpVolumeSupport(fromLogLines: lines).contains { $0 != "unknown" }
+  }
+
+  // MARK: - The ledger's filename
+
+  /// `<yyyy-MM-dd>-<sha7>.json`, in UTC.
+  ///
+  /// Pure, and pinned by a test, because the ledger's CI leg selects the newest
+  /// record LEXICALLY and its drift guard reddens on any filename in the
+  /// directory that does not match this shape. A date that followed the running
+  /// machine's time zone would roll the day over at the wrong moment, and an
+  /// unpadded month or day would sort `2026-1-5` after `2026-10-05`: either way
+  /// the job reads a record that is not the newest and reports an outstanding
+  /// count for the wrong run. This function is the one definition of the shape.
+  public static func recordFilename(commit: String, date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone(identifier: "UTC")
+    formatter.dateFormat = "yyyy-MM-dd"
+    let trimmed = commit.trimmingCharacters(in: .whitespacesAndNewlines)
+    // Never a bare trailing dash: a record nobody can attribute is one the
+    // drift guard reddens on without saying why.
+    let sha = trimmed.isEmpty ? "unknown" : String(trimmed.prefix(7))
+    return "\(formatter.string(from: date))-\(sha).json"
+  }
+
   // MARK: - Reading the window
 
   /// Values from `ddc.write.end value=<v> ok=true` records.

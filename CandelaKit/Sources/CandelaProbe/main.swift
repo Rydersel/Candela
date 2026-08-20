@@ -511,12 +511,6 @@ case "regress":
     print(usage.message)
     exit(2)
   case let .success(options):
-    if options.jsonPath != nil || options.recordDir != nil {
-      // Said out loud rather than silently ignored: a flag that accepts a path
-      // and writes nothing is the same silence this command exists to refuse.
-      FileHandle.standardError.write(Data(
-        "regress: this build parses --json and --record but does not write the run record; the ledger leg lands with the panel-dump check\n".utf8))
-    }
     let regressDisplays = online.map { display in
       Regress.Display(
         id: display.id,
@@ -527,6 +521,18 @@ case "regress":
     }
     let report = Regress.run(options: options, displays: regressDisplays)
     for line in report.lines(label: "regress") { print(line) }
+    // Written after printing and before the exit code is consulted: a record
+    // that could not be written is a hard failure with its reason, never a run
+    // that reports its verdict and drops it.
+    switch Regress.writeRecords(report: report, options: options, timestamp: Date()) {
+    case let .failure(usage):
+      FileHandle.standardError.write(Data("\(usage.message)\n".utf8))
+      exit(2)
+    case let .success(paths):
+      for path in paths {
+        print(options.commit == nil ? "wrote \(path) (no --commit, so the record names no build)" : "wrote \(path)")
+      }
+    }
     exit(report.exitCode)
   }
 case "caps":

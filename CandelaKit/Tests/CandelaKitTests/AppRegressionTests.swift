@@ -659,4 +659,104 @@ struct AppRegressionTests {
       magTitleFragment: "MAG 341C", dellTitleFragment: "U2725QE")
     #expect(isPass(outcome))
   }
+
+  // MARK: - Reading a panel dump out of a window
+
+  /// The bytes the Debug build actually writes: `paneldump=header` once per
+  /// dump, then one `paneldump=row` per panel row, at `.info` in the
+  /// `PanelDump` category.
+  private static let dumpHeader =
+    "2026-08-19 11:02:03.099 If Candela[9:1] [com.rydersel.Candela:PanelDump] paneldump=header pass=1 rows=2 builtIn=hidden externals=2 hiddenExternals=0 safeMode=no prefsRevision=4"
+  private static func dumpRow(
+    title: String, volumeSupport: String, muteSupport: String = "unknown"
+  ) -> String {
+    "2026-08-19 11:02:03.100 If Candela[9:1] [com.rydersel.Candela:PanelDump] paneldump=row index=1 kind=external title=\"\(title)\" key=\"abc\" displayID=3 brightness=0.375 hdrEngaged=no hdrSupported=yes hdrMode=off volumeSlider=shown volumeAvailable=yes hideVolumePref=no volumeEnabled=yes volumeSupport=\(volumeSupport) muteSupport=\(muteSupport) volumeReason=\"none\" volume=0.500 muted=no contrastSlider=hidden contrastAvailable=no showContrastPref=no contrast=0.500"
+  }
+  private static let unrelatedLine =
+    "2026-08-19 11:02:03.098 Df Candela[9:1] [com.rydersel.Candela:ddc] ddc.write.end value=50 ok=true"
+
+  @Test func theControlCountsHeadersAsDumpOutput() {
+    // A launch that emitted a header and no rows is still an instrumented
+    // launch. Counting rows alone would read it as a clean control, which is
+    // the one measurement this check cannot afford to get wrong.
+    let count = AppRegression.panelDumpLines(fromLogLines: [
+      Self.dumpHeader, Self.unrelatedLine,
+    ]).count
+    #expect(count == 1)
+  }
+
+  @Test func onlyRowsCarryADisplaysVerdict() {
+    let rows = AppRegression.panelDumpRows(fromLogLines: [
+      Self.dumpHeader, Self.unrelatedLine,
+      Self.dumpRow(title: "MAG 341C OLED", volumeSupport: "unknown"),
+      Self.dumpRow(title: "DELL U2725QE", volumeSupport: "unsupported"),
+    ])
+    #expect(rows.count == 2)
+  }
+
+  @Test func theLaunchDumpHasNotLandedAVerdictYet() {
+    // pass=1 reports both panels unknown by construction: the capabilities
+    // verdict lands asynchronously, so a run that judged the launch dump would
+    // convict the denying panel of the app's own not-yet-knowing.
+    let landed = AppRegression.panelDumpVerdictLanded(inLogLines: [
+      Self.dumpHeader,
+      Self.dumpRow(title: "MAG 341C OLED", volumeSupport: "unknown"),
+      Self.dumpRow(title: "DELL U2725QE", volumeSupport: "unknown"),
+    ])
+    #expect(!landed)
+  }
+
+  @Test func aMuteVerdictIsNotAVolumeVerdict() {
+    // The two fields sit beside each other on the same line, so a parser that
+    // reads the line rather than the field lands a wait on the wrong verdict.
+    let landed = AppRegression.panelDumpVerdictLanded(inLogLines: [
+      Self.dumpRow(title: "DELL U2725QE", volumeSupport: "unknown", muteSupport: "supported"),
+    ])
+    #expect(!landed)
+  }
+
+  @Test func aDenyingPanelIsTheVerdictLanding() {
+    let landed = AppRegression.panelDumpVerdictLanded(inLogLines: [
+      Self.dumpRow(title: "MAG 341C OLED", volumeSupport: "unknown"),
+      Self.dumpRow(title: "DELL U2725QE", volumeSupport: "unsupported"),
+    ])
+    #expect(landed)
+  }
+
+  // MARK: - The ledger's filename
+
+  private func date(_ iso: String) -> Date {
+    let formatter = ISO8601DateFormatter()
+    return formatter.date(from: iso)!
+  }
+
+  @Test func theRecordFilenameIsTheDateInUTCAndSevenOfTheSha() {
+    #expect(
+      AppRegression.recordFilename(commit: "c1b0b4d4e5f60718", date: date("2026-08-19T23:30:00Z"))
+        == "2026-08-19-c1b0b4d.json")
+  }
+
+  @Test func theDateIsUTCAndZeroPadded() {
+    // The CI leg selects the newest record LEXICALLY. A machine-local date
+    // rolls the day over at the wrong moment, and an unpadded month or day
+    // sorts "2026-1-5" after "2026-10-05": either way the job reads a record
+    // that is not the newest and reports an outstanding count for the wrong run.
+    #expect(
+      AppRegression.recordFilename(commit: "abcdef1234", date: date("2026-01-05T00:30:00Z"))
+        == "2026-01-05-abcdef1.json")
+  }
+
+  @Test func aShortShaIsWrittenWhole() {
+    #expect(
+      AppRegression.recordFilename(commit: "abc", date: date("2026-08-19T12:00:00Z"))
+        == "2026-08-19-abc.json")
+  }
+
+  @Test func aBlankShaIsNamedRatherThanLeftEmpty() {
+    // A filename ending in a bare dash is a record nobody can attribute, and
+    // the ledger's drift guard would redden on it without saying why.
+    #expect(
+      AppRegression.recordFilename(commit: "   ", date: date("2026-08-19T12:00:00Z"))
+        == "2026-08-19-unknown.json")
+  }
 }
