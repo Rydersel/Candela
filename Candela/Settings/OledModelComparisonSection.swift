@@ -3,17 +3,19 @@ import CoreGraphics
 import SwiftUI
 
 /// EM9's gate instrument, as amended by OCR7: scores the estimated exposure
-/// model against the measured readings, on the Measurement & Data page and
-/// revertable, never inside the health view it might one day change. Shown
-/// once measurement is on or a stored comparison exists, so a user who turns
-/// measurement off keeps their score.
+/// model against the measured readings, beside the measurement controls and
+/// revertable, never inside the health view it might one day change. It rode
+/// the Measurement & Data page until SC5 retired that page, and moved to the
+/// Health pane with the controls it sits under. Shown once measurement is on
+/// or a stored comparison exists, so a user who turns measurement off keeps
+/// their score.
 ///
 /// **TEMPORARY, built to be deleted (OCR7).** This section exists to judge the
 /// estimate during the current soak. Once Ryder records the verdict on the
 /// comparison gate, deletion is: remove this file, remove the one call site in
-/// `OledCareMeasurementPage`, and move the stalled-sampling note below up to
-/// ride the "Measure how bright each part of this display is" toggle, because
-/// that note proved necessary independently of the comparison.
+/// `HealthPane`, and move the stalled-sampling note below up to ride the
+/// "Measure how bright each part of this display is" toggle, because that note
+/// proved necessary independently of the comparison.
 @MainActor
 struct OledModelComparisonSection: View {
   let persistenceKey: String

@@ -23,17 +23,16 @@
   ///
   ///   CANDELA_DEBUG_SETTINGS=pane:general    Candela.app/Contents/MacOS/Candela
   ///   CANDELA_DEBUG_SETTINGS=pane:menuBar    (also: pane:arrangement,
-  ///                                           pane:keyboard, pane:about)
+  ///                                           pane:keyboard, pane:about,
+  ///                                           pane:health, pane:protection,
+  ///                                           pane:checkup)
   ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/first        (also /<persistenceKey>
   ///                                           : opens OLED Care with that
   ///                                           display's page pushed, as the
   ///                                           hub's "All OLED Care Settings…"
   ///                                           link does)
-  ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/first/measurement
   ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/first/health
   ///                                           (a further /<page>:
-  ///                                           /measurement pushes that page
-  ///                                           on top of the display's;
   ///                                           /display is the spelled-out
   ///                                           default; /health opens the
   ///                                           Display Health WINDOW over the
@@ -190,18 +189,22 @@
           }
           key = targetBody
         }
-        var path: [OledCarePage] = [.display(key)]
+        let path: [OledCarePage] = [.display(key)]
         var healthWindowKey: String?
         if segments.count == 3 {
           // Validated like everything else here: a typo'd page must not
           // silently capture the display page.
           switch String(segments[2]) {
           case "display": break
-          case "measurement": path.append(.measurement(key))
           // A window, not a page (OCR-A1): the display page stays behind it.
           case "health": healthWindowKey = key
+          // Named rather than left to the default, because capture scripts
+          // written before SC5 still ask for it and "unknown page" would not
+          // tell anyone where the controls went.
+          case "measurement":
+            return .rejected("the OLED Care measurement page retired; its controls are on the Health pane, so use 'pane:health'")
           default:
-            return .rejected("unknown OLED page \(quoted(String(segments[2]))); ids are case-sensitive: display, measurement, health")
+            return .rejected("unknown OLED page \(quoted(String(segments[2]))); ids are case-sensitive: display, health")
           }
         }
         return .resolved(
@@ -298,7 +301,6 @@
     private static func describe(_ page: OledCarePage) -> String {
       switch page {
       case let .display(key): "display(\(key))"
-      case .measurement: "measurement"
       }
     }
 

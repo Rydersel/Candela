@@ -51,21 +51,24 @@ enum DisplaySubPage: String, CaseIterable, Hashable {
 /// Display Health is deliberately NOT a case (OCR-A1, #185): it opens in its
 /// own content-sized window, because a pushed page cannot resize the settings
 /// window to a portrait display's map. Navigation-only state, not on-disk
-/// schema, so the case's removal cost nothing stored.
+/// schema, so a case's removal costs nothing stored.
+///
+/// Measurement & Data was the second case until SC5 retired the page; its
+/// controls are the Health pane's now, which is a sidebar destination rather
+/// than a push. One case left, kept as an enum because the pane's stack, its
+/// switcher and its departure rule are all written against this type.
 enum OledCarePage: Hashable {
   case display(String)
-  case measurement(String)
 
   var displayKey: String {
     switch self {
-    case let .display(key), let .measurement(key): key
+    case let .display(key): key
     }
   }
 
   func withDisplayKey(_ key: String) -> OledCarePage {
     switch self {
     case .display: .display(key)
-    case .measurement: .measurement(key)
     }
   }
 }

@@ -491,14 +491,13 @@ struct SettingsRootView: View {
       // its own, so the values passed INTO the page register it here.
       let _ = model.prefsRevision
       if let state = model.displays.first(where: { $0.display.persistenceKey == page.displayKey }) {
+        // One case since SC5 retired Measurement & Data, and still a switch: a
+        // page added here later is then a compile error rather than a silent
+        // fall-through onto the display page.
         Group {
           switch page {
           case .display:
             OledCareDisplayPage(
-              state: state, path: $oledCarePath,
-              displays: oledSwitcherDisplays, onSwitch: switchOledDisplay)
-          case .measurement:
-            OledCareMeasurementPage(
               state: state, displays: oledSwitcherDisplays, onSwitch: switchOledDisplay)
           }
         }

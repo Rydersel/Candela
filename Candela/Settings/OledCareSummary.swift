@@ -188,6 +188,99 @@ struct PanelExposureSurface: View {
   }
 }
 
+/// The card-size heat surface, shared by the OLED Care overview's cards and
+/// the Health pane's (SC4). One implementation, so the two surfaces cannot
+/// come to draw the same display's history at different shapes or sizes.
+struct PanelExposureMiniSurface: View {
+  /// Panel-native cells; the surface re-orders for presentation itself.
+  let cells: [Double]
+  /// Live handle, read only for the display's current geometry. Never stored:
+  /// IDs reassign across a replug.
+  let displayID: CGDirectDisplayID?
+  /// False draws the blank frame. The map is drawn only from a `.measured`
+  /// history; every other state gets the blank frame, never a stale or
+  /// estimated picture presented as one (OC11).
+  let showsMap: Bool
+
+  /// The display hero's fit rule at card scale: the box the mini map fits
+  /// inside, preserving aspect, so an ultrawide and a portrait-mounted panel
+  /// take the same vertical room.
+  // Sized so the overview's whole default page fits the window without a
+  // scroll bar; measured against the 900 by 520 saved frame with two
+  // externals connected.
+  @ScaledMetric(relativeTo: .body) private var boxWidth: CGFloat = 104
+  @ScaledMetric(relativeTo: .body) private var boxHeight: CGFloat = 44
+
+  var body: some View {
+    // Display aspect, not panel-native: the card stands for the monitor on
+    // the desk, so a portrait mount draws tall. Storage stays panel-native;
+    // the surface re-orders for presentation.
+    let aspect =
+      OledPanelGeometry.displayAspect(for: displayID)
+      ?? CGFloat(PanelGrid.cols) / CGFloat(PanelGrid.rows)
+    let width = min(boxWidth, boxHeight * aspect)
+    let size = CGSize(width: width, height: width / aspect)
+    Group {
+      if showsMap {
+        // No hottest-cell marker at this size (OCR8): the box would be an
+        // unreadable speck, and the status line carries the fact in words.
+        PanelExposureSurface(
+          cells: cells,
+          highlighted: nil,
+          aspect: aspect,
+          rotation: OledPanelGeometry.rotation(for: displayID),
+          glowStrength: 0.35)
+      } else {
+        // No dotted placeholder: a blank surface with the status line beside
+        // it is quieter and does not read as faint data.
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+          .fill(Color.white.opacity(0.06))
+          .overlay {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+              .strokeBorder(SettingsTheme.cardStroke, lineWidth: 1)
+          }
+      }
+    }
+    .frame(width: size.width, height: size.height)
+    .frame(width: boxWidth, height: boxHeight)
+    .accessibilityHidden(true)
+  }
+}
+
+/// The words a summary card puts beside its mini map, shared by the OLED Care
+/// overview's cards and the Health pane's (SC4) so the two surfaces cannot
+/// report the same display's measurement differently.
+enum OledCareCardCopy {
+  /// Hours of use, and what the measurement is doing, in that order. The
+  /// honesty precedence is the health window's exactly: Safe Mode first, then
+  /// a missing Screen Recording grant, then the confidence states.
+  ///
+  /// `confidence` is a pure function of the telemetry pref and the stored
+  /// sample count, so it stays `.measured` through a revoked grant and through
+  /// a Safe Mode session; both are tested ahead of the switch for that reason.
+  static func measurementLine(
+    hours: String, summary: PanelHealthSummary, safeMode: Bool, grantPresent: Bool
+  ) -> String {
+    if safeMode { return hours }
+    if summary.confidence != .estimated, !grantPresent {
+      return "\(hours) · waiting on Screen Recording"
+    }
+    switch summary.confidence {
+    case .measured:
+      if let relative = summary.hottestRelative,
+        let multiple = PanelHealthCopy.multiple(relative)
+      {
+        return "\(hours) · hottest area \(multiple) average"
+      }
+      return hours
+    case .insufficient:
+      return "\(hours) · \(summary.sampleCount) of \(ExposureAccumulator.minimumSamplesForAnalysis) readings"
+    case .estimated:
+      return "\(hours) · brightness not measured"
+    }
+  }
+}
+
 /// One display on the OLED Care overview: mini heat surface, name, enrollment
 /// badge, and a status line. The WHOLE card is the navigation row (OCR3); it
 /// holds no toggles, and it previews its page's value (SO3). The map is drawn
@@ -205,15 +298,6 @@ struct OledCareDisplayCard: View {
   @Environment(\.oledCarePath) private var path
   @Environment(\.settingsAccent) private var lighting
   @State private var hovering = false
-
-  /// The display hero's fit rule at card scale: the box the mini map fits
-  /// inside, preserving aspect, so an ultrawide and a portrait-mounted panel
-  /// take the same vertical room.
-  // Sized so the overview's whole default page fits the window without a
-  // scroll bar; measured against the 900 by 520 saved frame with two
-  // externals connected.
-  @ScaledMetric(relativeTo: .body) private var boxWidth: CGFloat = 104
-  @ScaledMetric(relativeTo: .body) private var boxHeight: CGFloat = 44
 
   private var persistenceKey: String { state.display.persistenceKey }
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: persistenceKey) }
@@ -283,39 +367,10 @@ struct OledCareDisplayCard: View {
   }
 
   private func miniSurface(summary: PanelHealthSummary) -> some View {
-    // Display aspect, not panel-native: the card stands for the monitor on
-    // the desk, so a portrait mount draws tall. Storage stays panel-native;
-    // the surface re-orders for presentation.
-    let aspect =
-      OledPanelGeometry.displayAspect(for: state.display.id)
-      ?? CGFloat(PanelGrid.cols) / CGFloat(PanelGrid.rows)
-    let width = min(boxWidth, boxHeight * aspect)
-    let size = CGSize(width: width, height: width / aspect)
-    let showsMap = prefs.oledCareEnrolled && summary.confidence == .measured
-    return Group {
-      if showsMap {
-        // No hottest-cell marker at this size (OCR8): the box would be an
-        // unreadable speck, and the status line carries the fact in words.
-        PanelExposureSurface(
-          cells: summary.cells,
-          highlighted: nil,
-          aspect: aspect,
-          rotation: OledPanelGeometry.rotation(for: state.display.id),
-          glowStrength: 0.35)
-      } else {
-        // No dotted placeholder: a blank surface with the status line beside
-        // it is quieter and does not read as faint data.
-        RoundedRectangle(cornerRadius: 5, style: .continuous)
-          .fill(Color.white.opacity(0.06))
-          .overlay {
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-              .strokeBorder(SettingsTheme.cardStroke, lineWidth: 1)
-          }
-      }
-    }
-    .frame(width: size.width, height: size.height)
-    .frame(width: boxWidth, height: boxHeight)
-    .accessibilityHidden(true)
+    PanelExposureMiniSurface(
+      cells: summary.cells,
+      displayID: state.display.id,
+      showsMap: prefs.oledCareEnrolled && summary.confidence == .measured)
   }
 
   /// SO3's value preview, in words the data can support. For an enrolled
@@ -349,28 +404,15 @@ struct OledCareDisplayCard: View {
       case nil: parts.append("Starting")
       }
     }
-    let hours = PanelHealthCopy.hours(
-      model.oledCare.hoursTracker(for: persistenceKey).totalHours)
-    if model.isSafeMode {
-      parts.append(hours)
-    } else if summary.confidence != .estimated, !CGPreflightScreenCaptureAccess() {
-      parts.append("\(hours) · waiting on Screen Recording")
-    } else {
-      switch summary.confidence {
-      case .measured:
-        if let relative = summary.hottestRelative,
-          let multiple = PanelHealthCopy.multiple(relative)
-        {
-          parts.append("\(hours) · hottest area \(multiple) average")
-        } else {
-          parts.append(hours)
-        }
-      case .insufficient:
-        parts.append("\(hours) · \(summary.sampleCount) of \(ExposureAccumulator.minimumSamplesForAnalysis) readings")
-      case .estimated:
-        parts.append("\(hours) · brightness not measured")
-      }
-    }
+    // The measurement half is `OledCareCardCopy`'s, so this card and the
+    // Health pane's cannot describe one display's readings differently.
+    parts.append(
+      OledCareCardCopy.measurementLine(
+        hours: PanelHealthCopy.hours(
+          model.oledCare.hoursTracker(for: persistenceKey).totalHours),
+        summary: summary,
+        safeMode: model.isSafeMode,
+        grantPresent: CGPreflightScreenCaptureAccess()))
     return parts.joined(separator: " · ")
   }
 }

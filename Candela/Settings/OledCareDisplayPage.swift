@@ -3,11 +3,15 @@ import CoreGraphics
 import SwiftUI
 
 /// One display's OLED Care page, pushed from the pane's overview (OCR1):
-/// enrollment, the glanceable hero, everything that dims (OCR2: idle, lock,
-/// blackout, unfocused, never behind a second click), and the two drill-in
-/// rows. An un-enrolled display's page is the enrollment pitch (OCR10): the
-/// toggle, an empty map frame, and what the recommended settings would do,
-/// with no dead controls.
+/// enrollment, the glanceable hero, the two exposure findings, everything
+/// that dims (OCR2: idle, lock, blackout, unfocused, never behind a second
+/// click), and the two rows that lead on. An un-enrolled display's page is the
+/// enrollment pitch (OCR10): the toggle, an empty map frame, and what the
+/// recommended settings would do, with no dead controls.
+///
+/// Since SC5 this page pushes nothing: Measurement & Data retired to the
+/// Health pane and the row that pushed it now reveals that pane, so the page
+/// takes no navigation path of its own.
 ///
 /// The hero here is glanceable only (OCR5): map beside four stats, and the
 /// map is the doorway to Display Health. The lens picker, window outlines and
@@ -19,7 +23,6 @@ import SwiftUI
 @MainActor
 struct OledCareDisplayPage: View {
   let state: AppModel.DisplayState
-  let path: Binding<[OledCarePage]>
   let displays: [(key: String, name: String)]
   let onSwitch: (String) -> Void
 
@@ -106,6 +109,15 @@ struct OledCareDisplayPage: View {
       }
 
       if prefs.oledCareEnrolled {
+        // The findings, above the settings they argue for (Ryder, 2026-08-20).
+        // Both moved off the Display Health window, which keeps the map and
+        // the instruments that interrogate it; a card that states a
+        // measurement in words belongs next to the controls that measurement
+        // is an argument about.
+        let findings = model.oledCare.healthSummary(for: persistenceKey)
+        PanelHottestAreaCard(summary: findings)
+        PanelDisplayTimeCard(summary: findings)
+
         SettingsCardSection(title: "Dimming") {
           idleControls
           SettingsCardDivider()
@@ -117,10 +129,17 @@ struct OledCareDisplayPage: View {
         }
 
         SettingsCardSection(title: "More") {
+          // A sideways move, not a push (SC5): the Measurement & Data page
+          // retired and its controls are the Health pane's now, so this row
+          // changes the sidebar selection through the reveal seam rather than
+          // owning navigation state of its own. It keeps the chevron shape
+          // because it still leads somewhere, and it keeps the preview the
+          // pushed row had (SO3), which is the measuring status.
           NavigationRow(
-            title: "Measurement & Data",
+            title: "Health",
             value: measurementRowPreview,
-            action: { path.wrappedValue.append(.measurement(persistenceKey)) })
+            action: { actions.reveal(.pane(.health)) })
+          SettingsRowNote("Measuring is set for this display on the Health pane, where switching it off stops new readings and keeps everything recorded so far.")
           SettingsCardDivider()
           NavigationRow(
             title: "Display Health",
@@ -236,24 +255,11 @@ struct OledCareDisplayPage: View {
             .contentTransition(.numericText())
             .animation(Motion.value(reduceMotion: reduceMotion), value: hoursLine(tracker))
         }
-        if !historyBlank, let relative = summary.hottestRelative,
-          let multiple = PanelHealthCopy.multiple(relative)
-        {
-          heroStat("Hottest area") {
-            VStack(alignment: .leading, spacing: 2) {
-              Text(verbatim: "\(multiple) this display's average")
-                .monospacedDigit()
-                .contentTransition(.numericText())
-                .animation(Motion.value(reduceMotion: reduceMotion), value: multiple)
-              if let sentence = hottestSentence(summary) {
-                Text(verbatim: sentence)
-                  .font(.caption)
-                  .foregroundStyle(SettingsTheme.faintColor)
-                  .fixedSize(horizontal: false, vertical: true)
-              }
-            }
-          }
-        }
+        // No "Hottest area" stat here since 2026-08-20: `PanelHottestAreaCard`
+        // sits a few points below on this same page and states the identical
+        // measurement, under the identical gate, with the region named as
+        // well. Two readings of one number, one screen apart, is exactly how
+        // the two come to disagree.
         heroStat("Measurement") {
           VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
@@ -381,14 +387,6 @@ struct OledCareDisplayPage: View {
       let last = summary.lastSample
     else { return false }
     return Date().timeIntervalSince(last) < 180
-  }
-
-  /// The tag is the pointer (OCR8); prose coordinates were cut as noise. Past
-  /// tense for the owner, the health page's reason: the snapshot behind it is
-  /// up to a minute old.
-  private func hottestSentence(_ summary: PanelHealthSummary) -> String? {
-    guard let owner = summary.hottestOwner else { return "Marked on the map." }
-    return "Marked on the map. \(owner) was there at the last reading."
   }
 
   /// What the engine is doing right now. `dimStates` is the coordinator's own

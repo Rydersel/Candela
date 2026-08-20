@@ -10,6 +10,14 @@ import SwiftUI
 /// the window outlines, and the crosshair readout, all moved here from the
 /// old hero so the app has ONE surface for interrogating the map.
 ///
+/// **Instruments only, since 2026-08-20.** The two cards that stated findings
+/// in words, the hottest area and display time by app, moved to the display's
+/// OLED Care page (`PanelHottestAreaCard` and `PanelDisplayTimeCard`), where
+/// they sit above the dimming settings they argue for. What is left here is
+/// the map, the things that interrogate it, and Delete History, which acts on
+/// the map. Do not draw a finding here again without moving its card back:
+/// two surfaces stating one measurement is how they come to disagree.
+///
 /// `DisplayHealthWindowRoot` below is the scene's root: it resolves the
 /// window's persistence key against the connected externals, closes the
 /// window on that display's departure (the same rule that pops a pushed path
@@ -124,8 +132,6 @@ struct PanelHealthView: View {
       switcherRow
       confidenceNote(summary)
       mapSection(summary)
-      findings(summary)
-      ownersCard(summary)
       deleteRow
     }
     .padding(20)
@@ -552,145 +558,6 @@ struct PanelHealthView: View {
     return lines
   }
 
-  /// The shared tie-break (`OledPanelGeometry.hottestIndex`), one answer for
-  /// this page and the display page's hero.
-  private static func hottestIndex(_ cells: [Double]) -> Int? {
-    OledPanelGeometry.hottestIndex(cells)
-  }
-
-  // MARK: - Findings
-
-  @ViewBuilder private func findings(_ summary: PanelHealthSummary) -> some View {
-    if summary.confidence == .measured, let relative = summary.hottestRelative,
-      let multiple = Self.multiplePhrase(relative)
-    {
-      SettingsCardSection(title: "The hottest area") {
-        VStack(alignment: .leading, spacing: 6) {
-          // The one number this whole feature is allowed to state: a measured
-          // ratio of a panel against itself. It is not a lifespan, a date or a
-          // score, and it must never grow into one.
-          HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(verbatim: multiple)
-              .font(.title2.weight(.semibold))
-              .monospacedDigit()
-              .foregroundStyle(SettingsTheme.titleColor)
-            Text("this display's average")
-              .foregroundStyle(SettingsTheme.bodyColor)
-          }
-
-          if let region = Self.hottestIndex(summary.cells).map(Self.regionPhrase) {
-            SettingsCaption(verbatim: "Marked on the map, \(region).")
-          }
-
-          // Past tense, deliberately. The snapshot behind this is up to a
-          // minute old, so "right now" is a claim the data cannot support even
-          // though the summary withholds the owner entirely once observation is
-          // off.
-          if let owner = summary.hottestOwner {
-            SettingsCaption(
-              verbatim: "\(owner) was on that part of the display at the last reading.")
-          }
-        }
-      }
-    }
-  }
-
-  // MARK: - Attribution
-
-  /// Rendered from whatever the summary carries, with an explicit empty case:
-  /// the producer for this series is wired separately from the view, so the
-  /// section must assume neither that it is populated nor that it is not.
-  ///
-  /// **Not labelled by `confidence`.** That describes the luminance telemetry
-  /// only; these hours come from window observation, which is a separate pref
-  /// and needs no permission, so they are measured whether or not brightness
-  /// is. Calling them an estimate here would be as wrong as calling them
-  /// measured on the other side.
-  @ViewBuilder private func ownersCard(_ summary: PanelHealthSummary) -> some View {
-    let owners = summary.topOwnersByHours
-    VStack(alignment: .leading, spacing: 6) {
-      SettingsCardSection(title: "Display time by app") {
-        ownerRows(owners)
-      }
-
-      // The figure is display-time, NOT how long the app was open: an app
-      // filling the display books an hour per hour, one covering a quarter
-      // books fifteen minutes. Saying "Ghostty was open for 3 hours" would be a
-      // claim this does not measure, so the caption states the weighting
-      // outright.
-      SettingsCaption(
-        "Weighted by how much of the display each app's windows covered, so this is not how long the app was open. Read from window positions and owner names only (never window titles, and never their contents), and only while the display is awake and undimmed."
-      )
-    }
-  }
-
-  @ViewBuilder private func ownerRows(_ owners: [(owner: String, hours: Double)]) -> some View {
-    VStack(alignment: .leading, spacing: 8) {
-      if owners.isEmpty {
-        SettingsCaption("No data yet.")
-      } else {
-        // Index-keyed: the elements are tuples, which cannot be `Identifiable`,
-        // and an owner name is not guaranteed unique across the list.
-        // The bar is proportional to the LIST's own leader, so the top row is
-        // always full and the rest read against it; an absolute scale would
-        // need a total this list deliberately truncates.
-        let leader = owners.map(\.hours).max() ?? 0
-        ForEach(Array(owners.enumerated()), id: \.offset) { _, entry in
-          VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-              Text(verbatim: entry.owner)
-                .foregroundStyle(SettingsTheme.titleColor)
-              Spacer(minLength: 0)
-              Text(verbatim: Self.panelTimePhrase(entry.hours))
-                .foregroundStyle(SettingsTheme.bodyColor)
-                .monospacedDigit()
-            }
-            GeometryReader { geometry in
-              Capsule()
-                .fill(Color.white.opacity(0.08))
-                .overlay(alignment: .leading) {
-                  if leader > 0 {
-                    Capsule()
-                      .fill(
-                        LinearGradient(
-                          colors: [
-                            PanelExposureScale.color(0.35), PanelExposureScale.color(0.9),
-                          ],
-                          startPoint: .leading, endPoint: .trailing))
-                      .frame(width: geometry.size.width * entry.hours / leader)
-                  }
-                }
-            }
-            .frame(height: 4)
-            .accessibilityHidden(true)
-          }
-        }
-      }
-    }
-  }
-
-  // MARK: - Formatting
-
-  // These three used to live here as private statics, untestable because the
-  // app target has no test target, and the pane had independently grown a
-  // DIFFERENT formatter for the same quantity. They are `PanelHealthCopy` in
-  // CandelaKit now, tested there, and these are the thin adapters that keep
-  // each call site's own vocabulary.
-
-  private static func multiplePhrase(_ relative: Double) -> String? {
-    PanelHealthCopy.multiple(relative)
-  }
-
-  /// "none yet" rather than the shared default "0 hours": a leaderboard row for
-  /// an app with no time is a row that should not have appeared, whereas the
-  /// pane's lifetime counter is a number that legitimately reads zero.
-  private static func panelTimePhrase(_ hours: Double) -> String {
-    PanelHealthCopy.hours(hours, zeroPhrase: "none yet")
-  }
-
-  private static func regionPhrase(_ index: Int) -> String {
-    PanelHealthCopy.region(cell: index) ?? ""
-  }
 }
 
 // MARK: - Window root
