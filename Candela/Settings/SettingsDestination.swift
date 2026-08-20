@@ -14,7 +14,13 @@ enum PaneID: String, CaseIterable, Hashable {
   // whatever else stores a pane id): append, never rename and never renumber.
   // The care panes are appended for that reason alone, and their position here
   // says nothing about where they draw.
-  case general, menuBar, arrangement, oledCare, virtualDisplays, keyboard, updates, about
+  //
+  // `updates` was a case until 2026-08-20, when its controls moved onto the
+  // About page. Removing an id is the one edit this list otherwise forbids, and
+  // it is safe here only because nothing stores a pane id on disk: the window's
+  // selection is `@State`, seeded at General every time it opens. The one
+  // reader of a raw value is the debug route, which names the retirement.
+  case general, menuBar, arrangement, oledCare, virtualDisplays, keyboard, about
   case health, protection, checkup
 }
 

@@ -14,7 +14,7 @@ struct SidebarSectionTests {
         .general,
         .health, .protection, .oledCare, .checkup,
         .menuBar, .keyboard, .arrangement, .virtualDisplays,
-        .updates, .about,
+        .about,
       ])
   }
 

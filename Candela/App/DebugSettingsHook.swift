@@ -152,6 +152,13 @@
         // a suffix that silently did nothing would capture the top of a pane
         // and look like evidence that the landing position was tested.
         let segments = body.split(separator: "/", omittingEmptySubsequences: false)
+        // Named rather than left to the unknown-pane message, for the retired
+        // measurement page's reason: capture scripts written before the merge
+        // still ask for it, and a bare "unknown pane" would not say where the
+        // update controls went.
+        if segments[0] == "updates" {
+          return .rejected("the Updates pane merged into About; its controls are the About page's now, so use 'pane:about'")
+        }
         guard let id = PaneID(rawValue: String(segments[0])) else {
           let known = PaneID.allCases.map(\.rawValue).joined(separator: ", ")
           return .rejected("unknown pane \(quoted(String(segments[0]))); ids are case-sensitive: \(known)")

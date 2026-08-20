@@ -2,22 +2,53 @@ import AppKit
 import CandelaKit
 import SwiftUI
 
-/// `@MainActor` matches the other four panes: `View` is not a globally-isolated
-/// protocol, so only `body` would otherwise be main-actor, and
-/// `SettingsActions` is a `@MainActor` type.
+/// `@MainActor` matches every other pane: `View` is not a globally-isolated
+/// protocol, so only `body` would otherwise be main-actor, and both
+/// `SettingsActions` and `UpdaterModel` are `@MainActor` types.
 ///
 /// One deliberate omission. **No Donate button and no project links** (D26):
 /// every fork link points at a project Candela is not, and Candela has no
-/// public URL yet. Update controls live in the Updates pane, not here: the
-/// version line stays informational.
+/// public URL yet.
+///
+/// The software update controls were their own pane until 2026-08-20, when
+/// Ryder merged the two: one page holds the version and the controls that
+/// change it, which is where a person looks for both. Sparkle is still the
+/// store for every updater setting (`SUEnableAutomaticChecks` and friends are
+/// Sparkle's schema, not `PrefName` cases), so every write here goes through
+/// `UpdaterModel` and nothing is persisted by us.
 @MainActor
 struct AboutPane: View {
   @Environment(SettingsActions.self) private var actions
+  @Environment(UpdaterModel.self) private var updater
   @Environment(\.settingsAccent) private var lighting
 
   var body: some View {
+    @Bindable var updater = updater
     SettingsPageScaffold {
       hero
+
+      // Directly under the version it updates: the hero states which build is
+      // running, and this states when it last looked for a newer one.
+      SettingsCardSection(title: "Software Update") {
+        // The caption is the row's, not hand-attached to the button:
+        // `SettingRow` republishes it as the control's accessibility hint
+        // (contract 3), which the standalone lockup could not do.
+        SettingRow(caption: SettingsCaption(verbatim: checkNowLine)) {
+          Button("Check for Updates…") { updater.checkForUpdates() }
+            .buttonStyle(SettingsPrimaryButtonStyle())
+            .disabled(!updater.canCheckForUpdates)
+        }
+        SettingsCardDivider()
+        SettingRow("When this is on, \(AppInfo.productName) checks about once a day, in the background.") {
+          Toggle("Check for updates automatically", isOn: $updater.automaticallyChecksForUpdates)
+            .themedSwitch()
+        }
+        SettingsCardDivider()
+        // The promise that holds however the toggle above is set, so it sits
+        // under both rows rather than in either one's caption: the cadence
+        // claim is the toggle's and is conditional on the toggle being on.
+        SettingsRowNote("\(AppInfo.productName) never installs an update without asking first.")
+      }
 
       SettingsCardSection {
         // D14: the first-run flow must stay findable after it is dismissed.
@@ -132,5 +163,26 @@ struct AboutPane: View {
   private var copyrightLine: LocalizedStringKey {
     let year = Calendar.current.component(.year, from: Date())
     return "© \(String(year)) \(AppInfo.productName) contributors. MIT licensed."
+  }
+
+  // MARK: - Update copy
+
+  private var checkNowLine: String {
+    Self.checkNowCaption(lastCheck: updater.lastUpdateCheckDate)
+  }
+
+  /// Never claims the app is up to date: only a completed check knows that, and
+  /// only Sparkle's own window reports it.
+  ///
+  /// Nameable so the app test target can pin it (AT10). The locale is fixed
+  /// because the words are asserted verbatim and the app ships English only
+  /// (D25); a machine-locale formatter would fail the test on any other locale.
+  static func checkNowCaption(lastCheck: Date?, now: Date = .now) -> String {
+    guard let lastCheck else { return "Candela hasn't checked for updates yet." }
+    let formatter = RelativeDateTimeFormatter()
+    formatter.locale = Locale(identifier: "en_US")
+    formatter.unitsStyle = .full
+    let relative = formatter.localizedString(for: lastCheck, relativeTo: now)
+    return "Last checked \(relative)."
   }
 }

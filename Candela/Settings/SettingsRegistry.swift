@@ -57,7 +57,7 @@ enum SettingsRegistry {
     SettingsSidebarSection(
       header: "CONTROLS", gapAbove: false,
       panes: [.menuBar, .keyboard, .arrangement, .virtualDisplays]),
-    SettingsSidebarSection(header: nil, gapAbove: true, panes: [.updates, .about]),
+    SettingsSidebarSection(header: nil, gapAbove: true, panes: [.about]),
   ]
 
   /// Sidebar render order, flattened. Nameable so a test can pin it against
@@ -125,14 +125,6 @@ enum SettingsRegistry {
           accent: Color(red: 0.38, green: 0.54, blue: 0.89),
           secondary: Color(red: 0.45, green: 0.34, blue: 0.81)),
         content: { AnyView(KeyboardPane()) }
-      )
-    case .updates:
-      SettingsPaneDescriptor(
-        id: id, title: "Updates", symbol: "arrow.triangle.2.circlepath",
-        accent: SettingsAccent(
-          accent: Color(red: 0.37, green: 0.76, blue: 0.50),
-          secondary: Color(red: 0.22, green: 0.55, blue: 0.67)),
-        content: { AnyView(UpdatesPane()) }
       )
     // The CARE panes light from one warm hue family, so the section reads as
     // one identity (SC8). OLED Care's amber anchors it and is unchanged; these
