@@ -661,6 +661,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       // fires only on actual reconfigurations), so the initial OLED-care
       // enrollment resolve happens here, against the freshly discovered list.
       model.oledCare.displaysReconfigured()
+      // Same reason, same remedy for Setup: the first-run presentation fires
+      // at the end of launch, BEFORE this refresh lands, so the flow would
+      // derive over an empty display list (the slim no-displays flow, on a
+      // desk with two externals; measured on the rig 2026-08-19). Re-derive
+      // against the discovered list; a no-op unless Setup is visible.
+      self.onboardingController?.displayTopologyChanged()
       // Virtual display launch prelude (VD6/VD13): normalize the slot prefs,
       // log any orphan from a previous instance, and recreate the
       // recreate-at-launch slots (skipped in Safe Mode). Non-blocking: the
