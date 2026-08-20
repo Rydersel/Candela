@@ -35,12 +35,15 @@ struct SettingsSectionTitle: View {
   let text: String
 
   @Environment(\.settingsAccent) private var lighting
+  @Environment(\.isEnabled) private var isEnabled
 
   var body: some View {
     Text(text.uppercased())
       .font(.caption.weight(.semibold))
       .kerning(1.1)
-      .foregroundStyle(lighting.accent.opacity(0.85))
+      // A kicker over a disabled section is the loudest thing on it otherwise.
+      .foregroundStyle(
+        lighting.accent.opacity(isEnabled ? 0.85 : 0.85 * SettingsTheme.disabledOpacity))
       .padding(.leading, 4)
       // The uppercasing is typography; VoiceOver gets the written name.
       .accessibilityLabel(Text(text))
@@ -124,16 +127,29 @@ struct SettingsNotice<Content: View>: View {
 /// own, in the voice `SettingRow` gives a caption, so two kinds of qualifier on
 /// one card carry the same weight.
 struct SettingsRowNote: View {
-  private let sentence: LocalizedStringKey
+  private let sentence: Text
+
+  @Environment(\.settingsRowIsPadded) private var rowIsPadded
+  @Environment(\.isEnabled) private var isEnabled
 
   init(_ sentence: LocalizedStringKey) {
-    self.sentence = sentence
+    self.sentence = Text(sentence)
+  }
+
+  /// For a sentence carrying a display name or a count, which cannot be a
+  /// `LocalizedStringKey` literal.
+  init(verbatim sentence: String) {
+    self.sentence = Text(verbatim: sentence)
   }
 
   var body: some View {
-    Text(sentence)
+    sentence
       .font(.caption)
       .foregroundStyle(SettingsTheme.faintColor)
       .fixedSize(horizontal: false, vertical: true)
+      .opacity(isEnabled ? 1 : SettingsTheme.disabledOpacity)
+      // Standing on the card it is a row of its own; inside one the row
+      // wrapper already paid.
+      .padding(.vertical, rowIsPadded ? 0 : SettingsTheme.rowVerticalPadding)
   }
 }

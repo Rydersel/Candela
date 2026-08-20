@@ -1,10 +1,5 @@
 import SwiftUI
 
-/// What `.disabled(true)` looks like on all three styles. The geometry never
-/// moves: a button that resized when it went unavailable would shift the row
-/// under whatever the person was about to click.
-private let disabledOpacity = 0.45
-
 /// The window's standard action button: macOS bordered-button geometry
 /// (rounded rect, compact padding) with the destination accent carrying the
 /// primary. Quieter than the guided setup flow's glowing capsule, which is a
@@ -38,7 +33,7 @@ struct SettingsPrimaryButtonStyle: ButtonStyle {
             .stroke(Color.white.opacity(0.14), lineWidth: 0.5)
         )
         .scaleEffect(configuration.isPressed ? 0.98 : 1)
-        .opacity(isEnabled ? 1 : disabledOpacity)
+        .opacity(isEnabled ? 1 : SettingsTheme.disabledOpacity)
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
         .animation(SettingsTheme.hoverMotion, value: lit)
@@ -73,7 +68,7 @@ struct SettingsSecondaryButtonStyle: ButtonStyle {
           RoundedRectangle(cornerRadius: 6.5, style: .continuous)
             .stroke(Color.white.opacity(0.12), lineWidth: 1)
         )
-        .opacity(isEnabled ? 1 : disabledOpacity)
+        .opacity(isEnabled ? 1 : SettingsTheme.disabledOpacity)
         .onHover { hovering = $0 }
         .animation(SettingsTheme.hoverMotion, value: lit)
     }
@@ -110,7 +105,7 @@ struct SettingsDangerButtonStyle: ButtonStyle {
           RoundedRectangle(cornerRadius: 6.5, style: .continuous)
             .stroke(SettingsTheme.dangerTint.opacity(lit ? 0.5 : 0.3), lineWidth: 1)
         )
-        .opacity(isEnabled ? 1 : disabledOpacity)
+        .opacity(isEnabled ? 1 : SettingsTheme.disabledOpacity)
         .onHover { hovering = $0 }
         .animation(SettingsTheme.hoverMotion, value: lit)
     }

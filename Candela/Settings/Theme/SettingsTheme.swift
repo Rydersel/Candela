@@ -29,6 +29,30 @@ enum SettingsTheme {
   /// Destructive actions never borrow the destination accent, which everywhere
   /// else in this window means "this is on".
   static let dangerTint = Color(red: 0.84, green: 0.42, blue: 0.40)
+
+  /// Half the gap between rows on a card. Whichever component supplies a row's
+  /// rhythm supplies exactly this, once: a grouped `Form` used to pad every row
+  /// from the container, and dropping it moved the job to the components, which
+  /// then have to agree.
+  static let rowVerticalPadding: CGFloat = 6
+
+  /// What `.disabled(true)` looks like on anything this theme paints itself.
+  /// Native controls dim themselves and must never be given this on top.
+  static let disabledOpacity = 0.45
+}
+
+/// Set by whichever wrapper already supplied a row's vertical rhythm, so a row
+/// component nested inside one does not add a second helping. Without it a
+/// pop-up row is 12 pt bare and 24 pt wrapped, and one card shows both.
+private struct SettingsRowIsPaddedKey: EnvironmentKey {
+  static let defaultValue = false
+}
+
+extension EnvironmentValues {
+  var settingsRowIsPadded: Bool {
+    get { self[SettingsRowIsPaddedKey.self] }
+    set { self[SettingsRowIsPaddedKey.self] = newValue }
+  }
 }
 
 /// The stage lighting one destination provides: the hue its canvas, kickers,

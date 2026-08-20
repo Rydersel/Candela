@@ -1,11 +1,6 @@
 import CandelaKit
 import SwiftUI
 
-/// What `.disabled(true)` looks like on a drawn control. The same value the
-/// theme's button styles paint, kept in step with them by hand until something
-/// needs it in a third file.
-private let disabledOpacity = 0.45
-
 /// The accent-lit slider: capsule track, glowing fill, draggable. Custom
 /// because the system slider ignores the window's lighting entirely, so it
 /// carries its own accessibility (SV6): call sites supply the label, and a
@@ -88,7 +83,7 @@ struct ThemedSlider: View {
     .frame(height: 22)
     // Nothing greys a drawn control: the same dimming the theme's button styles
     // paint, so a slider inside a blocked section reads like its neighbours.
-    .opacity(isEnabled ? 1 : disabledOpacity)
+    .opacity(isEnabled ? 1 : SettingsTheme.disabledOpacity)
     // Both edges come off the tracking flag rather than the two callbacks, so
     // they pair: an unopened `false` and a swallowed `true` are both
     // unreachable, and a cancelled drag still closes.
@@ -300,12 +295,23 @@ struct ThemedChoiceRow<Value: Hashable, Options: View>: View {
   @Binding var selection: Value
   @ViewBuilder let options: Options
 
+  @Environment(\.settingsRowIsPadded) private var rowIsPadded
+  @Environment(\.isEnabled) private var isEnabled
+
   var body: some View {
     HStack(spacing: 12) {
       // Wraps rather than truncates: at large text sizes the pop-up keeps its
       // ideal width, so the label is the half that has to give.
       Text(label)
         .fixedSize(horizontal: false, vertical: true)
+        // The theme's own colour rather than whatever it inherits, since this
+        // row stands on a card as often as it sits inside a `SettingRow`. It
+        // is drawn beside the pop-up rather than inside it, so nothing dims it
+        // when the row is disabled except this.
+        .foregroundStyle(
+          isEnabled
+            ? SettingsTheme.titleColor
+            : SettingsTheme.titleColor.opacity(SettingsTheme.disabledOpacity))
         .accessibilityHidden(true)
       Spacer(minLength: 16)
       Picker(selection: $selection) {
@@ -318,6 +324,9 @@ struct ThemedChoiceRow<Value: Hashable, Options: View>: View {
       .accessibilityLabel(Text(label))
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+    // Its own rhythm when it stands on the card, none when a row wrapper
+    // already gave it one.
+    .padding(.vertical, rowIsPadded ? 0 : SettingsTheme.rowVerticalPadding)
   }
 }
 
@@ -327,13 +336,35 @@ struct ThemedChoiceRow<Value: Hashable, Options: View>: View {
 /// the theme without being rewritten.
 struct ThemedLabeledContentStyle: LabeledContentStyle {
   func makeBody(configuration: Configuration) -> some View {
-    HStack(alignment: .center, spacing: 12) {
-      configuration.label
-        .foregroundStyle(SettingsTheme.titleColor)
-      Spacer(minLength: 16)
-      configuration.content
+    Row(configuration: configuration)
+  }
+
+  private struct Row: View {
+    let configuration: Configuration
+    @Environment(\.settingsRowIsPadded) private var rowIsPadded
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+      HStack(alignment: .center, spacing: 12) {
+        configuration.label
+          .foregroundStyle(dimmed(SettingsTheme.titleColor))
+        Spacer(minLength: 16)
+        // A value is quieter than the label naming it. Colour rather than
+        // opacity, because this slot sometimes holds a real control (a
+        // commit-on-blur field), which dims itself and must not be dimmed
+        // twice.
+        configuration.content
+          .foregroundStyle(dimmed(SettingsTheme.bodyColor))
+      }
+      // Nothing when `SettingRow` already padded this row: the two together
+      // are what made twelve rows in the window twice the height of their
+      // neighbours.
+      .padding(.vertical, rowIsPadded ? 0 : SettingsTheme.rowVerticalPadding)
     }
-    .padding(.vertical, 6)
+
+    private func dimmed(_ color: Color) -> Color {
+      isEnabled ? color : color.opacity(SettingsTheme.disabledOpacity)
+    }
   }
 }
 
@@ -348,26 +379,40 @@ private struct ThemedSwitchStyle: ToggleStyle {
   let spreads: Bool
 
   func makeBody(configuration: Configuration) -> some View {
-    HStack(spacing: 12) {
-      configuration.label
-      if spreads {
-        Spacer(minLength: 16)
+    Row(configuration: configuration, accent: accent, spreads: spreads)
+      // A real labeled toggle stands in for the drawn row, so the element is
+      // focusable, pressable and named. NOT `children: .combine`: measured
+      // 2026-08-20 against the live app, a combined element keeps `AXPress`
+      // and loses `AXFocused`, which drops every switch row out of the Tab
+      // order. The inner style is explicit because this style is still in the
+      // environment here and would otherwise recurse into itself.
+      .accessibilityRepresentation {
+        Toggle(isOn: configuration.$isOn) { configuration.label }
+          .toggleStyle(.switch)
       }
-      Toggle(isOn: configuration.$isOn) { EmptyView() }
-        .labelsHidden()
-        .toggleStyle(.switch)
-        .controlSize(.small)
-        .tint(accent)
-    }
-    // A real labeled toggle stands in for the drawn row, so the element is
-    // focusable, pressable and named. NOT `children: .combine`: measured
-    // 2026-08-20 against the live app, a combined element keeps `AXPress` and
-    // loses `AXFocused`, which drops every switch row out of the Tab order.
-    // The inner style is explicit because this style is still in the
-    // environment here and would otherwise recurse into itself.
-    .accessibilityRepresentation {
-      Toggle(isOn: configuration.$isOn) { configuration.label }
-        .toggleStyle(.switch)
+  }
+
+  private struct Row: View {
+    let configuration: Configuration
+    let accent: Color
+    let spreads: Bool
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+      HStack(spacing: 12) {
+        // The label is drawn outside the switch, which is the whole point of
+        // the style and also why nothing else dims it.
+        configuration.label
+          .opacity(isEnabled ? 1 : SettingsTheme.disabledOpacity)
+        if spreads {
+          Spacer(minLength: 16)
+        }
+        Toggle(isOn: configuration.$isOn) { EmptyView() }
+          .labelsHidden()
+          .toggleStyle(.switch)
+          .controlSize(.small)
+          .tint(accent)
+      }
     }
   }
 }
