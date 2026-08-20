@@ -38,6 +38,31 @@ public enum AppRegression {
   public static let combinedFloorDDCValue: UInt16 = 0
   public static let combinedReleasedDDCValue: UInt16 = 37
 
+  /// The register value this panel writes at stored brightness 0.75 with
+  /// combined dimming on and the default switching point.
+  ///
+  /// Derived, not guessed. `DimmingMath.combinedSplit(value: 0.75, switching:
+  /// 0.5)` puts the DDC portion at `(0.75 - 0.5) / (1 - 0.5) = 0.5`, and this
+  /// panel's register maximum is 100: it answers no capabilities read at all,
+  /// so `BrightnessController.assumedMaxDDC` stands, and three independent
+  /// readings on the rig agree with it (37 at stored 0.375 with combined
+  /// dimming OFF, which is 0.375 x 100 truncated; 87 at 0.9375 with it on,
+  /// which is 0.875 x 100 truncated; 100 at 1.0). Half of 100 is exactly 50,
+  /// with no rounding to argue about.
+  ///
+  /// Anchoring the up leg on a VALUE is the point. Accepting any positive
+  /// write lets another panel's re-apply stand in for the register move this
+  /// check exists to observe. Nothing else should be writing inside that
+  /// window, since sync is staged off and no toggle fires, but a check that
+  /// would still pass if something were is not asserting what it says.
+  public static let combinedCrossoverDDCValue: UInt16 = 50
+
+  /// How close a native brightness write has to land to what it asked for
+  /// before the read back counts as having achieved it. Named for the same
+  /// reason every other threshold here is: a number spelled inline at its one
+  /// call site is a threshold nobody can find or argue with.
+  public static let nativeBrightnessLandingTolerance = 0.01
+
   /// The stored brightness the floor numbers above were measured at, and the
   /// point every driven check converges the panel to before and after it runs,
   /// so each check's precondition is the previous check's end state.
@@ -155,8 +180,9 @@ public enum AppRegression {
   ///
   /// A drive window with no writes at all is the dead-drive case and reports
   /// inconclusive: it says nothing about where the DDC leg picks up, only that
-  /// nothing reached the panel. A window full of floor writes is the real
-  /// failure, and the two are told apart here rather than merged.
+  /// nothing reached the panel. A window that carries writes but not the
+  /// expected register value is the real failure, and the two are told apart
+  /// here rather than merged.
   public static func combinedCrossoverVerdict(
     upWriteValues: [UInt16], gammaAtTop: Double,
     downWriteValues: [UInt16], gammaBackAtFloor: Double
@@ -173,9 +199,9 @@ public enum AppRegression {
     }
 
     var failures: [String] = []
-    if !upWriteValues.contains(where: { $0 > combinedFloorDDCValue }) {
+    if !upWriteValues.contains(combinedCrossoverDDCValue) {
       failures.append(
-        "every DDC write on the way up to \(combinedCrossoverBrightness) carried \(combinedFloorDDCValue) (\(list(upWriteValues))): above the switching point the DDC leg carries the whole value, so the register never left its floor"
+        "the writes on the way up to \(combinedCrossoverBrightness) carried \(list(upWriteValues)) and never \(combinedCrossoverDDCValue), which is what this panel's register holds at that stored brightness: above the switching point the DDC leg carries the whole value, and any other positive value in the window belongs to something else"
       )
     }
     if !within(gammaAtTop, combinedReleasedGamma, tolerance: combinedReleasedGammaTolerance) {

@@ -247,7 +247,20 @@ struct AppRegressionTests {
       downWriteValues: [0], gammaBackAtFloor: 0.7875
     )
     #expect(isFail(outcome))
-    #expect(detail(outcome).contains("switching point"))
+    #expect(detail(outcome).contains("\(AppRegression.combinedCrossoverDDCValue)"))
+  }
+
+  @Test func aPositiveWriteThatIsNotThisPanelsExpectedValueFails() {
+    // The up leg anchors on a VALUE, the way the released leg anchors on 37.
+    // Accepting any nonzero write would let another panel's re-apply stand in
+    // for the register move this check exists to observe: 93 and 64 are both
+    // positive and neither is what this panel writes at the crossover point.
+    let outcome = AppRegression.combinedCrossoverVerdict(
+      upWriteValues: [93, 0, 64], gammaAtTop: 1.0,
+      downWriteValues: [87, 0], gammaBackAtFloor: 0.7875
+    )
+    #expect(isFail(outcome))
+    #expect(detail(outcome).contains("93"))
   }
 
   @Test func aGammaStillScaledAtTheTopFails() {
@@ -269,11 +282,26 @@ struct AppRegressionTests {
   }
 
   @Test func theCrossoverPassesWithAnotherPanelsWritesInTheWindow() {
+    // Presence, not exclusivity, on both legs: the expected value is in the
+    // window alongside whatever else wrote, and the walk up carries the
+    // intermediate grid points with it.
     let outcome = AppRegression.combinedCrossoverVerdict(
-      upWriteValues: [93, 0, 64], gammaAtTop: 1.0,
+      upWriteValues: [93, 0, 12, 25, 37, AppRegression.combinedCrossoverDDCValue],
+      gammaAtTop: 1.0,
       downWriteValues: [87, 0], gammaBackAtFloor: 0.7875
     )
     #expect(isPass(outcome))
+  }
+
+  @Test func theCrossoverValueIsTheDimmingMathsAnswerAtTheCrossoverBrightness() {
+    // The constant is derived rather than transcribed, so the derivation is
+    // pinned: the DDC portion at 0.75 with the default switching point, times
+    // this panel's assumed register maximum of 100.
+    let split = DimmingMath.combinedSplit(
+      value: AppRegression.combinedCrossoverBrightness,
+      switching: DimmingMath.switchingValue(fromPoint: 0))
+    #expect(UInt16(split.ddc * 100) == AppRegression.combinedCrossoverDDCValue)
+    #expect(split.sw == 1)
   }
 
   // MARK: - Walking the key grid onto a target

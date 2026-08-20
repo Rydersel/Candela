@@ -408,7 +408,12 @@ enum Regress {
 
     return controlledCheck(name: name, control: control) {
       let start = Date()
-      instruments.warpPointer(toCenterOf: target.id)
+      let aim = instruments.warpPointer(toCenterOf: target.id)
+      guard aim.landed else {
+        return .inconclusive(
+          "the pointer could not be aimed at \(target.name) [\(target.id)]: \(aim.describedForDetail); the keys would go to whichever display the pointer is actually on, so neither a write nor its absence would be about this panel"
+        )
+      }
       // brightnessDown then brightnessUp: the pair leaves the panel where it
       // found it on the 1/16 key grid, so the instrument does not move the rig
       // it measures.
@@ -786,9 +791,15 @@ enum Regress {
         break
       }
       let name = step == .pressUp ? "brightnessUp" : "brightnessDown"
-      // Re-aimed every time: a key press is addressed by pointer position, and
-      // an aim taken once at the top of the drive is an aim nobody re-checked.
-      instruments.warpPointer(toCenterOf: display.id)
+      // Re-aimed every time and CHECKED every time: a key press is addressed
+      // by pointer position, an aim taken once is an aim nobody re-checked,
+      // and an aim nobody read back is not an aim at all.
+      let aim = instruments.warpPointer(toCenterOf: display.id)
+      guard aim.landed else {
+        failure =
+          "the pointer could not be aimed at \(display.name) [\(display.id)] before press \(presses + 1): \(aim.describedForDetail); a brightness key goes to the display under the pointer, so pressing now would move a panel this check does not name"
+        break
+      }
       guard instruments.postMediaKey(name, count: 1) else {
         failure =
           "the media-key poster failed on press \(presses + 1): \(instruments.posterFailureSummary(since: mark) ?? "no reason reported")"
@@ -848,6 +859,28 @@ enum Regress {
     return "\(key) reads \(text) rather than the default 0; the floor gamma \(AppRegression.combinedFloorGamma) is that default's number, so this panel's software leg divides by a different switching point and the constant does not describe it"
   }
 
+  /// Walks the panel back to the floor point whatever the check did with it,
+  /// so an abort halfway through a drive does not leave it parked wherever it
+  /// stopped. Both combined-dimming checks pass THROUGH the hardware zone on
+  /// their way to the floor, so an abort can strand the panel at 0.75 as
+  /// easily as anywhere else; before this, only the fan-out check walked home.
+  ///
+  /// By measurement, like every other drive here, and a walk that cannot
+  /// finish is noted rather than assumed.
+  private static func walkHome(
+    _ instruments: RegressInstruments, check: PlatformConformance.Check,
+    display: Display, persistenceKey: String
+  ) -> PlatformConformance.Check {
+    let home = converge(
+      instruments: instruments, display: display, persistenceKey: persistenceKey,
+      to: AppRegression.combinedFloorBrightness, limit: 24)
+    guard !home.arrived else { return check }
+    return note(
+      check,
+      "teardown: \(display.name) was not walked back to \(AppRegression.combinedFloorBrightness): \(home.failure ?? "the stored brightness never reached it")",
+      downgradingPass: true)
+  }
+
   /// The panel these constants belong to, plus its persistence key, or the
   /// reason this run cannot ask the question of any attached display.
   private static func magPanel(_ displays: [Display]) -> Result<(Display, String), SetupFailure> {
@@ -865,6 +898,32 @@ enum Regress {
 
   /// The gates every driven check shares: one instance, proven instruments,
   /// and a settings window on the pane the switches live on.
+  /// The pointer aim only decides anything in the pointer-targeted mode.
+  ///
+  /// `multiKeyboardBrightness` redirects a brightness key to every display, or
+  /// to the display holding the active window. In either of those the aim is
+  /// inert: the drive lands on panels the check never names, and the aim
+  /// readback reports success while it happens, so the readback cannot catch
+  /// this one.
+  ///
+  /// Read from the pref rather than driven through its control, deliberately.
+  /// That control is a pop-up on the Keyboard pane, not a switch on General,
+  /// and its accessibility value is an item title rather than the 0 or 1 every
+  /// drive here handles; staging it blind would be a setup step that compiles,
+  /// reports success and does something else. Absent means the default, which
+  /// is the mode these checks need.
+  private static func keyTargetingGate(_ instruments: RegressInstruments) -> String? {
+    guard let raw = instruments.defaultsRead("multiKeyboardBrightness") else { return nil }
+    let text = raw.trimmingCharacters(in: .whitespaces)
+    guard text != "0" else { return nil }
+    let mode = switch text {
+    case "1": "every display"
+    case "2": "the display holding the active window"
+    default: "an unrecognised mode"
+    }
+    return "multiKeyboardBrightness reads \(text) (\(mode)) rather than the pointer-targeted default; a posted brightness key would not go to the panel this check aims at, so the drive would move displays the record does not name. The Keyboard pane's brightness-key target has to be back on the display under the pointer before this check can measure anything"
+  }
+
   private static func drivenGate(
     name: String, instruments: RegressInstruments, preflight: Preflight, needsKeyDrive: Bool
   ) -> PlatformConformance.Check? {
@@ -872,6 +931,9 @@ enum Regress {
       return skippedCheck(
         name: name,
         reason: "unreachable without exactly one Candela running (see regress.app.running)")
+    }
+    if needsKeyDrive, let reason = keyTargetingGate(instruments) {
+      return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
     }
     if let missing = unprovenInstruments(preflight, needsKeyDrive: needsKeyDrive) {
       return plainCheck(name: name, outcome: .inconclusive(
@@ -906,7 +968,13 @@ enum Regress {
       return refusal
     }
 
-    let check = combinedDimmingDrive(instruments: instruments, mag: mag, persistenceKey: key)
+    // Walked home BEFORE the switches go back: the floor point is defined
+    // under the staged prefs, and a drive that aborted mid-walk has to be
+    // brought back under the same conditions it left.
+    let check = walkHome(
+      instruments,
+      check: combinedDimmingDrive(instruments: instruments, mag: mag, persistenceKey: key),
+      display: mag, persistenceKey: key)
     return restore(instruments, check: check, switches: switches)
   }
 
@@ -1014,7 +1082,13 @@ enum Regress {
       return refusal
     }
 
-    let check = crossoverDrive(instruments: instruments, mag: mag, persistenceKey: key)
+    // This check deliberately parks the panel at 0.75 partway through, so a
+    // mid-drive abort strands it there with nothing to bring it back. The walk
+    // home runs on every path, not only the ones that finished.
+    let check = walkHome(
+      instruments,
+      check: crossoverDrive(instruments: instruments, mag: mag, persistenceKey: key),
+      display: mag, persistenceKey: key)
     return restore(instruments, check: check, switches: switches)
   }
 
@@ -1099,8 +1173,11 @@ enum Regress {
         name: name,
         reason: "no DDC-capable external display is attached, so a fan-out has nowhere to land")
     }
+    // needsKeyDrive is true even though the DRIVE goes through DisplayServices:
+    // the teardown walks the panel home with posted keys, so a run whose key
+    // path is dead cannot leave the rig where the record says it did.
     if let refusal = drivenGate(
-      name: name, instruments: instruments, preflight: preflight, needsKeyDrive: false) {
+      name: name, instruments: instruments, preflight: preflight, needsKeyDrive: true) {
       return refusal
     }
 
@@ -1122,27 +1199,23 @@ enum Regress {
       return refusal
     }
 
-    let driven = fanOutDrive(
+    var check = fanOutDrive(
       instruments: instruments, builtIn: builtIn, preWindowFanOuts: preFanOuts)
-    // Sync goes back to what it was before the panel is walked home, so the
-    // teardown's own keys cannot fan out to anything.
-    var check = restore(instruments, check: driven, switches: switches)
 
-    // Leave the rig where the next check expects to find it. By measurement:
-    // the deadband clamp discards remainders, so the fan-out's arrival on this
+    // Leave the panel where the next check expects to find it, by measurement:
+    // the deadband clamp discards remainders, so where the fan-out landed this
     // panel is not the arithmetic the source moved by.
+    //
+    // The walk runs with sync still staged on, which is safe for the reason
+    // the log shows rather than the one this comment used to give: a key press
+    // steps its targeted display directly and never reaches the fan-out at
+    // all, so every fan-out line on the rig names the built-in as its source.
+    // The keys here cannot start one whatever sync is set to.
     if case let .success(panel) = magPanel(displays) {
-      let home = converge(
-        instruments: instruments, display: panel.0, persistenceKey: panel.1,
-        to: AppRegression.combinedFloorBrightness, limit: 24)
-      if !home.arrived {
-        check = note(
-          check,
-          "teardown: \(panel.0.name) was not walked back to \(AppRegression.combinedFloorBrightness): \(home.failure ?? "the stored brightness never reached it")",
-          downgradingPass: true)
-      }
+      check = walkHome(
+        instruments, check: check, display: panel.0, persistenceKey: panel.1)
     }
-    return check
+    return restore(instruments, check: check, switches: switches)
   }
 
   private static func fanOutDrive(
@@ -1173,7 +1246,8 @@ enum Regress {
     // smaller than the band is one sync is designed to swallow. Either would
     // otherwise present as the app failing to fan out.
     let control: Control
-    let landed = observed.map { abs($0 - target) <= 0.01 } ?? false
+    let landed = observed
+      .map { abs($0 - target) <= AppRegression.nativeBrightnessLandingTolerance } ?? false
     let cleared = observed.map { abs($0 - before) >= SyncDeadband.threshold } ?? false
     if let observed, landed, cleared {
       control = .fired(
@@ -1203,7 +1277,7 @@ enum Regress {
     instruments.setNativeBrightness(before, for: builtIn.id)
     Thread.sleep(forTimeInterval: 1.5)
     let restored = instruments.nativeBrightness(builtIn.id)
-    if restored == nil || abs(restored! - before) > 0.01 {
+    if restored == nil || abs(restored! - before) > AppRegression.nativeBrightnessLandingTolerance {
       check = note(
         check,
         "teardown: the built-in was written back to \(formatted(before)) and reads \(restored.map(formatted) ?? "nothing")",
@@ -1467,12 +1541,50 @@ final class RegressInstruments {
     return false
   }
 
+  /// One pointer aim, with the position the pointer actually ended up at.
+  struct Aim {
+    let display: CGDirectDisplayID
+    let landed: Bool
+    let achieved: CGPoint?
+    let attempts: Int
+
+    var describedForDetail: String {
+      let position = achieved
+        .map { "(\(Int($0.x)), \(Int($0.y)))" } ?? "a position that could not be read"
+      return "\(attempts) warp\(attempts == 1 ? "" : "s") left the pointer at \(position), \(landed ? "inside" : "outside") display \(display)'s bounds \(CGDisplayBounds(display).debugDescription)"
+    }
+  }
+
   /// Brightness keys target the display under the pointer, so aiming is how a
   /// key press is addressed to one panel.
-  func warpPointer(toCenterOf id: CGDirectDisplayID) {
+  ///
+  /// **The aim is read back**, which every other instrument here already does
+  /// and this one did not. `CGWarpMouseCursorPosition` returns nothing, so an
+  /// aim that did not take was indistinguishable from one that did, and a
+  /// drive would then walk a panel the record never names. Roughly half the
+  /// runs of one pass were measured delivering their key pair to the built-in
+  /// while reporting an aim at an external, which is the shape that hides
+  /// behind a missing readback.
+  ///
+  /// Up to three attempts, because a warp lands asynchronously and the window
+  /// server can still be reporting the old position on the first read.
+  @discardableResult
+  func warpPointer(toCenterOf id: CGDirectDisplayID) -> Aim {
     let bounds = CGDisplayBounds(id)
-    CGWarpMouseCursorPosition(CGPoint(x: bounds.midX, y: bounds.midY))
-    CGAssociateMouseAndMouseCursorPosition(1)
+    let centre = CGPoint(x: bounds.midX, y: bounds.midY)
+    var achieved: CGPoint?
+    for attempt in 1 ... 3 {
+      CGWarpMouseCursorPosition(centre)
+      CGAssociateMouseAndMouseCursorPosition(1)
+      Thread.sleep(forTimeInterval: 0.15)
+      // The event system's own idea of where the pointer is, which is what
+      // resolves a media key's target display; not the value just written.
+      achieved = CGEvent(source: nil)?.location
+      if let achieved, bounds.contains(achieved) {
+        return Aim(display: id, landed: true, achieved: achieved, attempts: attempt)
+      }
+    }
+    return Aim(display: id, landed: false, achieved: achieved, attempts: 3)
   }
 
   // MARK: The built-in's native brightness
