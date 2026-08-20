@@ -86,8 +86,12 @@ struct MenuBarPreviewView: View {
     // contrast. Columns top-align, so smaller content just leaves ground.
     .frame(height: 300)
     .frame(maxWidth: .infinity)
-    .clipShape(RoundedRectangle(cornerRadius: 9))
-    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.separator, lineWidth: 1))
+    // The frame is the settings window's (SV13): the widgets inside it keep
+    // the real look, and only what surrounds them is themed.
+    .clipShape(RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous))
+    .overlay(
+      RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
+        .strokeBorder(SettingsTheme.cardStroke, lineWidth: 1))
     .accessibilityElement(children: .contain)
     .accessibilityLabel("Preview of the menu bar and the on-screen indicators")
   }
