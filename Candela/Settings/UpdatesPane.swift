@@ -18,14 +18,16 @@ struct UpdatesPane: View {
     SettingsPageScaffold {
       SettingsPageHeader(
         title: "Updates",
-        subtitle:
-          "\(AppInfo.productName) checks quietly in the background and always asks before installing anything."
+        // The promise that holds however the toggle below is set: nothing
+        // installs itself. The cadence claim belongs to that toggle's caption,
+        // where it is conditional on the toggle being on.
+        subtitle: "\(AppInfo.productName) never installs an update without asking first."
       )
 
       hero
 
       SettingsCardSection(title: "Automatic Updates") {
-        SettingRow("About once a day, in the background, and never without telling you.") {
+        SettingRow("When this is on, \(AppInfo.productName) checks about once a day, in the background.") {
           Toggle("Check for updates automatically", isOn: $updater.automaticallyChecksForUpdates)
             .themedSwitch()
         }
