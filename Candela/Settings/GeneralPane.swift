@@ -34,12 +34,14 @@ struct GeneralPane: View {
   /// The login-item failure as RENDERED, mirroring `loginItem.lastError` one
   /// update behind. `LoginItem` writes it only from `setEnabled` (a refresh
   /// does not clear it), and neither placement of a keyed `.animation` fades a
-  /// conditional row symmetrically (measured 2026-08-17): on a `Group` wrapping
-  /// the row it animates nothing in either direction, and on an always-present
-  /// container inside the row the child fades IN and then SNAPS out. The
-  /// snap-out asymmetry is why the container-hung `.animation` is not enough;
-  /// the mirror is what puts the arrival AND the departure inside one
-  /// transaction. Kept in agreement by the two hooks on the toggle below and by
+  /// `Form` row symmetrically (measured 2026-08-17, on the grouped `Form` this
+  /// page was then): on a `Group` wrapping the conditional row it animates
+  /// nothing in either direction, and on an always-present container inside the
+  /// row the child fades IN and then SNAPS out. The snap-out asymmetry is why
+  /// the container-hung `.animation` is not enough; the mirror is what puts the
+  /// arrival AND the departure inside one transaction. Retained on the card
+  /// layout because SV7 pins the behavior, not because that trap was measured
+  /// here. Kept in agreement by the two hooks on the toggle below and by
   /// nothing else.
   @State private var shownLoginError: String?
 
@@ -57,6 +59,7 @@ struct GeneralPane: View {
         subtitle:
           "How \(AppInfo.productName) starts, how far it dims, and what it does with your saved levels."
       )
+      statusStrip
       applicationSection
       brightnessSection
       syncSection
@@ -93,6 +96,56 @@ struct GeneralPane: View {
       // item because the wipe removes a registration that lives outside the
       // prefs domain.
       Text("Your displays are put into a known state first: HDR off, any display muted by \(AppInfo.productName) unmuted, and OLED care stopped with the counted hours of use cleared. HDR that was turned on in System Settings goes back on at the end. A display that cannot be reached at the time keeps its mute and its HDR as they are, rather than being sent commands that cannot be confirmed.\n\nThen every setting is removed: per-display tuning and names, custom keyboard shortcuts, saved brightness, volume and contrast levels, remembered resolutions and rotation, saved arrangements, OLED care enrollment, and the Open at Login registration. Setup will run again afterwards.")
+    }
+  }
+
+  // MARK: - Hero
+
+  /// The page's one standing object: the app itself, running, with its login
+  /// state read off the same live `SMAppService` status the row below writes
+  /// (D10), and its display count off `AppModel`. No float; the About icon is
+  /// the window's only one (SV8).
+  private var statusStrip: some View {
+    SettingsCard {
+      HStack(spacing: 16) {
+        Image(nsImage: NSApp.applicationIconImage)
+          .resizable()
+          .frame(width: 54, height: 54)
+          .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+          .accessibilityHidden(true)
+
+        VStack(alignment: .leading, spacing: 4) {
+          // Both sentences are `LSUIElement`, which is settled in the bundle
+          // rather than read at runtime.
+          Text("Running from the menu bar")
+            .font(.system(size: 17, weight: .bold, design: .rounded))
+            .foregroundStyle(SettingsTheme.titleColor)
+          Text("No Dock icon and no window to lose: the controls live behind the icon.")
+            .font(.caption)
+            .foregroundStyle(SettingsTheme.bodyColor)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+
+        Spacer(minLength: 12)
+
+        VStack(alignment: .trailing, spacing: 6) {
+          SettingsBadge(text: loginItem.isEnabled ? "Opens at Login" : "Manual start")
+          Text(verbatim: connectedLine)
+            .font(.caption2)
+            .foregroundStyle(SettingsTheme.faintColor)
+        }
+      }
+    }
+    .shadow(color: .black.opacity(0.25), radius: 14, y: 6)
+  }
+
+  /// `AppModel.displays` is external-only (the built-in has its own slot), so
+  /// the line says external rather than counting a panel it excludes.
+  private var connectedLine: String {
+    switch model.displays.count {
+    case 0: "No external displays connected"
+    case 1: "1 external display connected"
+    case let count: "\(count) external displays connected"
     }
   }
 
@@ -265,7 +318,16 @@ struct GeneralPane: View {
       if prefs.startupAction == .read {
         // "Write-only panels" was the house term for these; SO14 makes the
         // hardware a display everywhere in UI copy.
+        //
+        // Rendered at row weight rather than as a standalone caption: it
+        // qualifies `startupCaption` above it, which `SettingRow` draws small
+        // and faint, and a callout here would be the larger, brighter sentence
+        // of the two.
         SettingsCaption("Some displays never answer DDC reads; values then stay as last saved.")
+          .text
+          .font(.caption)
+          .foregroundStyle(SettingsTheme.faintColor)
+          .fixedSize(horizontal: false, vertical: true)
           .padding(.bottom, 6)
       }
       SettingsCardDivider()
@@ -326,11 +388,11 @@ struct GeneralPane: View {
     .padding(11)
     .background(
       RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
-        .fill(Color.white.opacity(0.05))
+        .fill(SettingsTheme.cardFill)
     )
     .overlay(
       RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
-        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+        .stroke(SettingsTheme.cardStroke, lineWidth: 1)
     )
     .padding(.top, 10)
     .padding(.bottom, 4)
