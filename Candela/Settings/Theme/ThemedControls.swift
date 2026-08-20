@@ -5,10 +5,31 @@ import SwiftUI
 /// because the system slider ignores the window's lighting entirely, so it
 /// carries its own accessibility (SV6): call sites supply the label, this
 /// supplies the value and the adjustable action.
+///
+/// It takes what the native `Slider` takes, so a settings row converting to it
+/// keeps its semantics: a range, an optional step, a drag-boundary callback for
+/// the rows that commit on release rather than per frame, and an accessibility
+/// value for the rows whose stored number must never be spoken.
+///
+/// **Never bind this to a volume value (D29 rule 4).** It has no zero-free
+/// grid, and volume 0 is a hardware mute over VCP 0x8D; a volume row keeps the
+/// panel's `DisplaySliderRow`, which snaps and steps over
+/// `SliderSnap.stopsWithoutZero`.
 struct ThemedSlider: View {
   @Binding var value: Double
+  var range: ClosedRange<Double> = 0...1
+  /// Grid the value lands on, in value units. Nil is continuous.
+  var step: Double?
+  /// Overrides the spoken value where a percentage would be meaningless or
+  /// where the stored number must not reach VoiceOver.
+  var accessibilityValueText: String?
+  /// True when a drag starts, false when it ends, so a row that writes a pref
+  /// on release keeps one write per gesture. A keyboard or VoiceOver step is a
+  /// whole gesture of its own and sends both.
+  var onEditingChanged: ((Bool) -> Void)?
 
   @Environment(\.settingsAccent) private var lighting
+  @State private var dragging = false
 
   var body: some View {
     GeometryReader { proxy in
@@ -19,37 +40,94 @@ struct ThemedSlider: View {
           .frame(height: 5)
         Capsule()
           .fill(lighting.accent.opacity(0.85))
-          .frame(width: max(5, width * value), height: 5)
+          .frame(width: max(5, width * fraction), height: 5)
         Circle()
           .fill(.white)
           .frame(width: 13, height: 13)
           .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
-          .offset(x: max(0, (width - 13) * value))
+          .offset(x: max(0, (width - 13) * fraction))
       }
       .frame(height: proxy.size.height)
       .contentShape(Rectangle())
       .gesture(
-        DragGesture(minimumDistance: 0).onChanged { gesture in
-          value = min(1, max(0, gesture.location.x / width))
-        }
+        DragGesture(minimumDistance: 0)
+          .onChanged { gesture in
+            if !dragging {
+              dragging = true
+              onEditingChanged?(true)
+            }
+            value = valueAt(x: gesture.location.x, width: width)
+          }
+          .onEnded { gesture in
+            value = valueAt(x: gesture.location.x, width: width)
+            dragging = false
+            onEditingChanged?(false)
+          }
       )
     }
     .frame(height: 22)
     // The track, the fill and the knob are one control, not three shapes.
     .accessibilityElement(children: .ignore)
-    .accessibilityValue(Text(verbatim: SliderSnap.percentText(value)))
+    .accessibilityValue(Text(verbatim: accessibilityValueText ?? SliderSnap.percentText(fraction)))
     .accessibilityAdjustableAction { direction in
       switch direction {
-      case .increment: value = min(1, value + Self.step)
-      case .decrement: value = max(0, value - Self.step)
+      case .increment: commitStep(up: true)
+      case .decrement: commitStep(up: false)
       @unknown default: break
       }
     }
   }
 
-  /// One VoiceOver nudge, matching the panel sliders' feel rather than the
-  /// pixel resolution of a drag.
-  private static let step = 0.05
+  /// Position along the track, 0...1, whatever the value units are.
+  private var fraction: Double {
+    let span = range.upperBound - range.lowerBound
+    guard span > 0 else { return 0 }
+    return min(1, max(0, (value - range.lowerBound) / span))
+  }
+
+  private func valueAt(x: CGFloat, width: CGFloat) -> Double {
+    // A zero-width layout pass makes the division NaN, and `min(1, max(0, NaN))`
+    // resolves to 1: a drag on an unlaid-out track would write full scale.
+    guard width > 0 else { return value }
+    let span = range.upperBound - range.lowerBound
+    let raw = range.lowerBound + span * min(1, max(0, Double(x / width)))
+    guard let step, step > 0 else { return raw }
+    let grid = ((raw - range.lowerBound) / step).rounded()
+    return clamped(range.lowerBound + grid * step)
+  }
+
+  private func commitStep(up: Bool) {
+    onEditingChanged?(true)
+    value = stepped(up: up)
+    onEditingChanged?(false)
+  }
+
+  /// One discrete step, on `SliderSnap`'s grid rather than a raw addition: it
+  /// lands ON the grid in the direction of travel and rounds back to whole
+  /// millionths, so repeated stepping cannot drift a grid point into a readout
+  /// of 59%.
+  private func stepped(up: Bool) -> Double {
+    let size = step ?? Self.defaultStep
+    let span = range.upperBound - range.lowerBound
+    guard span > 0 else { return value }
+    // `SliderSnap`'s grid is defined over 0...1, so a wider range steps from
+    // where it is and takes the same rounding.
+    guard span <= 1 else {
+      let moved = value + (up ? size : -size)
+      return clamped(((moved * 1e6).rounded() / 1e6))
+    }
+    let offset = SliderSnap.stepped(
+      from: value - range.lowerBound, up: up, step: size, toStops: false)
+    return clamped(range.lowerBound + offset)
+  }
+
+  private func clamped(_ value: Double) -> Double {
+    min(range.upperBound, max(range.lowerBound, value))
+  }
+
+  /// One VoiceOver nudge on a continuous slider, matching the panel sliders'
+  /// feel rather than the pixel resolution of a drag.
+  private static let defaultStep = 0.05
 }
 
 /// Segmented choice shaped like the macOS segmented control: a recessed
@@ -145,21 +223,55 @@ struct ThemedLabeledContentStyle: LabeledContentStyle {
   }
 }
 
+/// The native switch under the destination tint, with the label held at the
+/// leading edge and the switch at the trailing one.
+///
+/// The spread has to live in the style: a switch-style `Toggle` sits beside its
+/// own label at its ideal width however wide a frame it is given, measured
+/// 2026-08-20 against a rendered card.
+private struct ThemedSwitchStyle: ToggleStyle {
+  let accent: Color
+  let spreads: Bool
+
+  func makeBody(configuration: Configuration) -> some View {
+    HStack(spacing: 12) {
+      configuration.label
+      if spreads {
+        Spacer(minLength: 16)
+      }
+      Toggle(isOn: configuration.$isOn) { EmptyView() }
+        .labelsHidden()
+        .toggleStyle(.switch)
+        .controlSize(.small)
+        .tint(accent)
+    }
+    // One row element, not a caption beside an unlabeled control: the row's
+    // label, its safety sentence and its hint all have to land on the thing
+    // that toggles. `combine` keeps the child's action, unlike `ignore`.
+    .accessibilityElement(children: .combine)
+  }
+}
+
 private struct ThemedSwitchModifier: ViewModifier {
+  var spreads: Bool
+
   @Environment(\.settingsAccent) private var lighting
 
   func body(content: Content) -> some View {
-    content
-      .toggleStyle(.switch)
-      .controlSize(.small)
-      .tint(lighting.accent)
+    content.toggleStyle(ThemedSwitchStyle(accent: lighting.accent, spreads: spreads))
   }
 }
 
 extension View {
   /// A `Toggle` at settings weight: the native switch, small like System
-  /// Settings uses, tinted by the destination. Labels are left alone; a row
-  /// that wants its label hidden says so at its own call site, and the label
-  /// still has to exist for VoiceOver.
-  func themedSwitch() -> some View { modifier(ThemedSwitchModifier()) }
+  /// Settings uses, tinted by the destination, spanning the row with the switch
+  /// at its trailing edge. Labels are left alone; a row that wants its label
+  /// hidden says so at its own call site, and the label still has to exist for
+  /// VoiceOver.
+  ///
+  /// `spreads: false` for a switch that shares a row with something else and
+  /// must keep its ideal width.
+  func themedSwitch(spreads: Bool = true) -> some View {
+    modifier(ThemedSwitchModifier(spreads: spreads))
+  }
 }

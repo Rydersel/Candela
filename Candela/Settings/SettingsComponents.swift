@@ -168,6 +168,11 @@ struct SettingRow<Control: View>: View {
       rowCaption(safety?.visibleCaption)
       rowCaption(caption)
     }
+    // The row's content takes the card's full width, not just its own ideal
+    // one: the dominant shape here is a labeled control, and a control given
+    // the whole row is what puts its label at the leading edge and its switch
+    // or pop-up at the trailing one.
+    .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.vertical, 6)
     .foregroundStyle(SettingsTheme.titleColor)
   }
