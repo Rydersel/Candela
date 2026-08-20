@@ -533,11 +533,30 @@ public enum AppRegression {
   /// mid-dump and has exactly one candidate segment, so its rows are handed
   /// back rather than dropped; reporting nothing there would turn a readable
   /// dump into a silent one.
+  ///
+  /// One passthrough is known and left alone: a display whose friendly name is
+  /// literally `paneldump=header` would cut the segment at its own row. Names
+  /// are user text and the dump quotes them without escaping their content, so
+  /// this is the same class the field parsers here already handle by stopping
+  /// at a token boundary. Recorded rather than defended against.
   public static func newestPanelDumpRows(fromLogLines lines: [String]) -> [String] {
     guard let header = lines.lastIndex(where: { $0.contains("paneldump=header") }) else {
       return panelDumpRows(fromLogLines: lines)
     }
     return panelDumpRows(fromLogLines: Array(lines[(header + 1)...]))
+  }
+
+  /// How many rows the newest header says its dump has, when the window carries
+  /// a header at all.
+  ///
+  /// Searched with its leading space, so a future field whose name ENDS in
+  /// `rows` cannot answer for this one, and parsed to the token boundary like
+  /// every other field read here.
+  public static func newestPanelDumpRowCount(fromLogLines lines: [String]) -> Int? {
+    guard let header = lines.last(where: { $0.contains("paneldump=header") }),
+          let marker = header.range(of: " rows=")
+    else { return nil }
+    return Int(header[marker.upperBound...].prefix { $0.isNumber })
   }
 
   /// Whether the NEWEST dump in a window is the one that knows.
@@ -554,9 +573,22 @@ public enum AppRegression {
   /// re-dump `unknown` while the app re-resolves. A header whose rows have not
   /// persisted yet leaves the segment empty, which is not landed, so the poll
   /// waits for them instead of judging nothing.
+  ///
+  /// A segment is landed only once it is COMPLETE, which is the same problem
+  /// one degree finer. The dump writes its rows in the panel's title order and
+  /// the store persists them in that order, so the denying panel's row can
+  /// arrive before the write-only panel's, and that row carries the very
+  /// verdict the wait is watching for. A poll landing in the gap would stop on
+  /// a segment with no MAG row in it and FAIL a healthy rig for a missing row.
+  /// The header already says how many rows are coming, so the count is what the
+  /// wait holds out for. A window with no header has nothing to count against
+  /// and falls back to the verdict alone.
   public static func panelDumpVerdictLanded(inLogLines lines: [String]) -> Bool {
-    panelDumpVolumeSupport(fromLogLines: newestPanelDumpRows(fromLogLines: lines))
-      .contains { $0 != "unknown" }
+    let rows = newestPanelDumpRows(fromLogLines: lines)
+    if let expected = newestPanelDumpRowCount(fromLogLines: lines), rows.count != expected {
+      return false
+    }
+    return panelDumpVolumeSupport(fromLogLines: rows).contains { $0 != "unknown" }
   }
 
   // MARK: - The ledger's filename

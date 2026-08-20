@@ -2235,6 +2235,12 @@ enum Regress {
     // pre-verdict row and convicts a healthy rig of a D24 regression.
     let rows = AppRegression.newestPanelDumpRows(fromLogLines: window.lines)
     let landed = AppRegression.panelDumpVerdictLanded(inLogLines: window.lines)
+    // Both counts, and what the newest header promised, because a timeout has
+    // two causes the segment's own count cannot tell apart: no dump rows
+    // ANYWHERE is a build with no dump compiled into it, while rows in the
+    // window over an incomplete newest segment is the store still flushing one.
+    let windowDumpRows = AppRegression.panelDumpRows(fromLogLines: window.lines).count
+    let promisedRows = AppRegression.newestPanelDumpRowCount(fromLogLines: window.lines)
     let queryFailed = window.queryFailed
     let queryFailure = window.failureReason
     let instrumentedLines = window.count
@@ -2249,8 +2255,9 @@ enum Regress {
       )
     }
     guard landed else {
+      let promised = promisedRows.map { "\($0)" } ?? "no header in the window said how many"
       return setupMiss(
-        "no dump row carried a volume verdict other than unknown within 20 s of launching \(running.described) (\(rows.count) rows in a \(instrumentedLines)-line window); the launch dump reports every panel unknown by construction and the capabilities verdict lands after it, so the D24 pair was never observable. With no rows at all the likeliest cause is a Release bundle behind --debug-app: the dump is compiled out of Release entirely, which looks exactly like this"
+        "no complete dump carried a volume verdict other than unknown within 20 s of launching \(running.described): the newest dump holds \(rows.count) of \(promised) rows, over \(windowDumpRows) dump rows in a \(instrumentedLines)-line window. The launch dump reports every panel unknown by construction and the capabilities verdict lands after it, so the D24 pair was never observable. With no dump rows anywhere in the window, the likeliest cause is a Release bundle behind --debug-app: the dump is compiled out of Release entirely, which looks exactly like this. With rows in the window over an incomplete newest dump, the store had not finished flushing it"
       )
     }
 

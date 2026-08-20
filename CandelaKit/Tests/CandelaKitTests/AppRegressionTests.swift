@@ -666,9 +666,16 @@ struct AppRegressionTests {
   /// dump, then one `paneldump=row` per panel row, at `.info` in the
   /// `PanelDump` category.
   private static let dumpHeader = header(pass: 1)
-  private static func header(pass: Int) -> String {
-    "2026-08-19 11:02:03.099 If Candela[9:1] [com.rydersel.Candela:PanelDump] paneldump=header pass=\(pass) rows=2 builtIn=hidden externals=2 hiddenExternals=0 safeMode=no prefsRevision=4"
+  private static func header(pass: Int, rows: Int = 2) -> String {
+    "2026-08-19 11:02:03.099 If Candela[9:1] [com.rydersel.Candela:PanelDump] paneldump=header pass=\(pass) rows=\(rows) builtIn=hidden externals=2 hiddenExternals=0 safeMode=no prefsRevision=4"
   }
+
+  /// The built-in's row, which carries no volume verdict at all: the panel puts
+  /// a name and a brightness slider there, so the dump reports both sliders as
+  /// not rendered. It counts towards the header's `rows=` all the same, which
+  /// is the difference between counting rows and counting verdicts.
+  private static let builtInRow =
+    "2026-08-19 11:02:03.100 If Candela[9:1] [com.rydersel.Candela:PanelDump] paneldump=row index=1 kind=builtIn title=\"Color LCD\" key=\"builtin\" displayID=1 brightness=0.500 hdrEngaged=no hdrSupported=no hdrMode=off volumeSlider=notRendered contrastSlider=notRendered"
   private static func dumpRow(
     title: String, volumeSupport: String, muteSupport: String = "unknown",
     volumeEnabled: String = "yes", volumeReason: String = "none"
@@ -784,6 +791,28 @@ struct AppRegressionTests {
     let window = Self.twoPassWindow + [Self.header(pass: 3)]
     #expect(!AppRegression.panelDumpVerdictLanded(inLogLines: window))
     #expect(AppRegression.newestPanelDumpRows(fromLogLines: window).isEmpty)
+  }
+
+  @Test func aHalfFlushedSegmentIsNotLanded() {
+    // The rows persist in the order the dump writes them, which is the panel's
+    // own title order, so the DENYING panel's row can arrive before the
+    // write-only panel's. Its unsupported verdict is exactly what the wait is
+    // watching for, so a poll landing in that gap would stop, judge a segment
+    // with no MAG row in it, and FAIL a healthy rig for a missing row. The
+    // header already says how many rows are coming, so the count is what the
+    // wait holds out for.
+    let window = [Self.header(pass: 2, rows: 3), Self.dellAfterVerdict]
+    #expect(!AppRegression.panelDumpVerdictLanded(inLogLines: window))
+  }
+
+  @Test func theCompletedSegmentLands() {
+    let window = [
+      Self.header(pass: 2, rows: 3), Self.builtInRow, Self.magAnyPass, Self.dellAfterVerdict,
+    ]
+    #expect(AppRegression.panelDumpVerdictLanded(inLogLines: window))
+    // The built-in row carries no verdict of its own and still counts: the
+    // header counts ROWS, and a count of verdicts would never reach three.
+    #expect(AppRegression.newestPanelDumpRows(fromLogLines: window).count == 3)
   }
 
   @Test func aWindowThatMissedTheHeaderStillOffersItsRows() {
