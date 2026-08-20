@@ -27,44 +27,61 @@ struct NavigationRow: View {
   var spokenValue: String? = nil
   let action: () -> Void
 
+  @State private var hovering = false
+  @Environment(\.settingsAccent) private var lighting
+
   var body: some View {
     Button(action: action) {
       ViewThatFits(in: .horizontal) {
-        HStack(spacing: 8) {
-          Text(title)
-          Spacer(minLength: 8)
+        HStack(spacing: 12) {
+          titleText
+          Spacer(minLength: 16)
           // Only on this candidate: a wrapping value would let the row "fit"
           // at any width and the fallback would never be reached.
           valueText.lineLimit(1)
           chevron
         }
         VStack(alignment: .leading, spacing: 2) {
-          HStack(spacing: 8) {
-            Text(title)
-            Spacer(minLength: 8)
+          HStack(spacing: 12) {
+            titleText
+            Spacer(minLength: 16)
             chevron
           }
           valueText
         }
       }
+      .padding(.vertical, 6)
+      .padding(.horizontal, 6)
+      // The lift is the only thing saying a card row is a doorway; the chevron
+      // alone reads as decoration at this density.
+      .background(
+        RoundedRectangle(cornerRadius: 6, style: .continuous)
+          .fill(Color.white.opacity(hovering ? 0.06 : 0))
+      )
       .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
+    .onHover { hovering = $0 }
+    .animation(SettingsTheme.hoverMotion, value: hovering)
     .accessibilityLabel(title)
     .accessibilityValue(spokenValue ?? value ?? "")
+  }
+
+  private var titleText: some View {
+    Text(title).foregroundStyle(SettingsTheme.titleColor)
   }
 
   @ViewBuilder
   private var valueText: some View {
     if let value {
-      Text(verbatim: value).foregroundStyle(.secondary)
+      Text(verbatim: value).foregroundStyle(SettingsTheme.bodyColor)
     }
   }
 
   private var chevron: some View {
     Image(systemName: "chevron.right")
       .font(.caption.weight(.semibold))
-      .foregroundStyle(.tertiary)
+      .foregroundStyle(hovering ? lighting.accent : SettingsTheme.faintColor)
       .accessibilityHidden(true)
   }
 }

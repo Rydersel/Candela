@@ -179,6 +179,28 @@ struct RenderSmokeTests {
     expectPixels(render(pane), "BuiltInDisplayPane")
   }
 
+  /// The theme layer composed the way a restyled page composes it: the
+  /// scaffold's scroll and content column, a card section, and the two shared
+  /// rows inside it. Nothing here is a real pane, which is the point: it covers
+  /// the shared components before any page adopts them, so a collapsed card or
+  /// a crashing row surfaces here rather than in whichever page happens to be
+  /// migrated first.
+  @Test func theThemeComponentsRender() {
+    let page = SettingsPageScaffold {
+      SettingsPageHeader(title: "Levels", subtitle: "The shared components on one card.")
+      SettingsCardSection(title: "Levels") {
+        SettingRow("What this switch changes.") {
+          Toggle("A themed switch", isOn: .constant(true)).themedSwitch()
+        }
+        SettingsCardDivider()
+        NavigationRow(title: "All Sizes", value: "3440 x 1440", action: {})
+      }
+    }
+    .environment(\.settingsAccent, .display(isBuiltIn: false, ordinal: 1))
+    .frame(width: 640, height: 420)
+    expectPixels(render(page), "settings theme components")
+  }
+
   // MARK: - The guided setup flow
 
   /// The window the flow asks for is 760x560 at its minimum, so every render

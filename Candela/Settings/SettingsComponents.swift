@@ -151,7 +151,7 @@ struct SettingRow<Control: View>: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 5) {
+    VStack(alignment: .leading, spacing: 3) {
       // Which branch runs is fixed by the initialiser the call site chose and
       // cannot flip while the row is on screen, so this `if` is safe where one
       // on the caption would not be: that would swap `_ConditionalContent`
@@ -165,8 +165,25 @@ struct SettingRow<Control: View>: View {
       } else {
         hinted(control)
       }
-      safety?.visibleCaption
-      caption
+      rowCaption(safety?.visibleCaption)
+      rowCaption(caption)
+    }
+    .padding(.vertical, 6)
+    .foregroundStyle(SettingsTheme.titleColor)
+  }
+
+  /// The row's own denser rendering of a caption: `SettingsCaption`'s sentence
+  /// at row weight rather than its standalone weight, which on a card would
+  /// compete with the control's label. The `Text` is taken rather than the
+  /// view, because a caption styles itself and an outer font cannot override
+  /// it.
+  @ViewBuilder
+  private func rowCaption(_ caption: SettingsCaption?) -> some View {
+    if let caption {
+      caption.text
+        .font(.caption)
+        .foregroundStyle(SettingsTheme.faintColor)
+        .fixedSize(horizontal: false, vertical: true)
     }
   }
 
@@ -209,7 +226,7 @@ struct SettingsCaption: View {
   var body: some View {
     text
       .font(.callout)
-      .foregroundStyle(.secondary)
+      .foregroundStyle(SettingsTheme.bodyColor)
       .fixedSize(horizontal: false, vertical: true)
   }
 }

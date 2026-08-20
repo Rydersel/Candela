@@ -25,7 +25,8 @@ struct SubPageHeader: View {
   var body: some View {
     HStack {
       Text(title)
-        .font(.title3.weight(.semibold))
+        .font(.system(size: 24, weight: .bold, design: .rounded))
+        .foregroundStyle(SettingsTheme.titleColor)
         .settingsHeading()
         .accessibilityFocused($titleFocused)
       Spacer()
