@@ -3,8 +3,12 @@ import CandelaKit
 import SwiftUI
 
 /// The app-level pane: how `AppInfo.productName` starts and stops, how far it
-/// is allowed to dim, whether it mirrors the built-in display, and what it does
-/// with saved values at launch and wake.
+/// is allowed to dim, and whether it mirrors the built-in display.
+///
+/// What it deliberately no longer holds is the startup and wake restore choice,
+/// which moved to Protection wholesale (SC6): that picker is a policy about
+/// what gets put back, and Protection is the named home of those. The pref, its
+/// `PrefName` case and its safe-mode visibility moved with it unchanged.
 ///
 /// Section order follows the HIG's reading-order and bottom-edge rules
 /// (layout.md — "avoid placing controls or critical information at the bottom
@@ -48,22 +52,22 @@ struct GeneralPane: View {
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: "app") }
 
   var body: some View {
-    // `DisplayPrefs` is plain UserDefaults and not observable, so `.refreshUI`
-    // — which is unioned into EVERY known `PrefName` — is the only thing
-    // that re-evaluates this body after a write. Without this reference the
-    // startup caption below would never follow its own picker.
+    // `DisplayPrefs` is plain UserDefaults and not observable, so `.refreshUI`,
+    // which is unioned into EVERY known `PrefName`, is the only thing that
+    // re-evaluates this body after a write. Without this reference the two
+    // dimming switches and the sync switch below would keep drawing the value
+    // they were built with after a reset or an outside write.
     let _ = model.prefsRevision
     SettingsPageScaffold {
       SettingsPageHeader(
         title: "General",
         subtitle:
-          "How \(AppInfo.productName) starts, how far it dims, and what it does with your saved levels."
+          "How \(AppInfo.productName) opens, how far it dims, and whether your other displays follow the built-in one."
       )
       statusStrip
       applicationSection
       brightnessSection
       syncSection
-      startupSection
     }
     // D10: `SMAppService.mainApp.status` is the single source of truth, but a
     // live read is not a live *render*. `LoginItem.isEnabled` registers its
@@ -293,102 +297,4 @@ struct GeneralPane: View {
     }
   }
 
-  // MARK: - Startup
-
-  private var startupSection: some View {
-    SettingsCardSection(title: "Startup") {
-      SettingRow(startupCaption) {
-        ThemedChoiceRow(label: "On startup and wake:", selection: Binding(
-          get: { prefs.startupAction },
-          set: { action in
-            prefs.startupAction = action
-            actions.prefDidChange(.startupAction)
-          }
-        )) {
-          Text("Trust the last saved values (recommended)").tag(StartupAction.doNothing)
-          Text("Re-send the last saved values to the display").tag(StartupAction.write)
-          Text("Ask the display for its current values").tag(StartupAction.read)
-        }
-        .prefIdentifier(.startupAction)
-      }
-      // `startupCaption` is NOT repeated here: `SettingRow` above already
-      // renders it beneath the picker. Rendering it a second time printed the
-      // same sentence twice, once tight under the control and once adrift
-      // below the safe-mode block.
-      if prefs.startupAction == .read {
-        // "Write-only panels" was the house term for these; SO14 makes the
-        // hardware a display everywhere in UI copy.
-        //
-        // Rendered at row weight rather than as a standalone caption: it
-        // qualifies `startupCaption` above it, which `SettingRow` draws small
-        // and faint, and a callout here would be the larger, brighter sentence
-        // of the two.
-        SettingsCaption("Some displays never answer DDC reads; values then stay as last saved.")
-          .text
-          .font(.caption)
-          .foregroundStyle(SettingsTheme.faintColor)
-          .fixedSize(horizontal: false, vertical: true)
-          .padding(.bottom, 6)
-      }
-      SettingsCardDivider()
-      // The picker deliberately shows the PERSISTED choice even in a safe-mode
-      // session: this pane's `DisplayPrefs` is built without the safe-mode
-      // flag, so the getter reports what is on disk rather than the `.doNothing`
-      // the engine is running on, and the setter writes through for the next
-      // normal launch. That is right for a settings control — but on its own it
-      // is also a control describing behavior that is not happening, so safe
-      // mode has to be visible right here or the pane quietly lies (D11).
-      //
-      // One line when nobody is in it, and the notice instead during a
-      // safe-mode session: the notice already says it, at length, in the state
-      // it is about. Safe mode's real, final scope (D11) must NEVER be written
-      // as "no DDC commands" in either place, which is the same false copy D11
-      // exists to fix: sliders and keys still work and still send DDC.
-      if model.isSafeMode {
-        safeModeNotice
-      } else {
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
-          Image(systemName: "shift")
-          Text("Hold Shift while launching for Safe Mode: saved values aren't restored.")
-        }
-        .font(.caption)
-        .foregroundStyle(SettingsTheme.faintColor)
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.top, 8)
-        .padding(.bottom, 2)
-      }
-    }
-  }
-
-  /// The active state D11 requires to be visible, as a notice inside the card
-  /// rather than a paragraph on the page: the full scope is shown HERE, in the
-  /// state it describes, and in no always-on form. A paragraph explaining a
-  /// mode nobody is in was this pane's longest block of text.
-  ///
-  /// The words themselves are `SafeModeCopy`'s. This pane was the only one of
-  /// the three summaries that named all four suppressions, so for a milestone
-  /// the launch alert and the Diagnostics row described a narrower feature than
-  /// the one the app was running. Whichever surface is right, one list is what
-  /// stops them disagreeing, and the enum is exhaustive so a fifth suppression
-  /// cannot reach only one of them.
-  private var safeModeNotice: some View {
-    SettingsNotice {
-      Text("Safe Mode is on for this session, so this setting is not in effect.")
-        .font(.callout.weight(.medium))
-        .fixedSize(horizontal: false, vertical: true)
-      SettingsCaption(verbatim: SafeModeCopy.generalPaneCaption(app: AppInfo.productName))
-    }
-    .padding(.top, 10)
-    .padding(.bottom, 4)
-  }
-
-  /// Exhaustive, so a future `StartupAction` case is a compile error here
-  /// rather than a silently missing caption.
-  private var startupCaption: LocalizedStringKey {
-    switch prefs.startupAction {
-    case .write: "Useful when a display forgets its settings while asleep."
-    case .read: "Reads brightness, contrast and volume back from the display. Not all hardware answers."
-    case .doNothing: "Keeps using the values from last time, and sends them to the display the first time you change something."
-    }
-  }
 }
