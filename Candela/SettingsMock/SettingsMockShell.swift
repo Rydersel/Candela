@@ -48,7 +48,7 @@
             // Seats the ring on the optical baseline and tucks it toward the
             // word; the arc's open right side reads as extra letter-spacing.
             .offset(x: 1.5, y: 1.5)
-            .animation(.easeInOut(duration: 0.5), value: destination)
+            .animation(.easeInOut(duration: 0.25), value: destination)
           Text(verbatim: String(AppInfo.productName.dropFirst()))
             .font(.system(size: 16, weight: .bold, design: .rounded))
             .foregroundStyle(OnboardingStyle.titleColor)
@@ -95,7 +95,7 @@
     }
 
     private func select(_ new: SettingsMockDestination) {
-      withAnimation(.easeInOut(duration: 0.5)) { destination = new }
+      withAnimation(.easeInOut(duration: 0.25)) { destination = new }
     }
 
     @ViewBuilder

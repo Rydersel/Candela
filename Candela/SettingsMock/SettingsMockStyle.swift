@@ -347,21 +347,23 @@
         let ring = side - line
         let radius = ring / 2
         let center = CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2)
-        // The C opens to the right; the dot sits on the upper terminus.
-        let dotAngle = Angle.degrees(-30)
+        // The C opens to the right; the dot sits on the upper terminus. The
+        // aperture matches the app icon's, a quarter of the ring: any less
+        // and the mark reads as an O at wordmark size.
+        let dotAngle = Angle.degrees(-49)
         let dotCenter = CGPoint(
           x: center.x + radius * CGFloat(cos(dotAngle.radians)),
           y: center.y + radius * CGFloat(sin(dotAngle.radians)))
         ZStack {
           Circle()
-            .trim(from: 0.10, to: 0.915)
+            .trim(from: 0.155, to: 0.865)
             .stroke(
               tint, style: StrokeStyle(lineWidth: line, lineCap: .round))
             .frame(width: ring, height: ring)
             .position(center)
           Circle()
             .fill(Color.white.opacity(0.95))
-            .frame(width: side * 0.30, height: side * 0.30)
+            .frame(width: side * 0.27, height: side * 0.27)
             .position(dotCenter)
             .shadow(color: tint.opacity(0.9), radius: side * 0.10)
         }
@@ -484,7 +486,7 @@
               y: size.height * (0.88 + 0.07 * CGFloat(sin(t2 * 1.7)))
             )
         }
-        .animation(.easeInOut(duration: 1.4), value: accent)
+        .animation(.easeInOut(duration: 0.7), value: accent)
       }
     }
   }
