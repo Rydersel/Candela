@@ -52,8 +52,21 @@ final class OnboardingFlowModel {
   /// Displays currently marked as OLEDs on the designation page. Changing it
   /// re-derives the plan, which is how the care page appears and disappears.
   var designatedOleds: Set<String> {
-    didSet { replan() }
+    didSet {
+      // Recorded here rather than in the select page, so every path that can
+      // drop a key runs through one rule. `update(environment:)` corrects the
+      // one drop that is not a user decision (a display that departed).
+      deselectedOleds.formUnion(oldValue.subtracting(designatedOleds))
+      deselectedOleds.subtract(designatedOleds)
+      replan()
+    }
   }
+
+  /// Keys the user took out of the designation. The designation commit arm
+  /// reads "enrolled but not designated" as an un-enrollment, so a display
+  /// that is merely ABSENT from the set must never be confused with one the
+  /// user deselected; this is what tells the two apart across a re-harvest.
+  private var deselectedOleds: Set<String> = []
 
   /// Per-display protection choice on the care page, default on for every
   /// designated display (OB3).
@@ -168,10 +181,18 @@ final class OnboardingFlowModel {
     // recommended measured default for a first run). Only an enrolled
     // display's pref carries a decision: an unenrolled display's stored
     // value is the unwritten default and must not flip the recommendation.
-    if !environment.isFirstRun,
-      let prior = environment.displays.first(where: \.enrolledInCare)
-    {
-      measuredTelemetry = prior.measuredTelemetry
+    //
+    // ANY measuring display seeds this on, not the first enrolled one. The
+    // choice is one switch for the whole flow, so on a mixed harvest one of
+    // the two answers has to lose, and it must not be the measuring display:
+    // seeding off there would make an untouched flow turn its measurement off
+    // on the way past. Seeding on re-affirms the recommended path for the
+    // other display instead, which is a write the user can see coming and can
+    // undo on the page it is offered.
+    if !environment.isFirstRun, environment.displays.contains(where: \.enrolledInCare) {
+      measuredTelemetry = environment.displays.contains {
+        $0.enrolledInCare && $0.measuredTelemetry
+      }
     }
     accessibilityGranted = environment.accessibilityGranted
     onCommit = { _ in }
@@ -266,9 +287,30 @@ final class OnboardingFlowModel {
       // countdown rather than answering into the void.
       resetApplyState()
     }
-    designatedOleds = designatedOleds.filter { key in
-      environment.displays.contains { $0.persistenceKey == key }
+    // This method has a LIVE caller: the app's topology loop calls it on every
+    // display reconfiguration while the Setup window is up, so displays really
+    // do arrive and depart mid-flow. The designation arm turns "enrolled but
+    // not designated" into an un-enrollment write, which makes both edges
+    // below load-bearing rather than housekeeping.
+    //
+    // An already enrolled display that arrives mid-flow is designated on
+    // arrival, or advancing past the designation page would silently
+    // un-enroll a display the user never touched. Only displays the user has
+    // not deselected are re-designated, so a deliberate deselect is never
+    // resurrected by a replug.
+    for entry in environment.displays
+    where entry.enrolledInCare && !deselectedOleds.contains(entry.persistenceKey) {
+      designatedOleds.insert(entry.persistenceKey)
+      careEnabled.insert(entry.persistenceKey)
     }
+    // A departure is not a decision. The prune below drops departed keys,
+    // which the didSet would otherwise record as deselections and hold
+    // against them when they come back.
+    let departed = designatedOleds.filter { key in
+      !environment.displays.contains { $0.persistenceKey == key }
+    }
+    designatedOleds.subtract(departed)
+    deselectedOleds.subtract(departed)
     // didSet already replanned; clamp in case the list shrank.
     index = min(index, pages.count - 1)
   }

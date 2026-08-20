@@ -539,6 +539,86 @@ struct OnboardingFlowModelTests {
     ])
   }
 
+  /// The measurement choice is one switch for the whole flow, so a mixed
+  /// harvest has to pick a side. It must not pick the destructive one: seeding
+  /// from the first enrolled display would let an untouched flow turn the
+  /// OTHER display's measurement off on the way past.
+  @Test func aMixedHarvestReAffirmsMeasuredInsteadOfTurningItOff() {
+    let model = OnboardingFlowModel(environment: environment(
+      [
+        entry(key: "dell", productName: "DELL OLED", enrolled: true),
+        entry(
+          key: "mag", productName: "MAG 341CQPX QD-OLED",
+          enrolled: true, measuredTelemetry: true),
+      ],
+      firstRun: false))
+    #expect(model.measuredTelemetry)
+    walk(model, to: .oledCare)
+    model.advance()
+    #expect(model.committed == [
+      .enrollInCare(displayKey: "dell"),
+      .enableMeasuredTelemetry(displayKey: "dell"),
+      .enrollInCare(displayKey: "mag"),
+      .enableMeasuredTelemetry(displayKey: "mag"),
+    ])
+  }
+
+  /// The topology loop calls `update` on every reconfiguration while Setup is
+  /// open, so an enrolled display really can arrive mid-flow. It must arrive
+  /// designated: absent from the set, the designation arm would read it as a
+  /// deselect and un-enroll a display the user never saw.
+  @Test func anEnrolledDisplayArrivingMidFlowIsNotUnenrolled() {
+    let model = OnboardingFlowModel(environment: environment(
+      [entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true)],
+      firstRun: false))
+    walk(model, to: .oledSelect)
+    model.update(environment: environment(
+      [
+        entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
+        entry(key: "dell", productName: "DELL OLED", enrolled: true),
+      ],
+      firstRun: false))
+    #expect(model.designatedOleds == ["mag", "dell"])
+    #expect(model.careEnabled.contains("dell"))
+    model.advance()
+    #expect(model.committed.isEmpty)
+  }
+
+  /// A departure is not a decision: the prune that drops a departed display
+  /// must not be remembered as a deselect, or the replug would un-enroll it.
+  @Test func unpluggingAndRepluggingAnEnrolledDisplayIsNotADeselect() {
+    let both = [
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
+      entry(key: "dell", productName: "DELL OLED", enrolled: true),
+    ]
+    let model = OnboardingFlowModel(environment: environment(both, firstRun: false))
+    walk(model, to: .oledSelect)
+    model.update(environment: environment([both[0]], firstRun: false))
+    #expect(model.designatedOleds == ["mag"])
+    model.update(environment: environment(both, firstRun: false))
+    #expect(model.designatedOleds == ["mag", "dell"])
+    model.advance()
+    #expect(model.committed.isEmpty)
+  }
+
+  /// The other side of the same rule: a deliberate deselect IS a decision, and
+  /// a replug must not resurrect the designation and swallow it.
+  @Test func aDeselectSurvivesTheDisplayBeingReplugged() {
+    let both = [
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED", enrolled: true),
+      entry(key: "dell", productName: "DELL OLED", enrolled: true),
+    ]
+    let model = OnboardingFlowModel(environment: environment(both, firstRun: false))
+    walk(model, to: .oledSelect)
+    model.designatedOleds.remove("dell")
+    model.careEnabled.remove("dell")
+    model.update(environment: environment([both[0]], firstRun: false))
+    model.update(environment: environment(both, firstRun: false))
+    #expect(model.designatedOleds == ["mag"])
+    model.advance()
+    #expect(model.committed == [.unenrollFromCare(displayKey: "dell")])
+  }
+
   /// The enrollment-family commit leads the telemetry-family commit for a
   /// display, whichever direction each is going.
   @Test func enrollmentPrecedesTheMeasurementCommitPerDisplay() {

@@ -81,7 +81,8 @@ struct OledCareMeasurementPage: View {
         PanelGridMark()
         // The ONE control on this page that gets its own safe-mode note, and
         // only because it is the one that spends something: the setter above
-        // raises the Screen Recording dialog unconditionally, so without this
+        // raises the Screen Recording dialog whenever it is switched ON
+        // (turning measurement off asks for nothing), so without this
         // a safe-mode session grants a system permission to a sampler that
         // cannot run until the next normal launch, with every visible signal
         // (switch on, no not-granted note) saying it worked. Every other
