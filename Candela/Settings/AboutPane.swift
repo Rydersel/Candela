@@ -178,7 +178,12 @@ struct AboutPane: View {
   /// because the words are asserted verbatim and the app ships English only
   /// (D25); a machine-locale formatter would fail the test on any other locale.
   static func checkNowCaption(lastCheck: Date?, now: Date = .now) -> String {
-    guard let lastCheck else { return "Candela hasn't checked for updates yet." }
+    guard let lastCheck else {
+      // Interpolated like every sibling string on this page; the verbatim test
+      // still pins the full sentence because the name resolves to the same
+      // words.
+      return "\(AppInfo.productName) hasn't checked for updates yet."
+    }
     let formatter = RelativeDateTimeFormatter()
     formatter.locale = Locale(identifier: "en_US")
     formatter.unitsStyle = .full
