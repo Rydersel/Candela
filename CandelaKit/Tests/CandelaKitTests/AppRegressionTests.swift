@@ -309,6 +309,17 @@ struct AppRegressionTests {
         == AppRegression.combinedCrossoverDDCValue)
   }
 
+  @Test func theAssumedRegisterMaximumIsTheAppsOwnUntunedFallback() {
+    // Couples the constant to the app rather than to a comment. Both
+    // derivation pins take the register maximum as given, so a change to what
+    // the app falls back to when a panel answers no capabilities read would
+    // leave them both green while describing a mapping the app no longer uses.
+    let untuned = CommandTuning(
+      unavailableDDC: false, minDDCOverride: 0, maxDDCOverride: 0,
+      curveIndex: 0, invert: false, remapCodes: [])
+    #expect(untuned.effectiveMaxDDC(readMax: nil) == Int(AppRegression.assumedRegisterMaximum))
+  }
+
   @Test func theReleasedValueIsTheSameMappingWithTheWholeRangeOnTheRegister() {
     // Combined dimming off puts the whole stored value on the register, so 37
     // is the same untuned mapping read at the floor brightness. Pinned beside

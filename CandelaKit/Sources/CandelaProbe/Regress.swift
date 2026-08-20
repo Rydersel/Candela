@@ -362,16 +362,24 @@ enum Regress {
     return (first, false)
   }
 
-  /// `targetingCaveat` is the key-targeting gate's reason when the pointer is
-  /// not what a brightness key follows. This check is NOT gated on it, and
+  /// `targetingCaveat` is what the key-targeting gate found when the pointer
+  /// is not what a brightness key follows. This check is NOT gated on it, and
   /// deliberately: in the every-display mode the writes really are the posted
   /// keys', which is the whole of what this instrument claims, so refusing to
   /// run would withhold a true answer. What is no longer true is the word
   /// "aimed", so the claim says so instead. The driven checks that DO depend
-  /// on the aim are gated on the same reason.
+  /// on the aim are gated on the same finding.
+  ///
+  /// It reaches exactly two places, and the split matters. Every outcome gains
+  /// the caveat as a note. Only ONE branch changes its verdict under it, the
+  /// zero-write shortfall, and that softening happens inside the verdict
+  /// closure where the branch and the mode are both known: a poster that never
+  /// ran and a log query that failed are faults of the instrument itself, and
+  /// rewriting either under a zero-write rationale would file an explanation
+  /// that does not describe what happened.
   private static func keysInstrumentCheck(
     instruments: RegressInstruments, target: (display: Display, inHardwareZone: Bool)?,
-    logProven: Bool, targetingCaveat: String?
+    logProven: Bool, targetingCaveat: KeyTargetingCaveat?
   ) -> PlatformConformance.Check {
     let name = "regress.instrument.keys"
     guard let (target, inHardwareZone) = target else {
@@ -445,8 +453,20 @@ enum Regress {
       }
       let writes = AppRegression.ddcWriteValues(fromLogLines: window.lines)
       guard writes.count >= 2 else {
-        return .fail(
-          "brightnessDown then brightnessUp aimed at \(target.name) produced \(writes.count) DDC writes in a \(window.count)-line window; the Accessibility grant, the app's event tap or the DDC path is down"
+        let shortfall =
+          "brightnessDown then brightnessUp aimed at \(target.name) produced \(writes.count) DDC writes in a \(window.count)-line window"
+        // Only THIS branch softens under a targeting caveat, and only with the
+        // sentence that is true of the mode actually in effect. The poster
+        // failing to run and the log query failing are failures of the
+        // instrument itself; rewriting either as inconclusive under a
+        // zero-write rationale would put an explanation in the record that
+        // does not describe what happened.
+        guard let targetingCaveat else {
+          return .fail(
+            "\(shortfall); the Accessibility grant, the app's event tap or the DDC path is down")
+        }
+        return .inconclusive(
+          "\(shortfall), with brightness keys targeting \(targetingCaveat.mode) rather than the display under the pointer: \(targetingCaveat.zeroWriteExplanation)"
         )
       }
       return .pass(
@@ -454,19 +474,13 @@ enum Regress {
       )
     }
     guard let targetingCaveat else { return check }
-    // A pass keeps its pass and gains the caveat: the writes really are the
-    // posted keys', which is the whole claim. A FAIL cannot stand, though. In
-    // the focused-display mode a key follows the active window, and if that is
-    // the built-in the app moves it natively and writes no DDC value at all,
-    // so a zero-write window is the operator's pref speaking rather than a
-    // grant, a tap or a transport being down. Convicting any of those on this
-    // evidence is a false verdict reachable from a supported setting.
+    // The caveat is a note on every outcome and a downgrade on none: a pass
+    // keeps its pass, because the writes really are the posted keys' whatever
+    // they landed on, and the one branch that had to soften did so inside the
+    // verdict where the branch is known.
     return note(
       check,
-      "the word aimed does not hold on this rig and these writes may belong to panels this check never pointed at: \(targetingCaveat)",
-      downgradingFail:
-        "a zero-write window is what this targeting mode produces when the keys follow the active window onto a display with a native brightness path, so it is not evidence that the grant, the event tap or the DDC transport is down"
-    )
+      "the word aimed does not hold on this rig and these writes may belong to panels this check never pointed at: \(targetingCaveat.reason)")
   }
 
   private static func identifierInstrumentCheck(
@@ -723,8 +737,7 @@ enum Regress {
   /// than a measurement; a teardown note belongs on all four, because it is
   /// about the rig and not about the reading.
   private static func note(
-    _ check: PlatformConformance.Check, _ text: String, downgradingPass: Bool = false,
-    downgradingFail: String? = nil
+    _ check: PlatformConformance.Check, _ text: String, downgradingPass: Bool = false
   ) -> PlatformConformance.Check {
     let outcome: PlatformConformance.Outcome
     switch check.outcome {
@@ -733,9 +746,7 @@ enum Regress {
         ? .inconclusive(
           "\(detail); \(text), so the rig is not in the state this record says it was left in")
         : .pass("\(detail); \(text)")
-    case let .fail(detail):
-      outcome = downgradingFail.map { .inconclusive("\(detail); \(text); \($0)") }
-        ?? .fail("\(detail); \(text)")
+    case let .fail(detail): outcome = .fail("\(detail); \(text)")
     case let .inconclusive(detail): outcome = .inconclusive("\(detail); \(text)")
     case let .skip(detail): outcome = .skip("\(detail); \(text)")
     }
@@ -897,17 +908,29 @@ enum Regress {
   /// and can push it back as fast as the keys walk it, so a walk that stalls
   /// with sync on and a walk that stalls with sync off are two different
   /// faults wearing one message. The note says which.
+  ///
+  /// It is a three-state on purpose, and callers are expected to READ it back
+  /// rather than pass what they asked for. Reporting the value a restore was
+  /// asked to write lets one detail say sync could not be put back and then
+  /// say the walk ran with sync in the state it failed to reach, which are
+  /// contradictory sentences in one line. Unreadable is its own answer and
+  /// says so.
   private static func walkHome(
     _ instruments: RegressInstruments, check: PlatformConformance.Check,
-    display: Display, persistenceKey: String, syncEnabledDuringWalk: Bool
+    display: Display, persistenceKey: String, syncEnabledDuringWalk: Bool?
   ) -> PlatformConformance.Check {
     let home = converge(
       instruments: instruments, display: display, persistenceKey: persistenceKey,
       to: AppRegression.combinedFloorBrightness, limit: 24)
     guard !home.arrived else { return check }
-    let contention = syncEnabledDuringWalk
-      ? "brightness sync was ON for this walk, so the built-in's ambient hunting was free to fan out onto this panel while the keys walked it"
-      : "brightness sync was off for this walk, so nothing was pushing the panel back"
+    let contention = switch syncEnabledDuringWalk {
+    case .some(true):
+      "brightness sync read ON for this walk, so the built-in's ambient hunting was free to fan out onto this panel while the keys walked it"
+    case .some(false):
+      "brightness sync read off for this walk, so nothing was pushing the panel back"
+    case .none:
+      "brightness sync could not be read for this walk, so whether anything was pushing the panel back is unknown"
+    }
     return note(
       check,
       "teardown: \(display.name) was not walked back to \(AppRegression.combinedFloorBrightness): \(home.failure ?? "the stored brightness never reached it"); \(contention)",
@@ -987,6 +1010,21 @@ enum Regress {
 
   /// The gates every driven check shares: one instance, proven instruments,
   /// and a settings window on the pane the switches live on.
+  /// What a non-default brightness-key targeting mode costs this run.
+  ///
+  /// The mode is carried, not just the reason, because the two consumers need
+  /// different sentences out of it: the driven checks refuse outright, while
+  /// the key instrument softens ONE of its branches and has to say which mode
+  /// produced the softening. A single reason string was making the record
+  /// claim the focused-display story under every mode.
+  struct KeyTargetingCaveat {
+    let mode: String
+    let reason: String
+    /// Why a zero-write window is not a reading of the aimed panel's drive
+    /// path, true for this mode specifically.
+    let zeroWriteExplanation: String
+  }
+
   /// The pointer aim only decides anything in the pointer-targeted mode.
   ///
   /// `multiKeyboardBrightness` redirects a brightness key to every display, or
@@ -1001,16 +1039,33 @@ enum Regress {
   /// drive here handles; staging it blind would be a setup step that compiles,
   /// reports success and does something else. Absent means the default, which
   /// is the mode these checks need.
-  private static func keyTargetingGate(_ instruments: RegressInstruments) -> String? {
+  private static func keyTargetingGate(_ instruments: RegressInstruments)
+    -> KeyTargetingCaveat?
+  {
     guard let raw = instruments.defaultsRead("multiKeyboardBrightness") else { return nil }
     let text = raw.trimmingCharacters(in: .whitespaces)
     guard text != "0" else { return nil }
-    let mode = switch text {
-    case "1": "every display"
-    case "2": "the display holding the active window"
-    default: "an unrecognised mode"
+    let mode: String
+    let zeroWrite: String
+    switch text {
+    case "1":
+      mode = "every display"
+      zeroWrite =
+        "the keys reached every display rather than the one this check aimed at, so the window is not a reading of the aimed panel's drive path; a dead transport would look the same here and this measurement cannot tell the two apart"
+    case "2":
+      mode = "the display holding the active window"
+      zeroWrite =
+        "the keys followed the active window rather than the pointer, and where that window sits on a display with a native brightness path the app moves it without writing DDC at all, so a zero-write window is what a healthy app produces"
+    default:
+      mode = "an unrecognised mode"
+      zeroWrite =
+        "the targeting mode is one this check does not recognise, so where the keys went is unknown and the window cannot be read as the aimed panel's drive path"
     }
-    return "multiKeyboardBrightness reads \(text) (\(mode)) rather than the pointer-targeted default; a posted brightness key would not go to the panel this check aims at, so the drive would move displays the record does not name. The Keyboard pane's brightness-key target has to be back on the display under the pointer before this check can measure anything"
+    return KeyTargetingCaveat(
+      mode: mode,
+      reason: "multiKeyboardBrightness reads \(text) (\(mode)) rather than the pointer-targeted default; a posted brightness key would not go to the panel this check aims at, so the drive would move displays the record does not name. The Keyboard pane's brightness-key target has to be back on the display under the pointer before this check can measure anything",
+      zeroWriteExplanation: zeroWrite
+    )
   }
 
   private static func drivenGate(
@@ -1021,8 +1076,8 @@ enum Regress {
         name: name,
         reason: "unreachable without exactly one Candela running (see regress.app.running)")
     }
-    if needsKeyDrive, let reason = keyTargetingGate(instruments) {
-      return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
+    if needsKeyDrive, let caveat = keyTargetingGate(instruments) {
+      return plainCheck(name: name, outcome: .inconclusive("setup: \(caveat.reason)"))
     }
     if let missing = unprovenInstruments(preflight, needsKeyDrive: needsKeyDrive) {
       return plainCheck(name: name, outcome: .inconclusive(
@@ -1307,8 +1362,13 @@ enum Regress {
     // on. When sync was found ON, the walk still runs with it on and can still
     // be fought by the built-in's ambient hunting. That case is diagnosable
     // rather than fixed: the walk's failure note names sync's state.
-    let syncRestoredTo = switches.first { $0.identifier == syncIdentifier }?.initial ?? false
     var check = restore(instruments, check: driven, switches: switches)
+    // Read back, never the value the restore was ASKED to write: a restore
+    // that failed and a walk that stalled would otherwise print one detail
+    // saying sync could not be put back and, in the same breath, describing
+    // the walk as having run with sync in the state it never reached.
+    let syncAfterRestore = instruments.axReading(identifier: syncIdentifier).presentText
+      .flatMap { $0 == "1" ? true : ($0 == "0" ? false : nil) }
 
     // Leave the panel where the next check expects to find it, by measurement:
     // the deadband clamp discards remainders, so where the fan-out left this
@@ -1316,7 +1376,7 @@ enum Regress {
     if case let .success(panel) = magPanel(displays) {
       check = walkHome(
         instruments, check: check, display: panel.0, persistenceKey: panel.1,
-        syncEnabledDuringWalk: syncRestoredTo)
+        syncEnabledDuringWalk: syncAfterRestore)
     }
     return check
   }
