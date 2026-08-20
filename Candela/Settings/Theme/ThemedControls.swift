@@ -29,7 +29,11 @@ struct ThemedSlider: View {
   var onEditingChanged: ((Bool) -> Void)?
 
   @Environment(\.settingsAccent) private var lighting
-  @State private var dragging = false
+  /// `@GestureState` and not `@State`: SwiftUI never calls `onEnded` for an
+  /// interrupted drag, and a flag left true there would swallow the next
+  /// drag's opening edge. This one resets itself on a cancel, so the editing
+  /// session closes either way.
+  @GestureState private var dragging = false
 
   var body: some View {
     GeometryReader { proxy in
@@ -51,21 +55,20 @@ struct ThemedSlider: View {
       .contentShape(Rectangle())
       .gesture(
         DragGesture(minimumDistance: 0)
+          .updating($dragging) { _, isDragging, _ in isDragging = true }
           .onChanged { gesture in
-            if !dragging {
-              dragging = true
-              onEditingChanged?(true)
-            }
             value = valueAt(x: gesture.location.x, width: width)
           }
           .onEnded { gesture in
             value = valueAt(x: gesture.location.x, width: width)
-            dragging = false
-            onEditingChanged?(false)
           }
       )
     }
     .frame(height: 22)
+    // Both edges come off the tracking flag rather than the two callbacks, so
+    // they pair: an unopened `false` and a swallowed `true` are both
+    // unreachable, and a cancelled drag still closes.
+    .onChange(of: dragging) { _, isDragging in onEditingChanged?(isDragging) }
     // The track, the fill and the knob are one control, not three shapes.
     .accessibilityElement(children: .ignore)
     .accessibilityValue(Text(verbatim: accessibilityValueText ?? SliderSnap.percentText(fraction)))
@@ -103,22 +106,24 @@ struct ThemedSlider: View {
   }
 
   /// One discrete step, on `SliderSnap`'s grid rather than a raw addition: it
-  /// lands ON the grid in the direction of travel and rounds back to whole
-  /// millionths, so repeated stepping cannot drift a grid point into a readout
-  /// of 59%.
+  /// lands ON the grid in the direction of travel and keeps the anti-drift
+  /// rounding, so repeated stepping cannot drift a grid point into a readout of
+  /// 59%.
+  ///
+  /// `SliderSnap`'s grid is defined over 0...1, so the step is taken on the
+  /// fraction and mapped back. Grid points are multiples of the step measured
+  /// from the range's floor whatever the span.
   private func stepped(up: Bool) -> Double {
     let size = step ?? Self.defaultStep
     let span = range.upperBound - range.lowerBound
-    guard span > 0 else { return value }
-    // `SliderSnap`'s grid is defined over 0...1, so a wider range steps from
-    // where it is and takes the same rounding.
-    guard span <= 1 else {
-      let moved = value + (up ? size : -size)
-      return clamped(((moved * 1e6).rounded() / 1e6))
-    }
-    let offset = SliderSnap.stepped(
-      from: value - range.lowerBound, up: up, step: size, toStops: false)
-    return clamped(range.lowerBound + offset)
+    guard span > 0, size > 0 else { return value }
+    let moved = SliderSnap.stepped(
+      from: fraction, up: up, step: size / span, toStops: false)
+    // Onto the nearest grid point in value units: the round trip through the
+    // fraction leaves a millionth of the span behind, which on a wide integer
+    // range is the difference between -7 and -6.999995.
+    let grid = ((moved * span) / size).rounded()
+    return clamped(range.lowerBound + grid * size)
   }
 
   private func clamped(_ value: Double) -> Double {
@@ -265,9 +270,13 @@ private struct ThemedSwitchModifier: ViewModifier {
 extension View {
   /// A `Toggle` at settings weight: the native switch, small like System
   /// Settings uses, tinted by the destination, spanning the row with the switch
-  /// at its trailing edge. Labels are left alone; a row that wants its label
-  /// hidden says so at its own call site, and the label still has to exist for
-  /// VoiceOver.
+  /// at its trailing edge.
+  ///
+  /// The style draws the toggle's own label at the leading edge, so a row is
+  /// written as `Toggle("Label", isOn:).themedSwitch()` and nothing else.
+  /// `.labelsHidden()` has no effect here: it travels in an environment key no
+  /// custom `ToggleStyle` can read, so a row that needs its label drawn
+  /// somewhere else keeps the native `.switch` style instead.
   ///
   /// `spreads: false` for a switch that shares a row with something else and
   /// must keep its ideal width.
