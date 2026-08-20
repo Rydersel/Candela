@@ -83,17 +83,15 @@ struct BannerRegion: View {
     }
   }
 
-  /// One banner's chrome. Applied per banner so an empty region is exactly
-  /// zero-height.
+  /// One banner's chrome: the theme's card, laid out in the same content column
+  /// `SettingsPageScaffold` gives the page below, so a banner lines up with the
+  /// cards it sits above instead of running to the window edges. Applied per
+  /// banner so an empty region is exactly zero-height.
   private func card(@ViewBuilder _ content: () -> some View) -> some View {
-    content()
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(12)
-      .background(
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-          .fill(.quaternary.opacity(0.5))
-      )
-      .padding(.horizontal, 20)
+    SettingsCard { content() }
+      .frame(maxWidth: SettingsTheme.pageWidth, alignment: .leading)
+      .padding(.horizontal, 32)
+      .frame(maxWidth: .infinity)
       .padding(.top, 10)
       // Opacity only, per card: the stack's animated layout supplies the
       // collapse and the growth, so nothing slides sideways and the cards below
@@ -156,7 +154,8 @@ struct BannerRegion: View {
       case .passive:
         card {
           Text(verbatim: DisplayModeCopy.passiveCountdown(preview.secondsRemaining))
-            .foregroundStyle(.secondary)
+            .font(.callout)
+            .foregroundStyle(SettingsTheme.bodyColor)
             .monospacedDigit()
         }
       }
@@ -213,6 +212,7 @@ struct BannerRegion: View {
           SettingsCaption(DisplayModeCopy.startFailure(failure.reason))
             .help(DisplayModeCopy.startFailureDiagnostic(failure.reason))
           Button("OK") { coordinator.dismissStartFailure() }
+            .buttonStyle(SettingsSecondaryButtonStyle())
             .accessibilityLabel("OK")
         }
       }
@@ -245,6 +245,7 @@ struct BannerRegion: View {
         VStack(alignment: .leading, spacing: 6) {
           SettingsCaption(SynthesisCopy.refusal(refusal.reason))
           Button("OK") { model.synthesis.dismissRefusal() }
+            .buttonStyle(SettingsSecondaryButtonStyle())
             .accessibilityLabel("OK")
         }
       }
@@ -275,6 +276,7 @@ struct BannerRegion: View {
           // Keyed by the report on screen, so OK can only clear the notice the
           // user is reading — and the same call the panel's OK makes.
           Button("OK") { coordinator.dismissReport(forKey: report.key) }
+            .buttonStyle(SettingsSecondaryButtonStyle())
             .accessibilityLabel("OK")
         }
       }
@@ -306,7 +308,11 @@ struct BannerRegion: View {
       card {
         VStack(alignment: .leading, spacing: 6) {
           HStack {
+            // Symbol AND text, never state by color alone, so the headline
+            // takes the theme's title weight rather than a tint.
             Label(strandedMuteHeadline, systemImage: "speaker.slash")
+              .font(.callout.weight(.medium))
+              .foregroundStyle(SettingsTheme.titleColor)
             Spacer()
             // In flight, the button gives way to the spinner: the same shape
             // the reset button takes while a reset runs, and for the same
@@ -316,9 +322,14 @@ struct BannerRegion: View {
             if recoveryPhase == .running {
               ProgressView().controlSize(.small)
             } else {
+              // Primary: in the state this card exists for it is the only way
+              // out, so it is the one action the page most wants. Never
+              // `.disabled` (D29 rule 3), and the style's disabled treatment is
+              // therefore unreachable here by construction.
               Button(strandedMuteButtonTitle) {
                 Task { await recoverFromHardwareMute() }
               }
+              .buttonStyle(SettingsPrimaryButtonStyle())
               .accessibilityLabel(strandedMuteButtonTitle)
               .accessibilityIdentifier("action.strandedMuteRecovery.\(persistenceKey)")
             }
@@ -471,9 +482,11 @@ struct BannerRegion: View {
       card {
         HStack(alignment: .firstTextBaseline) {
           Text("First time seeing this display. Its settings start fresh.")
-            .foregroundStyle(.secondary)
+            .font(.callout)
+            .foregroundStyle(SettingsTheme.bodyColor)
           Spacer()
           Button("OK") { model.dismissFirstSight(persistenceKey) }
+            .buttonStyle(SettingsSecondaryButtonStyle())
             .accessibilityLabel("OK")
         }
       }
@@ -512,8 +525,10 @@ private struct AnswerableModeBanner: View {
     VStack(alignment: .leading, spacing: 6) {
       Text("Keep this resolution?")
         .font(.callout.weight(.semibold))
+        .foregroundStyle(SettingsTheme.titleColor)
       Text(verbatim: "\(DisplayModeCopy.size(preview.mode)), \(DisplayModeCopy.refresh(preview.mode.refreshHz))")
-        .foregroundStyle(.secondary)
+        .font(.callout)
+        .foregroundStyle(SettingsTheme.bodyColor)
 
       if let failure = preview.failure {
         // Nothing auto-retries a failed resolution. Staying silent here would
@@ -525,7 +540,8 @@ private struct AnswerableModeBanner: View {
       }
       if preview.isCountingDown {
         Text(verbatim: DisplayModeCopy.countdown(preview.secondsRemaining))
-          .foregroundStyle(.secondary)
+          .font(.callout)
+          .foregroundStyle(SettingsTheme.bodyColor)
           .monospacedDigit()
       } else if preview.failure != nil {
         SettingsCaption(DisplayModeCopy.expiryAlreadyRan)
@@ -537,12 +553,16 @@ private struct AnswerableModeBanner: View {
         // refused as stale rather than resolved by an answer given about
         // something else. Keeping writes the stored mode when this display's
         // Remember toggle is on; reverting and expiry never do.
+        // The theme's styles carry the same emphasis split the system pair did,
+        // and the shortcuts are attached independently of the style, so Return
+        // and Escape still answer.
         Button("Keep") { Task { await coordinator.confirm(preview) } }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(SettingsPrimaryButtonStyle())
           .keyboardShortcut(.defaultAction)
           .accessibilityLabel("Keep")
           .accessibilityFocused($keepFocused)
         Button("Revert Now") { Task { await coordinator.revert(preview) } }
+          .buttonStyle(SettingsSecondaryButtonStyle())
           .keyboardShortcut(.cancelAction)
           .accessibilityLabel("Revert Now")
       }
