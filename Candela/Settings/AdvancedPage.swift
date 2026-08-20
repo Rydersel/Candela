@@ -239,7 +239,12 @@ struct AdvancedPage: View {
   @ViewBuilder private var vcpOverrides: some View {
     Text("VCP Overrides")
       .font(.callout.weight(.semibold))
-      .foregroundStyle(SettingsTheme.titleColor)
+      // Hand-rolled rather than a theme component, so it dims here or nowhere:
+      // a sub-header over a blocked section must not outshine it.
+      .foregroundStyle(
+        isBlocked
+          ? SettingsTheme.titleColor.opacity(SettingsTheme.disabledOpacity)
+          : SettingsTheme.titleColor)
       .settingsHeading()
     SettingsCaption("For a display that puts a control somewhere non-standard, or responds unevenly across its range.")
       .padding(.top, 2)

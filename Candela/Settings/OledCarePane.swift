@@ -149,18 +149,12 @@ struct OledCarePane: View {
   /// looking live in a session that measures nothing.
   private var safeModeNote: some View {
     SettingsCard {
-      HStack(alignment: .top, spacing: 9) {
-        // Symbol AND text; never state by colour alone. Monochrome against the
-        // card: the accent in this window means "this is on".
-        Image(systemName: "exclamationmark.triangle")
-          .foregroundStyle(SettingsTheme.faintColor)
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Safe Mode is on for this session, so no display is being dimmed, no hours of use are being counted, and no measurements are being taken.")
-            .font(.callout.weight(.medium))
-            .foregroundStyle(SettingsTheme.titleColor)
-            .fixedSize(horizontal: false, vertical: true)
-          SettingsCaption("Shift was held at launch. The two Screen Chrome settings below still work, and the settings you make here are saved for the next normal launch.")
-        }
+      // Surfaceless: the card is the surface.
+      SettingsNotice(drawsSurface: false) {
+        Text("Safe Mode is on for this session, so no display is being dimmed, no hours of use are being counted, and no measurements are being taken.")
+          .font(.callout.weight(.medium))
+          .fixedSize(horizontal: false, vertical: true)
+        SettingsCaption("Shift was held at launch. The two Screen Chrome settings below still work, and the settings you make here are saved for the next normal launch.")
       }
       .padding(.vertical, 2)
     }

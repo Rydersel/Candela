@@ -72,8 +72,7 @@ struct BuiltInDisplayPane: View {
         // between the two: the sentence explains the card, and it has to read
         // as the explanation whether or not the row above it exists.
         AmbientBrightnessRow()
-        SettingsCaption("macOS controls the built-in display's brightness directly, so there is nothing else to set here. \(AppInfo.productName) reads its level to keep your other displays in step.")
-          .padding(.vertical, 6)
+        SettingsRowNote("macOS controls the built-in display's brightness directly, so there is nothing else to set here. \(AppInfo.productName) reads its level to keep your other displays in step.")
       }
 
       SettingsCardSection(title: "Menu Bar") {

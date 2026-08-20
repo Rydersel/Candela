@@ -103,9 +103,9 @@ struct DisplaySizeRows: View {
       // Every size this panel reports is under the usability floor. The curated
       // list is empty, the full one is not, so the sub-page is the whole feature
       // here, and saying "no resolutions" while holding dozens would be false.
-      SettingsCaption("Every size this display reports is too small to use as a desktop. All Sizes & Refresh Rates lists them anyway.")
+      SettingsRowNote("Every size this display reports is too small to use as a desktop. All Sizes & Refresh Rates lists them anyway.")
     } else {
-      SettingsCaption("\(AppInfo.productName) found no resolutions it can switch between on this display.")
+      SettingsRowNote("\(AppInfo.productName) found no resolutions it can switch between on this display.")
     }
   }
 

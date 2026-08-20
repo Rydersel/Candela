@@ -195,8 +195,7 @@ struct DisplayHubView: View {
       if model.isSharedIdentity(persistenceKey) {
         // SO21: same persistence key, same prefs, so every control on this page
         // drives both units, and the user deserves to know before renaming one.
-        SettingsCaption(verbatim: "Two identical displays are attached. They share these settings.")
-          .padding(.bottom, 6)
+        SettingsRowNote(verbatim: "Two identical displays are attached. They share these settings.")
       }
     }
   }
