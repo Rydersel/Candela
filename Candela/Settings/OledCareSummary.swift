@@ -123,7 +123,10 @@ struct PanelExposureSurface: View {
             .resizable()
             .interpolation(.high)
         } else {
-          Rectangle().fill(.quaternary)
+          // Fixed opacities, not `.quaternary`/`.separator`: every surface this
+          // draws on is painted by the theme, so nothing here may resolve
+          // against the system appearance (SV2).
+          Rectangle().fill(Color.white.opacity(0.06))
         }
       }
       .aspectRatio(aspect, contentMode: .fit)
@@ -138,14 +141,14 @@ struct PanelExposureSurface: View {
               width: width, height: height
             ).insetBy(dx: 0.75, dy: 0.75)
             context.stroke(
-              Path(roundedRect: rect, cornerRadius: 2), with: .color(.primary), lineWidth: 1.5)
+              Path(roundedRect: rect, cornerRadius: 2), with: .color(.white), lineWidth: 1.5)
           }
         }
       }
       .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
       .overlay {
         RoundedRectangle(cornerRadius: 5, style: .continuous)
-          .strokeBorder(.separator, lineWidth: 1)
+          .strokeBorder(SettingsTheme.cardStroke, lineWidth: 1)
       }
       .overlay {
         if reticle { ReticleTicks() }
@@ -200,6 +203,8 @@ struct OledCareDisplayCard: View {
 
   @Environment(AppModel.self) private var model
   @Environment(\.oledCarePath) private var path
+  @Environment(\.settingsAccent) private var lighting
+  @State private var hovering = false
 
   /// The display hero's fit rule at card scale: the box the mini map fits
   /// inside, preserving aspect, so an ultrawide and a portrait-mounted panel
@@ -222,31 +227,39 @@ struct OledCareDisplayCard: View {
     Button {
       path.wrappedValue.append(.display(persistenceKey))
     } label: {
-      HStack(alignment: .center, spacing: 14) {
-        miniSurface(summary: summary)
-        VStack(alignment: .leading, spacing: 2) {
-          HStack(spacing: 8) {
-            Text(verbatim: name)
-              .font(.body.weight(.semibold))
-              .lineLimit(1)
-              .truncationMode(.middle)
-            enrollmentBadge
+      // An enrolled display sits a shade warmer than the rest, the card's own
+      // lit state. The tint only underlines the badge's word; enrollment is
+      // never carried by colour alone.
+      SettingsCard(isSelected: prefs.oledCareEnrolled) {
+        HStack(alignment: .center, spacing: 14) {
+          miniSurface(summary: summary)
+          VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+              Text(verbatim: name)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundStyle(SettingsTheme.titleColor)
+                .lineLimit(1)
+                .truncationMode(.middle)
+              enrollmentBadge
+            }
+            Text(verbatim: statusLine(summary: summary))
+              .font(.callout)
+              .foregroundStyle(SettingsTheme.bodyColor)
+              .lineLimit(2)
           }
-          Text(verbatim: statusLine(summary: summary))
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .lineLimit(2)
+          Spacer(minLength: 8)
+          Image(systemName: "chevron.right")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(hovering ? lighting.accent : SettingsTheme.faintColor)
+            .accessibilityHidden(true)
         }
-        Spacer(minLength: 8)
-        Image(systemName: "chevron.right")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.tertiary)
-          .accessibilityHidden(true)
+        .contentShape(Rectangle())
+        .padding(.vertical, 2)
       }
-      .contentShape(Rectangle())
-      .padding(.vertical, 2)
     }
     .buttonStyle(OledTileButtonStyle())
+    .onHover { hovering = $0 }
+    .animation(SettingsTheme.hoverMotion, value: hovering)
     .accessibilityLabel(Text(verbatim: name))
     .accessibilityValue(Text(verbatim: statusLine(summary: summary)))
     .accessibilityHint(Text("Shows this display's OLED care settings."))
@@ -254,16 +267,19 @@ struct OledCareDisplayCard: View {
 
   /// The word IS the state; the tint only underlines it (never state by
   /// colour alone).
-  private var enrollmentBadge: some View {
-    Text(prefs.oledCareEnrolled ? "Enrolled" : "Not enrolled")
-      .font(.caption2.weight(.semibold))
-      .padding(.horizontal, 7)
-      .padding(.vertical, 1.5)
-      .background(
-        prefs.oledCareEnrolled ? AnyShapeStyle(.green.opacity(0.15)) : AnyShapeStyle(.quaternary),
-        in: Capsule())
-      .foregroundStyle(
-        prefs.oledCareEnrolled ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
+  @ViewBuilder private var enrollmentBadge: some View {
+    if prefs.oledCareEnrolled {
+      // The window's own badge: the accent here means "this is on", which is
+      // exactly what enrollment is.
+      SettingsBadge(text: "Enrolled")
+    } else {
+      Text("Not enrolled")
+        .font(.caption2.weight(.semibold))
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2)
+        .background(Capsule().fill(Color.white.opacity(0.07)))
+        .foregroundStyle(SettingsTheme.faintColor)
+    }
   }
 
   private func miniSurface(summary: PanelHealthSummary) -> some View {
@@ -290,10 +306,10 @@ struct OledCareDisplayCard: View {
         // No dotted placeholder: a blank surface with the status line beside
         // it is quieter and does not read as faint data.
         RoundedRectangle(cornerRadius: 5, style: .continuous)
-          .fill(.quaternary)
+          .fill(Color.white.opacity(0.06))
           .overlay {
             RoundedRectangle(cornerRadius: 5, style: .continuous)
-              .strokeBorder(.separator, lineWidth: 1)
+              .strokeBorder(SettingsTheme.cardStroke, lineWidth: 1)
           }
       }
     }
@@ -387,10 +403,15 @@ struct OledInlineNote: View {
   var body: some View {
     HStack(alignment: .firstTextBaseline, spacing: 6) {
       Image(systemName: "exclamationmark.triangle")
-        .foregroundStyle(.secondary)
+        .foregroundStyle(SettingsTheme.bodyColor)
       text
         .fixedSize(horizontal: false, vertical: true)
     }
+    // Brighter than a caption and monochrome: the accent means "this is on"
+    // everywhere else in the window, and every use of this note says something
+    // is not.
+    .font(.callout)
+    .foregroundStyle(SettingsTheme.titleColor)
   }
 }
 
@@ -495,7 +516,7 @@ struct OledTelemetryTicker: View {
   var body: some View {
     Text(verbatim: line)
       .font(.caption2.monospaced())
-      .foregroundStyle(.tertiary)
+      .foregroundStyle(SettingsTheme.faintColor)
       .contentTransition(.numericText())
       .animation(Motion.value(reduceMotion: reduceMotion), value: sampleCount)
   }
@@ -527,7 +548,9 @@ struct OledMeasuringDot: View {
     // window. Symbol effects are contained to the glyph by construction.
     Image(systemName: "circle.fill")
       .font(.system(size: 7))
-      .foregroundStyle(live ? Color.green : Color.secondary.opacity(0.5))
+      // Green stays: it is the ticker's "grant OK" in a colour, and the words
+      // beside it carry the same fact.
+      .foregroundStyle(live ? Color.green : SettingsTheme.faintColor)
       .symbolEffect(.pulse, options: .repeating, isActive: live && !reduceMotion)
       .accessibilityHidden(true)
   }
@@ -548,7 +571,7 @@ struct OledBrightnessHistogram: View {
       HStack(alignment: .bottom, spacing: 5) {
         ForEach(secondsByBucket.indices, id: \.self) { bucket in
           let fraction = peak > 0 ? secondsByBucket[bucket] / peak : 0
-          UnevenRoundedRectangle(topLeadingRadius: 2, topTrailingRadius: 2)
+          UnevenRoundedRectangle(topLeadingRadius: 3, topTrailingRadius: 3)
             .fill(PanelExposureScale.color(Double(bucket) / 9))
             .opacity(secondsByBucket[bucket] > 0 ? 1 : 0.18)
             .frame(height: max(2, 44 * fraction))
@@ -562,7 +585,7 @@ struct OledBrightnessHistogram: View {
         Text("Brightest")
       }
       .font(.caption2)
-      .foregroundStyle(.tertiary)
+      .foregroundStyle(SettingsTheme.faintColor)
     }
     .accessibilityElement()
     .accessibilityLabel(Text(verbatim: spoken))
