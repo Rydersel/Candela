@@ -63,10 +63,21 @@ public final class ModePersistence: @unchecked Sendable {
   /// A quarter turn swaps the axes of the WHOLE mode list, so a descriptor
   /// recorded un-rotated cannot match anything a rotated display publishes,
   /// even though the identical panel-native mode is present with its sides
-  /// swapped. The literal arm runs first and short-circuits on an exact match,
-  /// so an un-rotated display takes exactly the path it always did; otherwise
-  /// the transposed arm runs too and the better-ranked outcome wins, with the
-  /// literal arm taking ties.
+  /// swapped. The transposed arm exists for that case, and is consulted ONLY
+  /// when the literal arm found nothing at the stored logical size.
+  ///
+  /// That condition is the whole rule. If the literal arm DID find the stored
+  /// logical size, the record was saved in the frame the display is in now, so
+  /// a transposed twin sitting in the same list is a genuinely different
+  /// desktop shape rather than a rotation artifact: taking it would change the
+  /// shape of the screen to fix a refresh delta. A literal
+  /// `.refreshRateDiffers` or `.scaleDiffers` therefore beats a transposed
+  /// `.exact`. Below that line, where the literal arm has only a different size
+  /// or nothing at all to offer, the better-ranked outcome wins and the literal
+  /// arm takes ties.
+  ///
+  /// An un-rotated display keeps exactly the path it always had: the literal
+  /// arm answers at the stored size and returns before the second pass exists.
   ///
   /// A transposed exact match reports `.exact` and so applies silently, on
   /// purpose: it is the same panel-native picture the user chose, and a
@@ -76,15 +87,22 @@ public final class ModePersistence: @unchecked Sendable {
     _ descriptor: DisplayModeDescriptor, in modes: [DisplayMode]
   ) -> ModeMatch {
     let literal = resolveLiteral(descriptor, in: modes)
-    if case .exact = literal { return literal }
-    let transposed = resolveLiteral(descriptor.transposed, in: modes)
-    return rank(transposed) > rank(literal) ? transposed : literal
+    switch literal {
+    case .exact, .refreshRateDiffers, .scaleDiffers:
+      return literal
+    case .sizeDiffers, .none:
+      let transposed = resolveLiteral(descriptor.transposed, in: modes)
+      return rank(transposed) > rank(literal) ? transposed : literal
+    }
   }
 
   /// Outcome quality, best first. Mirrors `resolveLiteral`'s own step order
   /// rather than inventing a second opinion about which compromise is worse:
   /// exact, then the same geometry at another rate, then the same logical size
   /// at another framebuffer, then another size, then nothing.
+  ///
+  /// Only ever asked about the two arms below the same-logical-size line, where
+  /// neither has the stored size to offer and they are genuinely comparable.
   private static func rank(_ match: ModeMatch) -> Int {
     switch match {
     case .exact: 4
