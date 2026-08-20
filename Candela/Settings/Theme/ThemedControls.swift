@@ -3,8 +3,9 @@ import SwiftUI
 
 /// The accent-lit slider: capsule track, glowing fill, draggable. Custom
 /// because the system slider ignores the window's lighting entirely, so it
-/// carries its own accessibility (SV6): call sites supply the label, this
-/// supplies the value and the adjustable action.
+/// carries its own accessibility (SV6): call sites supply the label, and a
+/// native `Slider` stands in for the drawn one to supply the role, the value
+/// and the adjustable actions.
 ///
 /// It takes what the native `Slider` takes, so a settings row converting to it
 /// keeps its semantics: a range, an optional step, a drag-boundary callback for
@@ -74,10 +75,10 @@ struct ThemedSlider: View {
     // they pair: an unopened `false` and a swallowed `true` are both
     // unreachable, and a cancelled drag still closes.
     .onChange(of: dragging) { _, isDragging in onEditingChanged?(isDragging) }
-    // Tab reaches it and the arrows move it, through the same stepping and
-    // committing path VoiceOver uses: one write per keypress, on the grid.
-    // A drawn ring rather than the system's, which has no shape to trace on a
-    // view made of loose capsules.
+    // The arrows move it, through the same stepping and committing path every
+    // other route uses: one write per keypress, on the grid. A drawn ring
+    // rather than the system's, which has no shape to trace on a view made of
+    // loose capsules.
     .focusable()
     .focused($focused)
     .overlay(focusRing)
@@ -85,16 +86,37 @@ struct ThemedSlider: View {
     .onKeyPress(.downArrow) { commitStep(up: false); return .handled }
     .onKeyPress(.rightArrow) { commitStep(up: true); return .handled }
     .onKeyPress(.upArrow) { commitStep(up: true); return .handled }
-    // The track, the fill and the knob are one control, not three shapes.
-    .accessibilityElement(children: .ignore)
-    .accessibilityValue(Text(verbatim: accessibilityValueText ?? SliderSnap.percentText(fraction)))
-    .accessibilityAdjustableAction { direction in
-      switch direction {
-      case .increment: commitStep(up: true)
-      case .decrement: commitStep(up: false)
-      @unknown default: break
-      }
+    // A real slider stands in for the drawn one, so AX gets a native slider's
+    // role, value, adjustable actions and focusability. NOT a synthesized
+    // element: measured 2026-08-20 against the live app, `children: .ignore`
+    // published the label, the value and both adjust actions but no
+    // `AXFocused` at all, the same half of the lesson the switch style
+    // learned. The binding takes only the DIRECTION of whatever value the
+    // representation proposes and turns it into one step on the grid with its
+    // editing cycle around it, so no route here can write a raw value.
+    .accessibilityRepresentation {
+      Slider(value: steppedBinding, in: representableRange)
+        .accessibilityValue(Text(verbatim: spokenValue))
     }
+  }
+
+  private var spokenValue: String {
+    accessibilityValueText ?? SliderSnap.percentText(fraction)
+  }
+
+  private var steppedBinding: Binding<Double> {
+    Binding(
+      get: { value },
+      set: { proposed in
+        guard proposed != value else { return }
+        commitStep(up: proposed > value)
+      })
+  }
+
+  /// A native `Slider` traps on an empty range; the drawn one merely holds
+  /// still.
+  private var representableRange: ClosedRange<Double> {
+    range.upperBound > range.lowerBound ? range : range.lowerBound...(range.lowerBound + 1)
   }
 
   @ViewBuilder private var focusRing: some View {
