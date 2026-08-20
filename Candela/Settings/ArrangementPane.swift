@@ -39,14 +39,10 @@ struct ArrangementPane: View {
 
   /// The restore notice as RENDERED, mirroring `coordinator.restoreNotice` one
   /// update behind. The coordinator writes that property from an unattended
-  /// restore pass, and neither placement of a keyed `.animation` fades a `Form`
-  /// row symmetrically (measured 2026-08-17): on a `Group` wrapping the
-  /// conditional row it animates nothing either way, and on an always-present
-  /// container inside the row the child fades IN and then SNAPS out. That
-  /// snap-out asymmetry is why a container-hung `.animation` is not enough; the
-  /// mirror is what puts the arrival AND the dismissal inside one transaction.
-  /// Kept in agreement by the two hooks in `savedLayoutSection` and by nothing
-  /// else.
+  /// restore pass, outside any transaction of ours, so a `.animation` hung on
+  /// the notice's container has nothing to travel with: the mirror is what puts
+  /// the arrival AND the dismissal inside one. Kept in agreement by the two
+  /// hooks in `savedLayoutSection` and by nothing else.
   @State private var shownRestoreNotice: ArrangementReapplyNotice?
 
   /// The layout a requested change is animating INTO, held while the apply is
@@ -135,11 +131,12 @@ struct ArrangementPane: View {
     // name standing on the map. The coordinator itself is `@Observable` and
     // needs no help.
     let _ = model.prefsRevision
-    Form {
-      arrangementSection
+    SettingsPageScaffold {
+      SettingsPageHeader(title: "Arrangement", subtitle: Self.pageSubtitle)
+      mapCard
+      mainDisplaySection
       savedLayoutSection
     }
-    .formStyle(.grouped)
     // ONE signal ends the settle, and it is positive: the coordinator has
     // finished the work it was given. No timer, because a deadline long enough
     // for a slow reconfiguration is also long enough to show a failed one as
@@ -166,24 +163,34 @@ struct ArrangementPane: View {
       // refusal, and cancelled outright when the pane goes away.
       try? await Task.sleep(for: .seconds(4))
       guard !Task.isCancelled else { return }
-      // Inside a transaction, like the write in `onRefuse`: a keyed `.animation`
-      // on a `Group` wrapping a conditional `Form` row animates nothing in either
-      // direction, and hung on the always-present container inside the row it
-      // fades the child in but snaps it out (measured 2026-08-17), so the
-      // animation has to travel with the write.
+      // Inside a transaction, like the write in `onRefuse`, so both directions
+      // fade the same way.
       withAnimation(Motion.notice(reduceMotion: reduceMotion)) { refusal = [] }
     }
   }
 
-  // MARK: - The section
+  // MARK: - The map
 
-  /// Headerless on purpose. The pane's toolbar title already reads
-  /// "Arrangement", and a section header repeating it word for word is the
-  /// duplicated-title defect the settings redesign shipped once and had to be
-  /// looked at to catch — a structural check cannot see two identical words at
-  /// two altitudes. The pane has one group, so the header carried no
-  /// information beyond the repetition.
-  private var arrangementSection: some View {
+  /// Says the map is draggable at all, and names the arrow keys, which are the
+  /// only way to move a display without a pointer.
+  ///
+  /// It is the page's subtitle rather than a caption inside the card for the
+  /// reason it stopped being the button's caption: that caption shows only
+  /// while nothing is selected, so the instructions explaining the whole
+  /// control disappeared as soon as anyone used it. The arrow keys were then
+  /// carried for a while by a per-tile accessibility hint alone, which a
+  /// sighted keyboard-only user never hears: that user is the gap the keyboard
+  /// route exists to close, so the instruction is visible copy that nothing
+  /// takes away.
+  static let pageSubtitle =
+    "Where the displays are, and where they should be. Drag a display to move it, or tab to one and move it with the arrow keys."
+
+  /// Headerless on purpose. The page's own title already reads "Arrangement",
+  /// and a card kicker repeating it word for word is the duplicated-title
+  /// defect the settings redesign shipped once and had to be looked at to
+  /// catch: a structural check cannot see two identical words at two
+  /// altitudes.
+  private var mapCard: some View {
     // Ours by ownership, everyone else's by the optional-returning predicate
     // (nil reads as an ordinary panel). Snapshotted ONCE per render rather
     // than asked per tile: the canvas calls its closure per tile per drag
@@ -201,76 +208,57 @@ struct ArrangementPane: View {
     // place (AR6). The panel is its slave and has no tile of its own, which is
     // why the tile has to speak for it.
     let panels = Self.panels(standingBehind: model.synthesis.pairings)
-    return Section {
-      VStack(alignment: .leading, spacing: 8) {
-        // The map's FIELD spans the whole row, so its leading edge is the
-        // section's leading edge and everything below it lines up with the map
-        // rather than starting 99 pt to its left. The canvas itself keeps a
-        // fixed size (AR2, and the screenshot checks) and is centred inside the
-        // field.
-        VStack(alignment: .leading, spacing: 12) {
-          // Says the map is draggable at all, and names the arrow keys, which
-          // are the only way to move a display without a pointer. Both used to
-          // live in the button's caption, which is shown only while nothing is
-          // selected, so the instructions that explain the whole control
-          // disappeared as soon as anyone used it. The arrow keys were then
-          // carried for a while by a per-tile accessibility hint alone, which a
-          // sighted keyboard-only user never hears: that user is the gap the
-          // keyboard route exists to close, so the instruction is visible copy.
-          //
-          // The inset is on this line rather than on the field, because the
-          // field's horizontal padding is what the canvas's own width budget is
-          // measured against: at 16 pt a side the row's minimum went to 512 and
-          // overflowed the detail column at the 720 pt window minimum. See
-          // `ArrangementCanvasView.canvasSize`.
-          SettingsCaption(
-            "Drag a display to move it, or tab to one and move it with the arrow keys. Displays have to touch along an edge and cannot overlap."
-          )
-          .padding(.horizontal, 16)
-
-          ArrangementCanvasView(
-            arrangement: displayedArrangement,
-            name: displayName,
-            isVirtual: { virtualIDs.contains($0) },
-            isSynthesisPair: { panels[$0] != nil },
-            // Not for the settle, which is this pane's: the canvas refuses to
-            // compose a new request from a layout that has only been requested,
-            // because a refused request is never achieved. That covers the drag,
-            // the arrow keys, the tile's context menu and its VoiceOver action.
-            isApplying: coordinator.isApplying,
-            selection: reconciledSelection,
-            onPropose: { propose($0) },
-            onRefuse: { problems in
-              // The sentence below is a conditional child of a `Form` row: a keyed
-              // `.animation` on a `Group` around it animates nothing, and on the
-              // always-present `VStack` inside the row it fades the sentence in but
-              // snaps it out (measured 2026-08-17), so the write carries the
-              // transaction instead. `refusal` is this view's own state and needs no
-              // mirror: the mirror shape exists to get a coordinator's write inside
-              // a `withAnimation`, and this write is already inside the view. The
-              // whole value moves, so a second refusal with a longer sentence
-              // animates its height rather than snapping to it.
-              withAnimation(Motion.notice(reduceMotion: reduceMotion)) {
-                refusal = problems
-              }
-              refusalToken &+= 1
+    // Drawn as a laptop rather than as a monitor (SV9). One ID, snapshotted for
+    // `virtualIDs`' reason, and read from the model rather than from the tile:
+    // an arrangement tile knows a rect, not what kind of glass it is.
+    let builtInID = model.builtIn?.id
+    return SettingsCardSection {
+      VStack(alignment: .leading, spacing: 10) {
+        // The stage: a dark recessed floor the displays stand on, spanning the
+        // card while the map itself keeps its fixed size (AR2, and the
+        // screenshot checks) and is centred on it.
+        ArrangementCanvasView(
+          arrangement: displayedArrangement,
+          name: displayName,
+          isVirtual: { virtualIDs.contains($0) },
+          isSynthesisPair: { panels[$0] != nil },
+          isBuiltIn: { $0 == builtInID },
+          // Not for the settle, which is this pane's: the canvas refuses to
+          // compose a new request from a layout that has only been requested,
+          // because a refused request is never achieved. That covers the drag,
+          // the arrow keys, the tile's context menu and its VoiceOver action.
+          isApplying: coordinator.isApplying,
+          selection: reconciledSelection,
+          onPropose: { propose($0) },
+          onRefuse: { problems in
+            // The animation travels with the write. `refusal` is this view's own
+            // state and needs no mirror: the mirror shape exists to get a
+            // coordinator's write inside a `withAnimation`, and this write is
+            // already inside the view. The whole value moves, so a second
+            // refusal with a longer sentence animates its height rather than
+            // snapping to it.
+            withAnimation(Motion.notice(reduceMotion: reduceMotion)) {
+              refusal = problems
             }
-          )
-          .frame(maxWidth: .infinity, alignment: .center)
-        }
+            refusalToken &+= 1
+          }
+        )
+        .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 10).fill(.quinary))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
+        .background(
+          RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
+            .fill(Color.black.opacity(0.32))
+        )
+        .overlay(
+          RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
+            .stroke(Color.white.opacity(0.07), lineWidth: 1)
+        )
 
-        if coordinator.arrangement.tiles.count < 2 {
-          // No button at all, rather than a permanently dead one: with one
-          // display there is nothing to choose between, and a grey control with
-          // nothing to say is the shape R8 forbids.
-          SettingsCaption("Connect another display to arrange them.")
-        } else {
-          mainDisplayControl
-        }
+        // The two facts the map states that the tiles' shapes cannot: what the
+        // strip on a face means, and the rule a drop has to satisfy.
+        SettingsCaption(
+          "The strip along the top of a display marks the one showing the menu bar. Displays have to touch along an edge and cannot overlap."
+        )
 
         // AR7 in words. Built from the problems themselves, so it names the
         // displays — and it is the SAME sentence the confirmation window uses
@@ -281,23 +269,19 @@ struct ArrangementPane: View {
         // carry. The refused-drop write also springs the tile home on the same
         // values, so sentence and spring read as one gesture; the 4 s
         // auto-clear has no drag left to spring.
-        //
-        // Expect the two directions to differ. This is a conditional child of an
-        // always-present `VStack` that is itself a `Form` row, the geometry
-        // measured on 2026-08-17 as fading IN and snapping OUT, so the insert
-        // reads as a fade and the 4 s removal most likely snaps even though the
-        // transaction is present. Confirm by looking before claiming a symmetric
-        // fade; the mirror shape is the fix if the snap is unacceptable.
         if !refusal.isEmpty {
           ArrangementCopy.invalidLayout(refusal, name: displayName)
             .font(.callout)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(SettingsTheme.bodyColor)
             .fixedSize(horizontal: false, vertical: true)
             .transition(.opacity)
         }
       }
+      .padding(.vertical, 4)
     }
   }
+
+  // MARK: - Main display
 
   /// AR9. Setting the main display is a **button**, not a drag on a 4 pt strip:
   /// the strip affordance is undiscoverable enough to be a recurring support
@@ -305,23 +289,34 @@ struct ArrangementPane: View {
   /// VoiceOver, and a second drag semantic on the tile is the most feel-dependent
   /// interaction in the riskiest view here. The same action is on the tile's
   /// context menu and is a VoiceOver custom action.
-  @ViewBuilder private var mainDisplayControl: some View {
-    // The reason the button is dead travels IN its row. A grey control a
-    // divider away from its explanation reads as a different setting.
-    SettingRow(caption: mainDisplayCaption) {
-      Button("Use as Main Display") {
-        guard let id = reconciledSelection.wrappedValue else { return }
-        // A pure translation of the whole layout, so relative geometry is
-        // provably unchanged — "make main" cannot rearrange anything.
-        //
-        // Through `propose`, like every other route: this button is the reason
-        // the settle was lifted out of the canvas, since it was the one way of
-        // asking for a layout that could not reach the state and so stepped to
-        // its result instead of animating into it.
-        propose(displayedArrangement.makingMain(id))
+  @ViewBuilder private var mainDisplaySection: some View {
+    SettingsCardSection(title: "Main Display") {
+      if coordinator.arrangement.tiles.count < 2 {
+        // No button at all, rather than a permanently dead one: with one
+        // display there is nothing to choose between, and a grey control with
+        // nothing to say is the shape R8 forbids.
+        SettingsCaption("Connect another display to arrange them.")
+          .padding(.vertical, 6)
+      } else {
+        // The reason the button is dead travels IN its row. A grey control a
+        // divider away from its explanation reads as a different setting.
+        SettingRow(caption: mainDisplayCaption) {
+          Button("Use as Main Display") {
+            guard let id = reconciledSelection.wrappedValue else { return }
+            // A pure translation of the whole layout, so relative geometry is
+            // provably unchanged: "make main" cannot rearrange anything.
+            //
+            // Through `propose`, like every other route: this button is the
+            // reason the settle was lifted out of the canvas, since it was the
+            // one way of asking for a layout that could not reach the state and
+            // so stepped to its result instead of animating into it.
+            propose(displayedArrangement.makingMain(id))
+          }
+          .buttonStyle(SettingsSecondaryButtonStyle())
+          .accessibilityLabel("Use as Main Display")
+          .disabled(!canMakeMain)
+        }
       }
-      .accessibilityLabel("Use as Main Display")
-      .disabled(!canMakeMain)
     }
   }
 
@@ -379,8 +374,8 @@ struct ArrangementPane: View {
       // menu bar. Copy that promises the button's effect to a click is half of
       // why a selected-looking tile beside a dead button reads as broken.
       //
-      // The dragging half of this sentence now lives in the field above, where
-      // it stays visible once something is selected.
+      // The dragging half of this sentence now lives in the page's subtitle,
+      // where it stays visible once something is selected.
       return SettingsCaption(
         "Select a display to move the menu bar to it. Click one, or tab to it and press Space."
       )
@@ -415,15 +410,15 @@ struct ArrangementPane: View {
   /// Its OWN section rather than another row under the map, because it is a
   /// different concern — the map is what the user is doing now, this is what the
   /// app does when nobody is watching — and grouping is what tells two concerns
-  /// apart (layout.md, "group related items"). The header carries information
-  /// the pane's toolbar title does not, which is why this section has one and
-  /// the map's section does not.
+  /// apart (layout.md, "group related items"). The kicker carries information
+  /// the page title does not, which is why this card has one and the map's does
+  /// not.
   ///
   /// It is present with one display attached, for the reason the whole pane is:
   /// a control that appears and disappears as hardware comes and goes is the
   /// failure R16 ruled against. What changes is the caption, not the control.
   private var savedLayoutSection: some View {
-    Section("Saved Arrangements") {
+    SettingsCardSection(title: "Saved Arrangements") {
       SettingRow(caption: rememberCaption) {
         Toggle("Remember how these displays are arranged", isOn: Binding(
           get: { coordinator.isRestoringLayout },
@@ -437,6 +432,7 @@ struct ArrangementPane: View {
             actions.prefDidChange(.restoreArrangement)
           }
         ))
+        .themedSwitch()
         .prefIdentifier(.restoreArrangement)
       }
       // The restore notice's mirror hooks hang HERE, on the one row of this
@@ -457,12 +453,13 @@ struct ArrangementPane: View {
       // the pane quietly claiming otherwise. Symbol AND text — never state by
       // colour alone (color.md).
       if model.isSafeMode {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-          Image(systemName: "exclamationmark.triangle")
-            .foregroundStyle(.secondary)
+        notice {
           Text("Safe Mode is on for this session, so no arrangement will be restored.")
+            .font(.callout.weight(.medium))
+            .foregroundStyle(SettingsTheme.titleColor)
+            .fixedSize(horizontal: false, vertical: true)
+          SettingsCaption("Shift was held at launch. Relaunch without holding Shift to restore normal startup behavior. Your setting above is unchanged and will be used then.")
         }
-        SettingsCaption("Shift was held at launch. Relaunch without holding Shift to restore normal startup behavior. Your setting above is unchanged and will be used then.")
       }
 
       // The only account an unattended restore ever gives, and it waits here
@@ -475,18 +472,45 @@ struct ArrangementPane: View {
       // `dismissReport()` clears five coordinator properties and the OK click
       // is not the only thing that ends this notice, so the transaction belongs
       // to the mirror write and not to the button.
-      if let notice = shownRestoreNotice {
-        VStack(alignment: .leading, spacing: 6) {
-          ArrangementCopy.restoreNotice(notice, name: displayName)
+      if let report = shownRestoreNotice {
+        notice(symbol: "clock.arrow.circlepath") {
+          ArrangementCopy.restoreNotice(report, name: displayName)
             .font(.callout)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(SettingsTheme.titleColor)
             .fixedSize(horizontal: false, vertical: true)
           Button("OK") { coordinator.dismissReport() }
+            .buttonStyle(SettingsSecondaryButtonStyle())
             .accessibilityLabel("OK")
+            .padding(.top, 2)
         }
         .transition(.opacity)
       }
     }
+  }
+
+  /// A notice inside a card: the arrangement pane's two, in the shape the rest
+  /// of the window uses. Symbol AND text, never state by colour alone
+  /// (color.md), and monochrome against the card so it cannot borrow the
+  /// meaning the accent carries everywhere else.
+  private func notice(
+    symbol: String = "exclamationmark.triangle", @ViewBuilder content: () -> some View
+  ) -> some View {
+    HStack(alignment: .top, spacing: 9) {
+      Image(systemName: symbol)
+        .foregroundStyle(SettingsTheme.faintColor)
+      VStack(alignment: .leading, spacing: 4) { content() }
+    }
+    .padding(11)
+    .background(
+      RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
+        .fill(Color.white.opacity(0.05))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
+        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+    )
+    .padding(.top, 10)
+    .padding(.bottom, 4)
   }
 
   /// What the toggle will do — and, with one display attached, what there is to
