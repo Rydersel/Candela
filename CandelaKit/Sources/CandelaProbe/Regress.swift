@@ -177,11 +177,21 @@ enum Regress {
     let instruments = RegressInstruments(toolsDir: options.toolsDir)
     let preflight = preflight(instruments: instruments, displays: displays)
     report.checks += preflight.checks
-    // The order is deliberate: each driven check leaves the panel at the floor
-    // brightness the next one needs, so the run walks the rig forward instead
-    // of dragging it back three times. Every check still MEASURES that
-    // precondition rather than inheriting it, because a check that assumes
-    // where it started reports its predecessor's state as its own.
+    // FIRST, and only under --apply: the wake check refuses to sleep anything
+    // until its 30 s pre-sleep window is free of DDC writes, and the three
+    // brightness drives below park coalescer state the wake refresh releases
+    // as a ramp of writes. Anywhere after them, a full run's wake check is
+    // inconclusive by construction and only a standalone run could ever pass
+    // it. It depends on nothing they leave behind, and leaves nothing they
+    // need: its only effect is the sleep and wake itself, and each drive below
+    // measures its own precondition rather than inheriting one.
+    report.checks.append(
+      wakeCheck(instruments: instruments, preflight: preflight, options: options))
+    // Then the drives. The order among them is deliberate too: each leaves the
+    // panel at the floor brightness the next one needs, so the run walks the
+    // rig forward instead of dragging it back three times. Every check still
+    // MEASURES that precondition rather than inheriting it, because a check
+    // that assumes where it started reports its predecessor's state as its own.
     report.checks.append(
       combinedDimmingCheck(instruments: instruments, preflight: preflight, displays: displays))
     report.checks.append(
@@ -194,11 +204,7 @@ enum Regress {
     // runs.
     report.checks.append(
       muteStrandCheck(instruments: instruments, preflight: preflight, displays: displays))
-    // Last, and only under --apply: it blanks every display, so anything after
-    // it would measure a rig that had just been slept.
-    report.checks.append(
-      wakeCheck(instruments: instruments, preflight: preflight, options: options))
-    // Last of all: it quits the deployed app and runs another build in its
+    // Last: it quits the deployed app and runs another build in its
     // place, so every check that measures the deployed build has to be behind
     // it, and the preflight that bound one instance describes a rig this check
     // deliberately changes.
@@ -2135,13 +2141,27 @@ enum Regress {
     // wake refresh releases it as a ramp of writes that looks exactly like the
     // restore burst this check exists to catch. Refused here rather than at the
     // verdict so a contaminated run does not blank the rig to learn nothing.
-    let preWindow = instruments.logWindow(since: Date().addingTimeInterval(-30))
+    //
+    // Waited out rather than read once. This check runs first for exactly this
+    // reason, but first is not the same as quiet: the preflight's own key
+    // instrument posts two media keys by design, a few seconds earlier, and
+    // they land inside the same window. Polled at 5 s up to a minute, which is
+    // long enough for a 30 s window to clear whatever the preflight put in it
+    // and short enough that a genuinely busy rig is refused rather than waited
+    // on forever.
+    var preWindow = instruments.logWindow(since: Date().addingTimeInterval(-30))
+    var preSleepWrites = AppRegression.ddcWriteValues(fromLogLines: preWindow.lines).count
+    let quietBy = Date().addingTimeInterval(60)
+    while !preWindow.queryFailed, preSleepWrites > 0, Date() < quietBy {
+      Thread.sleep(forTimeInterval: 5)
+      preWindow = instruments.logWindow(since: Date().addingTimeInterval(-30))
+      preSleepWrites = AppRegression.ddcWriteValues(fromLogLines: preWindow.lines).count
+    }
     guard !preWindow.queryFailed else {
       return plainCheck(name: name, outcome: .inconclusive(
         "setup: the pre-sleep window's log query failed, so its silence is the query's and not the app's: \(preWindow.failureReason)"
       ))
     }
-    let preSleepWrites = AppRegression.ddcWriteValues(fromLogLines: preWindow.lines).count
     if let reason = AppRegression.wakeContaminationReason(preSleepWrites: preSleepWrites) {
       return plainCheck(name: name, outcome: .inconclusive("setup: \(reason)"))
     }
