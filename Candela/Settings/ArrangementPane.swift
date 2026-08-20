@@ -260,6 +260,13 @@ struct ArrangementPane: View {
           "The strip along the top of a display marks the one showing the menu bar. Displays have to touch along an edge and cannot overlap."
         )
 
+        // Under the MAP, because arranging them is what the sentence is about.
+        // Under the Main Display kicker it answered a question that card is not
+        // asking.
+        if coordinator.arrangement.tiles.count < 2 {
+          SettingsCaption("Connect another display to arrange them.")
+        }
+
         // AR7 in words. Built from the problems themselves, so it names the
         // displays — and it is the SAME sentence the confirmation window uses
         // for the same fact, because two spellings of one statement are two
@@ -289,15 +296,17 @@ struct ArrangementPane: View {
   /// VoiceOver, and a second drag semantic on the tile is the most feel-dependent
   /// interaction in the riskiest view here. The same action is on the tile's
   /// context menu and is a VoiceOver custom action.
+  ///
+  /// The whole card, kicker included, waits for a second display. No button at
+  /// all rather than a permanently dead one: with one display there is nothing
+  /// to choose between, and a grey control with nothing to say is the shape R8
+  /// forbids. This is not the appearing-and-disappearing control R16 rules
+  /// against either, which is about a control whose SUBJECT is still there: a
+  /// heading over an empty card would be one, and the map above says what is
+  /// missing.
   @ViewBuilder private var mainDisplaySection: some View {
-    SettingsCardSection(title: "Main Display") {
-      if coordinator.arrangement.tiles.count < 2 {
-        // No button at all, rather than a permanently dead one: with one
-        // display there is nothing to choose between, and a grey control with
-        // nothing to say is the shape R8 forbids.
-        SettingsCaption("Connect another display to arrange them.")
-          .padding(.vertical, 6)
-      } else {
+    if coordinator.arrangement.tiles.count > 1 {
+      SettingsCardSection(title: "Main Display") {
         // The reason the button is dead travels IN its row. A grey control a
         // divider away from its explanation reads as a different setting.
         SettingRow(caption: mainDisplayCaption) {
@@ -501,13 +510,16 @@ struct ArrangementPane: View {
       VStack(alignment: .leading, spacing: 4) { content() }
     }
     .padding(11)
+    // The card's own tokens, not a second pair of literals: a notice inside a
+    // card is the card's surface again, and two panes writing the same shape by
+    // hand is how a fill drifts by 0.005.
     .background(
       RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
-        .fill(Color.white.opacity(0.05))
+        .fill(SettingsTheme.cardFill)
     )
     .overlay(
       RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
-        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+        .stroke(SettingsTheme.cardStroke, lineWidth: 1)
     )
     .padding(.top, 10)
     .padding(.bottom, 4)

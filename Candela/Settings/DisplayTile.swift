@@ -301,9 +301,17 @@ struct DisplayTile: View {
   /// The box that puts `LaptopGlyph`'s glass exactly on the tile's rect.
   ///
   /// That view fits its face inside the box it is given and hangs a deck under
-  /// it, so a box the size of the rect would inset the glass. These two shares
-  /// are `LaptopGlyph`'s own proportions: change them there and this has to
-  /// follow, or the built-in's glass stops meeting its neighbours.
+  /// it, so a box the size of the rect would inset the glass. This inverts it.
+  ///
+  /// **It mirrors three of `LaptopGlyph`'s numbers and depends on a fourth.**
+  /// The three are the constants below: the face's share of the box width, the
+  /// deck's share of the box height, and the deck's floor in points. The fourth
+  /// is that view's deck width, `min(bounds.width, faceWidth * 1.18)`, which the
+  /// box gets to ignore only because `1 / 0.86` is 1.163 and the `min` therefore
+  /// takes the box width. Raise the face share past `1 / 1.18` and the 1.18
+  /// starts to bind, and the deck stops widening with the glass. Change any of
+  /// them there and this has to follow, or the built-in's glass stops meeting
+  /// its neighbours.
   private static func laptopBox(fitting face: CGSize) -> CGSize {
     CGSize(
       width: face.width / laptopFaceWidthShare,
