@@ -1,6 +1,11 @@
 import CandelaKit
 import SwiftUI
 
+/// What `.disabled(true)` looks like on a drawn control. The same value the
+/// theme's button styles paint, kept in step with them by hand until something
+/// needs it in a third file.
+private let disabledOpacity = 0.45
+
 /// The accent-lit slider: capsule track, glowing fill, draggable. Custom
 /// because the system slider ignores the window's lighting entirely, so it
 /// carries its own accessibility (SV6): call sites supply the label, and a
@@ -15,6 +20,10 @@ import SwiftUI
 /// It is operable by pointer, by VoiceOver and by the keyboard: Tab reaches it,
 /// the arrow keys step it, and all three routes go through the same grid and
 /// the same editing edges.
+///
+/// Disabled means dimmed and inert on every route: the track takes no drag,
+/// the keyboard cannot reach it, and no write lands from the representation
+/// either. A drawn control has to say that itself; nothing greys it for us.
 ///
 /// **Never bind this to a volume value (D29 rule 4).** It has no zero-free
 /// grid, and volume 0 is a hardware mute over VCP 0x8D; a volume row keeps the
@@ -34,6 +43,7 @@ struct ThemedSlider: View {
   var onEditingChanged: ((Bool) -> Void)?
 
   @Environment(\.settingsAccent) private var lighting
+  @Environment(\.isEnabled) private var isEnabled
   /// `@GestureState` and not `@State`: SwiftUI never calls `onEnded` for an
   /// interrupted drag, and a flag left true there would swallow the next
   /// drag's opening edge. This one resets itself on a cancel, so the editing
@@ -62,15 +72,23 @@ struct ThemedSlider: View {
       .gesture(
         DragGesture(minimumDistance: 0)
           .updating($dragging) { _, isDragging, _ in isDragging = true }
+          // Explicit, because a gesture on a drawn view is not a control:
+          // `.disabled` greys the native slider beside this one and does
+          // nothing to a `DragGesture`.
           .onChanged { gesture in
+            guard isEnabled else { return }
             value = valueAt(x: gesture.location.x, width: width)
           }
           .onEnded { gesture in
+            guard isEnabled else { return }
             value = valueAt(x: gesture.location.x, width: width)
           }
       )
     }
     .frame(height: 22)
+    // Nothing greys a drawn control: the same dimming the theme's button styles
+    // paint, so a slider inside a blocked section reads like its neighbours.
+    .opacity(isEnabled ? 1 : disabledOpacity)
     // Both edges come off the tracking flag rather than the two callbacks, so
     // they pair: an unopened `false` and a swallowed `true` are both
     // unreachable, and a cancelled drag still closes.
@@ -78,8 +96,9 @@ struct ThemedSlider: View {
     // The arrows move it, through the same stepping and committing path every
     // other route uses: one write per keypress, on the grid. A drawn ring
     // rather than the system's, which has no shape to trace on a view made of
-    // loose capsules.
-    .focusable()
+    // loose capsules. Unfocusable while disabled, so no key handler can run and
+    // no ring can draw around a control that does nothing.
+    .focusable(isEnabled)
     .focused($focused)
     .overlay(focusRing)
     .onKeyPress(.leftArrow) { commitStep(up: false); return .handled }
@@ -146,7 +165,10 @@ struct ThemedSlider: View {
     return clamped(range.lowerBound + grid * step)
   }
 
+  /// The one gate the keyboard and the representation share: both routes end
+  /// here, so a disabled control cannot open an editing cycle at all.
   private func commitStep(up: Bool) {
+    guard isEnabled else { return }
     onEditingChanged?(true)
     value = stepped(up: up)
     onEditingChanged?(false)
