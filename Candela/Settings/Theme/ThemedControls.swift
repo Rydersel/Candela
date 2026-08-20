@@ -81,6 +81,12 @@ struct ThemedSlider: View {
       )
     }
     .frame(height: 22)
+    // On the whole control, so the track, the knob and the padding around them
+    // are all exempt: the window moves by its background, and without this
+    // AppKit takes every mouse-down here for a window drag before the gesture
+    // above can open. `minimumDistance: 0` does not help; the decision is made
+    // a layer below SwiftUI.
+    .blocksWindowDrag()
     // Nothing greys a drawn control: the same dimming the theme's button styles
     // paint, so a slider inside a blocked section reads like its neighbours.
     .opacity(isEnabled ? 1 : SettingsTheme.disabledOpacity)
@@ -224,6 +230,9 @@ struct ThemedSegments: View {
       RoundedRectangle(cornerRadius: 7, style: .continuous)
         .stroke(Color.white.opacity(0.08), lineWidth: 1)
     )
+    // A control is not a window-drag handle, which is what a native segmented
+    // control would tell AppKit if this one were not drawn.
+    .blocksWindowDrag()
   }
 
   private struct SegmentButton: View {
@@ -322,6 +331,9 @@ struct ThemedChoiceRow<Value: Hashable, Options: View>: View {
       .labelsHidden()
       .fixedSize()
       .accessibilityLabel(Text(label))
+      // The control only, not the row: the label and the gap beside it stay
+      // window-drag handles like the rest of the card's deadspace.
+      .blocksWindowDrag()
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     // Its own rhythm when it stands on the card, none when a row wrapper
@@ -427,6 +439,9 @@ private struct ThemedSwitchStyle: ToggleStyle {
           .toggleStyle(.switch)
           .controlSize(.small)
           .tint(accent)
+          // The switch only, for the reason the pop-up row gives: the label
+          // and the spread beside it are still window-drag handles.
+          .blocksWindowDrag()
       }
     }
   }

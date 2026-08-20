@@ -243,6 +243,14 @@ struct ArrangementCanvasView: View {
     .frame(width: Self.canvasSize.width, height: Self.canvasSize.height)
     .coordinateSpace(.named(Self.spaceName))
     .contentShape(Rectangle())
+    // The whole map, tiles and background alike, is exempt from the settings
+    // window's move-by-background dragging: AppKit asks the hit view whether a
+    // mouse-down may move the window, the hosting view says yes, and a tile's
+    // drag would lose every gesture to the window move. On the canvas rather
+    // than on a tile, deliberately: the per-tile chain above `.position` is
+    // load-bearing (see below), and the background's own click target belongs
+    // to the map too.
+    .blocksWindowDrag()
     // A click on the background deselects. Without it the only way out of a
     // selection is to select something else, and "Use as Main Display" then has
     // no off state.
