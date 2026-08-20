@@ -50,7 +50,11 @@ enum MenuBarPreviewJump {
 @MainActor
 struct MenuBarPreviewView: View {
   @Environment(AppModel.self) private var model
-  @Environment(\.colorScheme) private var colorScheme
+
+  /// The widgets follow the SYSTEM appearance, and the settings window is dark
+  /// by rule, so the window's own color scheme would make the preview draw a
+  /// dark panel and pill to someone whose real ones are light.
+  @State private var systemAppearance = SystemAppearance()
 
   /// Scrolls the pane; supplied by `AppMenuPane`, which owns the
   /// `ScrollViewReader`.
@@ -208,7 +212,7 @@ struct MenuBarPreviewView: View {
   // MARK: - Panel miniature
 
   private var panelGround: Color {
-    colorScheme == .dark ? Color(white: 0.16) : Color(white: 0.95)
+    systemAppearance.isDark ? Color(white: 0.16) : Color(white: 0.95)
   }
 
   private func panelMiniature(externals: [AppModel.DisplayState], showsBuiltIn: Bool) -> some View {
@@ -342,13 +346,14 @@ struct MenuBarPreviewView: View {
   /// brighter than `.hudWindow` did, and the real HUD is being corrected the
   /// same direction.
   private var pillGround: Color {
-    colorScheme == .dark ? Color(white: 0.27).opacity(0.97) : Color(white: 0.95).opacity(0.97)
+    systemAppearance.isDark
+      ? Color(white: 0.27).opacity(0.97) : Color(white: 0.95).opacity(0.97)
   }
 
   /// A LIGHT edge, never a dark one: the black-reading `separatorColor` border
   /// is one of the deltas KMR-A4 names against the native pill.
   private var pillHairline: Color {
-    colorScheme == .dark ? .white.opacity(0.22) : .black.opacity(0.08)
+    systemAppearance.isDark ? .white.opacity(0.22) : .black.opacity(0.08)
   }
 
   /// The display a pill names, its live value, and whether it is muted:
@@ -493,6 +498,33 @@ private struct PillChrome: ViewModifier {
       .clipShape(RoundedRectangle(cornerRadius: radius))
       .overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(hairline, lineWidth: 0.5))
       .shadow(color: .black.opacity(0.22), radius: 5, y: 2)
+  }
+}
+
+/// Whether the system is drawing in dark, live. The preview depicts widgets
+/// that follow the system appearance while the settings window is pinned dark,
+/// so it cannot read the window's color scheme (SV13).
+///
+/// KVO on `NSApp.effectiveAppearance`: an appearance flip made while this window
+/// is open has to relight the miniatures, and an activation notification would
+/// miss it.
+@MainActor
+@Observable
+private final class SystemAppearance {
+  private(set) var isDark = SystemAppearance.currentIsDark()
+
+  @ObservationIgnored private var observation: NSKeyValueObservation?
+
+  init() {
+    observation = NSApp?.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+      // The value is re-read on the main actor rather than taken from the
+      // change: the closure is nonisolated and `NSApplication` is not.
+      Task { @MainActor in self?.isDark = SystemAppearance.currentIsDark() }
+    }
+  }
+
+  private static func currentIsDark() -> Bool {
+    NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
   }
 }
 
