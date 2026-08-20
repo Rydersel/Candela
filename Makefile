@@ -41,7 +41,7 @@ INSTALLED := /Applications/Candela.app
 CONTROL := Where this display has been lit
 MARKER  := CANDELA_
 
-.PHONY: help build release test test-app check markers deploy regen probe conform clean
+.PHONY: help build release test test-app check markers deploy regen probe conform clean prune prune-apply
 
 help:
 	@echo "Candela targets            (DD=$(DD))"
@@ -57,6 +57,8 @@ help:
 	@echo "  make conform     Platform-conformance suite; the exit code is the verdict"
 	@echo "  make regen       Force xcodegen generate"
 	@echo "  make clean       Remove $(DD)/ and CandelaKit/.build"
+	@echo "  make prune       Report worktrees and DerivedData that are safe to delete"
+	@echo "  make prune-apply Delete what prune reported (destructive)"
 	@echo ""
 	@echo "The xcodeproj regenerates automatically when project.yml is newer."
 
@@ -211,3 +213,17 @@ conform:
 
 clean:
 	rm -rf $(DD) CandelaKit/.build
+
+# clean's counterpart across worktrees: clean empties THIS checkout's cache,
+# prune removes finished checkouts whole plus the global DerivedData left
+# orphaned by worktrees already gone.
+#
+# Two targets rather than `prune APPLY=1` because the destructive one has to be
+# typed on purpose. `prune` changes nothing, so it is safe to run whenever the
+# disk gets tight, and its report IS the argument for running prune-apply.
+# The script's gates are the safety, not this file: see its header.
+prune:
+	@scripts/prune-worktrees.sh --caches
+
+prune-apply:
+	@scripts/prune-worktrees.sh --caches --apply
