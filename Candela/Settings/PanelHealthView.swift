@@ -57,6 +57,19 @@ struct PanelHealthView: View {
 
   private enum SurfaceMode { case history, now }
 
+  /// The lens names in `SurfaceMode`'s own order, so the segments and the
+  /// binding below cannot come to disagree about which one index 0 is.
+  private static let lensNames = ["History", "Right now"]
+
+  /// `ThemedSegments` chooses by index; the surface reasons in lenses. One
+  /// adapter, and an out-of-range write lands on the history lens rather than
+  /// on nothing.
+  private var lensSelection: Binding<Int> {
+    Binding(
+      get: { surfaceMode == .now ? 1 : 0 },
+      set: { surfaceMode = $0 == 1 ? .now : .history })
+  }
+
   private var persistenceKey: String { state.display.persistenceKey }
   /// Live handle, used only to ask macOS about the panel's current geometry.
   /// Never persisted and never a key: IDs reassign across a replug. Staleness
@@ -293,17 +306,21 @@ struct PanelHealthView: View {
       Text("Where this display has been lit")
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(SettingsTheme.titleColor)
+        // The kicker's own inset, so this heading and the two card kickers
+        // below share a left edge.
+        .padding(.leading, 4)
         .settingsHeading()
 
       HStack(spacing: 12) {
-        Picker("Map", selection: $surfaceMode) {
-          Text("History").tag(SurfaceMode.history)
-          Text("Right now").tag(SurfaceMode.now)
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .frame(width: 170)
-        .accessibilityLabel("Map shows")
+        // The window's segments rather than the native segmented control,
+        // whose selected segment fills with the SYSTEM accent: the same hue
+        // the toggle below refuses for the same reason.
+        ThemedSegments(options: Self.lensNames, selection: lensSelection)
+          // A container element, because the segments themselves are the
+          // buttons: the written label names the group, each segment keeps
+          // its own name and its selected trait.
+          .accessibilityElement(children: .contain)
+          .accessibilityLabel("Map shows")
         // The window's switch rather than a bordered toggle button: a button
         // toggle fills with the SYSTEM accent when on, the one hue this
         // window never borrows.

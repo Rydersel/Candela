@@ -43,11 +43,21 @@ final class DisplayHealthWindowPresenter {
       backing: .buffered, defer: false)
     window.title = "Display Health"
     // Dark-only (SV2), on the WINDOW and not just in SwiftUI: the titlebar,
-    // the traffic lights and the AppKit-drawn controls inside (the display
-    // switcher, the lens picker) take their look from the window's
-    // appearance, and a light titlebar over the page's canvas is the seam
-    // this window is opened from settings to avoid.
+    // the traffic lights and the AppKit-drawn display switcher inside take
+    // their look from the window's appearance, and a light titlebar over the
+    // page's canvas is the seam this window is opened from settings to avoid.
     window.appearance = NSAppearance(named: .darkAqua)
+    // The rest of that seam: a transparent titlebar draws the window's own
+    // background instead of its material, so the strip above the page is the
+    // canvas ground rather than a lighter bar laid over it. NOT
+    // `fullSizeContentView`, which would run the content under the titlebar,
+    // and the title stays visible: it is what names this window in the Window
+    // menu and tells it apart from the settings window that opened it.
+    window.titlebarAppearsTransparent = true
+    // The canvas's own ground colour, duplicated deliberately: an AppKit
+    // window cannot read a SwiftUI view's fill, and the two only have to agree
+    // across the strip the titlebar covers.
+    window.backgroundColor = NSColor(srgbRed: 0.035, green: 0.035, blue: 0.06, alpha: 1)
     // State restoration would resurrect the window at the next launch with
     // no display resolution having run, the unprompted-window defect class.
     window.isRestorable = false
