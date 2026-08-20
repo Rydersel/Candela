@@ -29,6 +29,14 @@ struct RenderSmokeTests {
     ImageRenderer(content: view).cgImage
   }
 
+  /// The rendered bytes, for the one comparison in this suite that is between
+  /// two renders rather than against a floor. Never used to assert a COLOR,
+  /// which is a human's job: only whether two renders of the same view differ.
+  private func pixels(_ image: CGImage?) -> Data? {
+    guard let data = image?.dataProvider?.data else { return nil }
+    return data as Data
+  }
+
   private func expectPixels(
     _ image: CGImage?, _ label: Comment, sourceLocation: SourceLocation = #_sourceLocation
   ) {
@@ -256,6 +264,65 @@ struct RenderSmokeTests {
     .environment(\.settingsAccent, .display(isBuiltIn: false, ordinal: 1))
     .frame(width: 640, height: 420)
     expectPixels(render(page), "settings theme components")
+  }
+
+  // MARK: - The menu-bar preview
+
+  /// The Menu Bar pane's preview, and SV13's faithfulness contract with it: the
+  /// depicted widgets follow the SYSTEM appearance, so the settings window's own
+  /// pinned-dark scheme must not reach them.
+  ///
+  /// The regression this catches shipped once. The grounds already tracked the
+  /// system through the appearance observer, but the labels ("Color LCD", the
+  /// pill's display name, "Settings…", "Quit", the percent readouts) resolved
+  /// `.primary` and `.secondary` against the WINDOW, so a light-mode system got
+  /// white text on the light panel and pills the preview had correctly drawn.
+  /// Byte-identical renders under the two window schemes is exactly the property
+  /// that was missing.
+  ///
+  /// Not a color assertion: nothing here says which scheme the widgets drew in,
+  /// only that the window's did not decide it. Whether the depiction MATCHES the
+  /// real widgets stays a human's look at the window.
+  @Test func theMenuBarPreviewIgnoresTheWindowsColorScheme() {
+    let model = TestFixtures.appModel()
+    func shot(_ scheme: ColorScheme) -> CGImage? {
+      render(
+        MenuBarPreviewView { _ in }
+          .environment(model)
+          .environment(\.colorScheme, scheme)
+          .frame(width: SettingsTheme.pageWidth))
+    }
+    let inDarkWindow = shot(.dark)
+    let inLightWindow = shot(.light)
+    expectPixels(inDarkWindow, "MenuBarPreviewView in a dark window")
+    expectPixels(inLightWindow, "MenuBarPreviewView in a light window")
+    #expect(
+      pixels(inDarkWindow) == pixels(inLightWindow),
+      "the window's scheme must not reach the depicted widgets (SV13)")
+  }
+
+  /// The positive control the case above is worth nothing without: two renders
+  /// of a view that DOES follow the ambient scheme must differ by these same
+  /// bytes. Without it, a preview that rendered nothing, a renderer that
+  /// ignores the scheme override, or a comparison that cannot see a color
+  /// change would all report the equality above as a pass.
+  @Test func theSchemeComparisonCanSeeAScheme() {
+    func shot(_ scheme: ColorScheme) -> CGImage? {
+      render(
+        Text("Aa")
+          .font(.system(size: 40))
+          .foregroundStyle(.primary)
+          .padding(20)
+          .background(Color.gray)
+          .environment(\.colorScheme, scheme))
+    }
+    let dark = shot(.dark)
+    let light = shot(.light)
+    expectPixels(dark, "scheme control, dark")
+    expectPixels(light, "scheme control, light")
+    #expect(
+      pixels(dark) != pixels(light),
+      "an ambient scheme flip must be visible to this comparison")
   }
 
   // MARK: - The guided setup flow

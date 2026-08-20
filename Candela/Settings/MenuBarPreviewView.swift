@@ -53,8 +53,13 @@ struct MenuBarPreviewView: View {
 
   /// The widgets follow the SYSTEM appearance, and the settings window is dark
   /// by rule, so the window's own color scheme would make the preview draw a
-  /// dark panel and pill to someone whose real ones are light.
+  /// dark panel and pill to someone whose real ones are light. It feeds the
+  /// grounds below AND the depicted subtree's whole color scheme (see `body`),
+  /// because the labels and glyphs adapt too.
   @State private var systemAppearance = SystemAppearance()
+
+  /// What the widgets resolve their adaptive colors against.
+  private var depictedScheme: ColorScheme { systemAppearance.isDark ? .dark : .light }
 
   /// Scrolls the pane; supplied by `AppMenuPane`, which owns the
   /// `ScrollViewReader`.
@@ -85,6 +90,20 @@ struct MenuBarPreviewView: View {
       anchorColumn(.topCenter, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
       anchorColumn(.topRight, externals: externals, showsBuiltIn: showsBuiltIn, iconVisible: iconVisible)
     }
+    // SV13 covers the INK as well as the grounds. Every adaptive color inside a
+    // widget (`.primary` labels, `.secondary` headers and glyphs, `.quaternary`
+    // tracks, the panel's `.separator` edge) resolves against the environment's
+    // color scheme, and this window pins that dark, so in a light-mode system
+    // the panel and pills drew light with white text on them: illegible, and a
+    // claim about the real widgets that is simply false. Resolving the depicted
+    // subtree from the tracked system appearance flips text, glyphs and grounds
+    // together. The literal whites below are NOT covered by this and must not
+    // be: they copy `CandelaSlider`'s own literals, which are white in both
+    // appearances (Control Center's fill is), and the fixed-dark menu bar's.
+    //
+    // Applied to the scene, not to the whole `body`: the card frame added
+    // beneath this line is the settings window's chrome and stays themed.
+    .environment(\.colorScheme, depictedScheme)
     // Sized for the tallest realistic column: both pills at top right above a
     // panel showing a built-in row plus two externals with volume and
     // contrast. Columns top-align, so smaller content just leaves ground.
