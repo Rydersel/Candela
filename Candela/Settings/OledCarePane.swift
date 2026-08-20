@@ -52,11 +52,17 @@ struct OledCarePane: View {
     // pushed pages, which write through `DisplayPrefWriter`.
     let _ = model.prefsRevision
     SettingsPageScaffold {
-      // Title alone, no subtitle: the two-levers sentence belongs under the
-      // cards it explains, and an introduction above them read as the page's
-      // headline and made the overview open with a paragraph (Ryder,
-      // 2026-08-17).
-      SettingsPageHeader(title: "OLED Care")
+      // The two levers (OC11) at header weight, where the page says what it is.
+      // One sentence is not the opening paragraph that was cut from here, and
+      // the claim is bounded in the same breath it is made: the only two ways
+      // software can. "Enrolled" is load-bearing, because care runs on the
+      // displays that were enrolled and on no others, which is what the cards'
+      // badges say one screen down.
+      SettingsPageHeader(
+        title: "OLED Care",
+        subtitle:
+          "\(AppInfo.productName) protects an enrolled OLED display the only two ways software can: show fewer bright pixels, and show them for less time."
+      )
 
       // The exceptional state leads when it exists; prose never does. The
       // page opens on the cards, which are its actual content.
@@ -119,12 +125,12 @@ struct OledCarePane: View {
         }
       }
 
-      // The two-levers line (OC11), under the cards rather than above them: it
-      // explains what the cards do, so it reads below them at caption weight.
-      // One sentence, one line: the cards' own status lines show what dimming
-      // does, the display pages explain it, and Screen Chrome's captions carry
-      // the auto-hide half.
-      SettingsCaption("Software can do two things about OLED wear: show fewer bright pixels, and show them for less time.")
+      // What the cards are, now that the two levers are stated at the top: the
+      // wear fact and the one thing the pictures above can be trusted to show.
+      // Scoped to a measured display on purpose, because a card whose display
+      // has too few readings draws a blank frame and this line must not promise
+      // a picture that is not there.
+      SettingsCaption("Wear accumulates where bright, unchanging content sits, and a card shows where its display has been lit once there are enough readings.")
         .text
         .font(.caption)
         .foregroundStyle(SettingsTheme.faintColor)
