@@ -137,9 +137,12 @@ struct OnboardingFlowModelTests {
 
   @Test func countdownSeedFollowsTheInstalledApplierSeconds() {
     let model = modelOnSizePage()
-    // The tick is long enough that nothing lands during the test; only the
-    // synchronous seed is under inspection.
+    // Install with the applier's seconds so the seed var is set, then
+    // silence the seam: the fixture applier's synchronous first tick would
+    // also report 7 and mask a hardcoded seed. With `onApplySize` a no-op,
+    // the state below can only be the model's own synchronous seed.
     model.installFixtureSizeApplier(seconds: 7, tick: .seconds(60))
+    model.onApplySize = { _, _, _ in }
     model.applySize(displayKey: "dell", choice: .recommended)
     #expect(model.applyState == .counting(secondsRemaining: 7))
     #expect(model.applyCountdownSecondsRemaining(forKey: "dell") == 7)
