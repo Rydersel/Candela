@@ -41,7 +41,11 @@ final class DisplayHealthWindowPresenter {
       // resize would fight `preferredContentSize` sizing.
       styleMask: [.titled, .closable, .miniaturizable],
       backing: .buffered, defer: false)
-    window.title = "Display Health"
+    // "Heat Map" since 2026-08-20: the row above it on the OLED Care page is
+    // "Health", and two neighbouring doorways called Health and Display Health
+    // told nobody which was which. The type keeps its name; scripts that
+    // select windows by title exclude both spellings.
+    window.title = "Heat Map"
     // Dark-only (SV2), on the WINDOW and not just in SwiftUI: the titlebar,
     // the traffic lights and the AppKit-drawn display switcher inside take
     // their look from the window's appearance, and a light titlebar over the

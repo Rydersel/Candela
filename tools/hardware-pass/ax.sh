@@ -37,7 +37,7 @@
 # a selector that errors on them misdiagnoses a successful pick as a selector
 # failure. They are excluded like the decoys; axprobe reaches INTO them (it
 # walks every candidate), which is how Keep is pressed.
-BIND='set cands to (every window whose name does not start with "Candela Gamma Activity Enforcer" and name does not start with "Candela OLED Care Overlay" and name does not start with "Display resolution" and name does not start with "Display mirroring" and name is not "Display Health" and name is not "Candela Setup")
+BIND='set cands to (every window whose name does not start with "Candela Gamma Activity Enforcer" and name does not start with "Candela OLED Care Overlay" and name does not start with "Display resolution" and name does not start with "Display mirroring" and name is not "Display Health" and name is not "Heat Map" and name is not "Candela Setup")
     if (count of cands) is not 1 then
       set seen to ""
       repeat with x in windows
@@ -53,8 +53,10 @@ BIND='set cands to (every window whose name does not start with "Candela Gamma A
 # MEASURED 2026-08-20 against the restyled hand-built shell (SV4): the window
 # is one AXGroup holding two scroll areas, sidebar first, detail second. The
 # old four-level paths were the NavigationSplitView's and stopped resolving
-# the day the shell changed; "Display Health" joined the exclusions the same
-# day, since that window now coexists with settings (OCR-A1).
+# the day the shell changed; the map window joined the exclusions the same
+# day, since that window now coexists with settings (OCR-A1). It was renamed
+# from "Display Health" to "Heat Map" on 2026-08-20 and BOTH titles are
+# excluded, so this selector keeps working against an older installed build.
 SB="UI element 1 of UI element 1 of w"
 DETAIL="UI element 2 of UI element 1 of w"
 

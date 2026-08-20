@@ -6,15 +6,22 @@ import SwiftUI
 /// record says, and every control that decides what goes into it.
 ///
 /// The cards at the top are summaries, never instruments. The reading surface
-/// is Display Health, which stays its own content-sized window (OCR-A1
-/// stands), and every card that has a record to show opens it.
+/// is the Heat Map window, which stays content-sized (OCR-A1 stands), and
+/// every card that has a record to show opens it.
 ///
 /// Below the cards is what used to be OLED Care's Measurement & Data page,
 /// moved here whole when SC5 retired it: the measurement toggle and its Screen
-/// Recording consent site, the permission-free observation, the detection dim
-/// that depends on both, the hours counter, what has been collected so far,
-/// and the temporary model comparison. Nothing was re-derived on the way over;
-/// every control keeps its `PrefName` write through `SettingsActions` (D27).
+/// Recording consent site, the permission-free observation, the hours counter,
+/// what has been collected so far, and the temporary model comparison. Nothing
+/// was re-derived on the way over; every control keeps its `PrefName` write
+/// through `SettingsActions` (D27).
+///
+/// **Measurement and record only, never a dimming behavior** (Ryder,
+/// 2026-08-20). The static-region dim arrived here with that page and went
+/// back out to the display's OLED Care page, which is where everything that
+/// dims lives (OCR2); it depends on the two measurement settings above and
+/// says so from there. Anything that changes what the screen looks like
+/// belongs on that page, not this one.
 ///
 /// **Per display, not global.** Every pref written here is per-display, as it
 /// was on the page it came from (SC10), so this pane names the display it is
@@ -316,11 +323,11 @@ private struct HealthDisplayCard: View {
         }
         Spacer(minLength: 12)
         if recording {
-          Button("Open Health Window") { actions.openDisplayHealth(persistenceKey) }
+          Button("Open Heat Map") { actions.openDisplayHealth(persistenceKey) }
             .buttonStyle(SettingsSecondaryButtonStyle())
             // Repeated verbatim on every card otherwise, which tells a
             // VoiceOver user which button but not which display.
-            .accessibilityLabel(Text(verbatim: "Open Health Window for \(name)"))
+            .accessibilityLabel(Text(verbatim: "Open Heat Map for \(name)"))
         } else {
           Button("Open OLED Care") { actions.reveal(.pane(.oledCare)) }
             .buttonStyle(SettingsSecondaryButtonStyle())
@@ -355,7 +362,7 @@ private struct HealthDisplayCard: View {
 
 /// The two data sources behind a display's record, in the order they cost
 /// the user something: the one that needs a system permission first, then the
-/// one that needs none, then the dim that depends on both.
+/// one that needs none.
 ///
 /// Moved here from `OledCareMeasurementPage` when SC5 retired it. The copy,
 /// the ordering and the write paths are that page's exactly; what changed is
@@ -446,47 +453,6 @@ private struct MeasurementControls: View {
       ))
       .themedSwitch()
       .prefIdentifier(.oledWindowObservation, persistenceKey: persistenceKey)
-    }
-
-    SettingsCardDivider()
-
-    // Last in the group and off by default, and the copy leads with what
-    // it does to the screen rather than with what it protects.
-    //
-    // Here rather than with the dimming settings on the display's OLED Care
-    // page, because it depends on BOTH measurements above and its caption says
-    // so: moving it to the Dimming section would put "the measurements above"
-    // on a page that has none.
-    //
-    // Every other control in OLED care acts while the user is away or the
-    // screen is locked. This one changes what they are looking at, so a wrong
-    // nomination is visible as a defect rather than felt as protection, and the
-    // honest framing is the one that lets someone decline. It also depends on
-    // BOTH measurements above, one for luminance and one for staticness, so the
-    // caption says so instead of leaving the switch to do nothing silently.
-    //
-    // The caption promises exactly what the code delivers: "full-screen video
-    // is never dimmed" is the `fullScreenOwner` gate, which is read from the
-    // window list and is exact. It does NOT promise that a WINDOWED video is
-    // safe, because it is not: bounds stability is not content staticness, so a
-    // player holding a fixed rect passes both halves of the conjunction. An
-    // earlier version of this comment claimed the conjunction excluded a
-    // playing video, contradicting `WindowObserver`'s own doc, which is right.
-    // NOT claimed here: "eases off where you are pointing". The spec's §4 wants
-    // pointer-proximity falloff and it is NOT built: the pointer is not an
-    // input to `StaticRegionDetector`, which is pure, and nothing in the
-    // coordinator supplies it either. Writing it into the caption would be the
-    // fifth instance this wave of copy outrunning its producer (A-16, A-17,
-    // OC17's gate, the stale `hottestOwner`). It goes back in when it exists.
-    SettingRow("Areas that stay bright and unchanged, like a toolbar or a sidebar, are dimmed a little while you work. Full-screen video is never dimmed. This needs both measurements above: without them nothing is dimmed.") {
-      // Renamed on main (2026-08-20) while this control's page was being
-      // retired; the rename rides the move (Ryder's call at merge time).
-      Toggle("Automatic static-region dimming", isOn: Binding(
-        get: { prefs.oledDetectionDimming },
-        set: { on in writer.write(.oledDetectionDimming) { $0.oledDetectionDimming = on } }
-      ))
-      .themedSwitch()
-      .prefIdentifier(.oledDetectionDimming, persistenceKey: persistenceKey)
     }
   }
 }

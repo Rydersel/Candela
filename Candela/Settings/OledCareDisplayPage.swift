@@ -4,18 +4,18 @@ import SwiftUI
 
 /// One display's OLED Care page, pushed from the pane's overview (OCR1):
 /// enrollment, the glanceable hero, the two exposure findings, everything
-/// that dims (OCR2: idle, lock, blackout, unfocused, never behind a second
-/// click), and the two rows that lead on. An un-enrolled display's page is the
-/// enrollment pitch (OCR10): the toggle, an empty map frame, and what the
-/// recommended settings would do, with no dead controls.
+/// that dims (OCR2: idle, lock, blackout, unfocused, static-region, never
+/// behind a second click), and the two rows that lead on. An un-enrolled
+/// display's page is the enrollment pitch (OCR10): the toggle, an empty map
+/// frame, and what the recommended settings would do, with no dead controls.
 ///
 /// Since SC5 this page pushes nothing: Measurement & Data retired to the
 /// Health pane and the row that pushed it now reveals that pane, so the page
 /// takes no navigation path of its own.
 ///
 /// The hero here is glanceable only (OCR5): map beside four stats, and the
-/// map is the doorway to Display Health. The lens picker, window outlines and
-/// crosshair live on that page now.
+/// map is the doorway to the Heat Map window. The lens picker, window
+/// outlines and crosshair live in that window now.
 ///
 /// Copy rule for every sentence in this file (OC11): software has exactly two
 /// levers against burn-in, reduce luminance and reduce time at luminance.
@@ -47,9 +47,9 @@ struct OledCareDisplayPage: View {
   /// action that changes it from here (Dismiss); the numbers otherwise refresh
   /// whenever anything else re-renders the page.
   @State private var hoursRevision = 0
-  /// The hero map is a button into Display Health, and a still image does not
-  /// read as one. Hover lift plus a brightened caption say so before the
-  /// click; lift rather than tint, because an inactive window draws every
+  /// The hero map is a button into the Heat Map window, and a still image
+  /// does not read as one. Hover lift plus a brightened caption say so before
+  /// the click; lift rather than tint, because an inactive window draws every
   /// accent grey (the measured glance-tile lesson).
   @State private var heroHovering = false
 
@@ -110,10 +110,10 @@ struct OledCareDisplayPage: View {
 
       if prefs.oledCareEnrolled {
         // The findings, above the settings they argue for (Ryder, 2026-08-20).
-        // Both moved off the Display Health window, which keeps the map and
-        // the instruments that interrogate it; a card that states a
-        // measurement in words belongs next to the controls that measurement
-        // is an argument about.
+        // Both moved off the Heat Map window, which keeps the map and the
+        // instruments that interrogate it; a card that states a measurement
+        // in words belongs next to the controls that measurement is an
+        // argument about.
         let findings = model.oledCare.healthSummary(for: persistenceKey)
         PanelHottestAreaCard(summary: findings)
         PanelDisplayTimeCard(summary: findings)
@@ -126,6 +126,8 @@ struct OledCareDisplayPage: View {
           blackoutControls
           SettingsCardDivider()
           unfocusedControls
+          SettingsCardDivider()
+          detectionControls
         }
 
         SettingsCardSection(title: "More") {
@@ -151,7 +153,7 @@ struct OledCareDisplayPage: View {
           SettingsRowNote("Measuring is set for this display on the Health pane, where switching it off stops new readings and keeps everything recorded so far.")
           SettingsCardDivider()
           NavigationRow(
-            title: "Display Health",
+            title: "Heat Map",
             value: healthRowPreview,
             // A window, not a push (OCR-A1): the settings window cannot
             // resize to a portrait display's map, and a window sized to its
@@ -189,7 +191,7 @@ struct OledCareDisplayPage: View {
   /// stated in words in the stat column, so the map stays decorative to
   /// VoiceOver, and the honesty precedence is the health page's exactly:
   /// Safe Mode, then the grant, then confidence. The whole map column is a
-  /// button into Display Health.
+  /// button into the Heat Map window.
   @ViewBuilder private var hero: some View {
     let summary = model.oledCare.healthSummary(for: persistenceKey)
     let tracker = model.oledCare.hoursTracker(for: persistenceKey)
@@ -202,7 +204,7 @@ struct OledCareDisplayPage: View {
 
     HStack(alignment: .top, spacing: 20) {
       Button {
-        // Same doorway as the More row: Display Health's own window (OCR-A1),
+        // Same doorway as the More row: the Heat Map's own window (OCR-A1),
         // an AppKit island reached through the actions closure.
         actions.openDisplayHealth(persistenceKey)
       } label: {
@@ -234,7 +236,7 @@ struct OledCareDisplayPage: View {
           // The visible affordance for the button this whole column is; on
           // hover it brightens alongside the lift. Brightness rather than the
           // destination accent: an inactive window draws every accent grey.
-          Text("Display Health ›")
+          Text("Heat Map ›")
             .font(.caption)
             .foregroundStyle(heroHovering ? SettingsTheme.titleColor : SettingsTheme.bodyColor)
         }
@@ -243,7 +245,7 @@ struct OledCareDisplayPage: View {
         // rotated Dell at 200 pt: the map ran ~355 pt tall in a 520 pt
         // window). The hero is glanceable (OCR5), so a portrait map caps
         // near the landscape map's own height; the big reading surface is
-        // one push away on Display Health.
+        // one push away in the Heat Map window.
         .frame(maxWidth: aspect < 1 ? 130 : 300)
         .contentShape(Rectangle())
       }
@@ -254,7 +256,7 @@ struct OledCareDisplayPage: View {
         radius: heroHovering ? 10 : 0, y: 3)
       .animation(reduceMotion ? nil : .spring(duration: 0.25), value: heroHovering)
       .onHover { heroHovering = $0 }
-      .accessibilityLabel("Display Health")
+      .accessibilityLabel("Heat Map")
 
       VStack(alignment: .leading, spacing: 10) {
         heroStat("Status") { Text(statusText) }
@@ -362,7 +364,7 @@ struct OledCareDisplayPage: View {
   /// Caption under a blank hero map. `summary.cells` stays populated whatever
   /// the confidence, so blanking the drawing must not also claim there is no
   /// history behind it (the health page's own rule). Single lens here: the
-  /// live reading lives on Display Health now.
+  /// live reading lives in the Heat Map window now.
   private func mapPlaceholder(_ summary: PanelHealthSummary) -> String {
     if model.isSafeMode {
       return "Paused for this session (Safe Mode). History recorded before it is kept."
@@ -537,6 +539,53 @@ struct OledCareDisplayPage: View {
       ) { brightness in
         writer.write(.oledUnfocusedDimLevel) { $0.oledUnfocusedDimBrightness = brightness }
       }
+    }
+  }
+
+  // MARK: - Static-region dim
+
+  /// Last in the Dimming group and off by default, and the copy leads with what
+  /// it does to the screen rather than with what it protects.
+  ///
+  /// Here since 2026-08-20 (Ryder's call). It shipped on the Health pane with
+  /// the retired Measurement & Data page it came from, but it is a dimming
+  /// behavior and this is where everything that dims lives (OCR2); the Health
+  /// pane keeps measurement and record. What the move costs is the caption's
+  /// antecedent: the two measurement settings it depends on are not on this
+  /// page, so the sentence names the pane they are on. The Dimming section
+  /// renders only for an enrolled display, which is accepted rather than
+  /// worked around: detection dimming acts on enrolled displays only, so an
+  /// un-enrolled display has nothing to set here and a second carrier
+  /// elsewhere would be two switches for one setting.
+  ///
+  /// Every other control in OLED care acts while the user is away or the
+  /// screen is locked. This one changes what they are looking at, so a wrong
+  /// nomination is visible as a defect rather than felt as protection, and the
+  /// honest framing is the one that lets someone decline. It depends on BOTH
+  /// measurement settings, one for luminance and one for staticness, so the
+  /// caption says so instead of leaving the switch to do nothing silently.
+  ///
+  /// The caption promises exactly what the code delivers: "full-screen video
+  /// is never dimmed" is the `fullScreenOwner` gate, which is read from the
+  /// window list and is exact. It does NOT promise that a WINDOWED video is
+  /// safe, because it is not: bounds stability is not content staticness, so a
+  /// player holding a fixed rect passes both halves of the conjunction. An
+  /// earlier version of this comment claimed the conjunction excluded a
+  /// playing video, contradicting `WindowObserver`'s own doc, which is right.
+  /// NOT claimed here: "eases off where you are pointing". The spec's §4 wants
+  /// pointer-proximity falloff and it is NOT built: the pointer is not an
+  /// input to `StaticRegionDetector`, which is pure, and nothing in the
+  /// coordinator supplies it either. Writing it into the caption would be the
+  /// fifth instance this wave of copy outrunning its producer (A-16, A-17,
+  /// OC17's gate, the stale `hottestOwner`). It goes back in when it exists.
+  private var detectionControls: some View {
+    SettingRow("Areas that stay bright and unchanged, like a toolbar or a sidebar, are dimmed a little while you work. Full-screen video is never dimmed. This needs both measurement settings on the Health pane: without them nothing is dimmed.") {
+      Toggle("Automatic static-region dimming", isOn: Binding(
+        get: { prefs.oledDetectionDimming },
+        set: { on in writer.write(.oledDetectionDimming) { $0.oledDetectionDimming = on } }
+      ))
+      .themedSwitch()
+      .prefIdentifier(.oledDetectionDimming, persistenceKey: persistenceKey)
     }
   }
 

@@ -177,7 +177,7 @@ struct PanelHealthView: View {
   // MARK: - Chrome
 
   /// `SubPageHeader`'s switcher half without its title half: the window's
-  /// title bar already says Display Health. Same callback contract (SO23):
+  /// title bar already says Heat Map. Same callback contract (SO23):
   /// a persistence key out, navigation meaning owned by the caller.
   @ViewBuilder private var switcherRow: some View {
     if displays.count > 1 {
