@@ -1,5 +1,4 @@
 import CandelaKit
-import CoreGraphics
 import Foundation
 
 /// Everything one display contributes to an `OnboardingEnvironment`, as plain
@@ -39,7 +38,9 @@ struct OnboardingDisplayInput {
   var volumeSupport: VCPSupport?
   /// The density model's correction, nil whenever it abstained.
   var recommendation: SizeRecommendation?
-  /// The curated size rows, in catalog order.
+  /// The curated size rows, in catalog order. This is the MERGED list, so it
+  /// can carry synthesized stops beside the published sizes; `sizeSuggestion`
+  /// is where that is filtered, and why.
   var curatedRows: [DisplayModeRow]
   var recommendationDismissed: Bool
   var sizeAppliedThisSession: Bool
@@ -148,23 +149,34 @@ enum OnboardingEnvironmentBuilder {
   /// verdict documents as equal whenever a recommendation exists. Only a
   /// recommendation is a correction: `bestInBand` outlives it as an
   /// endorsement, and an endorsement is a mark on a picker, not a page.
+  ///
+  /// **Published rows only.** The catalog's rows are the MERGED list, so a
+  /// display that has opted into synthesized sizes carries stops in there too,
+  /// and two rows can share one logical size. Three reasons the flow takes the
+  /// published half: a `Choice` is identified by its size alone, so a duplicate
+  /// would collide in the picker's `ForEach`; the flow's apply seam names a
+  /// size rather than a mode, and a synthesized-only size cannot be resolved
+  /// from one; and the density model itself is handed published rows for the
+  /// stated reason that recommending a size which costs a virtual display is a
+  /// v1 non-goal. Offering stops as alternatives would put that back.
   private static func sizeSuggestion(for input: OnboardingDisplayInput) -> OnboardingSizeSuggestion? {
     guard let recommendation = input.recommendation,
           !input.recommendationDismissed,
           !input.sizeAppliedThisSession
     else { return nil }
+    let publishedRows = input.curatedRows.filter { !$0.mode.isSynthesized }
     let matchesRecommendation = { (row: DisplayModeRow) in
       row.mode.logicalWidth == recommendation.logicalWidth
         && row.mode.logicalHeight == recommendation.logicalHeight
     }
-    guard input.curatedRows.contains(where: matchesRecommendation) else { return nil }
+    guard publishedRows.contains(where: matchesRecommendation) else { return nil }
     guard recommendation.logicalWidth != input.currentLooksLikeWidth
       || recommendation.logicalHeight != input.currentLooksLikeHeight
     else { return nil }
     return OnboardingSizeSuggestion(
       looksLikeWidth: recommendation.logicalWidth,
       looksLikeHeight: recommendation.logicalHeight,
-      alternatives: input.curatedRows.map {
+      alternatives: publishedRows.map {
         OnboardingSizeSuggestion.Choice(
           looksLikeWidth: $0.mode.logicalWidth,
           looksLikeHeight: $0.mode.logicalHeight,

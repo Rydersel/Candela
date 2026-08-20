@@ -21,6 +21,20 @@ struct OnboardingLiveEnvironmentTests {
     )
   }
 
+  /// A stop the merge appends to the curated list: a size Candela renders by
+  /// mirroring onto a virtual display rather than one the display publishes.
+  private static func synthesizedRow(_ width: Int, _ height: Int) -> DisplayModeRow {
+    DisplayModeRow(
+      mode: DisplayMode(
+        ioModeID: DisplayMode.syntheticIoModeID(stopIndex: 0),
+        logicalWidth: width, logicalHeight: height,
+        pixelWidth: width * 2, pixelHeight: height * 2,
+        refreshHz: 0, isNative: false, provenance: .synthesized
+      ),
+      isScaled: true
+    )
+  }
+
   private static func input(
     key: String = "panel",
     name: String = "Some Display",
@@ -112,6 +126,19 @@ struct OnboardingLiveEnvironmentTests {
 
     #expect(entry.nativePixelWidth == 3440)
     #expect(entry.nativePixelHeight == 1440)
+  }
+
+  @Test func theLooksLikeFallbackIsStillSwappedIntoPanelNative() {
+    // Both halves at once: no native-flagged mode AND a quarter turn. The
+    // looks-like size arrives rotated, so the fallback has to un-rotate it the
+    // same way a real native size would be, and `drawnAspect` re-swaps it back
+    // to the portrait the display is actually mounted in.
+    let entry = OnboardingEnvironmentBuilder.entry(for: Self.input(
+      nativePixels: nil, rotation: 90, looksLike: (1440, 2560)))
+
+    #expect(entry.nativePixelWidth == 2560)
+    #expect(entry.nativePixelHeight == 1440)
+    #expect(entry.drawnAspect < 1)
   }
 
   @Test func aZeroNativePixelSizeIsTreatedAsAbsent() {
@@ -233,6 +260,36 @@ struct OnboardingLiveEnvironmentTests {
     #expect(OnboardingEnvironmentBuilder.entry(for: Self.input(
       recommendation: Self.recommendation(3200, 1800),
       curatedRows: Self.ladder)).sizeSuggestion == nil)
+  }
+
+  @Test func synthesizedStopsAreNotOfferedAsAlternatives() throws {
+    // The curated rows are the MERGED list, so a display opted into
+    // synthesized sizes carries stops beside the published ones, and a stop can
+    // share a logical size with a published row. A `Choice` is identified by
+    // its size alone, so an unfiltered list would collide in the picker.
+    let entry = OnboardingEnvironmentBuilder.entry(for: Self.input(
+      looksLike: (3840, 2160),
+      recommendation: Self.recommendation(2560, 1440),
+      curatedRows: [
+        Self.row(2560, 1440),
+        Self.synthesizedRow(2560, 1440),
+        Self.row(2048, 1152),
+        Self.synthesizedRow(2304, 1296),
+      ]))
+
+    let suggestion = try #require(entry.sizeSuggestion)
+    #expect(suggestion.alternatives.map(\.id) == ["2560x1440", "2048x1152"])
+  }
+
+  @Test func aRecommendationOnlyASynthesizedRowCarriesHasNothingToApply() {
+    // The apply seam names a size, not a mode, and a synthesized-only size
+    // cannot be resolved from one. The density model is fed published rows for
+    // the same reason, so this state means the two lists disagreed.
+    #expect(OnboardingEnvironmentBuilder.entry(for: Self.input(
+      looksLike: (3840, 2160),
+      recommendation: Self.recommendation(2580, 1080),
+      curatedRows: [Self.row(2560, 1440), Self.synthesizedRow(2580, 1080)]))
+      .sizeSuggestion == nil)
   }
 
   @Test func aRotatedDisplayMatchesItsRecommendationInTheDisplayFrame() throws {
