@@ -55,11 +55,6 @@
   ///                                           onboarding overhaul and the
   ///                                           permanent screenshot route for
   ///                                           the flow's pages.)
-  ///   CANDELA_DEBUG_SETTINGS=setup:settingsMock  (the settings surface
-  ///                                           re-imagined in the flow's
-  ///                                           visual style, over fixtures:
-  ///                                           a taste exploration, nothing
-  ///                                           written.)
   ///   CANDELA_DEBUG_SETTINGS=display:builtIn
   ///   CANDELA_DEBUG_SETTINGS=display:first
   ///   CANDELA_DEBUG_SETTINGS=display:<persistenceKey>
@@ -123,8 +118,6 @@
       /// `setup:mock`: not a settings destination at all; the guided setup
       /// flow in its own window, over the fixture environment.
       case presentSetupMock
-      /// `setup:settingsMock`: the settings visual mock in its own window.
-      case presentSettingsMock
       case rejected(String)
     }
 
@@ -149,10 +142,9 @@
       case "setup":
         switch body {
         case "mock": return .presentSetupMock
-        case "settingsMock": return .presentSettingsMock
         default:
           return .rejected(
-            "unknown setup value \(quoted(body)); ids are case-sensitive: mock, settingsMock")
+            "unknown setup value \(quoted(body)); ids are case-sensitive: mock")
         }
       case "pane":
         // Optional suffixes, accepted only on the panes with pushed pages:
@@ -283,9 +275,6 @@
       case .presentSetupMock:
         log("presenting the guided setup mock")
         OnboardingMockPresenter.present()
-      case .presentSettingsMock:
-        log("presenting the settings visual mock")
-        SettingsMockPresenter.present()
       case let .rejected(reason):
         log("ignored: \(reason)")
       }
