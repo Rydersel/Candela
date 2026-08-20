@@ -9,3 +9,6 @@
 # per-worktree scratch DerivedData used by the deploy loop
 dd/
 
+# Local secrets (Cloudflare token etc.); never commit
+.env
+

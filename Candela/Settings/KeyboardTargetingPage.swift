@@ -46,6 +46,7 @@ struct KeyboardTargetingPage: View {
           Text("Every display").tag(MultiKeyboardBrightness.allScreens)
           Text("The display with the active window").tag(MultiKeyboardBrightness.focusInsteadOfMouse)
         }
+        .prefIdentifier(.multiKeyboardBrightness)
         .disabled(prefs.keyboardBrightness == .disabled)
         if prefs.multiKeyboardBrightness == .focusInsteadOfMouse {
           SettingsCaption("Window focus may not resolve correctly for full-screen apps.")
@@ -61,6 +62,7 @@ struct KeyboardTargetingPage: View {
           Text("Every display").tag(MultiKeyboardVolume.allScreens)
           Text("The display matching the audio output device").tag(MultiKeyboardVolume.audioDeviceNameMatching)
         }
+        .prefIdentifier(.multiKeyboardVolume)
         .disabled(prefs.keyboardVolume == .disabled)
       }
     }
@@ -80,6 +82,7 @@ struct KeyboardTargetingPage: View {
         get: { prefs.useFineScaleBrightness },
         set: { setFineScaleBrightness($0) }
       ))
+      .prefIdentifier(.useFineScaleBrightness)
       .disabled(prefs.keyboardBrightness == .disabled)
 
       // D25: the fork's "Fine OSD scale for…" leaked internal vocabulary. "On-screen
@@ -89,6 +92,7 @@ struct KeyboardTargetingPage: View {
           get: { prefs.useFineScaleVolume },
           set: { setFineScaleVolume($0) }
         ))
+        .prefIdentifier(.useFineScaleVolume)
         .disabled(prefs.keyboardVolume == .disabled)
       }
       SettingsCaption("Custom shortcuts have no modifiers of their own, so they always use the step size selected here.")
@@ -109,6 +113,7 @@ struct KeyboardTargetingPage: View {
           get: { prefs.separateCombinedScale },
           set: { setSeparateCombinedScale($0) }
         ))
+        .prefIdentifier(.separateCombinedScale)
         .disabled(prefs.keyboardBrightness == .disabled)
       }
     }

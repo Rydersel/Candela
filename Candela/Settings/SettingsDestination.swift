@@ -13,7 +13,9 @@ enum PaneID: String, CaseIterable, Hashable {
   // `virtualDisplays` follows `oledCare` for the same reason `oledCare`
   // follows `arrangement`: it is about the desktop's displays rather than
   // about the app, and it CREATES the things the arrangement pane places.
-  case general, menuBar, arrangement, oledCare, virtualDisplays, keyboard, about
+  // `updates` sits with the app-and-informational tail, directly above
+  // `about`, whose version line it shares a subject with.
+  case general, menuBar, arrangement, oledCare, virtualDisplays, keyboard, updates, about
 }
 
 /// The split view's selection type.

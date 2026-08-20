@@ -188,4 +188,44 @@ struct PlatformConformanceTests {
       return
     }
   }
+
+  // MARK: - Inconclusive is a third result, never a pass (HP7)
+
+  @Test func inconclusiveMakesTheRunNonZero() {
+    let report = PC.Report(platform: "test", checks: [
+      .init(name: "a", outcome: .pass("fine")),
+      .init(name: "b", outcome: .inconclusive("its positive control did not fire")),
+    ])
+    #expect(report.exitCode != 0)
+    #expect(report.inconclusive == 1)
+  }
+
+  @Test func inconclusiveAppearsInTheSummaryOnlyWhenPresent() {
+    let with = PC.Report(platform: "t", checks: [
+      .init(name: "a", outcome: .pass("p")),
+      .init(name: "b", outcome: .inconclusive("control failed")),
+    ])
+    #expect(with.lines().last == "conform: 1 passed, 0 failed, 0 skipped, 1 inconclusive")
+    let without = PC.Report(platform: "t", checks: [.init(name: "a", outcome: .pass("p"))])
+    #expect(without.lines().last == "conform: 1 passed, 0 failed, 0 skipped")
+  }
+
+  @Test func inconclusiveLinePrefixIsDistinct() {
+    let report = PC.Report(platform: "t", checks: [
+      .init(name: "b", outcome: .inconclusive("control failed")),
+    ])
+    #expect(report.lines().contains { $0.hasPrefix("INCONCLUSIVE ") })
+  }
+
+  @Test func summaryLabelIsParameterised() {
+    let report = PC.Report(platform: "t", checks: [.init(name: "a", outcome: .pass("p"))])
+    #expect(report.lines(label: "regress").last == "regress: 1 passed, 0 failed, 0 skipped")
+  }
+
+  @Test func controlFieldDefaultsToAbsent() {
+    let check = PC.Check(name: "a", outcome: .pass("p"))
+    #expect(check.control == nil)
+    let carried = PC.Check(name: "b", outcome: .pass("p"), control: .fired)
+    #expect(carried.control == .fired)
+  }
 }

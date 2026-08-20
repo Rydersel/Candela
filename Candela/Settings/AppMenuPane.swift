@@ -85,6 +85,7 @@ struct AppMenuPane: View {
               Text(label(for: mode)).tag(mode)
             }
           }
+          .prefIdentifier(.menuIcon)
           if prefs.menuIcon != .show {
             // Every mode but "Always" can leave the user with no icon and
             // therefore no way in. SO24 makes that recovery real rather than a
@@ -113,6 +114,7 @@ struct AppMenuPane: View {
               actions.prefDidChange(.hideBuiltInDisplay)
             }
           ))
+          .prefIdentifier(.hideBuiltInDisplay)
         }
 
         // The caption carries the consequence because the panel's own row cannot:
@@ -126,6 +128,7 @@ struct AppMenuPane: View {
               actions.prefDidChange(.hideKeepAwake)
             }
           ))
+          .prefIdentifier(.hideKeepAwake)
         }
 
         SettingRow("DDC-controlled displays only, and results vary by monitor.") {
@@ -136,6 +139,7 @@ struct AppMenuPane: View {
               actions.prefDidChange(.showContrast)
             }
           ))
+          .prefIdentifier(.showContrast)
         }
       }
       .id(Self.slidersSectionID)
@@ -148,6 +152,7 @@ struct AppMenuPane: View {
             actions.prefDidChange(.enableSliderSnap)
           }
         ))
+        .prefIdentifier(.enableSliderSnap)
         // The caption must not promise a 0% stop on every slider: volume rows
         // snap on `SliderSnap.stopsWithoutZero` (D29), because landing on 0 is
         // a mute event in `DDCValueController.apply` and, under
@@ -162,6 +167,7 @@ struct AppMenuPane: View {
               actions.prefDidChange(.enableSliderPercent)
             }
           ))
+          .prefIdentifier(.enableSliderPercent)
         }
       }
 
@@ -200,6 +206,7 @@ struct AppMenuPane: View {
             Text(label(for: style)).tag(style)
           }
         }
+        .prefIdentifier(.hudStyle)
       }
 
       SettingRow("Contrast uses this position too.") {
@@ -217,6 +224,7 @@ struct AppMenuPane: View {
             Text(label(for: position)).tag(position)
           }
         }
+        .prefIdentifier(.hudPositionBrightness)
       }
 
       SettingRow("Mute uses this position too. The indicator appears on the display the keys act on.") {
@@ -231,6 +239,7 @@ struct AppMenuPane: View {
             Text(label(for: position)).tag(position)
           }
         }
+        .prefIdentifier(.hudPositionVolume)
       }
     } header: {
       Text("On-Screen Indicators")

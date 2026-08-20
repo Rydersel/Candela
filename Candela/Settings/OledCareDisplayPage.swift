@@ -80,6 +80,10 @@ struct OledCareDisplayPage: View {
             get: { prefs.oledCareEnrolled },
             set: { on in writer.write(.oledCareEnrolled) { $0.oledCareEnrolled = on } }
           ))
+          // Byte-identical to the hub's enrollment toggle on purpose: the two
+          // carriers are the same setting on the same display and are never in
+          // the rendered tree at the same time, so a walk finds exactly one.
+          .prefIdentifier(.oledCareEnrolled, persistenceKey: persistenceKey)
         }
 
         if prefs.oledCareEnrolled {
@@ -414,6 +418,7 @@ struct OledCareDisplayPage: View {
         Stepper(value: idleMinutesBinding, in: Self.idleMinuteRange) {
           Text(verbatim: "Dim after \(Self.minutesPhrase(minutes(prefs.oledIdleDimSeconds))) of inactivity")
         }
+        .prefIdentifier(.oledIdleDimSeconds, persistenceKey: persistenceKey)
         // In the SAME row as the control it is about: a divider between a
         // threshold and the sentence saying that threshold does nothing turns
         // the warning into what looks like an unrelated setting.
@@ -424,6 +429,7 @@ struct OledCareDisplayPage: View {
     levelRow(
       label: "Dim to",
       caption: "How bright the display is while dimmed: \(AppInfo.productName) draws a dark overlay over it, the display's own brightness setting is untouched, and any key or click restores the picture immediately.",
+      prefIdentifier: .oledIdleDimLevel,
       draft: $idleLevelDraft,
       value: prefs.oledIdleDimBrightness,
       accessibilityName: "Idle dim brightness"
@@ -440,6 +446,7 @@ struct OledCareDisplayPage: View {
         get: { prefs.oledLockDim },
         set: { on in writer.write(.oledLockDim) { $0.oledLockDim = on } }
       ))
+      .prefIdentifier(.oledLockDim, persistenceKey: persistenceKey)
     }
   }
 
@@ -454,6 +461,7 @@ struct OledCareDisplayPage: View {
         get: { prefs.oledBlackoutEnabled },
         set: { on in writer.write(.oledBlackoutEnabled) { $0.oledBlackoutEnabled = on } }
       ))
+      .prefIdentifier(.oledBlackoutEnabled, persistenceKey: persistenceKey)
     }
     if prefs.oledBlackoutEnabled {
       // The lower bound is the engine's own floor, not a number chosen here:
@@ -467,6 +475,7 @@ struct OledCareDisplayPage: View {
         Stepper(value: blackoutMinutesBinding, in: blackoutMinuteRange) {
           Text(verbatim: "Go black after \(Self.minutesPhrase(blackoutMinutesBinding.wrappedValue)) of inactivity")
         }
+        .prefIdentifier(.oledBlackoutSeconds, persistenceKey: persistenceKey)
         displaySleepWarning(forThresholdSeconds: prefs.oledBlackoutSeconds)
       }
     }
@@ -480,14 +489,17 @@ struct OledCareDisplayPage: View {
         get: { prefs.oledUnfocusedDimEnabled },
         set: { on in writer.write(.oledUnfocusedDimEnabled) { $0.oledUnfocusedDimEnabled = on } }
       ))
+      .prefIdentifier(.oledUnfocusedDimEnabled, persistenceKey: persistenceKey)
     }
     if prefs.oledUnfocusedDimEnabled {
       Stepper(value: unfocusedMinutesBinding, in: Self.unfocusedMinuteRange) {
         Text(verbatim: "Dim after \(Self.minutesPhrase(minutes(prefs.oledUnfocusedDimSeconds))) without focus")
       }
+      .prefIdentifier(.oledUnfocusedDimSeconds, persistenceKey: persistenceKey)
       levelRow(
         label: "Dim to",
         caption: "How bright an unfocused display is while dimmed. Usually higher than the idle dim, because the display is still in view.",
+        prefIdentifier: .oledUnfocusedDimLevel,
         draft: $unfocusedLevelDraft,
         value: prefs.oledUnfocusedDimBrightness,
         accessibilityName: "Unfocused dim brightness"
@@ -598,9 +610,20 @@ struct OledCareDisplayPage: View {
   /// display is left, so lower is darker; the range comes from
   /// `OledDimConfig.brightnessRange`: the config sanitises to exactly that,
   /// and a slider that could express more would be a slider that lies.
+  ///
+  /// The accessibility identifier comes from the CALLER, never from a name
+  /// written in here: one helper serves the idle level and the unfocused level,
+  /// and a hardcoded name would put the idle identifier on both sliders. The
+  /// parameter is labelled `prefIdentifier` so each call site names its pref on
+  /// a line the coverage scan can see. That label is also the hole in that
+  /// guard, and this sentence is the tripwire: the scan sees these two cases
+  /// ONLY through the argument label, so deleting the `.prefIdentifier` call
+  /// inside this helper while keeping the parameter leaves both sliders bare
+  /// with the coverage test still green.
   private func levelRow(
     label: LocalizedStringKey,
     caption: LocalizedStringKey,
+    prefIdentifier: PrefName,
     draft: Binding<Double?>,
     value: Double,
     accessibilityName: String,
@@ -635,6 +658,7 @@ struct OledCareDisplayPage: View {
         )
         .accessibilityLabel(Text(verbatim: accessibilityName))
         .accessibilityValue(Text(verbatim: Self.percent(live)))
+        .prefIdentifier(prefIdentifier, persistenceKey: persistenceKey)
         // The keyboard path. `onEditingChanged` is a DRAG boundary: adjusting a
         // focused slider with the arrow keys moves the draft and never ends an
         // edit, so without this the value would show as changed and never be

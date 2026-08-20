@@ -9,6 +9,13 @@ packages:
     # with nothing committed to pin it. Matches the house convention (M4 pinned
     # SimplyCoreAudio exactly and MediaKeyTap to a commit).
     exactVersion: 3.0.1
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    # Exact for the same Package.resolved reason as KeyboardShortcuts. Added by
+    # the W6 auto-update work as a deliberate amendment to the v1 dependency
+    # decision; an updater is a correctness requirement for an app built on
+    # private APIs that break across macOS releases.
+    exactVersion: 2.9.6
 options:
   deploymentTarget:
     macOS: "14.0"
@@ -49,6 +56,9 @@ targets:
     dependencies:
       - package: CandelaKit
       - package: KeyboardShortcuts
+      # App sources compile into the bundle, so anything the app imports the
+      # bundle must also link. No updater runs in tests: nothing calls start.
+      - package: Sparkle
   Candela:
     type: application
     platform: macOS
@@ -56,6 +66,7 @@ targets:
     dependencies:
       - package: CandelaKit
       - package: KeyboardShortcuts
+      - package: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rydersel.Candela
@@ -115,3 +126,13 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSHumanReadableCopyright: "MIT licensed."
+        # Sparkle. The feed URL is permanent: it bakes into every shipped
+        # binary, so it must outlive any one hosting choice; candela.fyi is
+        # ours and the appcast path never moves. Enclosure URLs inside the
+        # appcast are per release and free to move. SUEnableAutomaticChecks
+        # set explicitly means Sparkle never shows its second-launch consent
+        # prompt; checking is on by default and installs always ask (the
+        # automatic-download default stays off).
+        SUFeedURL: "https://candela.fyi/appcast.xml"
+        SUPublicEDKey: "l1jMVT0ljq1l/b0/8htcM12F+m0RriyMnt0kTnfEhwk="
+        SUEnableAutomaticChecks: true

@@ -298,6 +298,7 @@ struct BannerRegion: View {
                 Task { await recoverFromHardwareMute() }
               }
               .accessibilityLabel(strandedMuteButtonTitle)
+              .accessibilityIdentifier("action.strandedMuteRecovery.\(persistenceKey)")
             }
           }
           SettingsCaption(strandedMuteExplanation)

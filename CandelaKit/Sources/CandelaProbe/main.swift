@@ -51,6 +51,7 @@ usage: candela-probe [--display <id>] <subcommand>
   vd create <slot 1-3> <w> <h> [--hidpi] [--hold <s>]  create a virtual display, hold, destroy
   vd online <id>                          is that display in THIS process's online list
   conform [--apply]                       assert the private-API platform assumptions; run after every macOS update
+  regress [--apply] [--json <path>] [--record <dir>] [--commit <sha>] [--tools <dir>] [--debug-app <path>]  assert the app-behaviour invariants against the deployed app
 """
 
 /// The DDC subcommands need a DDC-capable external display. The private-API
@@ -58,7 +59,14 @@ usage: candela-probe [--display <id>] <subcommand>
 /// the built-in, and including an external whose DDC is locked by HDR mode.
 struct ProbeDisplay {
   let id: CGDirectDisplayID
-  let name: String
+  /// The display's own title, as the app itself publishes it: its sidebar row's
+  /// accessibility description and its settings window title.
+  let title: String
+  /// The label the probe PRINTS, which appends the display id so two panels of
+  /// the same model can be told apart. Kept as a separate reading of the same
+  /// display because the two are consumed by different things: a person reads
+  /// this one, and the accessibility layer matches the title.
+  var name: String { "\(title) [\(id)]" }
 }
 
 let online: [ProbeDisplay] = {
@@ -68,7 +76,7 @@ let online: [ProbeDisplay] = {
   return ids.prefix(Int(count)).map { id in
     let ddcName = found.first { $0.display.id == id }?.display.name
     let fallback = CGDisplayIsBuiltin(id) != 0 ? "Built-in Display" : "Display \(id)"
-    return ProbeDisplay(id: id, name: "\(ddcName ?? fallback) [\(id)]")
+    return ProbeDisplay(id: id, title: ddcName ?? fallback)
   }.filter { displayFilter == nil || $0.id == displayFilter }
 }()
 
@@ -500,6 +508,47 @@ case "conform":
   ))
   for line in report.lines() { print(line) }
   exit(report.exitCode)
+case "regress":
+  // The other half of `conform`: that command asks whether the platform still
+  // behaves as this app assumes, this one asks whether the app still behaves
+  // as its own rulings say it must, against the build that is running. Same
+  // report type, same exit-code rule, separate baselines.
+  switch Regress.parseOptions(Array(arguments.dropFirst())) {
+  case let .failure(usage):
+    print(usage.message)
+    exit(2)
+  case let .success(options):
+    let regressDisplays = online.map { display in
+      Regress.Display(
+        id: display.id,
+        name: display.name,
+        title: display.title,
+        persistenceKey: found.first { $0.display.id == display.id }?.display.persistenceKey,
+        isBuiltIn: CGDisplayIsBuiltin(display.id) != 0
+      )
+    }
+    let report = Regress.run(options: options, displays: regressDisplays)
+    for line in report.lines(label: "regress") { print(line) }
+    // Written after printing and before the exit code is consulted: a record
+    // that could not be written is a hard failure with its reason, never a run
+    // that reports its verdict and drops it.
+    switch Regress.writeRecords(report: report, options: options, timestamp: Date()) {
+    case let .failure(usage):
+      // On stdout as well as stderr. Stdout is where a run says where its
+      // record landed, so it is where it has to say when none did: a reader
+      // watching that stream would otherwise see the report and no line about
+      // the record at all, which is the shape of a run that was never asked
+      // for one.
+      print("record NOT written: \(usage.message)")
+      FileHandle.standardError.write(Data("\(usage.message)\n".utf8))
+      exit(2)
+    case let .success(paths):
+      for path in paths {
+        print(options.commit == nil ? "wrote \(path) (no --commit, so the record names no build)" : "wrote \(path)")
+      }
+    }
+    exit(report.exitCode)
+  }
 case "caps":
   requireDDCDisplays()
   for entry in found {

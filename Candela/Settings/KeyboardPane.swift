@@ -137,6 +137,7 @@ struct KeyboardPane: View {
         // with:" row label the honest item is "Nothing".
         Text("Nothing").tag(KeyMode.disabled)
       }
+      .prefIdentifier(.keyboardBrightness)
 
       if KeyModePolicy.firesCustomShortcuts(prefs.keyboardBrightness) {
         KeyboardShortcuts.Recorder("Brightness down:", name: .brightnessDown)
@@ -154,6 +155,7 @@ struct KeyboardPane: View {
             get: { prefs.interceptAlternateBrightnessKeys }, // D1 positive accessor
             set: { setInterceptAlternateKeys($0) }
           ))
+          .prefIdentifier(.disableAltBrightnessKeys)
         }
       }
     }
@@ -173,6 +175,7 @@ struct KeyboardPane: View {
           Text("Both").tag(KeyMode.both)
           Text("Nothing").tag(KeyMode.disabled)
         }
+        .prefIdentifier(.keyboardVolume)
       }
 
       if KeyModePolicy.firesCustomShortcuts(prefs.keyboardVolume) {

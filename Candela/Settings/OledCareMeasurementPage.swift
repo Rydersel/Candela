@@ -76,6 +76,7 @@ struct OledCareMeasurementPage: View {
             writer.write(.oledTelemetry) { $0.oledTelemetry = on }
           }
         ))
+        .prefIdentifier(.oledTelemetry, persistenceKey: persistenceKey)
         // What "the resolution of this grid" means, at the size it means it.
         PanelGridMark()
         // The ONE control on this page that gets its own safe-mode note, and
@@ -111,6 +112,7 @@ struct OledCareMeasurementPage: View {
         get: { prefs.oledWindowObservation },
         set: { on in writer.write(.oledWindowObservation) { $0.oledWindowObservation = on } }
       ))
+      .prefIdentifier(.oledWindowObservation, persistenceKey: persistenceKey)
     }
 
     // #20. Last in the group and off by default, and the copy leads with what
@@ -141,6 +143,7 @@ struct OledCareMeasurementPage: View {
         get: { prefs.oledDetectionDimming },
         set: { on in writer.write(.oledDetectionDimming) { $0.oledDetectionDimming = on } }
       ))
+      .prefIdentifier(.oledDetectionDimming, persistenceKey: persistenceKey)
     }
   }
 
@@ -164,6 +167,7 @@ struct OledCareMeasurementPage: View {
         get: { prefs.oledHoursTracking },
         set: { on in writer.write(.oledHoursTracking) { $0.oledHoursTracking = on } }
       ))
+      .prefIdentifier(.oledHoursTracking, persistenceKey: persistenceKey)
     }
   }
 
