@@ -66,6 +66,14 @@ struct SettingsRootView: View {
       // The ground under both columns, lit by whatever destination is on
       // screen. One canvas for the life of the window, so a selection change
       // moves the light rather than cutting to a new one (SV8).
+      //
+      // **The canvas is the only view here that opts out of the safe area**
+      // (`ignoresSafeArea` lives inside it), and that asymmetry is the whole
+      // defence for the top strip: the glow runs under the transparent
+      // titlebar while the columns start below it, so nothing scrolls up
+      // behind the traffic lights and no view needs a clearance of its own.
+      // The mock is built the same way. Never add `.ignoresSafeArea()` to the
+      // HStack or to a page, and never re-add per-view titlebar padding.
       SettingsCanvas(accent: currentAccent.accent, secondary: currentAccent.secondary)
       HStack(spacing: 0) {
         SettingsSidebar(selection: animatedSelection, onReselect: returnToHub)
@@ -232,10 +240,14 @@ struct SettingsRootView: View {
   /// Every selection write in this window, so the canvas relight, the sidebar
   /// pill and the page swap all ride one transaction (SV8). The sidebar writes
   /// through the binding; the shortcuts and the display switcher call `select`.
+  ///
+  /// Derived from `$selection`, never a fresh `Binding(get:set:)`: a hand-built
+  /// binding carries no location, so SwiftUI cannot prove it equal between
+  /// updates and every view holding it re-renders on each root body pass.
+  /// `animation(_:)` keeps the projected value's location and only attaches a
+  /// transaction to writes made through it.
   private var animatedSelection: Binding<SettingsDestination?> {
-    Binding(get: { selection }, set: { new in
-      withAnimation(SettingsTheme.selectionMotion) { selection = new }
-    })
+    $selection.animation(SettingsTheme.selectionMotion)
   }
 
   private func select(_ destination: SettingsDestination?) {
@@ -260,9 +272,16 @@ struct SettingsRootView: View {
 
   /// A display's hue, chosen by its position among the externals: the same
   /// rule the sidebar's rows use, so a row and the canvas it lights agree.
+  ///
+  /// A key with no position is lit neutral rather than by the first display's
+  /// hue. `presentation` makes that unreachable today, and a fallback that
+  /// borrows a hue belonging to some OTHER display would be wrong in the one
+  /// way this window cannot afford: the canvas would say the user is somewhere
+  /// they are not.
   private func displayAccent(for key: String) -> SettingsAccent {
     guard key != "builtIn" else { return .display(isBuiltIn: true, ordinal: 0) }
-    let index = model.displays.firstIndex { $0.display.persistenceKey == key } ?? 0
+    guard let index = model.displays.firstIndex(where: { $0.display.persistenceKey == key })
+    else { return .neutral }
     return .display(isBuiltIn: false, ordinal: index)
   }
 
@@ -337,11 +356,20 @@ struct SettingsRootView: View {
     NavigationStack(path: currentPathBinding) {
       detailRoot
         .navigationDestination(for: SettingsPushedPage.self) { pushed in
-          switch pushed {
-          case let .display(page): pushedPage(page)
-          case let .oledCare(page): oledPushedPage(page)
-          case let .keyboard(page): keyboardPushedPage(page)
+          Group {
+            switch pushed {
+            case let .display(page): pushedPage(page)
+            case let .oledCare(page): oledPushedPage(page)
+            case let .keyboard(page): keyboardPushedPage(page)
+            }
           }
+          // The system back item draws at the WINDOW's leading edge, which in
+          // this shell is over the sidebar's wordmark rather than over the
+          // column it acts on, in unstyled chrome the mock has none of (SV1).
+          // Every pushed page opens with `SubPageHeader`, which draws the back
+          // control in the page instead. Cmd-[ and re-clicking the sidebar row
+          // are unaffected: both write the path directly.
+          .navigationBarBackButtonHidden(true)
         }
     }
   }

@@ -54,7 +54,13 @@ struct SettingsCanvas: View {
             y: size.height * (0.88 + 0.07 * CGFloat(sin(t2 * 1.7)))
           )
       }
-      .animation(SettingsTheme.canvasRelight, value: accent)
+      // Keyed on BOTH hues. Two destinations can share a primary accent and
+      // differ only in their secondary (OLED Care and the second external
+      // display do, faithfully to the mock), and keyed on `accent` alone the
+      // second blob cut to its new colour instead of relighting.
+      .animation(
+        SettingsTheme.canvasRelight,
+        value: SettingsAccent(accent: accent, secondary: secondary))
     }
   }
 }

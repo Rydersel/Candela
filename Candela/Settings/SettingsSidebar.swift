@@ -2,29 +2,6 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// System Settings' row idiom: a tinted rounded-rect tile holding a white SF
-/// Symbol, then the title. The tile is decoration — the title carries the
-/// meaning, so nothing here is communicated by color alone.
-struct SettingsSymbolTile: View {
-  let symbol: String
-  let tint: Color
-
-  var body: some View {
-    RoundedRectangle(cornerRadius: 5, style: .continuous)
-      .fill(tint)
-      .frame(width: 18, height: 18)
-      .overlay(
-        Image(systemName: symbol)
-          .font(.system(size: 10, weight: .semibold))
-          // Always white, never the row's own foreground: the glyph sits on a
-          // saturated fill, and the row dims its text when it is not selected.
-          // A glyph that dimmed with it would lose the tile underneath.
-          .foregroundStyle(.white)
-      )
-      .accessibilityHidden(true)
-  }
-}
-
 /// One external display's sidebar row, fully resolved: the state it draws and
 /// the ordinal it draws it under. Identity stays the display ID, the same key
 /// the sidebar's rows have always been diffed on.
@@ -80,12 +57,11 @@ struct SettingsSidebar: View {
         wordmark
 
         ForEach(SettingsRegistry.panes) { pane in
-          row(.pane(pane.id), label: pane.title, accent: pane.accent.accent) {
-            Label {
-              Text(pane.title)
-            } icon: {
-              SettingsSymbolTile(symbol: pane.symbol, tint: pane.accent.accent)
-            }
+          row(
+            .pane(pane.id), label: pane.title, symbol: pane.symbol,
+            accent: pane.accent.accent
+          ) {
+            Text(pane.title).lineLimit(1)
           }
         }
 
@@ -167,10 +143,12 @@ struct SettingsSidebar: View {
         .foregroundStyle(SettingsTheme.titleColor)
     }
     .padding(.leading, 12)
-    // Clears the traffic lights: the window is full-size-content now, so the
-    // first row of the sidebar sits under the titlebar unless it is pushed
-    // past it.
-    .padding(.top, 38)
+    // The mock's number and nothing added to it. The traffic lights are cleared
+    // by the titlebar safe area the shell already respects (the canvas is the
+    // one view that opts out), so a second clearance here would both double the
+    // inset and put the defence inside scrolled content, where enough display
+    // rows carry it away.
+    .padding(.top, 14)
     .padding(.bottom, 16)
     // The mark carries the missing letter, so the two halves have to be read
     // as one word: without this VoiceOver announces the text alone, which is
@@ -179,7 +157,8 @@ struct SettingsSidebar: View {
     .accessibilityLabel(Text(verbatim: AppInfo.productName))
   }
 
-  /// One selectable row: a button that draws its own selection pill.
+  /// One selectable row: the destination's glyph, whatever the row draws beside
+  /// it, and a button that draws its own selection pill.
   ///
   /// The pill is the destination's own accent at low alpha with a brighter
   /// stroke, so a selected row reads as lit rather than filled and the row's
@@ -195,11 +174,12 @@ struct SettingsSidebar: View {
   private func row(
     _ destination: SettingsDestination,
     label: String,
+    symbol: String,
     accent: Color,
     @ViewBuilder _ content: () -> some View
   ) -> some View {
     let isSelected = selection == destination
-    SidebarRowButton(isSelected: isSelected, accent: accent) {
+    SidebarRowButton(isSelected: isSelected, accent: accent, symbol: symbol) {
       if isSelected {
         onReselect(destination)
       } else {
@@ -261,65 +241,70 @@ struct SettingsSidebar: View {
     // label derived from its content, so a child element's label would simply
     // stop being announced. Same reason the brightness bar stays hidden.
     let spokenName = hasUnread ? "\(name), has an unread notice" : name
-    row(.display(display.persistenceKey), label: spokenName, accent: accent.accent) {
-      Label {
-        VStack(alignment: .leading, spacing: 3) {
-          HStack(spacing: 5) {
-            Text(verbatim: name) // a display's name — never a lookup key
-              .lineLimit(1)
-              .truncationMode(.tail)
-            // Something happened on this display while nobody was looking and
-            // nobody has read it yet. A dot, not a count: the destination
-            // carries the account, this only says there is one to open. It is
-            // never the sole carrier of the fact either — the notice itself is
-            // inside — so a missed dot costs nothing.
-            if hasUnread {
-              Circle()
-                // The row's own hue, which the low-alpha selection pill no
-                // longer swallows the way the old solid accent fill did.
-                .fill(accent.accent)
-                .frame(width: 6, height: 6)
-                .accessibilityHidden(true)
+    row(
+      .display(display.persistenceKey), label: spokenName,
+      // The built-in draws as a laptop everywhere it is depicted (SV9).
+      symbol: display.persistenceKey == "builtIn" ? "laptopcomputer" : "display",
+      accent: accent.accent
+    ) {
+      VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: 5) {
+          Text(verbatim: name) // a display's name — never a lookup key
+            .lineLimit(1)
+            .truncationMode(.tail)
+          // Something happened on this display while nobody was looking and
+          // nobody has read it yet. A dot, not a count: the destination
+          // carries the account, this only says there is one to open. It is
+          // never the sole carrier of the fact either — the notice itself is
+          // inside — so a missed dot costs nothing.
+          if hasUnread {
+            Circle()
+              // The row's own hue, which the low-alpha selection pill no
+              // longer swallows the way the old solid accent fill did.
+              .fill(accent.accent)
+              .frame(width: 6, height: 6)
+              .accessibilityHidden(true)
+          }
+        }
+        Capsule()
+          .fill(Color.white.opacity(0.14))
+          .frame(height: 3)
+          .overlay(alignment: .leading) {
+            GeometryReader { geo in
+              // Monochrome, not the accent: the selection pill is already
+              // accent-coloured, and an accent bar on every row made the
+              // sidebar read as several competing highlights rather than one
+              // selection plus some levels.
+              //
+              // Near-white, and explicit rather than `.primary`: the row
+              // dims its own text on an unselected row, and a level
+              // indicator's entire job is showing where the fill boundary
+              // is. Inheriting that dimming put the fill one step from the
+              // track and a full bar stopped reading as full.
+              Capsule()
+                .fill(SettingsTheme.titleColor)
+                .frame(width: geo.size.width * min(max(controller.brightness, 0), 1))
             }
           }
-          Capsule()
-            .fill(Color.white.opacity(0.14))
-            .frame(height: 3)
-            .overlay(alignment: .leading) {
-              GeometryReader { geo in
-                // Monochrome, not the accent: the selection pill is already
-                // accent-coloured, and an accent bar on every row made the
-                // sidebar read as several competing highlights rather than one
-                // selection plus some levels.
-                //
-                // Near-white, and explicit rather than `.primary`: the row
-                // dims its own text on an unselected row, and a level
-                // indicator's entire job is showing where the fill boundary
-                // is. Inheriting that dimming put the fill one step from the
-                // track and a full bar stopped reading as full.
-                Capsule()
-                  .fill(SettingsTheme.titleColor)
-                  .frame(width: geo.size.width * min(max(controller.brightness, 0), 1))
-              }
-            }
-            .accessibilityHidden(true)
-        }
-      } icon: {
-        // The built-in draws as a laptop everywhere it is depicted (SV9).
-        SettingsSymbolTile(
-          symbol: display.persistenceKey == "builtIn" ? "laptopcomputer" : "display",
-          tint: accent.accent)
+          .accessibilityHidden(true)
       }
     }
   }
 }
 
-/// The sidebar's row chrome: hover wash, selection pill, and the type weight
-/// that moves with selection. A view of its own because the hover state has to
-/// live somewhere, and a `@State` cannot live in a function.
+/// The sidebar's row chrome: the destination glyph, the hover wash, the
+/// selection pill, and the type weight that moves with selection. A view of its
+/// own because the hover state has to live somewhere, and a `@State` cannot
+/// live in a function.
+///
+/// The glyph is bare and tinted, not a filled tile: a column of saturated tiles
+/// is the System Settings idiom, and this window is not that window. It is
+/// decoration either way, so it is the row's text that carries the meaning and
+/// nothing here is said by colour alone.
 private struct SidebarRowButton<Content: View>: View {
   let isSelected: Bool
   let accent: Color
+  let symbol: String
   let action: () -> Void
   @ViewBuilder let content: Content
 
@@ -327,24 +312,35 @@ private struct SidebarRowButton<Content: View>: View {
 
   var body: some View {
     Button(action: action) {
-      content
-        .font(.callout.weight(isSelected ? .semibold : .regular))
-        .foregroundStyle(isSelected ? SettingsTheme.titleColor : SettingsTheme.bodyColor)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 7)
-        .background(
-          RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
-            .fill(
-              isSelected
-                ? accent.opacity(0.13)
-                : Color.white.opacity(hovering ? 0.06 : 0))
-        )
-        .overlay(
-          RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
-            .stroke(isSelected ? accent.opacity(0.25) : .clear, lineWidth: 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous))
+      HStack(spacing: 10) {
+        Image(systemName: symbol)
+          .font(.system(size: 13, weight: .medium))
+          // Lit only where the user is; elsewhere it sits at the row's own
+          // weight so eight hues do not compete for the eye at once.
+          .foregroundStyle(isSelected ? accent : SettingsTheme.bodyColor)
+          .frame(width: 20)
+          .accessibilityHidden(true)
+        content
+          .font(.callout.weight(isSelected ? .semibold : .regular))
+          .foregroundStyle(isSelected ? SettingsTheme.titleColor : SettingsTheme.bodyColor)
+          // The whole remaining width, not the text's own: a display row's
+          // brightness bar is measured against it.
+          .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .padding(.horizontal, 8)
+      .padding(.vertical, 7)
+      .background(
+        RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
+          .fill(
+            isSelected
+              ? accent.opacity(0.13)
+              : Color.white.opacity(hovering ? 0.06 : 0))
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
+          .stroke(isSelected ? accent.opacity(0.25) : .clear, lineWidth: 1)
+      )
+      .contentShape(RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous))
     }
     .buttonStyle(.plain)
     .onHover { hovering = $0 }
