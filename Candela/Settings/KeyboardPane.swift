@@ -47,14 +47,18 @@ struct KeyboardPane: View {
     // so the recorder rows below would never appear and the picker would look
     // like it snapped back.
     let _ = model.prefsRevision
-    Form {
+    SettingsPageScaffold {
+      SettingsPageHeader(
+        title: "Keyboard",
+        subtitle:
+          "Which keys \(AppInfo.productName) handles, and which display they reach. Lit keys are handled here; grey ones go straight to macOS."
+      )
       accessibilitySection
       heroSection
       brightnessSection
       volumeSection
       moreSection
     }
-    .formStyle(.grouped)
   }
 
   // MARK: - Accessibility
@@ -74,25 +78,31 @@ struct KeyboardPane: View {
   /// up disagreeing on an all-custom rig.
   @ViewBuilder private var accessibilitySection: some View {
     if model.accessibility.isWarningWarranted {
-      Section {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+      SettingsCard {
+        HStack(alignment: .top, spacing: 9) {
           // Symbol AND text: the state is never signalled by color alone
-          // (color.md, inclusive color). No custom color: the row is
-          // monochrome in both appearances.
+          // (color.md, inclusive color). No custom color: the notice is
+          // monochrome against the card.
           Image(systemName: "exclamationmark.triangle")
-            .foregroundStyle(.secondary)
-          VStack(alignment: .leading, spacing: 2) {
+            .foregroundStyle(SettingsTheme.faintColor)
+          VStack(alignment: .leading, spacing: 6) {
             Text("Keyboard control needs Accessibility access")
+              .font(.callout.weight(.medium))
+              .foregroundStyle(SettingsTheme.titleColor)
+              .fixedSize(horizontal: false, vertical: true)
             SettingsCaption(
               "\(AppInfo.productName) watches the brightness and volume keys through the system event tap, which macOS gates behind Accessibility. Custom shortcuts work without it."
             )
+            // The page's one action while the grant is missing, so it takes the
+            // primary style. Trailing ellipsis: it opens another app
+            // (buttons.md).
+            Button("Open System Settings…") {
+              AccessibilityPermission.openSystemSettings()
+            }
+            .buttonStyle(SettingsPrimaryButtonStyle())
+            .accessibilityLabel("Open System Settings…")
+            .padding(.top, 2)
           }
-          Spacer(minLength: 8)
-          // Trailing ellipsis: this button opens another app (buttons.md).
-          Button("Open System Settings…") {
-            AccessibilityPermission.openSystemSettings()
-          }
-          .accessibilityLabel("Open System Settings…")
         }
       }
     }
@@ -105,92 +115,123 @@ struct KeyboardPane: View {
   /// re-derives on the same `prefsRevision` bump the controls below cause.
   /// The good-news Accessibility line gates itself inside the hero; while the
   /// warning above is warranted it stays silent, so the two never both speak.
+  ///
+  /// Uncarded: the strip is the page's subject rather than one more group of
+  /// rows, and the deadspace around it is what makes it read as a hero.
   private var heroSection: some View {
-    Section {
-      KeyboardKeysHero(
-        brightnessMode: prefs.keyboardBrightness,
-        volumeMode: prefs.keyboardVolume,
-        brightnessTarget: prefs.multiKeyboardBrightness,
-        volumeTarget: prefs.multiKeyboardVolume,
-        alternateAccepted: prefs.interceptAlternateBrightnessKeys,
-        accessibilityGranted: model.accessibility.isGranted
-      )
-    }
+    KeyboardKeysHero(
+      brightnessMode: prefs.keyboardBrightness,
+      volumeMode: prefs.keyboardVolume,
+      brightnessTarget: prefs.multiKeyboardBrightness,
+      volumeTarget: prefs.multiKeyboardVolume,
+      alternateAccepted: prefs.interceptAlternateBrightnessKeys,
+      accessibilityGranted: model.accessibility.isGranted
+    )
   }
 
   // MARK: - Brightness
 
   @ViewBuilder private var brightnessSection: some View {
-    Section("Brightness and Contrast Keys") {
-      // Explicit enum tags, never `enumerated()` positions (fork QUIRK): the
-      // raw values are shipped on-disk schema (D22) and the UI order is not
-      // the raw order.
-      Picker("Control brightness with:", selection: Binding(
-        get: { prefs.keyboardBrightness },
-        set: { setBrightnessMode($0) }
-      )) {
-        Text("The keyboard's brightness keys").tag(KeyMode.media)
-        Text("Custom shortcuts").tag(KeyMode.custom)
-        Text("Both").tag(KeyMode.both)
-        // D25: the fork's "Disable keyboard" disables no keyboard — it stops
-        // THIS APP from handling one key family. Under a "Control brightness
-        // with:" row label the honest item is "Nothing".
-        Text("Nothing").tag(KeyMode.disabled)
+    SettingsCardSection(title: "Brightness and Contrast Keys") {
+      SettingRow {
+        // Explicit enum tags, never `enumerated()` positions (fork QUIRK): the
+        // raw values are shipped on-disk schema (D22) and the UI order is not
+        // the raw order.
+        ThemedChoiceRow(label: "Control brightness with:", selection: Binding(
+          get: { prefs.keyboardBrightness },
+          set: { setBrightnessMode($0) }
+        )) {
+          Text("The keyboard's brightness keys").tag(KeyMode.media)
+          Text("Custom shortcuts").tag(KeyMode.custom)
+          Text("Both").tag(KeyMode.both)
+          // D25: the fork's "Disable keyboard" disables no keyboard; it stops
+          // THIS APP from handling one key family. Under a "Control brightness
+          // with:" row label the honest item is "Nothing".
+          Text("Nothing").tag(KeyMode.disabled)
+        }
+        .prefIdentifier(.keyboardBrightness)
       }
-      .prefIdentifier(.keyboardBrightness)
 
       if KeyModePolicy.firesCustomShortcuts(prefs.keyboardBrightness) {
+        // The recorder is KeyboardShortcuts' own control: the row frames it and
+        // its internals stay the package's. A titled recorder is a
+        // `LabeledContent`, so the scaffold's style gives it this window's row
+        // grammar for free.
+        SettingsCardDivider()
         KeyboardShortcuts.Recorder("Brightness down:", name: .brightnessDown)
+        SettingsCardDivider()
         KeyboardShortcuts.Recorder("Brightness up:", name: .brightnessUp)
+        SettingsCardDivider()
         KeyboardShortcuts.Recorder("Contrast down:", name: .contrastDown)
+        SettingsCardDivider()
         SettingRow(Self.modifierHint) {
           KeyboardShortcuts.Recorder("Contrast up:", name: .contrastUp)
         }
-        SettingsCaption("Contrast works on displays controlled over their data cable (DDC) only.")
+        rowNote("Contrast works on displays controlled over their data cable (DDC) only.")
+          .padding(.bottom, 6)
       }
 
       if KeyModePolicy.watchesMediaKeys(prefs.keyboardBrightness) {
+        SettingsCardDivider()
         SettingRow("F14 and F15 are Scroll Lock and Pause on PC keyboards, and the brightness keys on some Logitech keyboards.") {
           Toggle("Also accept F14 and F15", isOn: Binding(
             get: { prefs.interceptAlternateBrightnessKeys }, // D1 positive accessor
             set: { setInterceptAlternateKeys($0) }
           ))
+          .themedSwitch()
           .prefIdentifier(.disableAltBrightnessKeys)
         }
       }
     }
   }
 
+  /// A sentence that qualifies the rows above it, at row weight rather than
+  /// standalone weight: on a card a callout here would be the brightest line in
+  /// the group it only annotates.
+  private func rowNote(_ sentence: LocalizedStringKey) -> some View {
+    SettingsCaption(sentence)
+      .text
+      .font(.caption)
+      .foregroundStyle(SettingsTheme.faintColor)
+      .fixedSize(horizontal: false, vertical: true)
+  }
+
   // MARK: - Volume
 
   @ViewBuilder private var volumeSection: some View {
-    Section("Volume Keys") {
-      SettingRow("Volume applies to external displays that accept volume commands over their data cable (DDC).") {
-        Picker("Control volume with:", selection: Binding(
-          get: { prefs.keyboardVolume },
-          set: { setVolumeMode($0) }
-        )) {
-          Text("The keyboard's volume and mute keys").tag(KeyMode.media)
-          Text("Custom shortcuts").tag(KeyMode.custom)
-          Text("Both").tag(KeyMode.both)
-          Text("Nothing").tag(KeyMode.disabled)
+    VStack(alignment: .leading, spacing: 8) {
+      SettingsCardSection(title: "Volume Keys") {
+        SettingRow("Volume applies to external displays that accept volume commands over their data cable (DDC).") {
+          ThemedChoiceRow(label: "Control volume with:", selection: Binding(
+            get: { prefs.keyboardVolume },
+            set: { setVolumeMode($0) }
+          )) {
+            Text("The keyboard's volume and mute keys").tag(KeyMode.media)
+            Text("Custom shortcuts").tag(KeyMode.custom)
+            Text("Both").tag(KeyMode.both)
+            Text("Nothing").tag(KeyMode.disabled)
+          }
+          .prefIdentifier(.keyboardVolume)
         }
-        .prefIdentifier(.keyboardVolume)
-      }
 
-      if KeyModePolicy.firesCustomShortcuts(prefs.keyboardVolume) {
-        KeyboardShortcuts.Recorder("Volume down:", name: .volumeDown)
-        KeyboardShortcuts.Recorder("Volume up:", name: .volumeUp)
-        SettingRow(Self.modifierHint) {
-          KeyboardShortcuts.Recorder("Mute:", name: .mute)
+        if KeyModePolicy.firesCustomShortcuts(prefs.keyboardVolume) {
+          SettingsCardDivider()
+          KeyboardShortcuts.Recorder("Volume down:", name: .volumeDown)
+          SettingsCardDivider()
+          KeyboardShortcuts.Recorder("Volume up:", name: .volumeUp)
+          SettingsCardDivider()
+          SettingRow(Self.modifierHint) {
+            KeyboardShortcuts.Recorder("Mute:", name: .mute)
+          }
         }
       }
 
       if KeyModePolicy.watchesMediaKeys(prefs.keyboardVolume) {
-        // The output-device rule is NOT restated here. It does not hold in every
-        // mode (name matching never consults it), and the Targeting page's
-        // `volumeTargetCaption` already states it beside the picker that decides
-        // whether it applies.
+        // Under the card, where a section footer went: it is about the whole
+        // family rather than any one row. The output-device rule is NOT
+        // restated here. It does not hold in every mode (name matching never
+        // consults it), and the Targeting page's `volumeTargetCaption` already
+        // states it beside the picker that decides whether it applies.
         SettingsCaption("While macOS reports an output device, the volume keys go to it instead whenever no display those keys would reach can take the command they send. Option on its own opens Sound settings.")
       }
     }
@@ -212,11 +253,12 @@ struct KeyboardPane: View {
   /// breaks path retention (KMR5), so inactivity is stated on the page rather
   /// than by hiding the way there.
   private var moreSection: some View {
-    Section {
+    SettingsCardSection(title: "More") {
       NavigationRow(
         title: "Modifier Keys",
         value: KeyboardHeroModel.modifiersPreview,
         action: { keyboardPath.wrappedValue.append(.modifiers) })
+      SettingsCardDivider()
       NavigationRow(
         title: "Targeting & Precision",
         value: KeyboardHeroModel.targetingPreview(
@@ -225,8 +267,6 @@ struct KeyboardPane: View {
           fineBrightness: prefs.useFineScaleBrightness,
           fineVolume: prefs.useFineScaleVolume),
         action: { keyboardPath.wrappedValue.append(.targeting) })
-    } header: {
-      Text("More").settingsHeading()
     }
   }
 

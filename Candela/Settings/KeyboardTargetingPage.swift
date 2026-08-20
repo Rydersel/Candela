@@ -20,41 +20,42 @@ struct KeyboardTargetingPage: View {
     // `.refreshUI` (on every known PrefName) is the ONLY invalidation signal
     // this page has; `DisplayPrefs` is plain UserDefaults and not observable.
     let _ = model.prefsRevision
-    Form {
-      Section {
-        SubPageHeader(
-          title: KeyboardPage.targeting.title,
-          currentKey: "", displays: [], onSwitch: { _ in })
-      }
+    SettingsPageScaffold {
+      SubPageHeader(
+        title: KeyboardPage.targeting.title,
+        currentKey: "", displays: [], onSwitch: { _ in })
 
       targetSection
       precisionSection
     }
-    .formStyle(.grouped)
   }
 
   // MARK: - Targeting
 
   @ViewBuilder private var targetSection: some View {
-    Section("Target Display") {
+    SettingsCardSection(title: "Target Display") {
       SettingRow {
-        Picker("Brightness keys affect:", selection: Binding(
-          get: { prefs.multiKeyboardBrightness },
-          set: { setBrightnessTarget($0) }
-        )) {
-          Text("The display under the pointer").tag(MultiKeyboardBrightness.mouse)
-          Text("Every display").tag(MultiKeyboardBrightness.allScreens)
-          Text("The display with the active window").tag(MultiKeyboardBrightness.focusInsteadOfMouse)
-        }
-        .prefIdentifier(.multiKeyboardBrightness)
-        .disabled(prefs.keyboardBrightness == .disabled)
-        if prefs.multiKeyboardBrightness == .focusInsteadOfMouse {
-          SettingsCaption("Window focus may not resolve correctly for full-screen apps.")
+        VStack(alignment: .leading, spacing: 6) {
+          ThemedChoiceRow(label: "Brightness keys affect:", selection: Binding(
+            get: { prefs.multiKeyboardBrightness },
+            set: { setBrightnessTarget($0) }
+          )) {
+            Text("The display under the pointer").tag(MultiKeyboardBrightness.mouse)
+            Text("Every display").tag(MultiKeyboardBrightness.allScreens)
+            Text("The display with the active window").tag(MultiKeyboardBrightness.focusInsteadOfMouse)
+          }
+          .prefIdentifier(.multiKeyboardBrightness)
+          .disabled(prefs.keyboardBrightness == .disabled)
+          if prefs.multiKeyboardBrightness == .focusInsteadOfMouse {
+            rowNote("Window focus may not resolve correctly for full-screen apps.")
+          }
         }
       }
 
+      SettingsCardDivider()
+
       SettingRow(volumeTargetCaption) {
-        Picker("Volume keys affect:", selection: Binding(
+        ThemedChoiceRow(label: "Volume keys affect:", selection: Binding(
           get: { prefs.multiKeyboardVolume },
           set: { setVolumeTarget($0) }
         )) {
@@ -68,6 +69,18 @@ struct KeyboardTargetingPage: View {
     }
   }
 
+  /// A sentence qualifying the row it follows, drawn the way `SettingRow` draws
+  /// its own caption: small and faint, so the two kinds of qualifier in one card
+  /// carry the same weight. Callers standing it alone on the card add the
+  /// row's bottom padding; inside a row the row already has it.
+  private func rowNote(_ sentence: LocalizedStringKey) -> some View {
+    SettingsCaption(sentence)
+      .text
+      .font(.caption)
+      .foregroundStyle(SettingsTheme.faintColor)
+      .fixedSize(horizontal: false, vertical: true)
+  }
+
   private var volumeTargetCaption: LocalizedStringKey {
     prefs.multiKeyboardVolume == .audioDeviceNameMatching
       ? "Matches on the display's name, which you can override under Sound on that display's page."
@@ -77,13 +90,18 @@ struct KeyboardTargetingPage: View {
   // MARK: - Precision
 
   @ViewBuilder private var precisionSection: some View {
-    Section("Precision") {
-      Toggle("Fine steps for brightness and contrast", isOn: Binding(
-        get: { prefs.useFineScaleBrightness },
-        set: { setFineScaleBrightness($0) }
-      ))
-      .prefIdentifier(.useFineScaleBrightness)
-      .disabled(prefs.keyboardBrightness == .disabled)
+    SettingsCardSection(title: "Precision") {
+      SettingRow {
+        Toggle("Fine steps for brightness and contrast", isOn: Binding(
+          get: { prefs.useFineScaleBrightness },
+          set: { setFineScaleBrightness($0) }
+        ))
+        .themedSwitch()
+        .prefIdentifier(.useFineScaleBrightness)
+        .disabled(prefs.keyboardBrightness == .disabled)
+      }
+
+      SettingsCardDivider()
 
       // D25: the fork's "Fine OSD scale for…" leaked internal vocabulary. "On-screen
       // indicator" is the house term for the HUD across this pane and the Displays pane.
@@ -92,10 +110,14 @@ struct KeyboardTargetingPage: View {
           get: { prefs.useFineScaleVolume },
           set: { setFineScaleVolume($0) }
         ))
+        .themedSwitch()
         .prefIdentifier(.useFineScaleVolume)
         .disabled(prefs.keyboardVolume == .disabled)
       }
-      SettingsCaption("Custom shortcuts have no modifiers of their own, so they always use the step size selected here.")
+      rowNote("Custom shortcuts have no modifiers of their own, so they always use the step size selected here.")
+        .padding(.bottom, 6)
+
+      SettingsCardDivider()
 
       // A1 relitigated D26 for this one: it is a key-step setting, which is
       // what this section is, and the decision behind it ("how far does one
@@ -113,6 +135,7 @@ struct KeyboardTargetingPage: View {
           get: { prefs.separateCombinedScale },
           set: { setSeparateCombinedScale($0) }
         ))
+        .themedSwitch()
         .prefIdentifier(.separateCombinedScale)
         .disabled(prefs.keyboardBrightness == .disabled)
       }
