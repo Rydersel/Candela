@@ -92,12 +92,25 @@ struct PanelHealthView: View {
     !CGPreflightScreenCaptureAccess()
   }
 
+  /// This display's lighting, by its position among the connected externals:
+  /// the same rule the settings sidebar and its canvas use, so this window and
+  /// the page it was opened from are lit alike (SV11: opened from settings, so
+  /// it must not look like a different app).
+  private var accent: SettingsAccent {
+    guard
+      let index = model.displays.firstIndex(where: {
+        $0.display.persistenceKey == persistenceKey
+      })
+    else { return .neutral }
+    return .display(isBuiltIn: false, ordinal: index)
+  }
+
   var body: some View {
     let summary = self.summary
     VStack(alignment: .leading, spacing: 20) {
       switcherRow
       confidenceNote(summary)
-      mapCard(summary)
+      mapSection(summary)
       findings(summary)
       ownersCard(summary)
       deleteRow
@@ -112,6 +125,15 @@ struct PanelHealthView: View {
     // it a second time (the duplicated-title defect), so the switcher stands
     // alone at the trailing edge.
     .frame(width: 560, alignment: .leading)
+    // The settings window's ground, lit by this display's own hue. A
+    // BACKGROUND and never a container: a background is laid out against the
+    // content it sits behind, so the canvas cannot reach the fitting size the
+    // window is built from. A `ZStack` would, and would collapse the window
+    // to the canvas's own ideal size.
+    .background { SettingsCanvas(accent: accent.accent, secondary: accent.secondary) }
+    // Published for the whole page, so every card, kicker and button reads
+    // this display's lighting the way the settings pages do.
+    .environment(\.settingsAccent, accent)
     .confirmationDialog(
       "Delete this display's measurement history?",
       isPresented: $confirmingDelete,
@@ -158,6 +180,9 @@ struct PanelHealthView: View {
 
   private var deleteRow: some View {
     Button("Delete History…", role: .destructive) { confirmingDelete = true }
+      // The window's own destructive style: warning red, never the display's
+      // accent, which everywhere else means "this is on".
+      .buttonStyle(SettingsDangerButtonStyle())
       .accessibilityLabel("Delete History…")
   }
 
@@ -242,7 +267,12 @@ struct PanelHealthView: View {
   /// display's history for presentation; storage stays panel-native), with
   /// the lens picker, the window outlines and the crosshair readout, all
   /// moved here from the old pane hero.
-  @ViewBuilder private func mapCard(_ summary: PanelHealthSummary) -> some View {
+  ///
+  /// The one section with no card under it. The map is this window's reason to
+  /// exist, and a card would both frame the instrument as one fact among
+  /// several and squeeze its measured width by the card's own padding; the
+  /// sections that state facts about it are carded below.
+  @ViewBuilder private func mapSection(_ summary: PanelHealthSummary) -> some View {
     let live = model.oledCare.latestSample(for: persistenceKey)
     let historyBlank = summary.confidence != .measured
     let aspect =
@@ -257,10 +287,15 @@ struct PanelHealthView: View {
       surfaceMode == .history ? (historyBlank ? nil : summary.cells) : live?.cells
 
     VStack(alignment: .leading, spacing: 10) {
+      // The page's hero heading, and deliberately not a card kicker: the
+      // carded sections below announce themselves in small caps, and this one
+      // titles the picture rather than a group of rows.
       Text("Where this display has been lit")
         .font(.subheadline.weight(.semibold))
+        .foregroundStyle(SettingsTheme.titleColor)
+        .settingsHeading()
 
-      HStack(spacing: 10) {
+      HStack(spacing: 12) {
         Picker("Map", selection: $surfaceMode) {
           Text("History").tag(SurfaceMode.history)
           Text("Right now").tag(SurfaceMode.now)
@@ -269,9 +304,11 @@ struct PanelHealthView: View {
         .labelsHidden()
         .frame(width: 170)
         .accessibilityLabel("Map shows")
+        // The window's switch rather than a bordered toggle button: a button
+        // toggle fills with the SYSTEM accent when on, the one hue this
+        // window never borrows.
         Toggle("Windows", isOn: $showsWindowGhosts)
-          .toggleStyle(.button)
-          .controlSize(.small)
+          .themedSwitch(spreads: false)
           .help("Outline the windows on this display, from the same permission-free snapshot app attribution uses.")
         Spacer(minLength: 0)
       }
@@ -326,15 +363,18 @@ struct PanelHealthView: View {
         if surfaceMode == .now, let live {
           Text(verbatim: "Reading from \(live.at.formatted(date: .omitted, time: .standard)); brightness of what the display was showing.")
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(SettingsTheme.faintColor)
             .fixedSize(horizontal: false, vertical: true)
         }
       } else {
+        // A recessed well, the same one the OLED Care hero draws behind a
+        // blank map: on this canvas a filled tile reads as a broken picture
+        // rather than as a place a picture will arrive.
         RoundedRectangle(cornerRadius: 5, style: .continuous)
-          .fill(.quaternary)
+          .fill(Color.black.opacity(0.22))
           .overlay {
             RoundedRectangle(cornerRadius: 5, style: .continuous)
-              .strokeBorder(.separator, lineWidth: 1)
+              .strokeBorder(SettingsTheme.cardStroke, lineWidth: 1)
           }
           // Same explicit frame as the drawn map: the blank state collapses
           // under `preferredContentSize` hosting exactly the same way.
@@ -348,10 +388,7 @@ struct PanelHealthView: View {
         // "Delete History…". Only `.insufficient` may say nothing was measured,
         // because that state IS a map with fewer than
         // `minimumSamplesForAnalysis` samples in it.
-        Text(verbatim: mapPlaceholder(summary, mode: surfaceMode))
-          .font(.callout)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
+        SettingsCaption(verbatim: mapPlaceholder(summary, mode: surfaceMode))
       }
     }
   }
@@ -510,31 +547,32 @@ struct PanelHealthView: View {
     if summary.confidence == .measured, let relative = summary.hottestRelative,
       let multiple = Self.multiplePhrase(relative)
     {
-      VStack(alignment: .leading, spacing: 10) {
-        Text("The hottest area")
-          .font(.subheadline.weight(.semibold))
+      SettingsCardSection(title: "The hottest area") {
+        VStack(alignment: .leading, spacing: 6) {
+          // The one number this whole feature is allowed to state: a measured
+          // ratio of a panel against itself. It is not a lifespan, a date or a
+          // score, and it must never grow into one.
+          HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(verbatim: multiple)
+              .font(.title2.weight(.semibold))
+              .monospacedDigit()
+              .foregroundStyle(SettingsTheme.titleColor)
+            Text("this display's average")
+              .foregroundStyle(SettingsTheme.bodyColor)
+          }
 
-        // The one number this whole feature is allowed to state: a measured
-        // ratio of a panel against itself. It is not a lifespan, a date or a
-        // score, and it must never grow into one.
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-          Text(verbatim: multiple)
-            .font(.title2.weight(.semibold))
-            .monospacedDigit()
-          Text("this display's average")
-            .foregroundStyle(.secondary)
-        }
+          if let region = Self.hottestIndex(summary.cells).map(Self.regionPhrase) {
+            SettingsCaption(verbatim: "Marked on the map, \(region).")
+          }
 
-        if let region = Self.hottestIndex(summary.cells).map(Self.regionPhrase) {
-          SettingsCaption(verbatim: "Marked on the map, \(region).")
-        }
-
-        // Past tense, deliberately. The snapshot behind this is up to a minute
-        // old, so "right now" is a claim the data cannot support even though
-        // the summary withholds the owner entirely once observation is off.
-        if let owner = summary.hottestOwner {
-          SettingsCaption(
-            verbatim: "\(owner) was on that part of the display at the last reading.")
+          // Past tense, deliberately. The snapshot behind this is up to a
+          // minute old, so "right now" is a claim the data cannot support even
+          // though the summary withholds the owner entirely once observation is
+          // off.
+          if let owner = summary.hottestOwner {
+            SettingsCaption(
+              verbatim: "\(owner) was on that part of the display at the last reading.")
+          }
         }
       }
     }
@@ -553,14 +591,26 @@ struct PanelHealthView: View {
   /// measured on the other side.
   @ViewBuilder private func ownersCard(_ summary: PanelHealthSummary) -> some View {
     let owners = summary.topOwnersByHours
-    VStack(alignment: .leading, spacing: 10) {
-      Text("Display time by app")
-        .font(.subheadline.weight(.semibold))
+    VStack(alignment: .leading, spacing: 6) {
+      SettingsCardSection(title: "Display time by app") {
+        ownerRows(owners)
+      }
 
+      // The figure is display-time, NOT how long the app was open: an app
+      // filling the display books an hour per hour, one covering a quarter
+      // books fifteen minutes. Saying "Ghostty was open for 3 hours" would be a
+      // claim this does not measure, so the caption states the weighting
+      // outright.
+      SettingsCaption(
+        "Weighted by how much of the display each app's windows covered, so this is not how long the app was open. Read from window positions and owner names only (never window titles, and never their contents), and only while the display is awake and undimmed."
+      )
+    }
+  }
+
+  @ViewBuilder private func ownerRows(_ owners: [(owner: String, hours: Double)]) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
       if owners.isEmpty {
-        Text("No data yet.")
-          .font(.callout)
-          .foregroundStyle(.secondary)
+        SettingsCaption("No data yet.")
       } else {
         // Index-keyed: the elements are tuples, which cannot be `Identifiable`,
         // and an owner name is not guaranteed unique across the list.
@@ -572,14 +622,15 @@ struct PanelHealthView: View {
           VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
               Text(verbatim: entry.owner)
+                .foregroundStyle(SettingsTheme.titleColor)
               Spacer(minLength: 0)
               Text(verbatim: Self.panelTimePhrase(entry.hours))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(SettingsTheme.bodyColor)
                 .monospacedDigit()
             }
             GeometryReader { geometry in
               Capsule()
-                .fill(.quaternary)
+                .fill(Color.white.opacity(0.08))
                 .overlay(alignment: .leading) {
                   if leader > 0 {
                     Capsule()
@@ -598,15 +649,6 @@ struct PanelHealthView: View {
           }
         }
       }
-
-      // The figure is display-time, NOT how long the app was open: an app
-      // filling the display books an hour per hour, one covering a quarter
-      // books fifteen minutes. Saying "Ghostty was open for 3 hours" would be a
-      // claim this does not measure, so the caption states the weighting
-      // outright.
-      SettingsCaption(
-        "Weighted by how much of the display each app's windows covered, so this is not how long the app was open. Read from window positions and owner names only (never window titles, and never their contents), and only while the display is awake and undimmed."
-      )
     }
   }
 
@@ -676,12 +718,21 @@ struct DisplayHealthWindowRoot: View {
         .id(key)
       } else {
         // One frame of a departed display's window before `close` lands;
-        // never a blank white sheet.
+        // never a blank white sheet. Neutral lighting: the display whose hue
+        // this window carried is the one that just left.
         Text("This display is not connected.")
-          .foregroundStyle(.secondary)
+          .foregroundStyle(SettingsTheme.bodyColor)
           .padding(40)
+          .background {
+            SettingsCanvas(
+              accent: SettingsAccent.neutral.accent,
+              secondary: SettingsAccent.neutral.secondary)
+          }
       }
     }
+    // Dark-only (SV2), belt to the window's own `darkAqua`: every colour in
+    // this window comes from the theme layer and none has a light answer.
+    .preferredColorScheme(.dark)
     .onChange(of: model.displays.map(\.display.persistenceKey), initial: true) { _, connected in
       if !connected.contains(key) {
         close()
@@ -705,25 +756,31 @@ struct DisplayHealthWindowRoot: View {
 
 /// Symbol AND text, never state by colour alone: the same rule the OLED Care
 /// pane's Safe Mode note follows, and the reason an inactive window (which
-/// draws every accent in grey) cannot make this unreadable.
+/// draws every accent in grey) cannot make this unreadable. The card is the
+/// settings window's notice chrome, so a state note here and one in the
+/// banner region read as the same kind of statement.
 private struct PanelHealthBanner: View {
   let symbol: String
   let title: Text
   let message: Text
 
   var body: some View {
-    HStack(alignment: .firstTextBaseline, spacing: 8) {
-      Image(systemName: symbol)
-        .foregroundStyle(.secondary)
-      VStack(alignment: .leading, spacing: 4) {
-        title.font(.subheadline.weight(.semibold))
-        message
-          .font(.callout)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
+    SettingsCard {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Image(systemName: symbol)
+          .foregroundStyle(SettingsTheme.bodyColor)
+        VStack(alignment: .leading, spacing: 4) {
+          title
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(SettingsTheme.titleColor)
+          message
+            .font(.callout)
+            .foregroundStyle(SettingsTheme.bodyColor)
+            .fixedSize(horizontal: false, vertical: true)
+        }
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 
@@ -762,14 +819,18 @@ struct PanelExposureMap: View {
             width: cellWidth, height: cellHeight
           ).insetBy(dx: 0.75, dy: 0.75)
           let path = Path(roundedRect: rect, cornerRadius: 2)
-          context.fill(path, with: .color(Color.primary.opacity(0.07)))
+          // Fixed white rather than `Color.primary`, for the ramp's own
+          // reason: every surface that draws this grid is dark by
+          // construction, and a cell that answered the system appearance
+          // would make one panel's history two different pictures.
+          context.fill(path, with: .color(Color.white.opacity(0.07)))
           if !blank, cells.indices.contains(index), cells[index] > 0 {
             context.fill(path, with: .color(PanelExposureScale.color(cells[index])))
           }
           if index == highlighted {
             context.stroke(
               Path(roundedRect: rect.insetBy(dx: -1, dy: -1), cornerRadius: 3),
-              with: .color(.primary), lineWidth: 1.5)
+              with: .color(.white), lineWidth: 1.5)
           }
         }
       }
@@ -801,7 +862,7 @@ struct PanelExposureLegend: View {
       Text("More lit")
     }
     .font(.caption)
-    .foregroundStyle(.secondary)
+    .foregroundStyle(SettingsTheme.faintColor)
   }
 }
 

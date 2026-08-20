@@ -42,6 +42,12 @@ final class DisplayHealthWindowPresenter {
       styleMask: [.titled, .closable, .miniaturizable],
       backing: .buffered, defer: false)
     window.title = "Display Health"
+    // Dark-only (SV2), on the WINDOW and not just in SwiftUI: the titlebar,
+    // the traffic lights and the AppKit-drawn controls inside (the display
+    // switcher, the lens picker) take their look from the window's
+    // appearance, and a light titlebar over the page's canvas is the seam
+    // this window is opened from settings to avoid.
+    window.appearance = NSAppearance(named: .darkAqua)
     // State restoration would resurrect the window at the next launch with
     // no display resolution having run, the unprompted-window defect class.
     window.isRestorable = false
