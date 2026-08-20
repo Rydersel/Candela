@@ -2255,7 +2255,10 @@ enum Regress {
       )
     }
     guard landed else {
-      let promised = promisedRows.map { "\($0)" } ?? "no header in the window said how many"
+      // A phrase that fits the noun slot in both renderings: the nil case is
+      // the Release-bundle one, which is the sentence a person is likeliest to
+      // read, and a clause substituted for a number makes it unreadable.
+      let promised = promisedRows.map { "\($0)" } ?? "an unstated number of"
       return setupMiss(
         "no complete dump carried a volume verdict other than unknown within 20 s of launching \(running.described): the newest dump holds \(rows.count) of \(promised) rows, over \(windowDumpRows) dump rows in a \(instrumentedLines)-line window. The launch dump reports every panel unknown by construction and the capabilities verdict lands after it, so the D24 pair was never observable. With no dump rows anywhere in the window, the likeliest cause is a Release bundle behind --debug-app: the dump is compiled out of Release entirely, which looks exactly like this. With rows in the window over an incomplete newest dump, the store had not finished flushing it"
       )
