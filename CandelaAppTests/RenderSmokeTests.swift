@@ -187,14 +187,20 @@ struct RenderSmokeTests {
   ///
   /// Width only: the hero sizes its own height, and pinning one would assert a
   /// layout rather than the fact that it produced pixels.
-  @Test func theDisplayHeroRenders() {
+  ///
+  /// Both variants, because they are different drawings and not a parameter of
+  /// one: the built-in draws `LaptopGlyph` and drops the volume row, so a
+  /// break in the laptop path is invisible to the external render.
+  @Test(arguments: [DisplayHeroView.Variant.external, .builtIn])
+  func theDisplayHeroRenders(variant: DisplayHeroView.Variant) {
     let model = TestFixtures.appModel()
     let state = TestFixtures.displayState(name: "Smoke Panel", persistenceKey: "smoke-panel")
-    let hero = DisplayHeroView(state: state)
+    let isBuiltIn = variant == .builtIn
+    let hero = DisplayHeroView(state: state, variant: variant)
       .environment(model)
-      .environment(\.settingsAccent, .display(isBuiltIn: false, ordinal: 0))
+      .environment(\.settingsAccent, .display(isBuiltIn: isBuiltIn, ordinal: 0))
       .frame(width: SettingsTheme.pageWidth)
-    expectPixels(render(hero), "DisplayHeroView")
+    expectPixels(render(hero), "DisplayHeroView, \(isBuiltIn ? "built-in" : "external")")
   }
 
   /// The built-in display's page, which grew a Display section of its own.

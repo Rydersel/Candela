@@ -721,11 +721,14 @@ struct DisplayHubView: View {
   private var resetCard: some View {
     SettingsCardSection {
       HStack {
-        // The window's destructive vocabulary (a red-tinted quiet button),
-        // which is what SO20 asked for in the grouped-form language: the button
-        // is still plain-weight at rest and the destructive ROLE is still on
-        // the alert's confirm button. The app-wide reset in General reads the
-        // same, so one act does not wear two looks.
+        // The window's destructive style is mandatory for a destructive action,
+        // so this button wears red at rest: tinted fill, tinted stroke, medium
+        // weight. SO20 said plain at rest, and that clause is presentation,
+        // which this redesign supersedes; what survives of it is the part that
+        // was never about looks, the destructive ROLE staying on the alert's
+        // confirm button rather than on the button that only opens the alert.
+        // The app-wide reset in General reads the same, so one act does not
+        // wear two looks.
         // Disabled only WHILE a reset runs (a second or two), never as a state
         // the page can get stuck in: the latch is released by a `defer` on the
         // reset's own task.

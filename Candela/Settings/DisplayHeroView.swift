@@ -332,7 +332,10 @@ struct DisplayHeroView: View {
           .foregroundStyle(SettingsTheme.titleColor)
           .accessibilityHidden(true)
         Spacer(minLength: 16)
-        control().frame(maxWidth: sliderWidth)
+        // Fixed, never a maximum: the level column is part of the hero's
+        // composition, and a slider that took every point the window gained
+        // would strand the label at the far edge of a widening card.
+        control().frame(width: sliderWidth)
       }
       if let caption {
         Text(verbatim: caption)
