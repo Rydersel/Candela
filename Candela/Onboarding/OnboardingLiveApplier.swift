@@ -13,8 +13,8 @@ import Observation
 /// OWN Keep and Revert from the coordinator's observable preview state and
 /// answers with `confirm`/`revert` directly, carrying the exact preview it
 /// rendered: an answer can only resolve what the user was looking at. The
-/// preview it starts therefore carries `.guidedSetup`, the surface that takes
-/// every other one off screen (DM11).
+/// preview it starts therefore carries `.guidedSetup`, the surface no other
+/// one answers for (DM11).
 ///
 /// This object reports into the model (`applyCountdownTicked`, `applyKept`,
 /// `applyReverted`, `applyFailed`) and owns no meaning of its own; the model
@@ -109,10 +109,11 @@ final class OnboardingLiveApplier {
     answerInFlight = false
     requestedAnswerBeforePreview = nil
     // This flow OWNS the answer (DM11): the Setup page renders the countdown
-    // and both buttons itself, so every shipped surface stands down for
+    // and both buttons itself, so no other surface offers an ANSWER for
     // `.guidedSetup`. The floating confirmation window is not presented and
     // the settings banner renders nothing, including in a background settings
-    // window sitting on this display's page. Ownership is the guarantee;
+    // window sitting on this display's page; the menu-bar panel keeps its
+    // passive waiting line, which asks for nothing. Ownership is the guarantee;
     // the session's stale-answer refusal stays what it always was, a backstop
     // rather than the thing keeping two button rows from disagreeing.
     let selection = ResolutionSelection(

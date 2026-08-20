@@ -52,9 +52,10 @@ final class DisplayModeCoordinator {
   /// from the settings window while that window was key (the caller reads its
   /// own `controlActiveState` at the click). `.guidedSetup` iff the guided
   /// setup flow started the apply: that window draws its own Keep and Revert
-  /// out of the observable preview state, so it owns the answer and every
-  /// shipped surface stands down for it, the settings banner included, which
-  /// renders nothing at all rather than a passive line. Everything else, the
+  /// out of the observable preview state, so every other surface gives the
+  /// ANSWER up and shows passive text at most: the menu-bar panel keeps its
+  /// waiting caption, and the settings banner alone renders nothing at all
+  /// rather than a passive line. Everything else, the
   /// panel and a settings surface in a non-key window included, is answered by
   /// the floating `ConfirmationPanel`, which then does not show while another
   /// owner holds the answer. A non-owning surface renders passive text at most.
