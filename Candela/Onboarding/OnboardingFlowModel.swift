@@ -8,7 +8,14 @@ enum OnboardingCommit: Equatable {
   case rename(displayKey: String, name: String)
   case applySize(displayKey: String, looksLikeWidth: Int, looksLikeHeight: Int)
   case enrollInCare(displayKey: String)
+  /// A re-run's off path: a display that was enrolled before this run and is
+  /// no longer wanted in OLED care.
+  case unenrollFromCare(displayKey: String)
   case enableMeasuredTelemetry(displayKey: String)
+  /// The measurement choice turned back down to estimated. Emitted only when
+  /// the harvested pref says measured, so a first run's estimated choice writes
+  /// nothing and absent keeps meaning "no decision".
+  case disableMeasuredTelemetry(displayKey: String)
   case setLaunchAtLogin(Bool)
 }
 
@@ -420,8 +427,18 @@ final class OnboardingFlowModel {
 
   private func commitCurrentPage() {
     switch currentPage {
-    case .welcome, .accessibility, .noDisplays, .oledSelect:
+    case .welcome, .accessibility, .noDisplays:
       break
+    case .oledSelect:
+      // Un-enrollment is split across two pages on purpose. A deselect can be
+      // the very thing that takes the care page out of the plan, so the care
+      // arm would never run for it; this arm owns the displays that left the
+      // designation, and the care arm owns the ones still in it with their
+      // toggle off. The two sets cannot overlap, so nothing is written twice.
+      for entry in environment.displays
+      where entry.enrolledInCare && !designatedOleds.contains(entry.persistenceKey) {
+        onCommit(.unenrollFromCare(displayKey: entry.persistenceKey))
+      }
     case .detection:
       for (key, newName) in renames {
         let original = display(forKey: key)?.name
@@ -448,10 +465,20 @@ final class OnboardingFlowModel {
         break
       }
     case .oledCare:
-      for key in designatedOleds.sorted() where careEnabled.contains(key) {
-        onCommit(.enrollInCare(displayKey: key))
-        if measuredTelemetry {
-          onCommit(.enableMeasuredTelemetry(displayKey: key))
+      for key in designatedOleds.sorted() {
+        let harvested = display(forKey: key)
+        if careEnabled.contains(key) {
+          onCommit(.enrollInCare(displayKey: key))
+          if measuredTelemetry {
+            onCommit(.enableMeasuredTelemetry(displayKey: key))
+          } else if harvested?.measuredTelemetry == true {
+            // Differs-only, against the harvested pref rather than the flow's
+            // default: a first run that picks estimated writes nothing, so an
+            // absent key keeps meaning "no decision made yet".
+            onCommit(.disableMeasuredTelemetry(displayKey: key))
+          }
+        } else if harvested?.enrolledInCare == true {
+          onCommit(.unenrollFromCare(displayKey: key))
         }
       }
     case .finish:

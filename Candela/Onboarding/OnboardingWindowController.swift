@@ -159,9 +159,25 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         DisplayPrefWriter(persistenceKey: key, actions: actions)
           .write(.oledCareEnrolled) { $0.oledCareEnrolled = true }
       },
+      // The enrollment toggle's own write, byte for byte. Its pref fan-out
+      // already reconciles enrollment and drops the display's state, so there
+      // is deliberately no teardown call here. The measurement pref is left
+      // alone for the reason Settings leaves it alone: a later re-enrollment
+      // should come back to the choice the user made, not to the default.
+      unenrollFromCare: { key in
+        DisplayPrefWriter(persistenceKey: key, actions: actions)
+          .write(.oledCareEnrolled) { $0.oledCareEnrolled = false }
+      },
       enableMeasuredTelemetry: { key in
         DisplayPrefWriter(persistenceKey: key, actions: actions)
           .write(.oledTelemetry) { $0.oledTelemetry = true }
+      },
+      // The measurement toggle's setter minus the branch it gates: that
+      // setter asks for Screen Recording only when turning measurement ON, so
+      // switching back to estimated requests no access at all.
+      disableMeasuredTelemetry: { key in
+        DisplayPrefWriter(persistenceKey: key, actions: actions)
+          .write(.oledTelemetry) { $0.oledTelemetry = false }
       },
       isLoginItemEnabled: { loginItem.isEnabled },
       setLaunchAtLogin: { loginItem.setEnabled($0) },

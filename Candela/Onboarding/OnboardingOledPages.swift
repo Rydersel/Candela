@@ -146,34 +146,22 @@ struct OnboardingOledCarePage: View {
     .onAppear { model.refreshScreenRecordingGranted() }
   }
 
-  @ViewBuilder
+  /// The same toggle for every designated display, enrolled or not: a display
+  /// enrolled before this run arrives with it on, and turning it off is the
+  /// flow's un-enrollment.
   private func protectRow(for display: OnboardingDisplayEntry) -> some View {
     let key = display.persistenceKey
-    if display.enrolledInCare {
-      // Enrolled before this run: unchecking a toggle here would write
-      // nothing (the commit only enrolls, it never disenrolls), so the row
-      // states the fact instead of offering a dead control.
-      VStack(alignment: .leading, spacing: 2) {
-        Text(model.displayName(forKey: key))
-          .foregroundStyle(OnboardingStyle.bodyColor)
-        Text("Already protected. Manage it in Settings.")
-          .font(.caption)
-          .foregroundStyle(OnboardingStyle.faintColor)
+    return Toggle(isOn: Binding(
+      get: { model.careEnabled.contains(key) },
+      set: { on in
+        if on { model.careEnabled.insert(key) } else { model.careEnabled.remove(key) }
       }
-      .accessibilityElement(children: .combine)
-    } else {
-      Toggle(isOn: Binding(
-        get: { model.careEnabled.contains(key) },
-        set: { on in
-          if on { model.careEnabled.insert(key) } else { model.careEnabled.remove(key) }
-        }
-      )) {
-        Text("Protect \(model.displayName(forKey: key))")
-          .foregroundStyle(OnboardingStyle.bodyColor)
-      }
-      .toggleStyle(.switch)
-      .tint(accent)
+    )) {
+      Text("Protect \(model.displayName(forKey: key))")
+        .foregroundStyle(OnboardingStyle.bodyColor)
     }
+    .toggleStyle(.switch)
+    .tint(accent)
   }
 
   /// OB5: measured is the recommended path; the estimate is the honest
