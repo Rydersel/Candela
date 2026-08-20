@@ -65,6 +65,11 @@ enum SettingsRegistry {
         id: id, title: "Keyboard", symbol: "keyboard", tint: .indigo,
         content: { AnyView(KeyboardPane()) }
       )
+    case .updates:
+      SettingsPaneDescriptor(
+        id: id, title: "Updates", symbol: "arrow.triangle.2.circlepath", tint: .green,
+        content: { AnyView(UpdatesPane()) }
+      )
     case .about:
       SettingsPaneDescriptor(
         id: id, title: "About", symbol: "info.circle", tint: .gray,
