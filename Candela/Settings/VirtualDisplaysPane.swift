@@ -18,6 +18,7 @@ struct VirtualDisplaysPane: View {
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.settingsAccent) private var lighting
   /// Which slot the controls below describe, chosen on the tile row the way
   /// the arrangement map chooses a display. nil until something is added or
   /// clicked; the effective selection falls back to the first added slot.
@@ -26,12 +27,13 @@ struct VirtualDisplaysPane: View {
   /// The selected slot's create failure as RENDERED, mirroring
   /// `AppModel.virtualSlotIssues` one update behind. The model writes that map
   /// from the convergence pass, and neither placement of a keyed `.animation`
-  /// fades a `Form` row symmetrically (measured 2026-08-17): on a `Group`
-  /// wrapping the conditional row it animates nothing in either direction, and on
-  /// an always-present container inside the row the child fades IN and then SNAPS
-  /// out. That snap-out asymmetry is why hanging the animation on the container
-  /// is not enough; the mirror puts the sentence's arrival AND departure inside
-  /// one transaction.
+  /// faded the sentence symmetrically when this pane was a grouped `Form`
+  /// (measured 2026-08-17): on a `Group` wrapping the conditional row it
+  /// animated nothing in either direction, and on an always-present container
+  /// inside the row the child faded IN and then SNAPPED out. The card layout is
+  /// not that container, but the mirror stays: it puts the sentence's arrival
+  /// AND departure inside one transaction, which is the property worth having
+  /// whatever the row is made of.
   ///
   /// It carries the SLOT it is about, and the row renders nothing unless the two
   /// agree: one value serves whichever slot is selected, and without the slot a
@@ -56,12 +58,23 @@ struct VirtualDisplaysPane: View {
     return defined.first
   }
 
+  /// What a virtual display IS, which is the page's opening sentence. Absent
+  /// when the feature is unavailable: the quiet card below is then the whole
+  /// answer, and describing a capability this Mac does not have first is the
+  /// wrong order to read it in.
+  private static let capabilitySentence =
+    "A virtual display behaves like a connected display: windows move to it, it appears in arrangement, and it can be shared or recorded."
+
   var body: some View {
     let _ = model.prefsRevision
     let defined = definedSlots
-    Form {
-      if model.virtualDisplays.isAvailable {
-        introSection
+    let available = model.virtualDisplays.isAvailable
+    SettingsPageScaffold {
+      SettingsPageHeader(
+        title: "Virtual Displays",
+        subtitle: available ? Self.capabilitySentence : nil)
+      if available {
+        if model.isSafeMode { safeModeCard }
         selectorSection(defined: defined)
         if let slot = effectiveSelection(in: defined) {
           slotSection(slot)
@@ -74,36 +87,26 @@ struct VirtualDisplaysPane: View {
             .id(slot)
         }
       } else {
-        unavailableSection
-      }
-    }
-    .formStyle(.grouped)
-  }
-
-  private var introSection: some View {
-    Section {
-      SettingRow(
-        "A virtual display behaves like a connected display: windows move to it, it appears in arrangement, and it can be shared or recorded."
-      ) {
-        Text("Up to three virtual displays can run at once.")
-      }
-      if model.isSafeMode {
-        SettingRow {
-          Text("Safe Mode session: displays marked to come back at launch were not recreated. Create still works here.")
-            .foregroundStyle(.secondary)
-        }
+        unavailableCard
       }
     }
   }
 
-  private var unavailableSection: some View {
+  private var safeModeCard: some View {
+    SettingsCardSection {
+      SettingsCaption(
+        "Safe Mode session: displays marked to come back at launch were not recreated. Create still works here."
+      )
+    }
+  }
+
+  private var unavailableCard: some View {
     // VD16: the class family resolved to nothing on this macOS, so every
     // entry point is inert and the pane says why instead of showing dead
-    // controls. No section header: the pane's toolbar title already reads
-    // "Virtual Displays", and repeating it is the duplicated-title defect.
-    Section {
-      Text("Virtual displays are unavailable on this version of macOS.")
-        .foregroundStyle(.secondary)
+    // controls. No kicker: the page header already reads "Virtual Displays",
+    // and repeating it is the duplicated-title defect.
+    SettingsCardSection {
+      SettingsCaption("Virtual displays are unavailable on this version of macOS.")
     }
   }
 
@@ -111,28 +114,48 @@ struct VirtualDisplaysPane: View {
 
   /// One tile per ADDED display, the arrangement map's visual language: a
   /// running slot is a purple (virtual) tile carrying its achieved size, a
-  /// stopped one an empty grey tile. A dashed Add tile follows while free
-  /// slots remain. Real buttons, so the keyboard and VoiceOver can reach
-  /// every tile the way the arrangement canvas's tiles can be reached.
+  /// stopped one an empty grey tile. A ghosted Add tile follows while free
+  /// slots remain, and stands alone at hero size when nothing has been added
+  /// yet. Real buttons, so the keyboard and VoiceOver can reach every tile the
+  /// way the arrangement canvas's tiles can be reached.
   private func selectorSection(defined: [Int]) -> some View {
-    Section {
-      HStack(spacing: 14) {
-        let selection = effectiveSelection(in: defined)
-        ForEach(defined, id: \.self) { slot in
-          slotTile(slot, isSelected: selection == slot)
+    SettingsCardSection {
+      VStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 14) {
+          let selection = effectiveSelection(in: defined)
+          ForEach(defined, id: \.self) { slot in
+            slotTile(slot, isSelected: selection == slot)
+          }
+          if let free = VirtualDisplayIdentity.userSlotRange.first(where: { !defined.contains($0) }) {
+            addTile(slot: free, isHero: defined.isEmpty)
+          }
         }
-        if let free = VirtualDisplayIdentity.userSlotRange.first(where: { !defined.contains($0) }) {
-          addTile(slot: free, isFirst: defined.isEmpty)
-        }
+        Text(verbatim: Self.capacityCaption(definedCount: defined.count))
+          .font(.caption)
+          .foregroundStyle(SettingsTheme.faintColor)
+          .multilineTextAlignment(.center)
+          .fixedSize(horizontal: false, vertical: true)
       }
       .frame(maxWidth: .infinity, alignment: .center)
       .padding(.vertical, 6)
     }
   }
 
+  /// The tile row's one line about what is left, told about SLOTS rather than
+  /// about running displays: a slot with a stopped display in it is still spent.
+  static func capacityCaption(definedCount: Int) -> String {
+    if definedCount == 0 {
+      return "Nothing created yet. Up to three virtual displays can run at once."
+    }
+    if definedCount >= VirtualDisplayIdentity.userSlotRange.count {
+      return "All three slots are in use. Remove one to create a different display."
+    }
+    return "Up to three virtual displays can run at once."
+  }
+
   /// Adds the lowest free slot: definition with the slot defaults, created
   /// immediately, and selected so its controls appear below.
-  @ViewBuilder private func addTile(slot: Int, isFirst: Bool) -> some View {
+  @ViewBuilder private func addTile(slot: Int, isHero: Bool) -> some View {
     Button {
       var definition = prefs.virtualSlot(slot)
       definition.defined = true
@@ -146,17 +169,9 @@ struct VirtualDisplaysPane: View {
         [.virtualSlotDefined, .virtualSlotConfigured, .virtualSlotUUID], virtualSlot: slot
       )
     } label: {
-      VStack(spacing: 4) {
-        Image(systemName: "plus")
-        Text("Add Display").font(.system(size: 10))
-      }
-      .foregroundStyle(.secondary)
-      .frame(width: isFirst ? 135 : 96, height: 76)
-      .overlay(
-        RoundedRectangle(cornerRadius: 5)
-          .strokeBorder(.separator, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-      )
-      .contentShape(RoundedRectangle(cornerRadius: 5))
+      GhostDisplayTile(accent: lighting.accent, isHero: isHero)
+        .frame(width: isHero ? 232 : 96, height: isHero ? 144 : 76)
+        .contentShape(Rectangle())
     }
     .buttonStyle(.plain)
     .accessibilityLabel(Text("Add a virtual display"))
@@ -219,16 +234,21 @@ struct VirtualDisplaysPane: View {
   private func slotSection(_ slot: Int) -> some View {
     let definition = prefs.virtualSlot(slot)
     let live = liveHandle(slot: slot)
-    Section("Display \(slot)") {
+    SettingsCardSection(title: "Display \(slot)") {
       statusRow(slot: slot, live: live)
+      SettingsCardDivider()
       nameRow(slot: slot)
+      SettingsCardDivider()
       sizeRows(slot: slot, definition: definition)
+      SettingsCardDivider()
       SettingRow("The display is created again the next time \(AppInfo.productName) opens.") {
         Toggle("Come Back at Launch", isOn: binding(slot: slot,
                                                     name: .virtualSlotRecreateAtLaunch,
                                                     keyPath: \.recreateAtLaunch))
+          .themedSwitch()
           .prefIdentifier(.virtualSlotRecreateAtLaunch, slot: slot)
       }
+      SettingsCardDivider()
       actionRow(slot: slot, definition: definition, live: live)
     }
   }
@@ -236,51 +256,56 @@ struct VirtualDisplaysPane: View {
   @ViewBuilder
   private func statusRow(slot: Int, live: VirtualDisplayHandle?) -> some View {
     let busy = model.virtualSlotBusy.contains(slot)
-    // The four states below are a branch swap around a `ProgressView`, not an
-    // insert, so this row is left instant: fading a spinner into a sentence and
-    // back is the one shape the house voice has no use for.
-    HStack {
-      Text("Status")
-      Spacer()
-      if busy {
-        ProgressView().controlSize(.small)
-        Text("Working").foregroundStyle(.secondary)
-      } else if live != nil, let achieved = model.virtualDisplays.achievedMode(slot: slot) {
-        // ACHIEVED state, never the spec's claim: the Retina suffix appears
-        // only when the 2x mode actually engaged. From the host's verdict
-        // recorded at creation rather than a live read, which this process
-        // usually cannot perform on a display it created. `String(_:)`
-        // verbatim, or interpolation groups the digits (1,920 x 1,080).
-        Text("Running at \(String(achieved.width)) x \(String(achieved.height))\(achieved.hiDPI ? " (Retina)" : "")")
-          .foregroundStyle(.secondary)
-      } else if live != nil {
-        Text("Running").foregroundStyle(.secondary)
-      } else {
-        Text("Not created").foregroundStyle(.secondary)
+    VStack(alignment: .leading, spacing: 6) {
+      // The four states below are a branch swap around a `ProgressView`, not an
+      // insert, so this row is left instant: fading a spinner into a sentence and
+      // back is the one shape the house voice has no use for.
+      HStack {
+        Text("Status")
+        Spacer()
+        if busy {
+          ProgressView().controlSize(.small)
+          Text("Working").foregroundStyle(SettingsTheme.bodyColor)
+        } else if live != nil, let achieved = model.virtualDisplays.achievedMode(slot: slot) {
+          // ACHIEVED state, never the spec's claim: the Retina suffix appears
+          // only when the 2x mode actually engaged. From the host's verdict
+          // recorded at creation rather than a live read, which this process
+          // usually cannot perform on a display it created. `String(_:)`
+          // verbatim, or interpolation groups the digits (1,920 x 1,080).
+          Text("Running at \(String(achieved.width)) x \(String(achieved.height))\(achieved.hiDPI ? " (Retina)" : "")")
+            .foregroundStyle(SettingsTheme.bodyColor)
+        } else if live != nil {
+          Text("Running").foregroundStyle(SettingsTheme.bodyColor)
+        } else {
+          Text("Not created").foregroundStyle(SettingsTheme.bodyColor)
+        }
+      }
+      if let shown = shownIssue, shown.slot == slot, let issue = shown.failure {
+        // The last attempt's failure, in words: a create that fails must not
+        // be indistinguishable from a click that was ignored.
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+          Image(systemName: "exclamationmark.triangle.fill")
+          Text(verbatim: Self.sentence(for: issue))
+        }
+        .font(.callout)
+        .foregroundStyle(SettingsTheme.dangerTint)
+        .fixedSize(horizontal: false, vertical: true)
+        .transition(.opacity)
       }
     }
-    // The failure row's mirror hooks hang on the status row, which is always
-    // present and sits directly above it: hooks on the failure row itself would
-    // only exist while the failure does, so nothing would be watching for it to
-    // arrive. The appear sync is un-animated, and it re-runs on a slot change
-    // because `slotSection` carries the slot as its identity.
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.vertical, 6)
+    .foregroundStyle(SettingsTheme.titleColor)
+    // The failure sentence's mirror hooks hang on the status row, which is
+    // always present and sits directly above it: hooks on the sentence itself
+    // would only exist while the failure does, so nothing would be watching for
+    // it to arrive. The appear sync is un-animated, and it re-runs on a slot
+    // change because `slotSection` carries the slot as its identity.
     .onAppear { shownIssue = ShownIssue(slot: slot, failure: visibleIssue(slot: slot)) }
     .onChange(of: visibleIssue(slot: slot)) { _, issue in
       withAnimation(Motion.notice(reduceMotion: reduceMotion)) {
         shownIssue = ShownIssue(slot: slot, failure: issue)
       }
-    }
-    if let shown = shownIssue, shown.slot == slot, let issue = shown.failure {
-      // The last attempt's failure, in words: a create that fails must not
-      // be indistinguishable from a click that was ignored.
-      HStack(alignment: .firstTextBaseline, spacing: 4) {
-        Image(systemName: "exclamationmark.triangle.fill")
-        Text(verbatim: Self.sentence(for: issue))
-      }
-      .font(.callout)
-      .foregroundStyle(.orange)
-      .fixedSize(horizontal: false, vertical: true)
-      .transition(.opacity)
     }
   }
 
@@ -361,25 +386,34 @@ struct VirtualDisplaysPane: View {
       $0.width == definition.width && $0.height == definition.height
     }
     SettingRow("Size changes apply when the display is next created.") {
-      Picker("Size", selection: Binding(
-        get: { presetIndex ?? -1 },
-        set: { newIndex in
-          // The Custom tag is a read-only state of the picker, not a choice:
-          // typing in the fields below is what makes a size custom.
-          guard newIndex >= 0 else { return }
-          var updated = prefs.virtualSlot(slot)
-          updated.width = Self.presets[newIndex].width
-          updated.height = Self.presets[newIndex].height
-          prefs.setVirtualSlot(updated, slot: slot)
-          actions.prefsDidChange([.virtualSlotWidth, .virtualSlotHeight])
+      HStack {
+        Text("Size")
+        Spacer()
+        Picker("Size", selection: Binding(
+          get: { presetIndex ?? -1 },
+          set: { newIndex in
+            // The Custom tag is a read-only state of the picker, not a choice:
+            // typing in the fields below is what makes a size custom.
+            guard newIndex >= 0 else { return }
+            var updated = prefs.virtualSlot(slot)
+            updated.width = Self.presets[newIndex].width
+            updated.height = Self.presets[newIndex].height
+            prefs.setVirtualSlot(updated, slot: slot)
+            actions.prefsDidChange([.virtualSlotWidth, .virtualSlotHeight])
+          }
+        )) {
+          ForEach(Self.presets.indices, id: \.self) { index in
+            Text(Self.presets[index].label).tag(index)
+          }
+          Text("Custom").tag(-1)
         }
-      )) {
-        ForEach(Self.presets.indices, id: \.self) { index in
-          Text(Self.presets[index].label).tag(index)
-        }
-        Text("Custom").tag(-1)
+        // The row draws the label, so the picker is the pop-up alone; the
+        // hidden label is still what VoiceOver reads it by.
+        .labelsHidden()
+        .fixedSize()
       }
     }
+    SettingsCardDivider()
     SettingRow {
       HStack {
         Text("Width and Height")
@@ -387,15 +421,17 @@ struct VirtualDisplaysPane: View {
         numberField(slot: slot, label: "Width", name: .virtualSlotWidth,
                     get: { $0.width }, set: { $0.width = $1 })
           .prefIdentifier(.virtualSlotWidth, slot: slot)
-        Text("x").foregroundStyle(.secondary)
+        Text("x").foregroundStyle(SettingsTheme.faintColor)
         numberField(slot: slot, label: "Height", name: .virtualSlotHeight,
                     get: { $0.height }, set: { $0.height = $1 })
           .prefIdentifier(.virtualSlotHeight, slot: slot)
       }
     }
+    SettingsCardDivider()
     SettingRow("Text renders at double resolution when the display is next created.") {
       Toggle("Retina (HiDPI)", isOn: binding(slot: slot,
                                              name: .virtualSlotHiDPI, keyPath: \.hiDPI))
+        .themedSwitch()
         .prefIdentifier(.virtualSlotHiDPI, slot: slot)
     }
   }
@@ -433,18 +469,26 @@ struct VirtualDisplaysPane: View {
         // Create and Apply are the same write through the same path and are
         // never on screen together, so they share one identifier.
         Button("Create Display") { setConfigured(true, slot: slot) }
+          .buttonStyle(SettingsPrimaryButtonStyle())
           .accessibilityIdentifier("action.slotApply.\(slot)")
       } else if drifted {
         // VD1/VD17: the apply path is destroy-and-recreate under the same
         // slot, and the button says what will happen rather than doing it
         // on the field edit.
         Button("Apply and Recreate") { setConfigured(true, slot: slot) }
+          .buttonStyle(SettingsPrimaryButtonStyle())
           .accessibilityIdentifier("action.slotApply.\(slot)")
       }
+      Spacer(minLength: 16)
       Button("Remove Display") { remove(slot: slot) }
+        .buttonStyle(SettingsDangerButtonStyle())
         .accessibilityIdentifier("action.slotRemove.\(slot)")
     }
+    .padding(.vertical, 8)
     .disabled(busy)
+    // A custom `ButtonStyle` draws the same whether or not it is enabled, so
+    // the dimming that says "not now" has to be asked for.
+    .opacity(busy ? 0.5 : 1)
   }
 
   private func setConfigured(_ configured: Bool, slot: Int) {
@@ -490,5 +534,47 @@ struct VirtualDisplaysPane: View {
         actions.prefDidChange(name)
       }
     )
+  }
+}
+
+/// The display that is not there yet: a dashed outline with a plus, tinted by
+/// the destination accent so it reads as an invitation rather than as an error
+/// state. At hero size it stands on the glyph's foot, which is what makes an
+/// empty page read as a stage with nothing on it yet; beside real tiles it is
+/// a face alone, so the row stays a row.
+private struct GhostDisplayTile: View {
+  var accent: Color
+  var isHero: Bool
+
+  var body: some View {
+    GeometryReader { proxy in
+      let bounds = proxy.size
+      let standHeight = isHero ? bounds.height * 0.11 : 0
+      let baseHeight = isHero ? 3.0 : 0
+      let shape = RoundedRectangle(cornerRadius: isHero ? 12 : 6, style: .continuous)
+      VStack(spacing: 0) {
+        ZStack {
+          shape.fill(accent.opacity(0.06))
+          shape.strokeBorder(
+            accent.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [7, 6]))
+          VStack(spacing: isHero ? 8 : 3) {
+            Image(systemName: "plus")
+              .font(.system(size: isHero ? 30 : 16, weight: .light))
+            Text("Add Display")
+              .font(.system(size: isHero ? 13 : 10))
+          }
+          .foregroundStyle(accent.opacity(0.8))
+        }
+        .frame(height: max(1, bounds.height - standHeight - baseHeight))
+        if isHero {
+          Rectangle()
+            .fill(accent.opacity(0.24))
+            .frame(width: 14, height: standHeight)
+          Capsule()
+            .fill(accent.opacity(0.2))
+            .frame(width: bounds.width * 0.24, height: baseHeight)
+        }
+      }
+    }
   }
 }
