@@ -40,10 +40,34 @@ struct CheckupReportTests {
   }
 
   @Test func canonicalEncodingIsStableAcrossKeyOrder() throws {
-    let a = try CheckupReportEnvelope.canonicalData(sample())
-    let b = try CheckupReportEnvelope.canonicalData(sample())
+    func report(showingKeysInsertedAs order: [String]) -> CheckupReport {
+      var showings: [String: Int] = [:]
+      for key in order { showings[key] = 1 }
+      var report = sample()
+      report.showings = showings
+      return report
+    }
+    let a = try CheckupReportEnvelope.canonicalData(
+      report(showingKeysInsertedAs: ["field.black", "field.red", "field.green", "field.blue"]))
+    let b = try CheckupReportEnvelope.canonicalData(
+      report(showingKeysInsertedAs: ["field.blue", "field.green", "field.red", "field.black"]))
     #expect(a == b)
-    #expect(!String(decoding: a, as: UTF8.self).contains("\n"))
+    let text = String(decoding: a, as: UTF8.self)
+    #expect(!text.contains(": "))
+    #expect(!text.contains(", "))
+    #expect(!text.contains("\n"))
+  }
+
+  @Test func completionEncodesToTheShippedSchemaShape() throws {
+    let incompleteData = try JSONEncoder().encode(CheckupCompletion.incomplete(reason: "cable"))
+    #expect(String(decoding: incompleteData, as: UTF8.self) == "{\"incomplete\":{\"reason\":\"cable\"}}")
+    let completeData = try JSONEncoder().encode(CheckupCompletion.complete)
+    #expect(String(decoding: completeData, as: UTF8.self) == "{\"complete\":{}}")
+
+    let decodedIncomplete = try JSONDecoder().decode(CheckupCompletion.self, from: incompleteData)
+    #expect(decodedIncomplete == .incomplete(reason: "cable"))
+    let decodedComplete = try JSONDecoder().decode(CheckupCompletion.self, from: completeData)
+    #expect(decodedComplete == .complete)
   }
 
   @Test func summaryCountsByVerdictAndDemonstratesSomething() {
