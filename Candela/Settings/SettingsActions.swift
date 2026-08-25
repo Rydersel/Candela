@@ -24,6 +24,11 @@ final class SettingsActions {
   /// AppKit island the views cannot see, wired by `StatusItemController` at
   /// launch. The argument is the display's persistence key.
   @ObservationIgnored var openDisplayHealth: (String) -> Void = { _ in }
+  /// Opens (or re-focuses) the checkup window (CK28). A closure for
+  /// `openDisplayHealth`'s reason: the window is an AppKit island the panes
+  /// cannot see, wired by `StatusItemController` at launch. No argument, since
+  /// the flow picks its own target.
+  @ObservationIgnored var openCheckup: () -> Void = {}
   /// Cross-pane navigation for the care cross-links (SC4, SC6): a pane that
   /// points at another destination (OLED Care to Health, Protection to a
   /// display's page) changes the sidebar selection through this, never by

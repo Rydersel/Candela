@@ -1691,6 +1691,50 @@ final class OledCareCoordinator {
     unsavedExposureKeys.insert(key)
   }
 
+  // MARK: - The checkup's bookings
+
+  /// CK17: every checkup showing is booked to this display's exposure record
+  /// with its on-time. A field is one flat luminance over the whole panel, so
+  /// the booking is a uniform grid.
+  ///
+  /// The sampling path's guard shape without its `telemetryEnabled` clause and
+  /// without its dim/mirror qualification: those two ask whether a CAPTURE
+  /// would describe the glass, and a checkup does not capture anything. It knows
+  /// what it put on the panel, and the panel wore it whether or not this display
+  /// is measuring, so declining to book it would leave the wear off the ledger.
+  ///
+  /// The grid is already in panel space and every cell holds the same value, so
+  /// the re-bin is exact under any transform; the live one is preferred anyway,
+  /// and the stand-in below is only reached for a display nothing has resolved
+  /// an ID for.
+  func bookCheckupShowing(identityKey key: String, luminance: Double, seconds: TimeInterval) {
+    guard seconds.isFinite, seconds > 0 else { return }
+    let transform = checkupBookingTransform(for: key)
+    var accumulator = exposureAccumulator(for: key)
+    accumulator.accumulate(
+      displayGrid: CheckupExposureBooking.panelGrid(luminance: luminance),
+      cols: PanelGrid.cols, rows: PanelGrid.rows, through: transform,
+      elapsed: seconds, at: Date())
+    accumulators[key] = accumulator
+    unsavedExposureKeys.insert(key)
+    log.info("""
+    checkup showing booked: \(key, privacy: .public) \(luminance, privacy: .public) \
+    \(seconds, privacy: .public)s
+    """)
+  }
+
+  /// The enrolled display's own transform where there is one, then the live
+  /// display list, then a stand-in whose size is never read: `panelNativeGrid`
+  /// works in normalized coordinates, so only the rotation can change an answer
+  /// and a uniform grid is invariant under all four.
+  private func checkupBookingTransform(for key: String) -> PanelSpaceTransform {
+    let id = states[key]?.lastDisplayID
+      ?? model?.allControlledStates.first { $0.display.persistenceKey == key }?.id
+    if let id, let transform = Self.transform(telemetryTarget(for: id)) { return transform }
+    return PanelSpaceTransform(
+      displaySize: CGSize(width: PanelGrid.cols, height: PanelGrid.rows), rotation: .standard)
+  }
+
   // MARK: - Exposure persistence
 
   /// Restored from disk on first touch and memoised, `hoursTracker(for:)`'s
