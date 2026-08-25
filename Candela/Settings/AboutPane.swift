@@ -30,10 +30,10 @@ struct AboutPane: View {
       // Directly under the version it updates: the hero states which build is
       // running, and this states when it last looked for a newer one.
       SettingsCardSection(title: "Software Update") {
-        // The caption is the row's, not hand-attached to the button:
-        // `SettingRow` republishes it as the control's accessibility hint
-        // (contract 3), which the standalone lockup could not do.
-        SettingRow(caption: SettingsCaption(verbatim: checkNowLine)) {
+        // The sentence is the row's, not hand-attached to the button:
+        // `SettingsActionRow` republishes it as the control's accessibility
+        // hint (contract 3), which the standalone lockup could not do.
+        SettingsActionRow(verbatim: checkNowLine) {
           Button("Check for Updates…") { updater.checkForUpdates() }
             .buttonStyle(SettingsPrimaryButtonStyle())
             .disabled(!updater.canCheckForUpdates)
@@ -50,13 +50,16 @@ struct AboutPane: View {
         SettingsRowNote("\(AppInfo.productName) never installs an update without asking first.")
       }
 
-      SettingsCardSection {
+      // Titled rather than the bare card it was. The page's other three groups
+      // carry a kicker, and the untitled one broke the column's rhythm at
+      // exactly the point the eye was already snagging.
+      SettingsCardSection(title: "Setup") {
         // D14: the first-run flow must stay findable after it is dismissed.
         // This is the only way back to it, which is why it is a pane-level
         // button and not buried in a disclosure. "Setup" is the user-facing
         // name, the same word Settings, General's reset alert uses; the
         // internal name "onboarding" never appears in the UI.
-        SettingRow(
+        SettingsActionRow(
           "Walks through Open at Login, the keyboard keys and the Accessibility permission again."
         ) {
           Button("Run Setup Again…") { actions.showOnboarding() }
@@ -70,7 +73,7 @@ struct AboutPane: View {
       // person most wants is the one about the monitor that just stopped
       // working. This one is always reachable.
       SettingsCardSection(title: "Support") {
-        SettingRow("Covers every display. The report doesn't include serial numbers.") {
+        SettingsActionRow("Covers every display. The report doesn't include serial numbers.") {
           DiagnosticsReportActions()
         }
       }

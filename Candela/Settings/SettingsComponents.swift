@@ -252,3 +252,75 @@ extension View {
   /// contract 4).
   func settingsHeading() -> some View { accessibilityAddTraits(.isHeader) }
 }
+
+/// A row whose control is an ACTION rather than a setting: the sentence at the
+/// leading edge, the button (or buttons) at the trailing one.
+///
+/// `SettingRow` cannot draw this shape, and the reason is in its own comment: it
+/// hands the control the card's full width so the control can place its own
+/// label, which is what puts a `Toggle`'s switch at the trailing edge. A
+/// `Button` carries no such label, so it collapses to its natural width at the
+/// leading edge and the rest of the card reads as dead space. One of those is
+/// unremarkable; the About page had three stacked, which is what made it look
+/// like the content had slid off the right of the card.
+///
+/// The sentence is the row's visible explanation AND the actions'
+/// `accessibilityHint`, the same seam and the same reason as `SettingRow`: a new
+/// row cannot forget it.
+struct SettingsActionRow<Actions: View>: View {
+  @Environment(\.isEnabled) private var isEnabled
+
+  private let sentence: Text
+  private let caption: SettingsCaption?
+  private let actions: Actions
+
+  init(
+    _ sentence: LocalizedStringKey,
+    caption: SettingsCaption? = nil,
+    @ViewBuilder actions: () -> Actions
+  ) {
+    self.sentence = Text(sentence)
+    self.caption = caption
+    self.actions = actions()
+  }
+
+  /// For a sentence carrying a name, a date or a count, which cannot be a
+  /// `LocalizedStringKey` literal.
+  init(
+    verbatim sentence: String,
+    caption: SettingsCaption? = nil,
+    @ViewBuilder actions: () -> Actions
+  ) {
+    self.sentence = Text(verbatim: sentence)
+    self.caption = caption
+    self.actions = actions()
+  }
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 12) {
+      VStack(alignment: .leading, spacing: 3) {
+        sentence
+          .font(.callout)
+          .foregroundStyle(SettingsTheme.bodyColor)
+          .fixedSize(horizontal: false, vertical: true)
+        if let caption {
+          caption.text
+            .font(.caption)
+            .foregroundStyle(SettingsTheme.faintColor)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      .opacity(isEnabled ? 1 : SettingsTheme.disabledOpacity)
+      // The sentence keeps its ideal width and this takes the rest, so the
+      // actions sit on the trailing edge whatever the sentence is.
+      Spacer(minLength: 12)
+      actions
+        .accessibilityHint(sentence)
+    }
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, SettingsTheme.rowVerticalPadding)
+    // This row's rhythm is supplied here, so a row component nested inside it
+    // adds none of its own and the card keeps one rhythm.
+    .environment(\.settingsRowIsPadded, true)
+  }
+}
