@@ -253,6 +253,42 @@ public class Arm64DDC: NSObject {
     return (Int(horizontal / 10), Int(vertical / 10))
   }
 
+  /// The whole `DisplayAttributes` record of the framebuffer entry matched to
+  /// this display: EDID as macOS parsed it at connection.
+  ///
+  /// Matching is `ioregMatchScore`, the same scorer `getServiceMatches` uses,
+  /// deliberately NOT `physicalSizeCm`'s route: that one reads CoreDisplay and
+  /// matches no ioreg entry at all, so there is nothing there to share.
+  /// The walk is `getIoregServicesForMatching`'s minus its DDC half: that
+  /// function only yields a service once a `DCPAVServiceProxy` node follows the
+  /// framebuffer, because it is building the DDC pool. Identity does not depend
+  /// on DDC health, so gating it on that node would drop the record of every
+  /// panel with no I2C route, the built-in included.
+  ///
+  /// Returns nil when nothing scores above zero, which is the honest "this
+  /// display exposed no parsed EDID record" answer.
+  static func displayAttributes(displayID: CGDirectDisplayID) -> [String: Any]? {
+    let ioregRoot: io_registry_entry_t = IORegistryGetRootEntry(kIOMainPortDefault)
+    defer { IOObjectRelease(ioregRoot) }
+    var iterator = io_iterator_t()
+    guard IORegistryEntryCreateIterator(ioregRoot, "IOService", IOOptionBits(kIORegistryIterateRecursively), &iterator) == KERN_SUCCESS else {
+      return nil
+    }
+    defer { IOObjectRelease(iterator) }
+    var best: (score: Int, attributes: [String: Any])?
+    while let objectOfInterest = self.ioregIterateToNextObjectOfInterest(interests: ["AppleCLCD2", "IOMobileFramebufferShim"], iterator: &iterator) {
+      defer { IOObjectRelease(objectOfInterest.entry) }
+      let details = self.getIORegServiceAppleCDC2Properties(entry: objectOfInterest.entry)
+      let score = self.ioregMatchScore(displayID: displayID, ioregEdidUUID: details.edidUUID, ioDisplayLocation: details.ioDisplayLocation, ioregProductName: details.productName, ioregSerialNumber: details.serialNumber)
+      guard score > 0, score > (best?.score ?? 0),
+        let unmanagedAttributes = IORegistryEntryCreateCFProperty(objectOfInterest.entry, "DisplayAttributes" as CFString, kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)),
+        let attributes = unmanagedAttributes.takeRetainedValue() as? [String: Any]
+      else { continue }
+      best = (score, attributes)
+    }
+    return best?.attributes
+  }
+
   static func ioregIterateToNextObjectOfInterest(interests: [String], iterator: inout io_iterator_t) -> (name: String, entry: io_service_t, preceedingEntry: io_service_t)? {
     var entry: io_service_t = IO_OBJECT_NULL
     var preceedingEntry: io_service_t = IO_OBJECT_NULL
