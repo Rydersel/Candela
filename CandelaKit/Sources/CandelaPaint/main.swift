@@ -27,9 +27,14 @@ import CandelaKit
 /// fitting input and goes through the inverse sRGB EOTF; `srgb` carries the
 /// dead-pixel protocol's field values, which are already the encoded numbers
 /// the panel is meant to receive, so no transfer function is applied to them.
+///
+/// `checkup` is a third thing again: the engine renders it, so the tool draws
+/// exactly the image the app puts on glass rather than a second reading of the
+/// same protocol that could drift from it.
 enum Field {
   case luminance(Double)
   case srgb(red: Int, green: Int, blue: Int, patternName: String?)
+  case checkup(CheckupFieldKind)
 }
 
 enum LevelChoice: String {
@@ -80,6 +85,8 @@ struct Options {
   var level: LevelChoice = .normal
   var hold = 60.0
   var defects: [Defect] = []
+  /// Only meaningful with `--field`, and checked to be so before anything is drawn.
+  var plant: CheckupPlant?
 }
 
 func usage() -> Never {
@@ -92,13 +99,17 @@ func usage() -> Never {
       --luminance <0...1>     RELATIVE LUMINANCE, not an sRGB value
       --color R,G,B           encoded sRGB, integers 0...255
       --pattern <name>        black, red, green, blue or white; sugar for --color
+      --field <kind>          a checkup field drawn by the engine: black, red,
+                              green, blue, gray7, gray50, ramp, white or witness
+      --plant x,y,size        square plant in DEVICE PIXELS, top-left origin;
+                              needs --field, and a field that carries a plant
       --level <name>          normal (default) or shielding; shielding caps --hold
                               at \(Int(shieldingHoldCap))s
       --defect X,Y,W,H,R,G,B  planted defect rect in DEVICE PIXELS, display-local,
                               top-left origin; repeatable
       --hold <seconds>        must be positive
 
-    Exactly one of --luminance, --color and --pattern may be given.
+    Exactly one of --luminance, --color, --pattern and --field may be given.
 
     Exits non-zero when the achieved window frame does not match the requested
     rect, rather than reporting the geometry it asked for.
@@ -155,6 +166,16 @@ while let flag = arguments.first {
     guard let pattern = patterns[name] else { usage() }
     options.field = .srgb(
       red: pattern.red, green: pattern.green, blue: pattern.blue, patternName: name)
+  case "--field":
+    fieldFlags.append(flag)
+    guard let kind = CheckupFieldKind(rawValue: value()) else { usage() }
+    options.field = .checkup(kind)
+  case "--plant":
+    let parts = value().split(separator: ",").compactMap { Int($0) }
+    // Same guard as --rect and --defect, for the same reason: a zero-sized or
+    // off-field plant paints nothing while the summary line still records one.
+    guard parts.count == 3, parts[0] >= 0, parts[1] >= 0, parts[2] > 0 else { usage() }
+    options.plant = CheckupPlant(x: parts[0], y: parts[1], size: parts[2])
   case "--level":
     guard let choice = LevelChoice(rawValue: value()) else { usage() }
     options.level = choice
@@ -183,8 +204,19 @@ if fieldFlags.count > 1 {
   // Loud, not last-one-wins. Both spellings would be in the run log and only
   // one of them would be on the glass.
   fail(
-    "exactly one of --luminance, --color and --pattern may be given; got "
+    "exactly one of --luminance, --color, --pattern and --field may be given; got "
       + fieldFlags.joined(separator: " "))
+}
+var checkupKind: CheckupFieldKind?
+if case .checkup(let kind) = options.field { checkupKind = kind }
+if options.plant != nil, checkupKind == nil {
+  fail("--plant needs --field: nothing else this tool draws carries a plant")
+}
+if let checkupKind, options.plant != nil, !checkupKind.carriesPlant {
+  fail("the \(checkupKind.rawValue) field carries no plant, so --plant would draw nothing")
+}
+if checkupKind != nil, !options.defects.isEmpty {
+  fail("--field and --defect contradict each other: the field image covers the whole window, so a defect rect would be painted over")
 }
 if options.fullscreen, options.rect != nil {
   fail("--fullscreen and --rect contradict each other; give one of them")
@@ -272,6 +304,22 @@ final class FieldView: NSView {
   }
 }
 
+/// Draws one `CheckupField` image at exactly one image pixel per device pixel.
+///
+/// Interpolation off: a plant is a few device pixels square, and a smoothed
+/// edge is the difference between a control someone can find and one they
+/// cannot. Unflipped, so the image's first row lands at the top of the window
+/// and the plant's y is the y `CheckupField` drew it at.
+final class CheckupFieldView: NSView {
+  var image: CGImage?
+
+  override func draw(_ dirtyRect: NSRect) {
+    guard let image, let context = NSGraphicsContext.current?.cgContext else { return }
+    context.interpolationQuality = .none
+    context.draw(image, in: bounds)
+  }
+}
+
 guard let requestedScreen = screen(for: options.displayID) else {
   FileHandle.standardError.write(Data("no NSScreen for display \(options.displayID)\n".utf8))
   exit(1)
@@ -305,6 +353,13 @@ case .srgb(let red, let green, let blue, let patternName):
     srgbRed: Double(red) / 255, green: Double(green) / 255, blue: Double(blue) / 255, alpha: 1)
   fieldDescription =
     "sRGB \(red),\(green),\(blue)" + (patternName.map { " (pattern \($0))" } ?? "")
+case .checkup(let kind):
+  // The image covers the content rect edge to edge, so this only shows in the
+  // instant before the first draw. Black rather than a guess at the field's own
+  // fill: a flash of the wrong colour is a flash, a flash of nearly-right is a
+  // reading nobody can tell from the field.
+  fieldColor = .black
+  fieldDescription = "checkup field \(kind.rawValue)"
 }
 
 let placedDefects = options.defects.map { defect -> PlacedDefect in
@@ -385,6 +440,43 @@ if !placedDefects.isEmpty {
   view.defects = placedDefects
   window.contentView = view
 }
+
+/// Printed with the readback lines when a checkup field was drawn, so the run
+/// log records which field and which plant were on the glass.
+var checkupFieldLine: String?
+if let checkupKind {
+  // The image is generated in DEVICE pixels and shown at that count divided by
+  // the backing scale, which is the only ratio that puts one image pixel on one
+  // panel pixel. `CGDisplayPixelsWide` would be the current mode's logical
+  // width, a different number on every scaled mode.
+  let fieldPixelWidth = Int((requestedRect.width * pixelScale).rounded())
+  let fieldPixelHeight = Int((requestedRect.height * pixelScale).rounded())
+  // A plant off the field paints nothing while the line below still records
+  // one, and the reader answers "no plant visible": the exact response the
+  // plant exists to tell apart from a panel that hid it.
+  if let plant = options.plant,
+    plant.x + plant.size > fieldPixelWidth || plant.y + plant.size > fieldPixelHeight
+  {
+    fail(
+      "plant \(plant.x),\(plant.y),\(plant.size) lands outside the "
+        + "\(fieldPixelWidth)x\(fieldPixelHeight) pixel field")
+  }
+  guard
+    let image = CheckupField.image(
+      kind: checkupKind, pixelWidth: fieldPixelWidth, pixelHeight: fieldPixelHeight,
+      plant: options.plant)
+  else {
+    fail(
+      "could not render the \(checkupKind.rawValue) field at "
+        + "\(fieldPixelWidth)x\(fieldPixelHeight) device pixels")
+  }
+  let view = CheckupFieldView(frame: NSRect(origin: .zero, size: requestedRect.size))
+  view.image = image
+  window.contentView = view
+  let plantText = options.plant.map { "\($0.x),\($0.y),\($0.size)" } ?? "none"
+  checkupFieldLine =
+    "field: \(checkupKind.rawValue) \(fieldPixelWidth)x\(fieldPixelHeight) plant: \(plantText)"
+}
 window.orderFrontRegardless()
 
 // Let AppKit and the window server settle before reading. `constrainFrameRect`
@@ -408,6 +500,7 @@ let defectSummary =
 print(
   "painting \(fieldDescription) on display \(options.displayID), "
     + "level \(options.level.rawValue), hold \(options.hold)s, defects \(defectSummary)")
+if let checkupFieldLine { print(checkupFieldLine) }
 print("  requested \(format(requestedRect))" + (options.fullscreen ? " (fullscreen)" : ""))
 print("  achieved  \(format(achieved))")
 fflush(stdout)
