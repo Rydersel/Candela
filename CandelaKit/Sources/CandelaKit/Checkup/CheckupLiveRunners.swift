@@ -28,14 +28,28 @@ public struct CheckupLiveCapabilitiesRunner: CheckupCapabilitiesRunning {
   public func run() async -> [CheckupClaim] {
     var claims: [CheckupClaim] = []
     for control in Self.controls {
+      let label = "\(control.name) (VCP \(Self.hex(control.code)))"
       // Support comes from the string alone; an unadvertised code is never
       // read, because a read that answers establishes nothing.
-      guard CapabilityString.support(forVCP: control.code, in: capabilities) == .supported else {
+      switch CapabilityString.support(forVCP: control.code, in: capabilities) {
+      case .supported:
+        break
+      case .unsupported:
+        claims.append(
+          CheckupClaim(
+            family: .capabilities, id: control.id,
+            verdict: .notObserved("\(label) is not advertised by this panel")))
+        continue
+      case .unknown:
+        // Distinct from unsupported on purpose (D24): a string we could not
+        // parse is not a display that denied the code, and saying so would put
+        // a denial the panel never made into a report a person keeps.
         claims.append(
           CheckupClaim(
             family: .capabilities, id: control.id,
             verdict: .notObserved(
-              "\(control.name) (VCP \(Self.hex(control.code))) is not advertised by this panel")))
+              "\(label): this panel's capabilities string could not be parsed, so whether it advertises this control is unknown"
+            )))
         continue
       }
       guard let first = await writer.read(command: control.code) else {
@@ -79,6 +93,14 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
   let displayID: CGDirectDisplayID
   private var before: DisplayMode?
 
+  /// Every apply here is `.preview` (`kCGConfigureForAppOnly`), which macOS
+  /// reverts when this process exits, crash included. A checkup walks a display
+  /// through modes it was never asked to keep, so a run that dies mid-sweep
+  /// must not leave someone's panel parked on the last rate it tried.
+  /// `restore()` still puts the mode back explicitly rather than relying on
+  /// this: the app is expected to keep running.
+  static let scope: DisplayConfigScope = .preview
+
   public init(configurator: any DisplayConfiguring, displayID: CGDirectDisplayID) {
     self.configurator = configurator
     self.displayID = displayID
@@ -102,6 +124,20 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
     return String(describing: error)
   }
 
+  /// Geometry and a quantized rate, never `ioModeID`.
+  ///
+  /// `ioModeID` is positional rather than identity: after a reconfiguration the
+  /// same number can resolve to a different mode while the apply still reports
+  /// success. The sweep reconfigures this display once per rate, so the id the
+  /// pre-run mode was captured under is exactly the kind that can have moved
+  /// underneath us. Geometry plus rate is what the persisted descriptor already
+  /// uses to re-find a mode across reassignment, so it is what this compares.
+  static func sameMode(_ a: DisplayMode, _ b: DisplayMode) -> Bool {
+    a.pixelWidth == b.pixelWidth && a.pixelHeight == b.pixelHeight
+      && a.logicalWidth == b.logicalWidth && a.logicalHeight == b.logicalHeight
+      && DisplayMode.quantizedRefresh(a.refreshHz) == DisplayMode.quantizedRefresh(b.refreshHz)
+  }
+
   private func rememberCurrentMode() {
     if before == nil { before = configurator.currentMode(for: displayID) }
   }
@@ -117,7 +153,7 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
       ]
     }
     do {
-      try configurator.apply(native, to: displayID, scope: .session)
+      try configurator.apply(native, to: displayID, scope: Self.scope)
     } catch {
       return [
         CheckupClaim(
@@ -148,11 +184,14 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
     rememberCurrentMode()
     let modes = configurator.modes(for: displayID)
     guard let native = modes.first(where: \.isNative) else { return [] }
-    // Synthesized sizes are rendered by us rather than offered by the panel, so
-    // they say nothing about what the wire carries.
+    // CoreGraphics modes only. A synthesized size is one Candela renders rather
+    // than one the panel offers, and a REVEALED mode can be bound to an
+    // unrelated wire timing and scan out cropped while every readback we have
+    // reports clean, so neither can support a claim about what this cable
+    // carries.
     let atNative = modes.filter {
       $0.pixelWidth == native.pixelWidth && $0.pixelHeight == native.pixelHeight
-        && $0.provenance != .synthesized
+        && $0.provenance == .coreGraphics
     }
     var claims: [CheckupClaim] = []
     for rate in DisplayModeCatalog.distinctRates(atNative).sorted() {
@@ -161,7 +200,7 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
       else { continue }
       let id = CheckupCheckID.refresh(hz: rate)
       do {
-        try configurator.apply(mode, to: displayID, scope: .session)
+        try configurator.apply(mode, to: displayID, scope: Self.scope)
       } catch {
         claims.append(
           CheckupClaim(
@@ -193,9 +232,14 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
     return claims
   }
 
-  public func restore() {
-    guard let before else { return }
-    try? configurator.apply(before, to: displayID, scope: .session)
+  public func restore() -> Bool {
+    // Nothing ran, so nothing moved the display and it is already where it was.
+    // Reporting a failed restore here would make a checkup that never touched
+    // the mode tell someone their display was left somewhere else.
+    guard let before else { return true }
+    try? configurator.apply(before, to: displayID, scope: Self.scope)
+    guard let achieved = configurator.currentMode(for: displayID) else { return false }
+    return Self.sameMode(achieved, before)
   }
 }
 
@@ -210,7 +254,7 @@ public struct CheckupLiveHDRRunner: CheckupHDRRunning {
   let hdr: any HDRToggling
   let displayID: CGDirectDisplayID
   let identity: CheckupDisplayIdentity
-  /// Injected so the fake-driven tests do not spend three seconds sleeping.
+  /// Injected so the fake-driven tests do not spend seconds sleeping.
   let settleDelay: Duration
   let restoreDelay: Duration
 
@@ -246,21 +290,45 @@ public struct CheckupLiveHDRRunner: CheckupHDRRunning {
         verdict: .observed(
           "EOTF flags: PQ \(yesNo(identity.supportsPQEOTF)), HDR gamma \(yesNo(identity.supportsHDRGammaEOTF)); macOS hasHDRModes \(macOSSays ? "true" : "false")"
         )))
+    claims.append(await settleClaim())
+    return claims
+  }
+
+  /// Toggles the state AWAY from where it started and back, so the check has a
+  /// transition to observe either way round.
+  ///
+  /// A panel already in HDR is the case this shape exists for: setting HDR on
+  /// when it is already on writes nothing, settles instantly and reads back
+  /// exactly the state that was there before the runner touched it, which is a
+  /// check whose failure mode is silence. Starting from `on` therefore measures
+  /// off-then-on and requires BOTH transitions.
+  private func settleClaim() async -> CheckupClaim {
     let prior = await hdr.measuredHDREnabled(displayID: displayID)
-    await hdr.setHDR(displayID: displayID, enabled: true)
-    try? await Task.sleep(for: settleDelay)
-    let settled = await hdr.measuredHDREnabled(displayID: displayID)
+    var transitions: [(target: Bool, settled: Bool)] = []
+    for target in prior ? [false, true] : [true] {
+      await hdr.setHDR(displayID: displayID, enabled: target)
+      try? await Task.sleep(for: settleDelay)
+      transitions.append((target, await hdr.measuredHDREnabled(displayID: displayID) == target))
+    }
     await hdr.setHDR(displayID: displayID, enabled: prior)
     try? await Task.sleep(for: restoreDelay)
     let restored = await hdr.measuredHDREnabled(displayID: displayID) == prior
     let suffix = restored ? "" : "; restore to the prior state did not settle"
-    claims.append(
-      CheckupClaim(
-        family: .hdr, id: CheckupCheckID.hdrSettle,
-        verdict: settled
-          ? .observed("toggled on, preferHDRModes settled on" + suffix)
-          : .refused("toggled on, preferHDRModes stayed off" + suffix)))
-    return claims
+    let text =
+      transitions.map { Self.transitionText(target: $0.target, settled: $0.settled) }
+      .joined(separator: "; ") + suffix
+    let allSettled = transitions.allSatisfy(\.settled)
+    return CheckupClaim(
+      family: .hdr, id: CheckupCheckID.hdrSettle,
+      verdict: allSettled ? .observed(text) : .refused(text))
+  }
+
+  static func transitionText(target: Bool, settled: Bool) -> String {
+    let verb = target ? "on" : "off"
+    let stayed = target ? "off" : "on"
+    return settled
+      ? "toggled \(verb), preferHDRModes settled \(verb)"
+      : "toggled \(verb), preferHDRModes stayed \(stayed)"
   }
 
   private func yesNo(_ v: Bool) -> String { v ? "yes" : "no" }

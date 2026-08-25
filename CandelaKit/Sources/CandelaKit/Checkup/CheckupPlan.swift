@@ -8,7 +8,12 @@ public enum CheckupCheckID {
   public static let capabilityVolume = "capabilities.volume"
   public static let nativeMode = "mode.native"
   public static let refreshSweep = "refresh.sweep"
-  public static func refresh(hz: Double) -> String { "refresh.\(Int(hz.rounded()))" }
+  /// One decimal, never an Int. Rounding to a whole number collides NTSC's
+  /// 59.9 with 60, and these ids are shipped schema, so a panel offering both
+  /// at its native size would file two measurements under one id forever.
+  public static func refresh(hz: Double) -> String {
+    "refresh." + String(format: "%g", DisplayMode.quantizedRefresh(hz))
+  }
   public static let witness = "field.witness"
   public static let hdrFlags = "hdr.flags"
   public static let hdrSettle = "hdr.settle"

@@ -40,6 +40,16 @@ struct CheckupPlanTests {
     #expect(CheckupPlan.make(panelClass: .readsDDC).map(\.id).first == CheckupCheckID.identity)
   }
 
+  @Test func refreshIdsKeepOneDecimalSoNTSCDoesNotCollideWithSixty() {
+    #expect(CheckupCheckID.refresh(hz: 60) == "refresh.60")
+    #expect(CheckupCheckID.refresh(hz: 59.9) == "refresh.59.9")
+    #expect(CheckupCheckID.refresh(hz: 59.9) != CheckupCheckID.refresh(hz: 60))
+    // The float noise CoreGraphics actually reports lands on the same ids.
+    #expect(CheckupCheckID.refresh(hz: 59.9998) == "refresh.60")
+    #expect(CheckupCheckID.refresh(hz: 59.94) == "refresh.59.9")
+    #expect(CheckupCheckID.refresh(hz: 119.88) == "refresh.119.9")
+  }
+
   @Test func worstCaseFieldTimeIsThreeShowingsOfEveryField() {
     // 8 pixel and gray fields at 20 s, white at 10 s, witness at 20 s, each up to 3 showings.
     #expect(CheckupPlan.worstCaseFieldSeconds == (7 * 20 + 10 + 20) * 3)

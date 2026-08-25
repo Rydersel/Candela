@@ -5,21 +5,28 @@ import Testing
 
 @Suite("Checkup live runners over fakes")
 struct CheckupLiveRunnersTests {
+  /// `@unchecked Sendable` because the runner awaits every call in order and no
+  /// test shares an instance across tasks, so the mutable recording arrays are
+  /// confined to one test body.
   final class FakeDDC: DDCWriting, @unchecked Sendable {
-    // Confined to one test; the runner awaits each call in order.
     var values: [UInt8: UInt16] = [VCP.brightness: 50, VCP.contrast: 75]
     var reads: [UInt8] = []
     var writes: [(UInt8, UInt16)] = []
     var answers = true
+    /// A panel that ACKs the write and does not keep the value.
+    var honorsWrites = true
+    /// Reads beyond this count return nothing, for the read that dies mid-check.
+    var answersReadsUpTo: Int?
 
     func write(command: UInt8, value: UInt16) async -> Bool {
       writes.append((command, value))
-      values[command] = value
+      values[command] = honorsWrites ? value : value &+ 1
       return true
     }
 
     func read(command: UInt8) async -> (current: UInt16, max: UInt16)? {
       reads.append(command)
+      if let answersReadsUpTo, reads.count > answersReadsUpTo { return nil }
       guard answers, let v = values[command] else { return nil }
       return (v, 100)
     }
@@ -47,6 +54,34 @@ struct CheckupLiveRunnersTests {
     #expect(claims[0].verdict.kind == "refused")
     #expect(claims[0].verdict.text.contains("no reply"))
     #expect(ddc.writes.isEmpty)
+  }
+
+  @Test func aValueTheWriteDidNotKeepIsRefusedDespiteTheACK() async {
+    let ddc = FakeDDC()
+    ddc.honorsWrites = false
+    let claims = await CheckupLiveCapabilitiesRunner(writer: ddc, capabilities: "(vcp(10))").run()
+    #expect(claims[0].verdict.kind == "refused")
+    #expect(claims[0].verdict.text.contains("the value did not hold"))
+    // The panel ACKed: the write is what a return-code check would have graded.
+    #expect(ddc.writes.map(\.0) == [VCP.brightness])
+  }
+
+  @Test func aSecondReadThatDiesIsRefusedAndSaysWhichReadItWas() async {
+    let ddc = FakeDDC()
+    ddc.answersReadsUpTo = 1
+    let claims = await CheckupLiveCapabilitiesRunner(writer: ddc, capabilities: "(vcp(10))").run()
+    #expect(claims[0].verdict == .refused("brightness: read 50, wrote 50, no reply to the second read"))
+  }
+
+  @Test func aCapabilitiesStringWeCannotParseIsNotADenial() async {
+    let ddc = FakeDDC()
+    // Unbalanced, so CapabilityString answers .unknown rather than .unsupported.
+    let claims = await CheckupLiveCapabilitiesRunner(writer: ddc, capabilities: "(vcp(10 12)").run()
+    #expect(claims.count == 3)
+    #expect(claims.allSatisfy { $0.verdict.kind == "notObserved" })
+    #expect(claims[0].verdict.text.contains("could not be parsed"))
+    #expect(!claims[0].verdict.text.contains("is not advertised"))
+    #expect(ddc.reads.isEmpty)
   }
 
   struct FakeConfigurator: DisplayConfiguring {
@@ -91,6 +126,17 @@ struct CheckupLiveRunnersTests {
     #expect(refused.first?.verdict.kind == "refused")
   }
 
+  @Test func everyApplyIsPreviewScopedSoACrashDoesNotParkThePanel() async {
+    let native = mode(1, w: 3840, h: 2160, hz: 60, native: true)
+    let recorder = ScopeRecordingConfigurator(modeList: [native])
+    let runner = CheckupLiveModeRunner(configurator: recorder, displayID: 1)
+    _ = await runner.runNativeMode()
+    _ = await runner.runRefreshSweep()
+    _ = await runner.restore()
+    #expect(!recorder.scopes.isEmpty)
+    #expect(recorder.scopes.allSatisfy { $0 == .preview })
+  }
+
   @Test func refreshSweepReportsEachRateAndTheOneThatDidNotAchieve() async {
     let m60 = mode(1, w: 3840, h: 2160, hz: 60, native: true)
     let m120 = mode(2, w: 3840, h: 2160, hz: 120)
@@ -104,6 +150,55 @@ struct CheckupLiveRunnersTests {
     #expect(claims[1].verdict == .refused("requested 120 Hz, achieved 60 Hz; macOS reports"))
   }
 
+  @Test func ntscAndSixtyAreSweptAsTwoRatesUnderTwoIds() async {
+    let m60 = mode(1, w: 3840, h: 2160, hz: 60, native: true)
+    let ntsc = mode(2, w: 3840, h: 2160, hz: 59.94)
+    let configurator = SweepConfigurator(modeList: [m60, ntsc], capAt: 240)
+    let claims = await CheckupLiveModeRunner(configurator: configurator, displayID: 1)
+      .runRefreshSweep()
+    #expect(claims.map(\.id) == ["refresh.59.9", "refresh.60"])
+    #expect(claims.allSatisfy { $0.verdict.kind == "observed" })
+    #expect(claims[0].verdict.text.contains("59.9 Hz achieved"))
+  }
+
+  @Test func theSweepIgnoresRevealedAndSynthesizedModes() async {
+    let m60 = mode(1, w: 3840, h: 2160, hz: 60, native: true)
+    let revealed = DisplayMode(
+      ioModeID: 2, logicalWidth: 3840, logicalHeight: 2160, pixelWidth: 3840,
+      pixelHeight: 2160, refreshHz: 75, isNative: false, provenance: .coreGraphicsServices)
+    let synthesized = DisplayMode(
+      ioModeID: 3, logicalWidth: 3840, logicalHeight: 2160, pixelWidth: 3840,
+      pixelHeight: 2160, refreshHz: 100, isNative: false, provenance: .synthesized)
+    let configurator = SweepConfigurator(modeList: [m60, revealed, synthesized], capAt: 240)
+    let claims = await CheckupLiveModeRunner(configurator: configurator, displayID: 1)
+      .runRefreshSweep()
+    #expect(claims.map(\.id) == ["refresh.60"])
+  }
+
+  @Test func restoreReportsWhetherTheDisplayIsActuallyBackOnItsOriginalMode() async {
+    let m60 = mode(1, w: 3840, h: 2160, hz: 60, native: true)
+    let m120 = mode(2, w: 3840, h: 2160, hz: 120)
+
+    let willing = SweepConfigurator(modeList: [m60, m120], capAt: 60)
+    let runner = CheckupLiveModeRunner(configurator: willing, displayID: 1)
+    _ = await runner.runRefreshSweep()
+    #expect(await runner.restore())
+
+    // Accepts the apply, reports a different mode: the ACK that means nothing.
+    let stubborn = StuckConfigurator(modeList: [m60, m120])
+    let stuckRunner = CheckupLiveModeRunner(configurator: stubborn, displayID: 1)
+    _ = await stuckRunner.runRefreshSweep()
+    stubborn.stuckOn = m120
+    #expect(await stuckRunner.restore() == false)
+  }
+
+  @Test func restoreWithNothingToPutBackIsNotAFailure() async {
+    let empty = FakeConfigurator(modeList: [], current: nil)
+    #expect(await CheckupLiveModeRunner(configurator: empty, displayID: 1).restore())
+  }
+
+  /// `@unchecked Sendable` for the same reason as `FakeDDC`: the runner actor
+  /// awaits each call in order and the instance never leaves its test body.
   final class SweepConfigurator: DisplayConfiguring, @unchecked Sendable {
     let modeList: [DisplayMode]
     let capAt: Double
@@ -135,11 +230,67 @@ struct CheckupLiveRunnersTests {
     func applyRotation(_ rotation: DisplayRotation, to displayID: CGDirectDisplayID) throws {}
   }
 
+  /// Accepts every apply and reports whatever `stuckOn` says: the panel that
+  /// answers `ok` and does not move. Same confinement as the fakes above.
+  final class StuckConfigurator: DisplayConfiguring, @unchecked Sendable {
+    let modeList: [DisplayMode]
+    var stuckOn: DisplayMode?
+
+    init(modeList: [DisplayMode]) { self.modeList = modeList }
+
+    func displays() -> [ConfiguredDisplay] { [] }
+    func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] { modeList }
+    func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
+      stuckOn ?? modeList.first
+    }
+    func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
+      (3840, 2160)
+    }
+    func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope) throws {}
+    func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws {}
+    var revealsHiddenModes: Bool { true }
+    var guardsWireTiming: Bool { false }
+    func modesWithheldByWireTimingGuard(for displayID: CGDirectDisplayID) -> Int { 0 }
+    var canRotate: Bool { false }
+    func rotation(of displayID: CGDirectDisplayID) -> DisplayRotation? { nil }
+    func applyRotation(_ rotation: DisplayRotation, to displayID: CGDirectDisplayID) throws {}
+  }
+
+  /// Records the scope of every apply. Same confinement as the fakes above.
+  final class ScopeRecordingConfigurator: DisplayConfiguring, @unchecked Sendable {
+    let modeList: [DisplayMode]
+    var scopes: [DisplayConfigScope] = []
+
+    init(modeList: [DisplayMode]) { self.modeList = modeList }
+
+    func displays() -> [ConfiguredDisplay] { [] }
+    func modes(for displayID: CGDirectDisplayID) -> [DisplayMode] { modeList }
+    func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? { modeList.first }
+    func nativePixels(for displayID: CGDirectDisplayID) -> (width: Int, height: Int)? {
+      modeList.first.map { ($0.pixelWidth, $0.pixelHeight) }
+    }
+    func apply(_ mode: DisplayMode, to displayID: CGDirectDisplayID, scope: DisplayConfigScope) throws {
+      scopes.append(scope)
+    }
+    func applyMirroring(_ changes: [MirrorChange], scope: DisplayConfigScope) throws {}
+    var revealsHiddenModes: Bool { true }
+    var guardsWireTiming: Bool { false }
+    func modesWithheldByWireTimingGuard(for displayID: CGDirectDisplayID) -> Int { 0 }
+    var canRotate: Bool { false }
+    func rotation(of displayID: CGDirectDisplayID) -> DisplayRotation? { nil }
+    func applyRotation(_ rotation: DisplayRotation, to displayID: CGDirectDisplayID) throws {}
+  }
+
+  /// `@unchecked Sendable` for the same reason as the configurator fakes: the
+  /// runner awaits each call in order and the instance stays in one test body.
   final class FakeHDR: HDRToggling, @unchecked Sendable {
     var supports = true
     var enabled = false
     var settles = true
     var sets: [Bool] = []
+    /// Sets past this count are ACKed and change nothing, for the restore that
+    /// does not take.
+    var honorSetsUpTo: Int?
 
     func supportsHDR(displayID: CGDirectDisplayID) async -> Bool { supports }
     func isHDREnabled(displayID: CGDirectDisplayID) async -> Bool { enabled }
@@ -147,7 +298,8 @@ struct CheckupLiveRunnersTests {
     @discardableResult
     func setHDR(displayID: CGDirectDisplayID, enabled: Bool) async -> Bool {
       sets.append(enabled)
-      if settles { self.enabled = enabled }
+      let honors = settles && (honorSetsUpTo.map { sets.count <= $0 } ?? true)
+      if honors { self.enabled = enabled }
       return true
     }
     func displaysReconfigured() async {}
@@ -178,7 +330,7 @@ struct CheckupLiveRunnersTests {
   @Test func hdrThatSettlesIsObservedAndRestored() async {
     let hdr = FakeHDR()
     let claims = await hdrRunner(hdr, pq: true).run()
-    #expect(claims[1].verdict.kind == "observed")
+    #expect(claims[1].verdict == .observed("toggled on, preferHDRModes settled on"))
     #expect(hdr.sets == [true, false])
     #expect(hdr.enabled == false)
   }
@@ -188,5 +340,45 @@ struct CheckupLiveRunnersTests {
     hdr.settles = false
     let claims = await hdrRunner(hdr, pq: true).run()
     #expect(claims[1].verdict == .refused("toggled on, preferHDRModes stayed off"))
+  }
+
+  @Test func aPanelAlreadyInHDRIsToggledOffAndBackSoTheCheckCanFail() async {
+    let hdr = FakeHDR()
+    hdr.enabled = true
+    let claims = await hdrRunner(hdr, pq: true).run()
+    // Setting HDR on when it is already on would settle instantly against a
+    // state nothing here produced: off first, so there is a transition to see.
+    #expect(hdr.sets == [false, true, true])
+    #expect(
+      claims[1].verdict
+        == .observed(
+          "toggled off, preferHDRModes settled off; toggled on, preferHDRModes settled on"))
+    #expect(hdr.enabled == true)
+  }
+
+  @Test func aPanelAlreadyInHDRThatWillNotLeaveItIsRefused() async {
+    let hdr = FakeHDR()
+    hdr.enabled = true
+    hdr.settles = false
+    let claims = await hdrRunner(hdr, pq: true).run()
+    #expect(hdr.sets == [false, true, true])
+    // The on transition "settles" only because the panel never left HDR, which
+    // is exactly why one transition on its own is not a check.
+    #expect(
+      claims[1].verdict
+        == .refused(
+          "toggled off, preferHDRModes stayed on; toggled on, preferHDRModes settled on"))
+  }
+
+  @Test func aRestoreThatDoesNotSettleIsSaidOutLoud() async {
+    let hdr = FakeHDR()
+    hdr.honorSetsUpTo = 1
+    let claims = await hdrRunner(hdr, pq: true).run()
+    #expect(hdr.sets == [true, false])
+    #expect(hdr.enabled == true)
+    #expect(
+      claims[1].verdict
+        == .observed(
+          "toggled on, preferHDRModes settled on; restore to the prior state did not settle"))
   }
 }

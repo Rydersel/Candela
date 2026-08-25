@@ -13,8 +13,15 @@ public protocol CheckupCapabilitiesRunning: Sendable {
 public protocol CheckupModeRunning: Sendable {
   func runNativeMode() async -> [CheckupClaim]
   func runRefreshSweep() async -> [CheckupClaim]
-  /// Puts the display back on the mode it had before either run.
-  func restore() async
+  /// Puts the display back on the mode it had before either run, and reports
+  /// whether the display is ACTUALLY on it afterwards.
+  ///
+  /// Returns a Bool rather than nothing because a restore that reports success
+  /// it did not achieve is the defect this whole feature is written against:
+  /// the apply's own return says only that the request was accepted, so the
+  /// caller needs the re-read's answer to be able to tell the person their
+  /// display was put back.
+  func restore() async -> Bool
 }
 
 public protocol CheckupHDRRunning: Sendable {
