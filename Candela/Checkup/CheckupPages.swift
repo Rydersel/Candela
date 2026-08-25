@@ -1,0 +1,558 @@
+import AppKit
+import CandelaKit
+import SwiftUI
+import UniformTypeIdentifiers
+
+/// The checkup flow borrows the setup flow's dark palette, cards and button
+/// styles so the two guided windows are one family; only the accent is its
+/// own, and it is a cool instrument light rather than a welcome.
+enum CheckupStyle {
+  static let accent = Color(red: 0.20, green: 0.78, blue: 0.92)
+  static let pageWidth: CGFloat = 560
+}
+
+/// The quiet ground the pages sit on. Deliberately still: a checkup is an
+/// instrument, and a moving backdrop behind a page asking someone to judge
+/// what they saw on glass would compete with the thing being judged.
+struct CheckupBackdrop: View {
+  var body: some View {
+    ZStack {
+      Color(red: 0.055, green: 0.06, blue: 0.075)
+      RadialGradient(
+        colors: [CheckupStyle.accent.opacity(0.16), .clear],
+        center: .top, startRadius: 0, endRadius: 620)
+    }
+    .ignoresSafeArea()
+  }
+}
+
+/// One claim as the flow shows it: the check in prose, its evidence grade, and
+/// the observable, refusal or attestation behind it. The grade is drawn in
+/// weight and opacity, never in green or red: a checkup records what happened
+/// and hands the display no verdict.
+struct CheckupClaimRow: View {
+  let claim: CheckupClaim
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 3) {
+      HStack(spacing: 8) {
+        Text(CheckupCopy.claimLabel(id: claim.id))
+          .font(.callout.weight(.medium))
+          .foregroundStyle(OnboardingStyle.titleColor)
+        Text(CheckupCopy.verdictLabel(claim.verdict))
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(OnboardingStyle.bodyColor)
+          .padding(.horizontal, 7)
+          .padding(.vertical, 2)
+          .background(Capsule().fill(Color.white.opacity(0.09)))
+      }
+      Text(detail)
+        .font(.caption)
+        .foregroundStyle(OnboardingStyle.faintColor)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private var detail: String {
+    guard let pixels = claim.detectedAt else { return claim.verdict.text }
+    return "\(claim.verdict.text) (control detected at \(pixels) px)"
+  }
+}
+
+/// The claims of one family, or a line saying the family has nothing yet.
+struct CheckupClaimList: View {
+  let claims: [CheckupClaim]
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      ForEach(claims, id: \.id) { claim in
+        CheckupClaimRow(claim: claim)
+      }
+    }
+  }
+}
+
+/// Title, body, content, then the page's one primary action: every page in the
+/// flow has this shape, so the eye finds Continue in the same place throughout.
+struct CheckupPageScaffold<Content: View, Actions: View>: View {
+  var title: String
+  var subtitle: String?
+  @ViewBuilder var content: Content
+  @ViewBuilder var actions: Actions
+
+  var body: some View {
+    VStack(spacing: 0) {
+      Spacer(minLength: 28)
+      OnboardingHeading(title: title, subtitle: subtitle)
+      Spacer(minLength: 20)
+      ScrollView {
+        content
+          .frame(maxWidth: CheckupStyle.pageWidth, alignment: .leading)
+          .frame(maxWidth: .infinity)
+          .padding(.horizontal, 24)
+      }
+      .scrollBounceBehavior(.basedOnSize)
+      Spacer(minLength: 16)
+      actions
+        .padding(.bottom, 40)
+    }
+  }
+}
+
+// MARK: - Scenario
+
+struct CheckupScenarioPage: View {
+  @Bindable var model: CheckupFlowModel
+
+  var body: some View {
+    CheckupPageScaffold(title: CheckupCopy.scenarioTitle, subtitle: CheckupCopy.scenarioSubtitle) {
+      VStack(spacing: 10) {
+        ForEach(CheckupScenario.allCases, id: \.self) { scenario in
+          Button {
+            model.scenario = scenario
+          } label: {
+            OnboardingCard(isSelected: model.scenario == scenario, accent: CheckupStyle.accent) {
+              HStack(spacing: 12) {
+                Image(
+                  systemName: model.scenario == scenario
+                    ? "largecircle.fill.circle" : "circle")
+                  .foregroundStyle(
+                    model.scenario == scenario ? CheckupStyle.accent : OnboardingStyle.faintColor)
+                Text(CheckupCopy.scenarioLabel(scenario))
+                  .foregroundStyle(OnboardingStyle.titleColor)
+                Spacer(minLength: 0)
+              }
+            }
+          }
+          .buttonStyle(.plain)
+        }
+      }
+    } actions: {
+      CheckupAdvanceButton(model: model, title: CheckupCopy.continueLabel)
+    }
+  }
+}
+
+// MARK: - Display pick
+
+struct CheckupDisplayPickPage: View {
+  @Bindable var model: CheckupFlowModel
+
+  var body: some View {
+    CheckupPageScaffold(title: CheckupCopy.pickTitle, subtitle: CheckupCopy.pickSubtitle) {
+      VStack(spacing: 10) {
+        if model.selectableDisplays.isEmpty {
+          Text(CheckupCopy.pickEmpty)
+            .font(.callout)
+            .foregroundStyle(OnboardingStyle.bodyColor)
+        }
+        ForEach(model.selectableDisplays) { entry in
+          Button {
+            model.selectedDisplay = entry
+          } label: {
+            OnboardingCard(
+              isSelected: model.selectedDisplay?.id == entry.id, accent: CheckupStyle.accent
+            ) {
+              VStack(alignment: .leading, spacing: 4) {
+                Text(entry.name)
+                  .font(.callout.weight(.medium))
+                  .foregroundStyle(OnboardingStyle.titleColor)
+                Text("\(entry.pixelWidth) by \(entry.pixelHeight) pixels")
+                  .font(.caption)
+                  .foregroundStyle(OnboardingStyle.bodyColor)
+                Text(CheckupCopy.panelClassLine(entry.panelClass))
+                  .font(.caption)
+                  .foregroundStyle(OnboardingStyle.faintColor)
+                  .fixedSize(horizontal: false, vertical: true)
+              }
+            }
+          }
+          .buttonStyle(.plain)
+        }
+      }
+    } actions: {
+      CheckupAdvanceButton(
+        model: model, title: CheckupCopy.continueLabel, enabled: model.selectedDisplay != nil)
+    }
+  }
+}
+
+// MARK: - Plan
+
+struct CheckupPlanPage: View {
+  @Bindable var model: CheckupFlowModel
+
+  var body: some View {
+    CheckupPageScaffold(title: CheckupCopy.planTitle, subtitle: CheckupCopy.planSubtitle) {
+      VStack(alignment: .leading, spacing: 14) {
+        ForEach(model.plan, id: \.id) { step in
+          VStack(alignment: .leading, spacing: 3) {
+            Text(CheckupCopy.claimLabel(id: step.id))
+              .font(.callout)
+              .foregroundStyle(
+                step.pregraded == nil ? OnboardingStyle.titleColor : OnboardingStyle.bodyColor)
+            if let pregraded = step.pregraded {
+              Text("\(CheckupCopy.verdictLabel(pregraded)): \(pregraded.text)")
+                .font(.caption)
+                .foregroundStyle(OnboardingStyle.faintColor)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        Text(CheckupCopy.planWorstCase(seconds: CheckupPlan.worstCaseFieldSeconds))
+          .font(.callout)
+          .foregroundStyle(OnboardingStyle.bodyColor)
+          .fixedSize(horizontal: false, vertical: true)
+          .padding(.top, 6)
+      }
+    } actions: {
+      CheckupAdvanceButton(model: model, title: CheckupCopy.continueLabel)
+    }
+  }
+}
+
+// MARK: - The measured legs
+
+/// Identity, capabilities, native mode, refresh and HDR are the same page with
+/// a different title and a different family of claims: a spinner while the leg
+/// is in flight, then what it found.
+struct CheckupLegPage: View {
+  @Bindable var model: CheckupFlowModel
+  let title: String
+  let family: CheckupFamily
+
+  var body: some View {
+    CheckupPageScaffold(title: title, subtitle: nil) {
+      VStack(alignment: .leading, spacing: 14) {
+        if model.running {
+          HStack(spacing: 10) {
+            ProgressView().controlSize(.small)
+            Text(CheckupCopy.running)
+              .font(.callout)
+              .foregroundStyle(OnboardingStyle.bodyColor)
+          }
+        } else {
+          CheckupClaimList(claims: model.claims.filter { $0.family == family })
+          Text(CheckupCopy.refusalNote)
+            .font(.caption)
+            .foregroundStyle(OnboardingStyle.faintColor)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 4)
+        }
+      }
+    } actions: {
+      CheckupAdvanceButton(
+        model: model, title: CheckupCopy.continueLabel, enabled: !model.running)
+    }
+  }
+}
+
+// MARK: - The planted control
+
+struct CheckupPlantDisclosurePage: View {
+  @Bindable var model: CheckupFlowModel
+
+  var body: some View {
+    CheckupPageScaffold(
+      title: CheckupCopy.plantDisclosureTitle, subtitle: CheckupCopy.plantDisclosure
+    ) {
+      EmptyView()
+    } actions: {
+      CheckupAdvanceButton(model: model, title: CheckupCopy.continueLabel)
+    }
+  }
+}
+
+// MARK: - Fields
+
+/// Where a field rests before and after its showing: what will appear, what to
+/// look for, and the two ways onto the panel (the first showing and a repeat).
+struct CheckupFieldInstructionPage: View {
+  @Bindable var model: CheckupFlowModel
+  let kind: CheckupFieldKind
+
+  var body: some View {
+    CheckupPageScaffold(
+      title: CheckupCopy.fieldTitle(kind), subtitle: CheckupCopy.instruction(for: kind)
+    ) {
+      VStack(alignment: .leading, spacing: 12) {
+        if let note = plantNote {
+          Text(note)
+            .font(.callout)
+            .foregroundStyle(OnboardingStyle.bodyColor)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        if let recorded = recordedClaim {
+          Text("\(CheckupCopy.recordedPrefix): \(recorded.verdict.text)")
+            .font(.caption)
+            .foregroundStyle(OnboardingStyle.faintColor)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    } actions: {
+      VStack(spacing: 10) {
+        if hasBeenShown {
+          if model.canShowAgain {
+            Button(CheckupCopy.showAgain) { model.showAgain() }
+              .buttonStyle(OnboardingSecondaryButtonStyle())
+          }
+          CheckupAdvanceButton(model: model, title: CheckupCopy.continueLabel)
+        } else {
+          Button(CheckupCopy.start) { model.startShowing() }
+            .buttonStyle(OnboardingPrimaryButtonStyle(accent: CheckupStyle.accent))
+            .keyboardShortcut(.defaultAction)
+        }
+        Text(CheckupCopy.showAgainCap)
+          .font(.caption)
+          .foregroundStyle(OnboardingStyle.faintColor)
+      }
+    }
+  }
+
+  private var hasBeenShown: Bool {
+    model.showings[CheckupCheckID.field(kind), default: 0] > 0
+  }
+
+  private var recordedClaim: CheckupClaim? {
+    model.claims.first { $0.id == CheckupCheckID.field(kind) }
+  }
+
+  /// CK21's copy, and only on the field the control rides: a miss is a fact
+  /// about what is resolvable from where the person is sitting.
+  private var plantNote: String? {
+    guard kind == CheckupFlowModel.plantedField, let record = model.plantRecord,
+      record.detectedAtPixels == nil
+    else { return nil }
+    if record.missed { return CheckupCopy.plantMissedTwice }
+    guard model.currentPlantSize == CheckupFlowModel.retryPlantPixels else { return nil }
+    return CheckupCopy.plantMissed(size: CheckupFlowModel.firstPlantPixels)
+  }
+}
+
+/// The field is on the panel. This page carries the countdown and the answers,
+/// and on a two-display setup it is the only place they exist.
+struct CheckupFieldShowingPage: View {
+  @Bindable var model: CheckupFlowModel
+  let kind: CheckupFieldKind
+  var tappedRegion: () -> (x: Int, y: Int)?
+
+  var body: some View {
+    CheckupPageScaffold(
+      title: CheckupCopy.fieldTitle(kind), subtitle: CheckupCopy.answerPrompt
+    ) {
+      VStack(alignment: .leading, spacing: 10) {
+        Text(CheckupCopy.secondsLeft(model.secondsRemaining))
+          .font(.title3.monospacedDigit())
+          .foregroundStyle(OnboardingStyle.titleColor)
+          .frame(maxWidth: .infinity, alignment: .center)
+        if kind.carriesPlant {
+          Text(CheckupCopy.tapHint)
+            .font(.caption)
+            .foregroundStyle(OnboardingStyle.faintColor)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+        }
+      }
+    } actions: {
+      CheckupAnswerButtons(kind: kind) { answer in
+        model.answer(answer, tappedRegion: tappedRegion())
+      }
+    }
+  }
+}
+
+/// CK22's confirmation: the same field with nothing planted on it, so a mark
+/// still on screen belongs to the panel.
+struct CheckupSecondDotPage: View {
+  @Bindable var model: CheckupFlowModel
+  let kind: CheckupFieldKind
+  var tappedRegion: () -> (x: Int, y: Int)?
+
+  var body: some View {
+    CheckupPageScaffold(
+      title: CheckupCopy.secondDotTitle, subtitle: CheckupCopy.secondDotPrompt
+    ) {
+      Text(CheckupCopy.secondsLeft(model.secondsRemaining))
+        .font(.title3.monospacedDigit())
+        .foregroundStyle(OnboardingStyle.titleColor)
+        .frame(maxWidth: .infinity, alignment: .center)
+    } actions: {
+      CheckupAnswerButtons(kind: kind) { answer in
+        model.answer(answer, tappedRegion: tappedRegion())
+      }
+    }
+  }
+}
+
+/// The answers a field offers, in one place because the flow window and the
+/// field's own strip must offer exactly the same ones.
+struct CheckupAnswerButtons: View {
+  let kind: CheckupFieldKind
+  let answer: (CheckupFieldAnswer) -> Void
+
+  var body: some View {
+    HStack(spacing: 10) {
+      // Indexed rather than keyed by the answer: `CheckupFieldAnswer` is
+      // Equatable and nothing else, and the order is the copy's own.
+      ForEach(Array(CheckupCopy.answers(for: kind).enumerated()), id: \.offset) { pair in
+        Button(CheckupCopy.answerLabel(pair.element)) { answer(pair.element) }
+          .buttonStyle(OnboardingSecondaryButtonStyle())
+      }
+    }
+  }
+}
+
+// MARK: - Summary
+
+struct CheckupSummaryPage: View {
+  @Bindable var model: CheckupFlowModel
+
+  @State private var justCopied = false
+  @State private var confirmationTask: Task<Void, Never>?
+  @State private var saveError: String?
+
+  var body: some View {
+    CheckupPageScaffold(title: CheckupCopy.summaryTitle, subtitle: CheckupCopy.headerSentence) {
+      VStack(alignment: .leading, spacing: 18) {
+        if let report = model.report {
+          Text(report.summary.line)
+            .font(.callout)
+            .foregroundStyle(OnboardingStyle.titleColor)
+            .fixedSize(horizontal: false, vertical: true)
+          Text(completionLine(report))
+            .font(.caption)
+            .foregroundStyle(OnboardingStyle.faintColor)
+            .fixedSize(horizontal: false, vertical: true)
+          ForEach(CheckupFamily.allCases, id: \.self) { family in
+            let claims = report.claims.filter { $0.family == family }
+            if !claims.isEmpty {
+              VStack(alignment: .leading, spacing: 10) {
+                Text(CheckupCopy.familyTitle(family))
+                  .font(.caption.weight(.semibold))
+                  .foregroundStyle(OnboardingStyle.bodyColor)
+                  .textCase(.uppercase)
+                CheckupClaimList(claims: claims)
+                if family == .visualField {
+                  Text(CheckupCopy.selfReportedNote)
+                    .font(.caption)
+                    .foregroundStyle(OnboardingStyle.faintColor)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+              }
+            }
+          }
+        }
+      }
+    } actions: {
+      VStack(spacing: 10) {
+        HStack(spacing: 10) {
+          Button(CheckupCopy.export) { export() }
+            .buttonStyle(OnboardingPrimaryButtonStyle(accent: CheckupStyle.accent))
+          Button(CheckupCopy.copySummary) { copySummary() }
+            .buttonStyle(OnboardingSecondaryButtonStyle())
+        }
+        if justCopied {
+          Text(CheckupCopy.copied)
+            .font(.caption)
+            .foregroundStyle(OnboardingStyle.faintColor)
+        }
+      }
+      .alert(
+        CheckupCopy.exportFailed,
+        isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })
+      ) {
+        Button(CheckupCopy.acknowledge) { saveError = nil }
+      } message: {
+        Text(verbatim: saveError ?? "")
+      }
+    }
+  }
+
+  private func completionLine(_ report: CheckupReport) -> String {
+    switch report.completion {
+    case .complete: CheckupCopy.summaryComplete
+    case .incomplete(let reason): CheckupCopy.summaryIncomplete(reason: reason)
+    }
+  }
+
+  private func export() {
+    guard let envelope = model.envelope else { return }
+    let panel = NSSavePanel()
+    panel.allowedContentTypes = [.json]
+    panel.nameFieldStringValue = CheckupStore.exportFileName(for: envelope.report)
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    do {
+      let encoder = JSONEncoder()
+      encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+      encoder.dateEncodingStrategy = .iso8601
+      try encoder.encode(envelope).write(to: url, options: .atomic)
+    } catch {
+      // Silence here would look exactly like a saved file. The report exists to
+      // be handed to somebody, so a save that did not happen has to say so.
+      saveError = error.localizedDescription
+    }
+  }
+
+  private func copySummary() {
+    guard let report = model.report else { return }
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(Self.plainText(report), forType: .string)
+    justCopied = true
+    // Cancelled and replaced on every copy, so a second click restarts the two
+    // seconds rather than letting the first click's timer clear the label early.
+    confirmationTask?.cancel()
+    confirmationTask = Task {
+      try? await Task.sleep(for: .seconds(2))
+      guard !Task.isCancelled else { return }
+      justCopied = false
+    }
+  }
+
+  /// Exactly what this page shows, as text. The pane's fuller document is a
+  /// separate renderer; this one exists so the button copies the page in front
+  /// of the person rather than a second, differently-shaped report.
+  static func plainText(_ report: CheckupReport) -> String {
+    var lines = [CheckupReport.headerSentence, "", report.summary.line]
+    switch report.completion {
+    case .complete: lines.append(CheckupCopy.summaryComplete)
+    case .incomplete(let reason): lines.append(CheckupCopy.summaryIncomplete(reason: reason))
+    }
+    for family in CheckupFamily.allCases {
+      let claims = report.claims.filter { $0.family == family }
+      guard !claims.isEmpty else { continue }
+      lines.append("")
+      lines.append(CheckupCopy.familyTitle(family))
+      for claim in claims {
+        let detail = claim.detectedAt.map { " (control detected at \($0) px)" } ?? ""
+        lines.append(
+          "- \(CheckupCopy.claimLabel(id: claim.id)): "
+            + "\(CheckupCopy.verdictLabel(claim.verdict)): \(claim.verdict.text)\(detail)")
+      }
+      if family == .visualField { lines.append(CheckupCopy.selfReportedNote) }
+    }
+    return lines.joined(separator: "\n")
+  }
+}
+
+// MARK: - Shared actions
+
+/// The one primary action every page ends on. `advance()` is async because some
+/// pages run a leg on the way out, so the button owns the task rather than each
+/// page rewriting it.
+struct CheckupAdvanceButton: View {
+  @Bindable var model: CheckupFlowModel
+  let title: String
+  var enabled = true
+
+  var body: some View {
+    Button(title) { Task { await model.advance() } }
+      .buttonStyle(OnboardingPrimaryButtonStyle(accent: CheckupStyle.accent))
+      .keyboardShortcut(.defaultAction)
+      .disabled(!enabled)
+      .opacity(enabled ? 1 : 0.4)
+  }
+}

@@ -3,16 +3,21 @@ import CandelaKit
 
 /// The field on the target display and nothing else: borderless, shielding
 /// level, pointer hidden. The flow window lives on another display; when the
-/// target is the only display, a strip at the bottom carries the instruction
-/// and the report records the field as partially occluded (CK16).
+/// target is the only display, a strip at the bottom carries the instruction,
+/// the countdown and the same answers the flow page offers, and the report
+/// records the field as partially occluded (CK16). The strip has to carry the
+/// answers because the flow window is behind a shielding-level field there:
+/// unreachable, so unusable.
 ///
 /// The AppKit island behind `CheckupFieldPresenting`, so the flow model can be
 /// driven over a fake with no window anywhere.
 @MainActor
 final class CheckupFieldWindow: CheckupFieldPresenting {
-  /// The instruction strip's height in points, and the reason the field is only
-  /// partially the panel when the target is the only display.
-  static let stripHeight: CGFloat = 44
+  /// The strip's height in points, and the reason the field is only partially
+  /// the panel when the target is the only display. Tall enough for the
+  /// instruction over a row of answers, because on that display this strip is
+  /// the whole of the flow's controls.
+  static let stripHeight: CGFloat = 104
 
   private var window: NSWindow?
   /// False in tests: ordering front is the one step with a visible consequence,
@@ -21,14 +26,34 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
   private var didHideCursor = false
   private(set) var isShowing = false
   private(set) var instructionStrip: NSView?
+  private var timerLabel: NSTextField?
+  private var instructionLabel: NSTextField?
+  private var answerTarget: AnswerTarget?
 
   /// What the strip says when the target is the only display. The flow sets it
-  /// per field; the default is the part that is true of every field.
-  var instructionText = "This display is showing a Candela checkup field. The checkup window is behind it."
+  /// per field; the default is the part that is true of every field. Written
+  /// through to a strip already on screen, because the confirmation re-show
+  /// changes what the strip is asking without taking the field down.
+  var instructionText = CheckupCopy.onlyDisplayStrip {
+    didSet { instructionLabel?.stringValue = instructionText }
+  }
 
   /// Where the user says they saw a mark, in the field image's pixels with a
   /// top-left origin: the space the planted control's own coordinates live in.
   var onTap: ((_ x: Int, _ y: Int) -> Void)?
+
+  /// The strip's answer buttons. Set by the window controller, which pairs the
+  /// answer with `lastTap` before handing both to the flow.
+  var onAnswer: ((CheckupFieldAnswer) -> Void)?
+
+  /// The most recent tap on THIS showing, cleared whenever a field goes up: a
+  /// region reported against the previous showing would be graded against a
+  /// control that is no longer there.
+  private(set) var lastTap: (x: Int, y: Int)?
+
+  /// What the strip's countdown reads. The flow owns the clock; this is the
+  /// last value it published.
+  private(set) var secondsRemaining = 0
 
   init(orderFront: Bool = true) { self.orderFront = orderFront }
 
@@ -50,7 +75,11 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
     view.autoresizingMask = [.width, .height]
     view.image = CheckupField.image(
       kind: kind, pixelWidth: display.pixelWidth, pixelHeight: display.pixelHeight, plant: plant)
-    view.onTap = { [weak self] x, y in self?.onTap?(x, y) }
+    lastTap = nil
+    view.onTap = { [weak self] x, y in
+      self?.lastTap = (x: x, y: y)
+      self?.onTap?(x, y)
+    }
     // Before `configure`, which applies the recipe's alpha and black backing to
     // whatever content view the window is holding. Set after, the field would
     // be an unconfigured view over a window whose recipe landed on a discarded
@@ -65,8 +94,12 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
     OverlayWindow.configure(window, as: config, title: "Candela Checkup Field", covering: screen.frame)
 
     instructionStrip = nil
+    timerLabel = nil
+    instructionLabel = nil
+    answerTarget = nil
+    secondsRemaining = kind.capSeconds
     if display.isOnlyDisplay {
-      let strip = makeInstructionStrip(width: screen.frame.width)
+      let strip = makeInstructionStrip(width: screen.frame.width, kind: kind)
       view.addSubview(strip)
       instructionStrip = strip
     }
@@ -74,12 +107,21 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
     self.window = window
     isShowing = true
     if orderFront {
-      if !didHideCursor {
+      // The strip is the flow's only reachable control on a one-display run,
+      // so the pointer stays: nobody can click a button they cannot aim at.
+      if !didHideCursor, !display.isOnlyDisplay {
         NSCursor.hide()
         didHideCursor = true
       }
       window.orderFrontRegardless()
     }
+  }
+
+  /// Re-renders the strip's countdown. Driven by the same one-second tick that
+  /// drives the flow page, so the two never disagree about the time left.
+  func updateTimer(_ seconds: Int) {
+    secondsRemaining = seconds
+    timerLabel?.stringValue = CheckupCopy.secondsLeft(seconds)
   }
 
   func hide() {
@@ -92,26 +134,87 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
     isShowing = false
   }
 
-  /// A container rather than a bare label: a label's text sits at the top of a
-  /// frame taller than its line, so the strip's own view is what centres it.
-  private func makeInstructionStrip(width: CGFloat) -> NSView {
-    let strip = NSView(frame: NSRect(x: 0, y: 0, width: width, height: Self.stripHeight))
+  /// The whole of the flow's controls when the target is the only display: what
+  /// to look for, how long is left, and the field's own answers. Built by hand
+  /// rather than hosted from SwiftUI so it stays a plain subview of the field,
+  /// which is what keeps it inside the shielding-level window.
+  private func makeInstructionStrip(width: CGFloat, kind: CheckupFieldKind) -> NSView {
+    let strip = CheckupFieldStripView(
+      frame: NSRect(x: 0, y: 0, width: width, height: Self.stripHeight))
     strip.autoresizingMask = [.width, .maxYMargin]
     strip.wantsLayer = true
-    strip.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.6).cgColor
+    strip.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.72).cgColor
 
-    let label = NSTextField(labelWithString: instructionText)
+    let inset: CGFloat = 24
+    let buttonRowHeight: CGFloat = 32
+    let label = NSTextField(wrappingLabelWithString: instructionText)
     label.textColor = .white
     label.alignment = .center
-    label.font = .systemFont(ofSize: 13)
-    label.sizeToFit()
+    label.font = .systemFont(ofSize: 12)
+    label.isSelectable = false
+    let labelHeight = Self.stripHeight - buttonRowHeight - 22
     label.frame = NSRect(
-      x: 0, y: (Self.stripHeight - label.frame.height) / 2, width: width,
-      height: label.frame.height)
-    label.autoresizingMask = [.width]
+      x: inset, y: Self.stripHeight - labelHeight - 8, width: width - inset * 2,
+      height: labelHeight)
+    label.autoresizingMask = [.width, .minYMargin]
     strip.addSubview(label)
+    instructionLabel = label
+
+    let timer = NSTextField(labelWithString: CheckupCopy.secondsLeft(secondsRemaining))
+    timer.textColor = .white
+    timer.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+    timer.sizeToFit()
+    timer.frame = NSRect(
+      x: inset, y: 10, width: timer.frame.width + 40, height: buttonRowHeight)
+    timer.alignment = .left
+    strip.addSubview(timer)
+    timerLabel = timer
+
+    let answers = CheckupCopy.answers(for: kind)
+    let target = AnswerTarget(answers: answers) { [weak self] answer in self?.onAnswer?(answer) }
+    answerTarget = target
+    let row = NSStackView(views: answers.enumerated().map { index, answer in
+      let button = NSButton(
+        title: CheckupCopy.answerLabel(answer), target: target, action: #selector(AnswerTarget.fire))
+      button.bezelStyle = .rounded
+      button.tag = index
+      return button
+    })
+    row.orientation = .horizontal
+    row.spacing = 10
+    row.setFrameSize(row.fittingSize)
+    row.setFrameOrigin(
+      NSPoint(x: (width - row.fittingSize.width) / 2, y: 10 + (buttonRowHeight - row.fittingSize.height) / 2))
+    row.autoresizingMask = [.minXMargin, .maxXMargin]
+    strip.addSubview(row)
     return strip
   }
+
+  /// `NSButton` wants a target and a selector, and the window is not an
+  /// `NSObject`; one small object carries the strip's closure instead.
+  @MainActor
+  private final class AnswerTarget: NSObject {
+    private let answers: [CheckupFieldAnswer]
+    private let handler: (CheckupFieldAnswer) -> Void
+
+    init(answers: [CheckupFieldAnswer], handler: @escaping (CheckupFieldAnswer) -> Void) {
+      self.answers = answers
+      self.handler = handler
+    }
+
+    @objc func fire(_ sender: NSButton) {
+      guard answers.indices.contains(sender.tag) else { return }
+      handler(answers[sender.tag])
+    }
+  }
+}
+
+/// The strip swallows clicks that miss its controls. Without this they fall
+/// through the responder chain to the field underneath and are graded as a
+/// person pointing at a defect down in the strip.
+final class CheckupFieldStripView: NSView {
+  override func mouseDown(with event: NSEvent) {}
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 /// Draws one field image over the whole of a display and reports where it was

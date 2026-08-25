@@ -61,6 +61,74 @@ struct CheckupFieldWindowTests {
     w.hide()
   }
 
+  /// On a one-display run the flow window is behind a shielding-level field,
+  /// so a strip without the answers on it is a run nobody can answer. Each
+  /// field's own answers, not a fixed three: the witness card asks about
+  /// geometry and offers neither "one mark" nor "more than one".
+  @Test func theOnlyDisplayStripCarriesTheAnswersTheFieldOffers() throws {
+    let w = CheckupFieldWindow(orderFront: false)
+    w.show(kind: .black, plant: nil, on: entry(only: true))
+    let plantStrip = try #require(w.instructionStrip)
+    #expect(
+      Self.buttonTitles(in: plantStrip)
+        == [CheckupCopy.answerNothing, CheckupCopy.answerOne, CheckupCopy.answerMore])
+    w.hide()
+
+    w.show(kind: .witness, plant: nil, on: entry(only: true))
+    let witnessStrip = try #require(w.instructionStrip)
+    #expect(
+      Self.buttonTitles(in: witnessStrip)
+        == [CheckupCopy.answerRound, CheckupCopy.answerNotRound])
+    w.hide()
+  }
+
+  /// The countdown and the instruction both change while the field stays up:
+  /// the cap runs down every second, and the confirmation re-show asks a
+  /// different question of the same field.
+  @Test func theStripsTimerAndInstructionRenderTheValuesTheFlowPublishes() throws {
+    let w = CheckupFieldWindow(orderFront: false)
+    w.instructionText = CheckupCopy.instruction(for: .red)
+    w.show(kind: .red, plant: nil, on: entry(only: true))
+    let strip = try #require(w.instructionStrip)
+    #expect(Self.labelStrings(in: strip).contains(CheckupCopy.secondsLeft(20)))
+    #expect(Self.labelStrings(in: strip).contains(CheckupCopy.instruction(for: .red)))
+
+    w.updateTimer(7)
+    #expect(w.secondsRemaining == 7)
+    #expect(Self.labelStrings(in: strip).contains(CheckupCopy.secondsLeft(7)))
+
+    w.instructionText = CheckupCopy.secondDotPrompt
+    #expect(Self.labelStrings(in: strip).contains(CheckupCopy.secondDotPrompt))
+    w.hide()
+  }
+
+  /// A region reported against the previous showing would be graded against a
+  /// control that is no longer on the panel.
+  @Test func aNewShowingForgetsTheTapTheLastOneSaw() {
+    let w = CheckupFieldWindow(orderFront: false)
+    w.show(kind: .black, plant: nil, on: entry(only: false))
+    let view = w.windowForTest?.contentView as? CheckupFieldView
+    view?.onTap?(11, 12)
+    #expect(w.lastTap?.x == 11)
+    w.show(kind: .red, plant: nil, on: entry(only: false))
+    #expect(w.lastTap == nil)
+    w.hide()
+  }
+
+  private static func buttonTitles(in view: NSView) -> [String] {
+    view.subviews.flatMap { sub -> [String] in
+      if let button = sub as? NSButton { return [button.title] }
+      return buttonTitles(in: sub)
+    }
+  }
+
+  private static func labelStrings(in view: NSView) -> [String] {
+    view.subviews.flatMap { sub -> [String] in
+      if let field = sub as? NSTextField { return [field.stringValue] }
+      return labelStrings(in: sub)
+    }
+  }
+
   /// The image is top-left origin (the plant's y is the y a user would tap) and
   /// the view is not flipped, so the two disagree about y and this conversion
   /// is the only thing reconciling them. Drop the flip and every tap is graded
