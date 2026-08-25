@@ -9,5 +9,16 @@
     <link>https://candela.fyi/appcast.xml</link>
     <description>Update feed for Candela.</description>
     <language>en</language>
+    <item>
+      <title>Version 0.1.0</title>
+      <pubDate>Tue, 25 Aug 2026 16:10:31 +0000</pubDate>
+      <sparkle:version>3</sparkle:version>
+      <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://candela.fyi/Candela-0.1.0.zip"
+        sparkle:edSignature="fmXi0GPoXqayPmaVZ9glq5BnFGMhvtkXyCakERGFU37DYbsrFawj6v87BY3ydqynFU4A1hD0FgKoWnt3RAccDg==" length="4682448"
+        type="application/octet-stream"/>
+    </item>
   </channel>
 </rss>
