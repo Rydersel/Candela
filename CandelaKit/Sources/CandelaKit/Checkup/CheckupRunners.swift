@@ -1,11 +1,8 @@
 import Foundation
 
 /// CK9: one protocol per family, a live implementation and a fake for each.
-///
-/// Every runner returns claims rather than a Bool, because a claim carries the
-/// evidence it was graded from. Nothing here may grade from an acknowledgement:
-/// a DDC write ACK and a successful configuration return are evidence of
-/// nothing, so each live runner re-reads the achieved state and quotes it.
+/// Runners return claims, not Bools, because a claim carries its evidence. A
+/// DDC ACK or a configuration return grades nothing; each live runner re-reads achieved state.
 public protocol CheckupCapabilitiesRunning: Sendable {
   func run() async -> [CheckupClaim]
 }
@@ -13,14 +10,8 @@ public protocol CheckupCapabilitiesRunning: Sendable {
 public protocol CheckupModeRunning: Sendable {
   func runNativeMode() async -> [CheckupClaim]
   func runRefreshSweep() async -> [CheckupClaim]
-  /// Puts the display back on the mode it had before either run, and reports
-  /// whether the display is ACTUALLY on it afterwards.
-  ///
-  /// Returns a Bool rather than nothing because a restore that reports success
-  /// it did not achieve is the defect this whole feature is written against:
-  /// the apply's own return says only that the request was accepted, so the
-  /// caller needs the re-read's answer to be able to tell the person their
-  /// display was put back.
+  /// Puts the display back on its pre-run mode and reports whether it is
+  /// ACTUALLY on it afterwards; the apply's own return only says the request was accepted.
   func restore() async -> Bool
 }
 

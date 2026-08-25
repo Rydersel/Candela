@@ -45,10 +45,8 @@ struct CheckupIdentityFactsTests {
     #expect(id.productName == "")
   }
 
-  /// The record's nesting was measurable for the manufacture date and serials
-  /// (inside `ProductAttributes`) but not for the EOTF flags, which no panel
-  /// attached during this task reports. Whichever level a panel puts them at,
-  /// the answer must be the panel's own, never a defaulted "no".
+  /// No attached panel reports the EOTF flags, so their level was not measured.
+  /// Whichever level a panel uses, the answer must be its own, never a defaulted "no".
   @Test func eotfFlagsAreFoundAtEitherLevelOfTheRecord() {
     let nested: [String: Any] = [
       "ProductAttributes": [
@@ -76,9 +74,8 @@ struct CheckupIdentityFactsTests {
   }
 }
 
-/// The entry-selection half of `Arm64DDC.displayAttributes`, factored out so the
-/// rule can be tested without an IORegistry. The walk itself cannot be tested
-/// here: it needs live `io_service_t` handles.
+/// The selection half of `Arm64DDC.displayAttributes`; the walk itself needs
+/// live `io_service_t` handles and cannot be tested here.
 @Suite("Checkup identity entry selection")
 struct CheckupIdentityEntrySelectionTests {
   private func record(_ name: String) -> [String: Any] {
@@ -93,10 +90,8 @@ struct CheckupIdentityEntrySelectionTests {
     #expect((chosen?["ProductAttributes"] as? [String: Any])?["ProductName"] as? String == "the right panel")
   }
 
-  /// The defect this selection exists to prevent: a twin scoring 4 on EDID
-  /// fields must not supply the record when the entry scoring 14 on location
-  /// has none. A twin's record parses perfectly, so the wrong answer would be
-  /// indistinguishable from a right one.
+  /// A twin scoring on EDID fields must not supply the record when the location
+  /// winner has none; a twin's record parses perfectly, so the wrong answer looks right.
   @Test func aWinnerWithNoReadableRecordYieldsNothingRatherThanALoserMatch() {
     let chosen = Arm64DDC.bestMatchingRecord(among: [
       (4, { self.record("same vendor twin") }),

@@ -210,9 +210,8 @@ func conformApplyPreview(
       return .init(name: name, outcome: .fail(
         "child apply of id \(revealed.ioModeID) exited \(child.terminationStatus)"))
     }
-    // Matched on the id in the middle of the line, not on the line's end: the
-    // apply lines carry a trailing rate, and an end-anchored match would have
-    // gone silently false the moment that was added.
+    // Not end-anchored: the apply lines end with a rate, and a suffix match on
+    // the id goes silently false.
     guard output.split(separator: "\n").contains(where: {
       $0.hasPrefix("after:") && $0.contains(" id \(revealed.ioModeID) ")
     }) else {
@@ -496,10 +495,8 @@ case "modeapply":
     exit(4)
   }
 case "identity":
-  // The same inputs the app's live checkup environment passes: vendor and model
-  // from CoreGraphics, the native pixels from the configurator, the maximum
-  // rate from the catalog's distinct rates. No I2C transaction is involved, so
-  // this answers on a write-only panel exactly as it does on a panel that reads.
+  // Same inputs the app's live checkup passes. No I2C transaction is involved,
+  // so a write-only panel answers exactly like one that reads.
   guard let target = displayFilter else {
     print("identity requires --display <id>")
     exit(2)
@@ -527,9 +524,8 @@ case "identity":
   }
   print(String(decoding: identityJSON, as: UTF8.self))
 case "refreshsweep":
-  // The checkup's refresh sweep against the real configurator: every rate the
-  // catalog advertises at the native size, applied at preview scope and graded
-  // on what currentMode reports afterwards. This RECONFIGURES the display.
+  // Applies every native-size rate at preview scope and grades on what
+  // currentMode reports afterwards. This RECONFIGURES the display.
   guard let target = displayFilter else {
     print("refreshsweep requires --display <id>")
     exit(2)
@@ -543,9 +539,8 @@ case "refreshsweep":
   if sweepClaims.isEmpty {
     print("no CoreGraphics modes at the native size on display \(target): nothing was swept")
   }
-  // Preview scope reverts when this process exits, but the restore is explicit
-  // and its achieved state is read back: a restore that reports success is not
-  // a restore that happened.
+  // Preview scope reverts on exit, but restore explicitly and read the achieved
+  // state back: a restore that reports success is not a restore that happened.
   let sweepRestored = await sweepRunner.restore()
   print("restore: \(sweepRestored ? "achieved, the display is back on its pre-run mode" : "NOT ACHIEVED, the display is not on its pre-run mode")")
   // A sweep that measured nothing is not a pass, and neither is one that left

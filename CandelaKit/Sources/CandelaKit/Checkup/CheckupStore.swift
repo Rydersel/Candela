@@ -40,10 +40,8 @@ public struct CheckupStore: Sendable {
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     encoder.dateEncodingStrategy = .iso8601
     try encoder.encode(envelope).write(to: url, options: .atomic)
-    // `contentsOfDirectory(at:)` in list() resolves symlinks in the path
-    // (macOS temp dirs land under /var, a symlink to /private/var); resolve
-    // here too so a URL returned from save() equals the one list() returns
-    // for the same file.
+    // Same canonical form as list(): macOS temp dirs sit under /var, a symlink
+    // to /private/var, and the two must compare equal for the same file.
     return url.resolvingSymlinksInPath()
   }
 
@@ -59,9 +57,8 @@ public struct CheckupStore: Sendable {
     let urls = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
       .filter { $0.pathExtension == "json" }
     return urls.compactMap { rawURL -> CheckupStoredRun? in
-      // `contentsOfDirectory(at:)` resolves a macOS temp dir's /var symlink
-      // to /private/var; `resolvingSymlinksInPath()` canonicalizes back to
-      // /var, matching the URL save() returns for the same file.
+      // `contentsOfDirectory(at:)` hands back /private/var; canonicalize so this
+      // equals the URL save() returns for the same file.
       let url = rawURL.resolvingSymlinksInPath()
       guard let envelope = try? load(url: url) else { return nil }
       return CheckupStoredRun(url: url, startedAt: envelope.report.startedAt,

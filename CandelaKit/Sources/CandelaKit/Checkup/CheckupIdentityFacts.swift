@@ -2,18 +2,12 @@ import CoreGraphics
 import Foundation
 import IOKit
 
-/// Identity as the display itself reported it at connection: the EDID macOS
-/// already parsed into `AppleCLCD2 -> DisplayAttributes`. No I2C transaction is
-/// involved, so a write-only DDC panel identifies itself as completely as a
-/// panel that answers readbacks.
+/// The EDID macOS already parsed into `AppleCLCD2 -> DisplayAttributes`. No I2C
+/// transaction, so a write-only DDC panel identifies itself as fully as one that reads.
 public enum CheckupIdentityFacts {
-  /// The record's nesting is not uniform, and it was measured rather than
-  /// assumed. The manufacture date and both serials sit inside
-  /// `ProductAttributes`, next to `LegacyManufacturerID`; the EOTF capability
-  /// flags were recorded at the record's top level. Each lookup tries the other
-  /// level too: a flag missed because it sat one level away would be reported
-  /// as "no HDR" on a panel that has it, which is a wrong answer rather than an
-  /// absent one.
+  /// Nesting is not uniform (measured): the manufacture date and serials sit in
+  /// `ProductAttributes`, the EOTF flags at top level. Each lookup tries both
+  /// levels, because a flag missed one level away reports "no HDR" on a panel that has it.
   public static func parse(
     displayAttributes attrs: [String: Any], identityKey: String, vendorID: UInt32,
     modelID: UInt32, nativePixels: (Int, Int), maxRefreshHz: Double?
@@ -34,10 +28,8 @@ public enum CheckupIdentityFacts {
       productName: product["ProductName"] as? String ?? "")
   }
 
-  /// Live read of the `AppleCLCD2` entry matched to this display.
-  /// Returns nil when no entry matches, which is the "the display exposed no
-  /// parsed EDID record" case and must be rendered as such, never as a checkup
-  /// failure.
+  /// Nil when no entry matches: the display exposed no parsed EDID record. Render
+  /// it as that, never as a checkup failure.
   public static func read(
     displayID: CGDirectDisplayID, identityKey: String, vendorID: UInt32, modelID: UInt32,
     nativePixels: (Int, Int), maxRefreshHz: Double?

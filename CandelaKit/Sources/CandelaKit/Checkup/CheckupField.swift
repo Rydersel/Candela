@@ -49,9 +49,8 @@ public enum CheckupField {
     Double(min(pixelWidth / 2, pixelHeight)) * 0.75
   }
 
-  /// Linear luminance of the field, for the exposure booking (CK17). The
-  /// witness and ramp fields are not flat, so their luminance depends on the
-  /// geometry `image()` actually draws at this size.
+  /// Linear luminance for the exposure booking (CK17). Witness and ramp are not
+  /// flat, so theirs depends on the geometry `image()` draws at this size.
   public static func luminance(of kind: CheckupFieldKind, pixelWidth: Int, pixelHeight: Int) -> Double {
     func linear(_ v: UInt8) -> Double {
       let c = Double(v) / 255
@@ -135,10 +134,8 @@ public enum CheckupField {
     return ctx.makeImage()
   }
 
-  /// Reads one pixel back, top-left origin. A test helper, public so the
-  /// paint tool's readback can use the same reader. `nil` on a failed data
-  /// read or a non-8-bit-per-component image: never confused with a real
-  /// black pixel.
+  /// Top-left origin; public so the paint tool's readback shares it. `nil` on a
+  /// failed read or a non-8-bit image, so it is never mistaken for a black pixel.
   public static func pixel(in image: CGImage, x: Int, y: Int) -> (r: UInt8, g: UInt8, b: UInt8)? {
     guard image.bitsPerComponent == 8,
       let data = image.dataProvider?.data,

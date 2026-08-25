@@ -1,11 +1,9 @@
 import CoreGraphics
 import Foundation
 
-/// CK11. For each control the capabilities string advertises: read, write the
-/// same value back, read again, and quote the whole round trip.
-///
-/// The write's return value is deliberately discarded. A DDC ACK is evidence of
-/// nothing, so the only thing that can grade this check is the second READ.
+/// CK11. Per advertised control: read, write the same value back, read again,
+/// quote the round trip. The write's return is discarded; a DDC ACK is evidence
+/// of nothing, so only the second READ grades this.
 public struct CheckupLiveCapabilitiesRunner: CheckupCapabilitiesRunning {
   let writer: any DDCWriting
   let capabilities: String
@@ -41,9 +39,8 @@ public struct CheckupLiveCapabilitiesRunner: CheckupCapabilitiesRunning {
             verdict: .notObserved("\(label) is not advertised by this panel")))
         continue
       case .unknown:
-        // Distinct from unsupported on purpose (D24): a string we could not
-        // parse is not a display that denied the code, and saying so would put
-        // a denial the panel never made into a report a person keeps.
+        // Distinct from unsupported (D24): an unparseable string is not a denial,
+        // and a report a person keeps must not contain one the panel never made.
         claims.append(
           CheckupClaim(
             family: .capabilities, id: control.id,
@@ -81,24 +78,17 @@ public struct CheckupLiveCapabilitiesRunner: CheckupCapabilitiesRunning {
   }
 }
 
-/// CK12 and CK13. Stages the native mode, then every rate advertised at the
-/// native size, and grades each one on what `currentMode` reports afterwards.
-///
-/// An actor rather than a class with an unchecked promise: it holds the one
-/// piece of mutable state in these runners (the mode to put back), and the
-/// isolation the compiler checks is worth more here than a comment claiming the
-/// flow calls it in sequence.
+/// CK12 and CK13. Stages the native mode, then every rate at the native size,
+/// graded on what `currentMode` reports afterwards. An actor because it holds
+/// the one piece of mutable state in these runners, the mode to put back.
 public actor CheckupLiveModeRunner: CheckupModeRunning {
   let configurator: any DisplayConfiguring
   let displayID: CGDirectDisplayID
   private var before: DisplayMode?
 
-  /// Every apply here is `.preview` (`kCGConfigureForAppOnly`), which macOS
-  /// reverts when this process exits, crash included. A checkup walks a display
-  /// through modes it was never asked to keep, so a run that dies mid-sweep
-  /// must not leave someone's panel parked on the last rate it tried.
-  /// `restore()` still puts the mode back explicitly rather than relying on
-  /// this: the app is expected to keep running.
+  /// `.preview` (`kCGConfigureForAppOnly`) reverts on process exit, crash
+  /// included, so a run that dies mid-sweep never parks the panel on the last
+  /// rate it tried. `restore()` still puts the mode back explicitly: the app keeps running.
   static let scope: DisplayConfigScope = .preview
 
   public init(configurator: any DisplayConfiguring, displayID: CGDirectDisplayID) {
@@ -110,9 +100,8 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
     "\(m.pixelWidth) by \(m.pixelHeight) at \(hz(m.refreshHz)) Hz"
   }
 
-  /// One quantization boundary for the whole app: rates that differ only by
-  /// CoreGraphics float noise print the same, and NTSC's 59.9 stays its own
-  /// number.
+  /// One quantization boundary for the whole app: CoreGraphics float noise
+  /// prints the same, and NTSC's 59.9 stays its own number.
   static func hz(_ v: Double) -> String {
     String(format: "%g", DisplayMode.quantizedRefresh(v))
   }
@@ -124,14 +113,9 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
     return String(describing: error)
   }
 
-  /// Geometry and a quantized rate, never `ioModeID`.
-  ///
-  /// `ioModeID` is positional rather than identity: after a reconfiguration the
-  /// same number can resolve to a different mode while the apply still reports
-  /// success. The sweep reconfigures this display once per rate, so the id the
-  /// pre-run mode was captured under is exactly the kind that can have moved
-  /// underneath us. Geometry plus rate is what the persisted descriptor already
-  /// uses to re-find a mode across reassignment, so it is what this compares.
+  /// Geometry and quantized rate, never `ioModeID`: that number is positional,
+  /// and after a reconfiguration it can resolve to a different mode while the
+  /// apply still reports success. The sweep reconfigures once per rate.
   static func sameMode(_ a: DisplayMode, _ b: DisplayMode) -> Bool {
     a.pixelWidth == b.pixelWidth && a.pixelHeight == b.pixelHeight
       && a.logicalWidth == b.logicalWidth && a.logicalHeight == b.logicalHeight
@@ -184,11 +168,9 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
     rememberCurrentMode()
     let modes = configurator.modes(for: displayID)
     guard let native = modes.first(where: \.isNative) else { return [] }
-    // CoreGraphics modes only. A synthesized size is one Candela renders rather
-    // than one the panel offers, and a REVEALED mode can be bound to an
-    // unrelated wire timing and scan out cropped while every readback we have
-    // reports clean, so neither can support a claim about what this cable
-    // carries.
+    // CoreGraphics modes only. A synthesized size is one Candela renders, and a
+    // REVEALED mode can be bound to an unrelated wire timing and scan out
+    // cropped while every readback reports clean.
     let atNative = modes.filter {
       $0.pixelWidth == native.pixelWidth && $0.pixelHeight == native.pixelHeight
         && $0.provenance == .coreGraphics
@@ -233,9 +215,8 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
   }
 
   public func restore() -> Bool {
-    // Nothing ran, so nothing moved the display and it is already where it was.
-    // Reporting a failed restore here would make a checkup that never touched
-    // the mode tell someone their display was left somewhere else.
+    // Nothing ran, so the display is where it was; a failed restore here would
+    // tell someone a checkup that never touched the mode left it elsewhere.
     guard let before else { return true }
     try? configurator.apply(before, to: displayID, scope: Self.scope)
     guard let achieved = configurator.currentMode(for: displayID) else { return false }
@@ -243,13 +224,9 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
   }
 }
 
-/// CK14. Two instruments that owe DDC nothing: the EDID EOTF flags, and whether
-/// `preferHDRModes` settles after a toggle.
-///
-/// `setHDR` reports only that the write was issued, so the settle read is the
-/// only thing that grades this. The prior state is restored on every exit path
-/// and re-read afterwards, because a restore that reports success is not a
-/// restore that happened.
+/// CK14. The EDID EOTF flags, and whether `preferHDRModes` settles after a
+/// toggle. `setHDR` reports only that the write was issued, so the settle read
+/// grades this. The prior state is restored on every exit path and re-read.
 public struct CheckupLiveHDRRunner: CheckupHDRRunning {
   let hdr: any HDRToggling
   let displayID: CGDirectDisplayID
@@ -294,14 +271,9 @@ public struct CheckupLiveHDRRunner: CheckupHDRRunning {
     return claims
   }
 
-  /// Toggles the state AWAY from where it started and back, so the check has a
-  /// transition to observe either way round.
-  ///
-  /// A panel already in HDR is the case this shape exists for: setting HDR on
-  /// when it is already on writes nothing, settles instantly and reads back
-  /// exactly the state that was there before the runner touched it, which is a
-  /// check whose failure mode is silence. Starting from `on` therefore measures
-  /// off-then-on and requires BOTH transitions.
+  /// Toggles AWAY from the starting state and back, so there is a transition to
+  /// observe. From `on`, setting on writes nothing and reads back the state that
+  /// was already there, so that case measures off-then-on and requires BOTH.
   private func settleClaim() async -> CheckupClaim {
     let prior = await hdr.measuredHDREnabled(displayID: displayID)
     var transitions: [(target: Bool, settled: Bool)] = []

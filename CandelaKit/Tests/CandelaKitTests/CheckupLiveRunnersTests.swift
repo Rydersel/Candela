@@ -5,9 +5,8 @@ import Testing
 
 @Suite("Checkup live runners over fakes")
 struct CheckupLiveRunnersTests {
-  /// `@unchecked Sendable` because the runner awaits every call in order and no
-  /// test shares an instance across tasks, so the mutable recording arrays are
-  /// confined to one test body.
+  /// `@unchecked Sendable`: the runner awaits every call in order and no instance
+  /// leaves its test body, so the recording arrays are confined to one thread.
   final class FakeDDC: DDCWriting, @unchecked Sendable {
     var values: [UInt8: UInt16] = [VCP.brightness: 50, VCP.contrast: 75]
     var reads: [UInt8] = []

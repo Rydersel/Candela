@@ -253,25 +253,14 @@ public class Arm64DDC: NSObject {
     return (Int(horizontal / 10), Int(vertical / 10))
   }
 
-  /// The whole `DisplayAttributes` record of the framebuffer entry matched to
-  /// this display: EDID as macOS parsed it at connection.
+  /// The `DisplayAttributes` record (EDID as macOS parsed it at connection) of
+  /// the framebuffer entry that scores highest for this display.
   ///
-  /// Matching is `ioregMatchScore`, the same scorer `getServiceMatches` uses,
-  /// deliberately NOT `physicalSizeCm`'s route: that one reads CoreDisplay and
-  /// matches no ioreg entry at all, so there is nothing there to share.
-  /// The walk is `getIoregServicesForMatching`'s minus its DDC half: that
-  /// function only yields a service once a `DCPAVServiceProxy` node follows the
-  /// framebuffer, because it is building the DDC pool. Identity does not depend
-  /// on DDC health, so gating it on that node would drop the record of every
-  /// panel with no I2C route, the built-in included.
-  ///
-  /// Unlike `getServiceMatches` there is no cross-display exclusivity here:
-  /// this resolves one display against every entry independently, so two
-  /// displays scoring alike on the same entry would both take it, and ties
-  /// resolve to the first entry in walk order.
-  ///
-  /// Returns nil when nothing scores above zero, which is the honest "this
-  /// display exposed no parsed EDID record" answer.
+  /// Not gated on a following `DCPAVServiceProxy` node the way the DDC pool
+  /// walk is: identity does not depend on DDC health, and that gate drops every
+  /// panel with no I2C route, the built-in included. No cross-display
+  /// exclusivity either; ties go to the first entry in walk order.
+  /// Nil when nothing scores above zero: the display exposed no parsed EDID record.
   static func displayAttributes(displayID: CGDirectDisplayID) -> [String: Any]? {
     let ioregRoot: io_registry_entry_t = IORegistryGetRootEntry(kIOMainPortDefault)
     defer { IOObjectRelease(ioregRoot) }
@@ -292,17 +281,10 @@ public class Arm64DDC: NSObject {
     })
   }
 
-  /// The winning entry's record, and only ever the winning entry's record:
-  /// highest score above zero, ties to the first in walk order, and nil when
-  /// the winner has no readable record.
-  ///
-  /// Selection and reading are deliberately separate. Scoring an entry out for
-  /// having an unreadable record would let a worse-scoring entry win, and on a
-  /// setup with two panels of the same vendor the loser's record parses
-  /// perfectly: the checkup would report a twin's serial and manufacture date
-  /// as this display's, with nothing to distinguish it from a correct answer.
-  /// The record is read lazily, so exactly one read happens and only for the
-  /// winner.
+  /// Highest score above zero wins, ties to the first in walk order; nil when the
+  /// winner has no readable record. An unreadable record must not disqualify the
+  /// winner: with two panels of the same vendor the loser's record parses fine
+  /// and would report the twin's serial as this display's. One lazy read, winner only.
   static func bestMatchingRecord(among candidates: [(score: Int, record: () -> [String: Any]?)]) -> [String: Any]? {
     var winner: (index: Int, score: Int)?
     for (index, candidate) in candidates.enumerated() where candidate.score > (winner?.score ?? 0) {

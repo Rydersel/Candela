@@ -28,9 +28,8 @@ import CandelaKit
 /// dead-pixel protocol's field values, which are already the encoded numbers
 /// the panel is meant to receive, so no transfer function is applied to them.
 ///
-/// `checkup` is a third thing again: the engine renders it, so the tool draws
-/// exactly the image the app puts on glass rather than a second reading of the
-/// same protocol that could drift from it.
+/// `checkup` is rendered by the engine, so the tool draws exactly the image the
+/// app puts on glass rather than a second reading of the protocol.
 enum Field {
   case luminance(Double)
   case srgb(red: Int, green: Int, blue: Int, patternName: String?)
@@ -304,12 +303,8 @@ final class FieldView: NSView {
   }
 }
 
-/// Draws one `CheckupField` image at exactly one image pixel per device pixel.
-///
-/// Interpolation off: a plant is a few device pixels square, and a smoothed
-/// edge is the difference between a control someone can find and one they
-/// cannot. Unflipped, so the image's first row lands at the top of the window
-/// and the plant's y is the y `CheckupField` drew it at.
+/// Interpolation off: a plant is a few device pixels square and a smoothed edge
+/// hides it. Unflipped, so the plant's y is the y `CheckupField` drew it at.
 final class CheckupFieldView: NSView {
   var image: CGImage?
 
@@ -354,10 +349,8 @@ case .srgb(let red, let green, let blue, let patternName):
   fieldDescription =
     "sRGB \(red),\(green),\(blue)" + (patternName.map { " (pattern \($0))" } ?? "")
 case .checkup(let kind):
-  // The image covers the content rect edge to edge, so this only shows in the
-  // instant before the first draw. Black rather than a guess at the field's own
-  // fill: a flash of the wrong colour is a flash, a flash of nearly-right is a
-  // reading nobody can tell from the field.
+  // Only visible in the instant before the first draw. Black rather than a guess
+  // at the field's fill: a flash of nearly-right reads as the field itself.
   fieldColor = .black
   fieldDescription = "checkup field \(kind.rawValue)"
 }
@@ -445,15 +438,12 @@ if !placedDefects.isEmpty {
 /// log records which field and which plant were on the glass.
 var checkupFieldLine: String?
 if let checkupKind {
-  // The image is generated in DEVICE pixels and shown at that count divided by
-  // the backing scale, which is the only ratio that puts one image pixel on one
-  // panel pixel. `CGDisplayPixelsWide` would be the current mode's logical
-  // width, a different number on every scaled mode.
+  // Device pixels: rect times backing scale is the only ratio that puts one image
+  // pixel on one panel pixel. `CGDisplayPixelsWide` is the mode's logical width.
   let fieldPixelWidth = Int((requestedRect.width * pixelScale).rounded())
   let fieldPixelHeight = Int((requestedRect.height * pixelScale).rounded())
-  // A plant off the field paints nothing while the line below still records
-  // one, and the reader answers "no plant visible": the exact response the
-  // plant exists to tell apart from a panel that hid it.
+  // An off-field plant paints nothing while the summary still records one, so
+  // "no plant visible" would look like a panel that hid it.
   if let plant = options.plant,
     plant.x + plant.size > fieldPixelWidth || plant.y + plant.size > fieldPixelHeight
   {
