@@ -2,12 +2,12 @@ import AppKit
 import CandelaKit
 
 /// The field on the target display and nothing else: borderless, shielding
-/// level, pointer hidden. The flow window lives on another display; when the
-/// target is the only display, a strip at the bottom carries the instruction,
-/// the countdown and the same answers the flow page offers, and the report
-/// records the field as partially occluded (CK16). The strip has to carry the
-/// answers because the flow window is behind a shielding-level field there:
-/// unreachable, so unusable.
+/// level, pointer out of the way. The flow window lives on another display;
+/// when the target is the only display, a strip at the bottom carries the
+/// instruction, the countdown and the same answers the flow page offers, and
+/// the flow records those fields on the report as partially occluded (CK16).
+/// The strip has to carry the answers because the flow window is behind a
+/// shielding-level field there: unreachable, so unusable.
 ///
 /// The AppKit island behind `CheckupFieldPresenting`, so the flow model can be
 /// driven over a fake with no window anywhere.
@@ -21,9 +21,8 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
 
   private var window: NSWindow?
   /// False in tests: ordering front is the one step with a visible consequence,
-  /// and it is the step that hides the pointer.
+  /// and it is the step that puts the pointer away.
   private let orderFront: Bool
-  private var didHideCursor = false
   private(set) var isShowing = false
   private(set) var instructionStrip: NSView?
   private var timerLabel: NSTextField?
@@ -91,7 +90,8 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
     // opaque from its first frame rather than fading up from nothing.
     config.ignoresMouseEvents = false
     config.initialContentAlpha = 1
-    OverlayWindow.configure(window, as: config, title: "Candela Checkup Field", covering: screen.frame)
+    OverlayWindow.configure(
+      window, as: config, title: CheckupCopy.fieldWindowTitle, covering: screen.frame)
 
     instructionStrip = nil
     timerLabel = nil
@@ -107,12 +107,12 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
     self.window = window
     isShowing = true
     if orderFront {
-      // The strip is the flow's only reachable control on a one-display run,
-      // so the pointer stays: nobody can click a button they cannot aim at.
-      if !didHideCursor, !display.isOnlyDisplay {
-        NSCursor.hide()
-        didHideCursor = true
-      }
+      // Not `NSCursor.hide()`: a hidden pointer cannot be aimed at the mark the
+      // person is being asked to tap, and cannot reach the strip's answers
+      // either. This clears the arrow off a field being judged and brings it
+      // back the moment the mouse moves, so it needs no unhide of its own and
+      // cannot strand the pointer if a run ends somewhere unexpected.
+      NSCursor.setHiddenUntilMouseMoves(true)
       window.orderFrontRegardless()
     }
   }
@@ -126,10 +126,6 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
 
   func hide() {
     guard isShowing else { return }
-    if didHideCursor {
-      NSCursor.unhide()
-      didHideCursor = false
-    }
     window?.orderOut(nil)
     isShowing = false
   }
@@ -174,7 +170,7 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
     let target = AnswerTarget(answers: answers) { [weak self] answer in self?.onAnswer?(answer) }
     answerTarget = target
     let row = NSStackView(views: answers.enumerated().map { index, answer in
-      let button = NSButton(
+      let button = CheckupStripButton(
         title: CheckupCopy.answerLabel(answer), target: target, action: #selector(AnswerTarget.fire))
       button.bezelStyle = .rounded
       button.tag = index
@@ -214,6 +210,13 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
 /// person pointing at a defect down in the strip.
 final class CheckupFieldStripView: NSView {
   override func mouseDown(with event: NSEvent) {}
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// The field can be clicked while another app is frontmost, and the first click
+/// on an answer has to BE the answer rather than an activation the person then
+/// repeats. `NSButton` does not accept a first mouse by default.
+final class CheckupStripButton: NSButton {
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 

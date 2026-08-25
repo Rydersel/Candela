@@ -9,7 +9,7 @@ import Testing
 /// reports a mark land on whatever is underneath.
 ///
 /// Host-free: every window here is created and configured but never ordered on
-/// screen, and nothing hides the pointer.
+/// screen, so nothing touches the pointer (`orderFront` is the step that does).
 @MainActor
 @Suite("Checkup field window")
 struct CheckupFieldWindowTests {
@@ -115,11 +115,46 @@ struct CheckupFieldWindowTests {
     w.hide()
   }
 
-  private static func buttonTitles(in view: NSView) -> [String] {
-    view.subviews.flatMap { sub -> [String] in
-      if let button = sub as? NSButton { return [button.title] }
-      return buttonTitles(in: sub)
+  /// Each button has to report its OWN answer. A shared target with a tag is
+  /// exactly the shape where all three can quietly send the same one, and on a
+  /// one-display run these buttons are the only answers that exist.
+  @Test func eachStripButtonReportsItsOwnAnswer() throws {
+    let w = CheckupFieldWindow(orderFront: false)
+    var received: [CheckupFieldAnswer] = []
+    w.onAnswer = { received.append($0) }
+
+    w.show(kind: .black, plant: nil, on: entry(only: true))
+    for button in Self.buttons(in: try #require(w.instructionStrip)) { button.performClick(nil) }
+    #expect(received == [.nothing, .oneMark, .moreThanOne])
+    w.hide()
+
+    received.removeAll()
+    w.show(kind: .witness, plant: nil, on: entry(only: true))
+    for button in Self.buttons(in: try #require(w.instructionStrip)) { button.performClick(nil) }
+    #expect(received == [.roundAndUncut, .notRound])
+    w.hide()
+  }
+
+  /// The field is clicked while another app is frontmost, so the first click on
+  /// an answer has to be the answer and not an activation the person repeats.
+  @Test func theStripAndItsButtonsAcceptAFirstMouse() throws {
+    let w = CheckupFieldWindow(orderFront: false)
+    w.show(kind: .black, plant: nil, on: entry(only: true))
+    let strip = try #require(w.instructionStrip)
+    #expect(strip.acceptsFirstMouse(for: nil))
+    #expect(Self.buttons(in: strip).allSatisfy { $0.acceptsFirstMouse(for: nil) })
+    w.hide()
+  }
+
+  private static func buttons(in view: NSView) -> [NSButton] {
+    view.subviews.flatMap { sub -> [NSButton] in
+      if let button = sub as? NSButton { return [button] }
+      return buttons(in: sub)
     }
+  }
+
+  private static func buttonTitles(in view: NSView) -> [String] {
+    buttons(in: view).map(\.title)
   }
 
   private static func labelStrings(in view: NSView) -> [String] {

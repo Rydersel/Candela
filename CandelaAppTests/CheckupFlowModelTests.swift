@@ -168,6 +168,38 @@ struct CheckupFlowModelTests {
     #expect(saved.last?.report.completion == .incomplete(reason: "closed"))
   }
 
+  /// CK16: on a one-display run the strip sits over the field's lower edge, so
+  /// the report has to name the fields that were not the whole panel. Once per
+  /// field however many times it was shown, and never on a run with somewhere
+  /// else to put the instructions.
+  @Test func aOneDisplayRunRecordsWhichFieldsCarriedTheStrip() async throws {
+    let flow = CheckupFlowModel(
+      environment: environment(presenter: FakePresenter(), entry: entry(only: true)))
+    var saved: [CheckupReportEnvelope] = []
+    flow.onSaved = { saved.append($0) }
+    await toFirstField(flow)
+    flow.startShowing()
+    flow.answer(.roundAndUncut, tappedRegion: nil)
+    await flow.advance()                       // plantDisclosure -> the black field
+    flow.startShowing()
+    for _ in 0..<20 { flow.timeoutTick() }     // runs out, back to the instruction
+    flow.startShowing()                        // the same field a second time
+    flow.answer(.nothing, tappedRegion: nil)
+    #expect(
+      flow.partiallyOccludedFields
+        == [CheckupCheckID.field(.witness), CheckupCheckID.field(.black)])
+    flow.abandon(reason: "closed")
+    #expect(
+      saved.last?.report.partiallyOccludedFields
+        == [CheckupCheckID.field(.witness), CheckupCheckID.field(.black)])
+
+    let elsewhere = CheckupFlowModel(
+      environment: environment(presenter: FakePresenter(), entry: entry()))
+    await toFirstField(elsewhere)
+    elsewhere.startShowing()
+    #expect(elsewhere.partiallyOccludedFields.isEmpty)
+  }
+
   @Test func theSelectedDisplayNeverIncludesVirtualOnes() {
     var v = entry(); v.isVirtual = true
     let flow = CheckupFlowModel(environment: environment(presenter: FakePresenter(), entry: v))

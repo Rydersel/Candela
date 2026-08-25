@@ -26,6 +26,10 @@ final class CheckupFlowModel {
   private(set) var running = false
   private(set) var secondsRemaining = 0
   private(set) var showings: [String: Int] = [:]
+  /// CK16: the fields whose lower edge carried the instruction strip, because
+  /// the target was the only display. Recorded on the report, since a reader
+  /// cannot otherwise tell those fields were not the whole panel.
+  private(set) var partiallyOccludedFields: [String] = []
   private(set) var plantRecord: CheckupPlantRecord?
   private(set) var report: CheckupReport?
   private(set) var envelope: CheckupReportEnvelope?
@@ -305,7 +309,11 @@ final class CheckupFlowModel {
     guard confirmation || cappedShowings(of: kind) < CheckupPlan.maxShowingsPerField else {
       return false
     }
-    showings[CheckupCheckID.field(kind), default: 0] += 1
+    let id = CheckupCheckID.field(kind)
+    showings[id, default: 0] += 1
+    if display.isOnlyDisplay, !partiallyOccludedFields.contains(id) {
+      partiallyOccludedFields.append(id)
+    }
     self.plant = plant
     environment.presenter.show(kind: kind, plant: plant, on: display)
     secondsRemaining = kind.capSeconds
@@ -559,7 +567,8 @@ final class CheckupFlowModel {
       macOSBuild: environment.macOSBuild, appBuild: environment.appBuild,
       startedAt: started, endedAt: environment.now(), completion: completion,
       claims: claims, plant: plantRecord, showings: showings,
-      exposureBookingID: CheckupExposureBooking.id(startedAt: started))
+      exposureBookingID: CheckupExposureBooking.id(startedAt: started),
+      partiallyOccludedFields: partiallyOccludedFields)
     self.report = report
     page = .summary
     // The report stands either way; only a hashed envelope can be saved (CK7).

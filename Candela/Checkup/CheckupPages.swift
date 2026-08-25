@@ -56,7 +56,7 @@ struct CheckupClaimRow: View {
 
   private var detail: String {
     guard let pixels = claim.detectedAt else { return claim.verdict.text }
-    return "\(claim.verdict.text) (control detected at \(pixels) px)"
+    return "\(claim.verdict.text) \(CheckupCopy.detectedAt(pixels: pixels))"
   }
 }
 
@@ -305,9 +305,13 @@ struct CheckupFieldInstructionPage: View {
             .buttonStyle(OnboardingPrimaryButtonStyle(accent: CheckupStyle.accent))
             .keyboardShortcut(.defaultAction)
         }
-        Text(CheckupCopy.showAgainCap)
-          .font(.caption)
-          .foregroundStyle(OnboardingStyle.faintColor)
+        // Gone once the cap is spent: a rule about what you may still do reads
+        // as an offer, and the button it describes is no longer there.
+        if model.canShowAgain {
+          Text(CheckupCopy.showAgainCap)
+            .font(.caption)
+            .foregroundStyle(OnboardingStyle.faintColor)
+        }
       }
     }
   }
@@ -419,6 +423,10 @@ struct CheckupSummaryPage: View {
     CheckupPageScaffold(title: CheckupCopy.summaryTitle, subtitle: CheckupCopy.headerSentence) {
       VStack(alignment: .leading, spacing: 18) {
         if let report = model.report {
+          Text(CheckupCopy.subjectLine(for: report))
+            .font(.callout.weight(.medium))
+            .foregroundStyle(OnboardingStyle.titleColor)
+            .fixedSize(horizontal: false, vertical: true)
           Text(report.summary.line)
             .font(.callout)
             .foregroundStyle(OnboardingStyle.titleColor)
@@ -427,6 +435,13 @@ struct CheckupSummaryPage: View {
             .font(.caption)
             .foregroundStyle(OnboardingStyle.faintColor)
             .fixedSize(horizontal: false, vertical: true)
+          if let occlusion = CheckupCopy.occlusionLine(
+            fieldIDs: report.partiallyOccludedFields) {
+            Text(occlusion)
+              .font(.caption)
+              .foregroundStyle(OnboardingStyle.faintColor)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           ForEach(CheckupFamily.allCases, id: \.self) { family in
             let claims = report.claims.filter { $0.family == family }
             if !claims.isEmpty {
@@ -516,10 +531,16 @@ struct CheckupSummaryPage: View {
   /// separate renderer; this one exists so the button copies the page in front
   /// of the person rather than a second, differently-shaped report.
   static func plainText(_ report: CheckupReport) -> String {
-    var lines = [CheckupReport.headerSentence, "", report.summary.line]
+    var lines = [
+      CheckupReport.headerSentence, "", CheckupCopy.subjectLine(for: report), "",
+      report.summary.line,
+    ]
     switch report.completion {
     case .complete: lines.append(CheckupCopy.summaryComplete)
     case .incomplete(let reason): lines.append(CheckupCopy.summaryIncomplete(reason: reason))
+    }
+    if let occlusion = CheckupCopy.occlusionLine(fieldIDs: report.partiallyOccludedFields) {
+      lines.append(occlusion)
     }
     for family in CheckupFamily.allCases {
       let claims = report.claims.filter { $0.family == family }
@@ -527,7 +548,7 @@ struct CheckupSummaryPage: View {
       lines.append("")
       lines.append(CheckupCopy.familyTitle(family))
       for claim in claims {
-        let detail = claim.detectedAt.map { " (control detected at \($0) px)" } ?? ""
+        let detail = claim.detectedAt.map { " " + CheckupCopy.detectedAt(pixels: $0) } ?? ""
         lines.append(
           "- \(CheckupCopy.claimLabel(id: claim.id)): "
             + "\(CheckupCopy.verdictLabel(claim.verdict)): \(claim.verdict.text)\(detail)")

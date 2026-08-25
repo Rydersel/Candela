@@ -26,6 +26,15 @@ public struct CheckupStore: Sendable {
     return f
   }
 
+  /// The run's day in UTC. The exported file name and the document that names
+  /// the run both read from here, so the two can never disagree about the date.
+  public static func day(_ date: Date) -> String {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withFullDate]
+    f.timeZone = TimeZone(identifier: "UTC")
+    return f.string(from: date)
+  }
+
   static func safe(_ s: String) -> String {
     s.map { $0.isLetter || $0.isNumber || $0 == "-" ? String($0) : "_" }.joined()
   }
@@ -67,10 +76,7 @@ public struct CheckupStore: Sendable {
   }
 
   public static func exportFileName(for report: CheckupReport) -> String {
-    let day = ISO8601DateFormatter()
-    day.formatOptions = [.withFullDate]
-    day.timeZone = TimeZone(identifier: "UTC")
     let model = report.identity.productName.isEmpty ? "Display" : report.identity.productName
-    return "Candela Checkup \(model) \(day.string(from: report.startedAt)).candela-checkup.json"
+    return "Candela Checkup \(model) \(day(report.startedAt)).candela-checkup.json"
   }
 }

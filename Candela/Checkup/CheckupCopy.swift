@@ -23,6 +23,17 @@ enum CheckupCopy {
     }
   }
 
+  /// The scenario in a few words, for the line that names the run. The rows on
+  /// the scenario page are sentences, which is right where a person is choosing
+  /// and wrong in the middle of a subject line.
+  static func scenarioWords(_ scenario: CheckupScenario) -> String {
+    switch scenario {
+    case .newMonitor: "a new monitor"
+    case .usedPurchase: "a used purchase"
+    case .recheck: "a recheck"
+    }
+  }
+
   // MARK: - Display pick
 
   static let pickTitle = "Which display?"
@@ -96,19 +107,28 @@ enum CheckupCopy {
     }
   }
 
-  /// The field in prose, for a heading. Never the stored field name: `gray7`
-  /// is a key, not something to read out.
+  /// The field's bare noun, for a list of several. Never the stored field name:
+  /// `gray7` is a key, not something to read out.
+  static func shortFieldName(_ kind: CheckupFieldKind) -> String {
+    switch kind {
+    case .black: "black"
+    case .red: "red"
+    case .green: "green"
+    case .blue: "blue"
+    case .gray7: "near-black gray"
+    case .gray50: "mid gray"
+    case .ramp: "black-to-white ramp"
+    case .white: "white"
+    case .witness: "witness card"
+    }
+  }
+
+  /// The field as a noun phrase, for a heading or for naming the step a run
+  /// stopped on. Built from the short name so the two cannot drift.
   static func fieldName(_ kind: CheckupFieldKind) -> String {
     switch kind {
-    case .black: "black field"
-    case .red: "red field"
-    case .green: "green field"
-    case .blue: "blue field"
-    case .gray7: "near-black gray field"
-    case .gray50: "mid gray field"
-    case .ramp: "black-to-white ramp"
-    case .white: "white field"
-    case .witness: "witness card"
+    case .ramp, .witness: shortFieldName(kind)
+    default: "\(shortFieldName(kind)) field"
     }
   }
 
@@ -154,9 +174,39 @@ enum CheckupCopy {
   static let onlyDisplayStrip =
     "This display is showing a \(AppInfo.productName) checkup field. Answer below."
 
+  /// The field window's own title. Borderless, so nobody reads it on screen,
+  /// but it is what the Window menu, VoiceOver and every window listing say.
+  static let fieldWindowTitle = "\(AppInfo.productName) Checkup Field"
+
   // MARK: - Summary
 
   static let summaryTitle = "What this run observed"
+
+  /// Names the run: which display, what it was for, and when. The date is the
+  /// UTC day the exported file name carries, so the document and the file it
+  /// arrives in never disagree.
+  static func subjectLine(for report: CheckupReport) -> String {
+    let model = report.identity.productName.isEmpty ? "Display" : report.identity.productName
+    return "\(model), \(scenarioWords(report.scenario)), \(CheckupStore.day(report.startedAt))"
+  }
+
+  /// CK16: which fields were shown with the strip over their lower edge. Nil
+  /// when none were, because a heading over an empty list reads as a caveat
+  /// nobody earned.
+  static func occlusionLine(fieldIDs: [String]) -> String? {
+    let names = fieldIDs
+      .compactMap { id in CheckupFieldKind.allCases.first { CheckupCheckID.field($0) == id } }
+      .map(shortFieldName)
+    guard !names.isEmpty else { return nil }
+    return "Fields shown with the instruction strip over their lower edge: "
+      + names.joined(separator: ", ") + "."
+  }
+
+  /// The sensitivity a graded attestation was made at, in one place because the
+  /// summary page and the text it copies must say it the same way.
+  static func detectedAt(pixels: Int) -> String {
+    "(control detected at \(pixels) px)"
+  }
   static let summaryComplete = "The run reached the end of the protocol."
 
   static func summaryIncomplete(reason: String) -> String {
@@ -171,6 +221,10 @@ enum CheckupCopy {
   static let copied = "Copied"
   static let exportFailed = "The report could not be saved."
   static let acknowledge = "OK"
+
+  /// Why a run ended when the person closed the window. It is read back inside
+  /// `summaryIncomplete`, so it is a phrase and not a state name.
+  static let closedReason = "the checkup window was closed"
   static let headerSentence = CheckupReport.headerSentence
 
   // MARK: - Claims
@@ -218,14 +272,13 @@ enum CheckupCopy {
     if id.hasPrefix("refresh."), let hz = id.split(separator: ".", maxSplits: 1).last {
       return "\(hz) Hz"
     }
-    // Nothing reaches this today; it exists so a check added later cannot leak
-    // its key onto the screen while nobody is looking.
-    return id.split(separator: ".").map(String.init).last.map(sentenceCased) ?? id
-  }
-
-  private static func sentenceCased(_ s: String) -> String {
-    guard let first = s.first else { return s }
-    return first.uppercased() + s.dropFirst()
+    // A check added without copy. The id is shipped schema and reads like the
+    // key it is, so it is never what comes back: a debug build stops on it, and
+    // a release build says as little as it truthfully can.
+    #if DEBUG
+      assertionFailure("checkup check id with no copy: \(id)")
+    #endif
+    return "Check"
   }
 
   /// Every fixed string plus one sample of each parameterised one, so the copy
@@ -239,9 +292,13 @@ enum CheckupCopy {
      answerNotRound, tapHint, secondDotTitle, secondDotPrompt, onlyDisplayStrip, summaryTitle,
      summaryComplete, selfReportedNote, export, copySummary, copied, exportFailed, acknowledge,
      headerSentence, plantMissed(size: 4), planWorstCase(seconds: 600), secondsLeft(1),
-     secondsLeft(20), summaryIncomplete(reason: "the display disconnected")]
+     secondsLeft(20), summaryIncomplete(reason: closedReason), closedReason, fieldWindowTitle,
+     detectedAt(pixels: 4),
+     occlusionLine(fieldIDs: [CheckupCheckID.field(.black), CheckupCheckID.field(.gray7)]) ?? "",
+     CheckupScenario.allCases.map(scenarioWords).joined(separator: " ")]
       + CheckupFieldKind.allCases.map(instruction(for:))
       + CheckupFieldKind.allCases.map(fieldTitle)
+      + CheckupFieldKind.allCases.map(shortFieldName)
       + CheckupFieldKind.allCases.map { claimLabel(id: CheckupCheckID.field($0)) }
       + CheckupFamily.allCases.map(familyTitle)
       + [CheckupPanelClass.readsDDC, .writeOnlyDDC, .noDDC].map(panelClassLine)

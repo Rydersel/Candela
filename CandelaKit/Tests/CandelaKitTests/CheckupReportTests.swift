@@ -91,6 +91,32 @@ struct CheckupReportTests {
     #expect(report.summary.line.contains("nothing was measured"))
   }
 
+  /// CK16's occlusion list is shipped schema: it round-trips, and a file
+  /// written before the key existed still decodes, with the list empty rather
+  /// than the whole report failing.
+  @Test func theOcclusionListRoundTripsAndAnOlderFileStillDecodes() throws {
+    var report = sample()
+    report.partiallyOccludedFields = ["field.black", "field.white"]
+    let envelope = try CheckupReportEnvelope(report: report)
+    #expect(envelope.validate())
+    let decoded = try JSONDecoder().decode(
+      CheckupReportEnvelope.self, from: try JSONEncoder().encode(envelope))
+    #expect(decoded.report.partiallyOccludedFields == ["field.black", "field.white"])
+
+    // The same file with the key removed, which is what every report written
+    // before this key existed looks like.
+    let data = try CheckupReportEnvelope.canonicalData(sample())
+    var object = try #require(
+      try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    object.removeValue(forKey: "partiallyOccludedFields")
+    let older = try JSONSerialization.data(withJSONObject: object)
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let olderReport = try decoder.decode(CheckupReport.self, from: older)
+    #expect(olderReport.partiallyOccludedFields.isEmpty)
+    #expect(olderReport.claims.count == 3)
+  }
+
   @Test func theHeaderSentenceIsFixed() {
     #expect(CheckupReport.headerSentence == "This report records observations made with Candela on the stated date; it does not certify the display.")
   }

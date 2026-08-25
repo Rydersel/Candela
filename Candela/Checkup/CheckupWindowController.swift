@@ -154,7 +154,7 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
   /// nothing left to abandon: the report is already written.
   func windowShouldClose(_: NSWindow) -> Bool {
     if model?.page != .summary {
-      model?.abandon(reason: "closed")
+      model?.abandon(reason: CheckupCopy.closedReason)
     }
     return true
   }

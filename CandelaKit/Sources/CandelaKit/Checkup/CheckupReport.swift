@@ -91,12 +91,17 @@ public struct CheckupReport: Codable, Equatable, Sendable {
   /// Showings per field id; the cap is CheckupPlan.maxShowingsPerField.
   public var showings: [String: Int]
   public var exposureBookingID: String?
+  /// CK16: the ids of the fields whose lower edge carried the instruction strip,
+  /// because the target was the only display and the flow had nowhere else to
+  /// put its controls. A reader of the file has to know which fields were not
+  /// the whole panel; silence would present them as if they had been.
+  public var partiallyOccludedFields: [String]
 
   public init(scenario: CheckupScenario, identity: CheckupDisplayIdentity,
               panelClass: CheckupPanelClass, macOSBuild: String, appBuild: String,
               startedAt: Date, endedAt: Date?, completion: CheckupCompletion,
               claims: [CheckupClaim], plant: CheckupPlantRecord?, showings: [String: Int],
-              exposureBookingID: String?) {
+              exposureBookingID: String?, partiallyOccludedFields: [String] = []) {
     self.scenario = scenario
     self.identity = identity
     self.panelClass = panelClass
@@ -109,6 +114,29 @@ public struct CheckupReport: Codable, Equatable, Sendable {
     self.plant = plant
     self.showings = showings
     self.exposureBookingID = exposureBookingID
+    self.partiallyOccludedFields = partiallyOccludedFields
+  }
+
+  /// Hand-written so a key added after a file was written decodes as its
+  /// default rather than failing the whole report. `encode` stays synthesized:
+  /// what is written is always the current shape.
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    header = try c.decodeIfPresent(String.self, forKey: .header) ?? Self.headerSentence
+    scenario = try c.decode(CheckupScenario.self, forKey: .scenario)
+    identity = try c.decode(CheckupDisplayIdentity.self, forKey: .identity)
+    panelClass = try c.decode(CheckupPanelClass.self, forKey: .panelClass)
+    macOSBuild = try c.decode(String.self, forKey: .macOSBuild)
+    appBuild = try c.decode(String.self, forKey: .appBuild)
+    startedAt = try c.decode(Date.self, forKey: .startedAt)
+    endedAt = try c.decodeIfPresent(Date.self, forKey: .endedAt)
+    completion = try c.decode(CheckupCompletion.self, forKey: .completion)
+    claims = try c.decode([CheckupClaim].self, forKey: .claims)
+    plant = try c.decodeIfPresent(CheckupPlantRecord.self, forKey: .plant)
+    showings = try c.decode([String: Int].self, forKey: .showings)
+    exposureBookingID = try c.decodeIfPresent(String.self, forKey: .exposureBookingID)
+    partiallyOccludedFields =
+      try c.decodeIfPresent([String].self, forKey: .partiallyOccludedFields) ?? []
   }
 
   public var summary: CheckupSummary {

@@ -73,7 +73,10 @@ enum CheckupPage: Equatable {
     case .witness: "the witness card"
     case .plantDisclosure: "the planted control disclosure"
     case .fieldInstruction(let kind), .fieldShowing(let kind), .fieldConfirmSecondDot(let kind):
-      "the \(kind.rawValue) field"
+      // The prose name, never `kind.rawValue`: this string is read back on the
+      // summary, in the copied text and in the exported file, and `gray7` is a
+      // storage key rather than something to show a person.
+      "the \(CheckupCopy.fieldName(kind))"
     case .hdr: "the HDR checks"
     case .summary: "the summary"
     }
