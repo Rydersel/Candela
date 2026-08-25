@@ -75,3 +75,60 @@ struct CheckupIdentityFactsTests {
     #expect(!id.supportsPQEOTF && !id.supportsHDRGammaEOTF)
   }
 }
+
+/// The entry-selection half of `Arm64DDC.displayAttributes`, factored out so the
+/// rule can be tested without an IORegistry. The walk itself cannot be tested
+/// here: it needs live `io_service_t` handles.
+@Suite("Checkup identity entry selection")
+struct CheckupIdentityEntrySelectionTests {
+  private func record(_ name: String) -> [String: Any] {
+    ["ProductAttributes": ["ProductName": name] as [String: Any]]
+  }
+
+  @Test func theHighestScoringEntryWinsWhateverTheWalkOrder() {
+    let chosen = Arm64DDC.bestMatchingRecord(among: [
+      (4, { self.record("same vendor twin") }),
+      (14, { self.record("the right panel") }),
+    ])
+    #expect((chosen?["ProductAttributes"] as? [String: Any])?["ProductName"] as? String == "the right panel")
+  }
+
+  /// The defect this selection exists to prevent: a twin scoring 4 on EDID
+  /// fields must not supply the record when the entry scoring 14 on location
+  /// has none. A twin's record parses perfectly, so the wrong answer would be
+  /// indistinguishable from a right one.
+  @Test func aWinnerWithNoReadableRecordYieldsNothingRatherThanALoserMatch() {
+    let chosen = Arm64DDC.bestMatchingRecord(among: [
+      (4, { self.record("same vendor twin") }),
+      (14, { nil }),
+    ])
+    #expect(chosen == nil)
+  }
+
+  @Test func tiesResolveToTheFirstEntryInWalkOrder() {
+    let chosen = Arm64DDC.bestMatchingRecord(among: [
+      (10, { self.record("first") }),
+      (10, { self.record("second") }),
+    ])
+    #expect((chosen?["ProductAttributes"] as? [String: Any])?["ProductName"] as? String == "first")
+  }
+
+  @Test func nothingScoringAboveZeroIsAnAbsentRecord() {
+    #expect(Arm64DDC.bestMatchingRecord(among: [(0, { self.record("a") }), (0, { self.record("b") })]) == nil)
+    #expect(Arm64DDC.bestMatchingRecord(among: []) == nil)
+  }
+
+  @Test func onlyTheWinnersRecordIsEverRead() {
+    final class Counter: @unchecked Sendable {
+      // Confined to this test's single thread; the closures run synchronously
+      // inside bestMatchingRecord before the test reads the counts back.
+      var reads: [String] = []
+    }
+    let counter = Counter()
+    _ = Arm64DDC.bestMatchingRecord(among: [
+      (4, { counter.reads.append("loser"); return self.record("loser") }),
+      (14, { counter.reads.append("winner"); return self.record("winner") }),
+    ])
+    #expect(counter.reads == ["winner"])
+  }
+}

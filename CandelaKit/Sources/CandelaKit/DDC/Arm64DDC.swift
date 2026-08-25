@@ -265,6 +265,11 @@ public class Arm64DDC: NSObject {
   /// on DDC health, so gating it on that node would drop the record of every
   /// panel with no I2C route, the built-in included.
   ///
+  /// Unlike `getServiceMatches` there is no cross-display exclusivity here:
+  /// this resolves one display against every entry independently, so two
+  /// displays scoring alike on the same entry would both take it, and ties
+  /// resolve to the first entry in walk order.
+  ///
   /// Returns nil when nothing scores above zero, which is the honest "this
   /// display exposed no parsed EDID record" answer.
   static func displayAttributes(displayID: CGDirectDisplayID) -> [String: Any]? {
@@ -275,18 +280,42 @@ public class Arm64DDC: NSObject {
       return nil
     }
     defer { IOObjectRelease(iterator) }
-    var best: (score: Int, attributes: [String: Any])?
+    var candidates: [(score: Int, entry: io_service_t)] = []
+    defer { for candidate in candidates { IOObjectRelease(candidate.entry) } }
     while let objectOfInterest = self.ioregIterateToNextObjectOfInterest(interests: ["AppleCLCD2", "IOMobileFramebufferShim"], iterator: &iterator) {
-      defer { IOObjectRelease(objectOfInterest.entry) }
       let details = self.getIORegServiceAppleCDC2Properties(entry: objectOfInterest.entry)
       let score = self.ioregMatchScore(displayID: displayID, ioregEdidUUID: details.edidUUID, ioDisplayLocation: details.ioDisplayLocation, ioregProductName: details.productName, ioregSerialNumber: details.serialNumber)
-      guard score > 0, score > (best?.score ?? 0),
-        let unmanagedAttributes = IORegistryEntryCreateCFProperty(objectOfInterest.entry, "DisplayAttributes" as CFString, kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)),
-        let attributes = unmanagedAttributes.takeRetainedValue() as? [String: Any]
-      else { continue }
-      best = (score, attributes)
+      candidates.append((score, objectOfInterest.entry))
     }
-    return best?.attributes
+    return self.bestMatchingRecord(among: candidates.map { candidate in
+      (candidate.score, { Self.displayAttributesRecord(entry: candidate.entry) })
+    })
+  }
+
+  /// The winning entry's record, and only ever the winning entry's record:
+  /// highest score above zero, ties to the first in walk order, and nil when
+  /// the winner has no readable record.
+  ///
+  /// Selection and reading are deliberately separate. Scoring an entry out for
+  /// having an unreadable record would let a worse-scoring entry win, and on a
+  /// setup with two panels of the same vendor the loser's record parses
+  /// perfectly: the checkup would report a twin's serial and manufacture date
+  /// as this display's, with nothing to distinguish it from a correct answer.
+  /// The record is read lazily, so exactly one read happens and only for the
+  /// winner.
+  static func bestMatchingRecord(among candidates: [(score: Int, record: () -> [String: Any]?)]) -> [String: Any]? {
+    var winner: (index: Int, score: Int)?
+    for (index, candidate) in candidates.enumerated() where candidate.score > (winner?.score ?? 0) {
+      winner = (index, candidate.score)
+    }
+    return winner.flatMap { candidates[$0.index].record() }
+  }
+
+  static func displayAttributesRecord(entry: io_service_t) -> [String: Any]? {
+    guard let unmanagedAttributes = IORegistryEntryCreateCFProperty(entry, "DisplayAttributes" as CFString, kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)) else {
+      return nil
+    }
+    return unmanagedAttributes.takeRetainedValue() as? [String: Any]
   }
 
   static func ioregIterateToNextObjectOfInterest(interests: [String], iterator: inout io_iterator_t) -> (name: String, entry: io_service_t, preceedingEntry: io_service_t)? {
