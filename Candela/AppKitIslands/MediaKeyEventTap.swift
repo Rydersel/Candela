@@ -337,20 +337,41 @@ final class MediaKeyEventTap {
     // block). Ping unanswered > 5 s: pipeline wedged. Probe/AX in flight
     // > 5 s or prober loop silent > 12 s: the prober is stuck in a call.
     // 5 s tolerates the platform's legitimate stalls (mode changes and
-    // rotation block up to ~1.1 s, measured on #11). A system sleep trips
-    // these on wake; `onEmergencyTeardown` re-checks the grant after a settle
-    // delay and rebuilds the tap, so a false fire self-heals.
+    // rotation block up to ~1.1 s, measured on #11). The thresholds and the
+    // decision live in `TapWatchdogVerdict`.
+    //
+    // A system sleep is the one staleness that means nothing: both threads
+    // stop with the machine, and at the next wake (a 2 s dark wake every
+    // ~15 minutes while the lid is closed) the monitor can run first and read
+    // the prober's stamp exactly as old as the sleep. That was a real exit
+    // and relaunch, 87 times in three days, always `proberDead` alone. The
+    // verdict compares the wall clock against the uptime clock, which stops
+    // during sleep, and a tick that straddled a sleep resets the stamps and
+    // decides nothing.
     let monitor = Thread {
       Self.watchdogLog.debug("monitor started")
+      var previousTick = TapWatchdogClock.now()
       while true {
         Thread.sleep(forTimeInterval: 1)
         let current = watchdogRuntime.withLockUnchecked { $0.port === watchdogPort }
         guard current else { Self.watchdogLog.debug("monitor: port gone, exiting"); return }
+        let now = TapWatchdogClock.now()
         let hb = heartbeat.withLock { $0 }
-        let pingLost = hb.pingPosted.map { Date().timeIntervalSince($0) > 5 } ?? false
-        let probeStuck = hb.probing.map { Date().timeIntervalSince($0) > 5 } ?? false
-        let proberDead = Date().timeIntervalSince(hb.alive) > 12
-        if pingLost || probeStuck || proberDead {
+        let outcome = TapWatchdogVerdict.evaluate(
+          sample: .init(pingPosted: hb.pingPosted, probing: hb.probing, alive: hb.alive),
+          previousTick: previousTick, now: now
+        )
+        previousTick = now
+        switch outcome {
+        case .healthy:
+          continue
+        case .sleptAcrossTick(let seconds):
+          Self.watchdogLog.notice(
+            "slept \(Int(seconds)) s across a tick; stamps reset, no verdict"
+          )
+          heartbeat.withLock { $0.pingPosted = nil; $0.probing = nil; $0.alive = now.wall }
+          continue
+        case .wedged(let pingLost, let probeStuck, let proberDead):
           Self.watchdogLog.fault(
             "EMERGENCY: pingLost=\(pingLost) probeStuck=\(probeStuck) proberDead=\(proberDead)"
           )
@@ -362,7 +383,8 @@ final class MediaKeyEventTap {
           // this investigation. So: spawn a detached relauncher and exit.
           // The relauncher's sleep outlives our death, by which point the
           // pipeline is free again and the app comes back with the banner
-          // showing. A false fire (e.g. a wake edge) costs one app blink.
+          // showing. A false fire costs one app blink, which is why the sleep
+          // case above never reaches here.
           Self.watchdogLog.fault("event pipeline wedged: exiting to clear it; relauncher spawned")
           let relauncher = Process()
           relauncher.executableURL = URL(fileURLWithPath: "/bin/sh")
