@@ -110,11 +110,8 @@ public actor ArrangementPreviewSession {
   private let countdownSeconds: Int
 
   private var outstanding: Outstanding?
-  private var remaining = 0
-  /// The countdown fires at most once. A failed expiry revert is re-attempted
-  /// through `revert()`, not by returning `.failed` from every later tick.
-  private var countdownArmed = false
-  private var lastOutcome: ModePreviewOutcome?
+  private var countdown = PreviewCountdown()
+  private var lastOutcome: PreviewOutcome?
 
   /// Thirty seconds, the same as `ModePreviewSession` and `MirrorPreviewSession`
   /// — see the note there. All three are one kind of decision (a reconfiguration
@@ -128,7 +125,7 @@ public actor ArrangementPreviewSession {
     self.countdownSeconds = countdownSeconds
   }
 
-  public var secondsRemaining: Int { remaining }
+  public var secondsRemaining: Int { countdown.remaining }
 
   /// True while a preview is applied and unresolved — including after a
   /// resolution that threw. `revert()` is worth calling exactly while this
@@ -139,7 +136,7 @@ public actor ArrangementPreviewSession {
   /// inferred: a failed EXPIRY disarms it while a failed COMMIT leaves it armed,
   /// and a caller that guesses wrong either shows a countdown that will never
   /// fire or hides one that will.
-  public var isCountingDown: Bool { countdownArmed && outstanding != nil }
+  public var isCountingDown: Bool { countdown.isArmed && outstanding != nil }
 
   /// What is applied and unresolved. The authority a UI rebuilds from.
   public var previewedArrangement: PreviewedArrangement? { outstanding?.previewed }
@@ -230,8 +227,7 @@ public actor ArrangementPreviewSession {
     // on the way in would make a later confirm() report a reversion that never
     // happened, after a commit that did.
     lastOutcome = nil
-    remaining = countdownSeconds
-    countdownArmed = true
+    countdown.arm(seconds: countdownSeconds)
     return .success(previewed)
   }
 
@@ -247,7 +243,7 @@ public actor ArrangementPreviewSession {
   /// Re-applying a layout that is already on screen is NOT a no-op reporting
   /// success: the preview holds it at `.preview` scope and this is what makes it
   /// permanent. The change is in the durability, not in the pixels.
-  public func confirm(_ answered: PreviewedArrangement) -> ModePreviewOutcome {
+  public func confirm(_ answered: PreviewedArrangement) -> PreviewOutcome {
     guard let outstanding else {
       // Nothing is applied: repeat the answer already given rather than
       // inventing a reversion that never happened. Never begun at all is
@@ -268,7 +264,7 @@ public actor ArrangementPreviewSession {
   /// seam's post-commit check can throw over a layout that DID move (see the
   /// type's doc comment), which is exactly why the retry re-samples instead of
   /// replaying.
-  public func revert(_ answered: PreviewedArrangement) -> ModePreviewOutcome {
+  public func revert(_ answered: PreviewedArrangement) -> PreviewOutcome {
     guard let outstanding else { return lastOutcome ?? .reverted }
     guard answered == outstanding.previewed else { return .stale }
     return revertOutstanding()
@@ -276,12 +272,8 @@ public actor ArrangementPreviewSession {
 
   /// Call once per second. Returns nil while the countdown runs, and the outcome
   /// when it expires.
-  public func tick() -> ModePreviewOutcome? {
-    guard countdownArmed, outstanding != nil else { return nil }
-    remaining -= 1
-    guard remaining <= 0 else { return nil }
-    remaining = 0
-    countdownArmed = false
+  public func tick() -> PreviewOutcome? {
+    guard outstanding != nil, countdown.tick() else { return nil }
     return revertOutstanding()
   }
 
@@ -290,7 +282,7 @@ public actor ArrangementPreviewSession {
   /// The expiry reverts without an intent check on purpose: it is the SESSION's
   /// own decision about what it is holding, not a person's answer to a window.
   /// Only answers can be stale.
-  private func revertOutstanding() -> ModePreviewOutcome {
+  private func revertOutstanding() -> PreviewOutcome {
     guard let outstanding else { return lastOutcome ?? .reverted }
     // Computed against the LIVE layout, not against the plan that was applied: a
     // display that moved since the preview must be restored to what the capture
@@ -350,10 +342,9 @@ public actor ArrangementPreviewSession {
     return true
   }
 
-  private func drop(reporting outcome: ModePreviewOutcome) {
+  private func drop(reporting outcome: PreviewOutcome) {
     outstanding = nil
-    remaining = 0
-    countdownArmed = false
+    countdown.disarm()
     lastOutcome = outcome
   }
 
@@ -368,8 +359,8 @@ public actor ArrangementPreviewSession {
   /// keep a layout that could not be made permanent, and falling back to the one
   /// they can definitely read is the safe way to end that.
   private func resolve(
-    applying plan: ArrangementPlan, success: ModePreviewOutcome
-  ) -> ModePreviewOutcome {
+    applying plan: ArrangementPlan, success: PreviewOutcome
+  ) -> PreviewOutcome {
     do {
       // The achieved layout is discarded HERE and only here: the configurator
       // has already compared it against the plan and thrown if the platform
@@ -387,8 +378,7 @@ public actor ArrangementPreviewSession {
       return .failed(error)
     }
     outstanding = nil
-    remaining = 0
-    countdownArmed = false
+    countdown.disarm()
     lastOutcome = success
     return success
   }

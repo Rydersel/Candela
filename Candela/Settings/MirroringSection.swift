@@ -2,7 +2,8 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// Mirroring for one display.
+/// Mirroring for one display — rows in the hub's Display section (Task 13),
+/// no section of its own.
 ///
 /// The state and every decision come from `MirroringCoordinator`; nothing here
 /// re-derives a topology, because two samples of one machine disagree exactly
@@ -39,6 +40,7 @@ struct MirroringSection: View {
   /// old name standing in the status line and in the picker. The coordinator
   /// itself is `@Observable` and needs no help.
   @Environment(AppModel.self) private var model
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   /// The master the user has picked, or nil while they have picked nothing.
   /// Never read directly — `selectedMaster` reconciles it against the live
@@ -46,27 +48,69 @@ struct MirroringSection: View {
   /// click.
   @State private var chosenMaster: CGDirectDisplayID?
 
+  /// The reason lines as RENDERED, mirroring the coordinator's three signals one
+  /// update behind. Neither placement of a keyed `.animation` fades a `Form` row
+  /// symmetrically (measured 2026-08-17, on the grouped `Form` these rows were
+  /// then): on a `Group` wrapping the conditional row it animates nothing in
+  /// either direction, and on an always-present container inside the row the
+  /// child fades IN and then SNAPS out. A line that snaps away is the half that
+  /// matters here, so the only way these fade both ways is for the write to
+  /// happen inside a `withAnimation` in this view. Retained on the card layout
+  /// because the behavior is pinned, not because that trap was measured here.
+  /// Kept in agreement by the two hooks on the status row and by nothing else.
+  @State private var shownReasons = ReasonLines.none
+
   private var displayID: CGDirectDisplayID { state.display.id }
+
+  /// The coordinator's sample, which since synthesis carries the engine's
+  /// pairing (SS1): the predicates below are the SS7 carve-out and they answer
+  /// "ordinary mirror set" for everything on an un-stamped one.
   private var topology: MirrorTopology { coordinator.topology }
+
+  /// True when this panel is showing a synthesized size (SS7). The ONE predicate
+  /// behind every carve-out in this file; it lives in `MirroringPredicates`, and
+  /// the panel's section and the display hero read the same one.
+  private var isSynthesized: Bool {
+    MirroringPredicates.isSynthesized(topology, displayID: displayID)
+  }
+
+  /// The displays this section may speak about: everything except the virtual
+  /// displays synthesis is rendering onto. `MirroringPredicates` says why the
+  /// physical panel of a synthesis set stays in the list.
+  private var userVisibleDisplays: [ConfiguredDisplay] {
+    MirroringPredicates.userVisibleDisplays(topology)
+  }
 
   /// Displays that can own a set: anything not locked into one. Sorted by id,
   /// like every other list this feature hands out — never enumeration order.
   ///
   /// The built-in is INCLUDED, unlike in the hotkey's automatic scan. A person
   /// naming a master by hand is not a heuristic guessing for them, and
-  /// `MirrorTopologyPolicy.engage` accepts it for exactly that reason.
+  /// `MirrorTopologyPolicy.engage` accepts it for exactly that reason. A
+  /// synthesis VD is not: nobody chose it, it exists to render one panel's size,
+  /// and picking it here would offer to mirror the machine onto a display that
+  /// disappears the moment the size does.
   private var eligibleMasters: [ConfiguredDisplay] {
-    topology.displays
+    userVisibleDisplays
       .filter { !$0.isAlwaysInMirrorSet }
       .sorted { $0.id < $1.id }
   }
 
   /// The set this display belongs to, as `MirrorTopologyPolicy.disengage` will
-  /// read it: the members, id-ascending, intersected with the sample.
-  private var setMembers: [CGDirectDisplayID] { topology.setMembers(containing: displayID) }
+  /// read it: the members, id-ascending, intersected with the sample. EMPTY for
+  /// a synthesis set, which is what keeps this pane's Stop control, its status
+  /// line and its locked-member sentences off a set the user did not build.
+  private var setMembers: [CGDirectDisplayID] {
+    isSynthesized ? [] : topology.setMembers(containing: displayID)
+  }
 
   private var isInSet: Bool { !setMembers.isEmpty }
-  private var isLocked: Bool { topology.cannotBeUnmirrored(displayID) }
+
+  /// Never true for a synthesized panel. `isAlwaysInMirrorSet` is macOS refusing
+  /// to release a set, and the caption it drives says so; over a set Candela
+  /// engaged that sentence blames the wrong party, and the Stop button it
+  /// disables is not the control that takes a synthesized size down.
+  private var isLocked: Bool { !isSynthesized && topology.cannotBeUnmirrored(displayID) }
 
   /// Members macOS will not release. Not the same question as `isLocked`, which
   /// is about THIS display only — a perfectly free master can be in a set full
@@ -94,19 +138,39 @@ struct MirroringSection: View {
     }
   }
 
+  // Rows, not a `Section`, since Task 13: the hub's Display section hosts
+  // these inline (spec §4 — "status row + the existing three-branch control").
   var body: some View {
     let _ = model.prefsRevision
-    Section(MirroringCopy.sectionTitle) {
+    Group {
       LabeledContent(MirroringCopy.statusLabel) {
-        Text(verbatim: MirroringCopy.state(
-          topology: topology, displayID: displayID, name: name
+        // A synthesized panel reads "Not mirrored" here, and it is the true
+        // answer to what this row asks: the user is mirroring nothing. The set
+        // it is in belongs to the size in force, which the size picker states in
+        // its own words. "Showing <virtual display>" would name a display nobody
+        // has, two rows under a control offering to start mirroring.
+        Text(verbatim: MirroringPredicates.statusLine(
+          topology, displayID: displayID, name: name
         ))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(SettingsTheme.bodyColor)
       }
+      // The mirror's two hooks hang HERE, on the one row of this section that is
+      // always present: a hook on the reason lines' own container would only
+      // exist while a reason does, so nothing would be watching for the arrival.
+      // The appear sync is deliberately un-animated, or a reason still standing
+      // when the pane opens would fade in as though it had just happened.
+      .onAppear { shownReasons = reasonLines }
+      .onChange(of: reasonLines) { _, lines in
+        withAnimation(Motion.notice(reduceMotion: reduceMotion)) { shownReasons = lines }
+      }
+
+      // The status row above is always drawn, so the control block always has
+      // a neighbour to be parted from.
+      SettingsCardDivider()
 
       if isLocked {
         // Named and DISABLED, never hidden, and the words travel in the SAME
-        // `Form` row as the dead button. `DisplayModeCoordinator` makes this
+        // row as the dead button. `DisplayModeCoordinator` makes this
         // argument for the mode picker and it holds here with more force:
         // mirroring is a hotkey in this app, so a control that vanished when a
         // set formed would appear and vanish under the user's hands. Which
@@ -120,43 +184,75 @@ struct MirroringSection: View {
         startControls
       }
 
-      // Every refusal states a reason and there are SEVEN of them, each with its
-      // own sentence — and three of the seven are the only ones this pane can
-      // say without asserting something it does not know. See `refusalCaption`,
-      // which switches over all seven with no `default:` arm.
-      if let refusal = coordinator.lastRefusal {
+      // The three reason lines are the only rows here that arrive and leave on
+      // their own, so they are the only ones that animate, and they render from
+      // the mirror rather than from the coordinator. The control block above
+      // swaps `_ConditionalContent` branches and rebuilds its control, reading
+      // the coordinator directly. It is observed to stay instant, and the reason
+      // is timing rather than a guarantee: today the topology change lands in the
+      // commit before the mirror write, so the branch swap is already outside the
+      // animated transaction. Reorder those two and the control could pick the
+      // fade up.
+      // Every refusal states a reason and there are EIGHT of them, each with its
+      // own sentence; three of the eight are the only ones this pane can say
+      // without asserting something it does not know. See `refusalCaption`,
+      // which switches over all eight with no `default:` arm.
+      if let refusal = shownReasons.refusal {
         refusalCaption(refusal)
+          .transition(.opacity)
       }
-      if let failure = coordinator.lastFailure {
+      if let failure = shownReasons.failure {
         // The CoreGraphics code is diagnostic and stays out of the sentence.
         SettingsCaption(MirroringCopy.applyFailure)
           .help("CoreGraphics error \(failure.cgErrorCode)")
+          .transition(.opacity)
       }
       // A break that committed exactly what it staged and STILL left a set
       // standing. `MirrorToggleDecision.disengage` carries `residualMembers` for
       // this sentence alone: a locked slave keeps mirroring, which keeps its
       // master a master. Binding that residue and not rendering it would report
-      // "mirroring off" over a set the user is still looking at — the
+      // "mirroring off" over a set the user is still looking at: the
       // silent-success defect this whole feature exists to close, re-created one
       // layer out.
       //
-      // Rendered in EVERY display's pane, unlike the four suppressed refusals
+      // Rendered in EVERY display's pane, unlike the five suppressed refusals
       // above, and that is deliberate rather than an oversight: this sentence
       // NAMES the displays it is about (or falls back to a count), so it makes
       // no claim about the pane it lands in and cannot be false there.
-      if !coordinator.lastPartialBreak.isEmpty {
+      if !shownReasons.partialBreak.isEmpty {
         SettingsCaption(verbatim: MirroringCopy.partialBreak(
-          residual: coordinator.lastPartialBreak, name: name
+          residual: shownReasons.partialBreak, name: name
         ))
+        .transition(.opacity)
       }
     }
+  }
+
+  /// The three reason signals, carried WHOLE rather than as three bools: one
+  /// refusal replacing another is a different sentence, five of the eight
+  /// refusals render nothing at all, and the sentences differ in height, so the
+  /// mirror has to move for a change that leaves the row count alone.
+  private struct ReasonLines: Equatable {
+    var refusal: MirrorRefusal?
+    var failure: DisplayConfigError?
+    var partialBreak: [CGDirectDisplayID]
+
+    static let none = ReasonLines(refusal: nil, failure: nil, partialBreak: [])
+  }
+
+  private var reasonLines: ReasonLines {
+    ReasonLines(
+      refusal: coordinator.lastRefusal,
+      failure: coordinator.lastFailure,
+      partialBreak: coordinator.lastPartialBreak
+    )
   }
 
   /// The refusals this pane can state TRUTHFULLY, and no others.
   ///
   /// `lastRefusal` is ONE property on the coordinator, written by the hotkey and
   /// by every display's pane alike, and nothing on it records which display it
-  /// was about. Four of the seven sentences name a display deictically, and this
+  /// was about. Five of the eight sentences name a display deictically, and this
   /// pane cannot vouch for the referent: a hotkey refusal of `.notInASet` would
   /// otherwise render "This display is not mirroring anything." inside the pane
   /// of a display that IS mirroring, contradicting the Status row two rows above
@@ -191,6 +287,10 @@ struct MirroringSection: View {
     case .masterIsAlwaysMirrored: EmptyView()
     // "…mirrored onto this one" — same problem, same direction.
     case .nothingToMirror: EmptyView()
+    // "Every display that can mirror this one already is." — "this one" is the
+    // named master, frequently not this pane's display. Same suppression as
+    // its neighbours.
+    case .alreadyMirrored: EmptyView()
     // "This display is not mirroring anything." — the one that contradicts the
     // Status row outright.
     case .notInASet: EmptyView()
@@ -206,17 +306,20 @@ struct MirroringSection: View {
   /// "what this button does" and "why this button is dead" are different facts.
   ///
   /// The caption is the row's own caption, never a `SettingsCaption` placed
-  /// after it: a caption as its own row gets a divider above it and full row
+  /// after it: a caption as its own row gets a hairline above it and full row
   /// padding, so it reads as a separate setting rather than as the explanation
-  /// for the button — measured in the forced-render capture for this task.
+  /// for the button (measured in the forced-render capture for this task, on
+  /// the grouped form; the card rhythm puts the hairline in the same place).
   private func stopControl(enabled: Bool, caption: SettingsCaption) -> some View {
     SettingRow(caption: caption) {
       Button(MirroringCopy.stopMirroring) {
-        // Fire-and-forget into the coordinator's queue — the queue is what
+        // Fire-and-forget into the coordinator's queue: the queue is what
         // serialises two fast clicks, so wrapping this in a `Task` here would
         // defeat it.
         coordinator.disengage(containing: displayID)
       }
+      .buttonStyle(SettingsSecondaryButtonStyle())
+      .accessibilityLabel(Text(MirroringCopy.stopMirroring))
       .disabled(!enabled)
     }
   }
@@ -256,11 +359,11 @@ struct MirroringSection: View {
     // cancels the whole transaction. On a rig that has one, the promise is
     // narrower and the sentence says so.
     SettingRow(
-      topology.displays.contains(where: \.isAlwaysInMirrorSet)
+      userVisibleDisplays.contains(where: \.isAlwaysInMirrorSet)
         ? MirroringCopy.startExplanationSomeLocked
         : MirroringCopy.startExplanation
     ) {
-      Picker(MirroringCopy.pickMaster, selection: Binding(
+      ThemedChoiceRow(label: MirroringCopy.pickMaster, selection: Binding(
         get: { selectedMaster },
         set: { chosenMaster = $0 }
       )) {
@@ -279,6 +382,8 @@ struct MirroringSection: View {
         guard let selectedMaster else { return }
         coordinator.engage(master: selectedMaster)
       }
+      .buttonStyle(SettingsSecondaryButtonStyle())
+      .accessibilityLabel(Text(MirroringCopy.startMirroring))
       .disabled(!canStart || selectedMaster == nil)
     }
   }
@@ -288,7 +393,7 @@ struct MirroringSection: View {
   /// Why mirroring cannot be started right now, or nil when it can.
   ///
   /// Four different sentences rather than one, for the same reason
-  /// `MirrorTopologyPolicy.engage` has three refusals rather than one:
+  /// `MirrorTopologyPolicy.engage` has four refusals rather than one:
   /// "mirroring needs a second display" is FALSE on a machine that has two, one
   /// of which macOS keeps locked to a set. The Kit already refuses to conflate
   /// those; a UI that conflated them anyway would put the wrong sentence on
@@ -305,9 +410,11 @@ struct MirroringSection: View {
     }
     // An empty sample lands here too, and this is the truth on the rig it
     // actually happens on — a laptop with nothing plugged in. Same reading as
-    // `MirrorRefusal.onlyOneDisplay`.
-    if topology.displays.count < 2 { return MirroringCopy.needsASecondDisplay }
-    if !topology.displays.contains(where: { $0.id == displayID }) {
+    // `MirrorRefusal.onlyOneDisplay`. Counted over the displays the user has:
+    // a lone panel rendering a synthesized size would otherwise count its own
+    // virtual display as the second one and be told macOS keeps the rest locked.
+    if userVisibleDisplays.count < 2 { return MirroringCopy.needsASecondDisplay }
+    if !userVisibleDisplays.contains(where: { $0.id == displayID }) {
       return MirroringCopy.noSuchDisplay
     }
     return MirroringCopy.nothingToMirror

@@ -1,7 +1,3 @@
-//  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
-//  Signatures transplanted from the MonitorControl project (MIT):
-//  Support/Bridging-Header.h:16-17.
-//
 // dlsym-loaded shims for the private DisplayServices.framework C API
 // (spec §4: no linker flags against private frameworks, no unsafeFlags).
 
@@ -15,12 +11,21 @@ import os
 public enum DisplayServices {
   private typealias GetBrightnessFn = @convention(c) (CGDirectDisplayID, UnsafeMutablePointer<Float>) -> Int32
   private typealias SetBrightnessFn = @convention(c) (CGDirectDisplayID, Float) -> Int32
+  /// Whether the display has ambient light compensation at all. Takes the
+  /// display alone: called with a spare second register argument it leaves the
+  /// buffer behind it untouched [MEASURED 2026-08-19].
+  private typealias HasAmbientFn = @convention(c) (CGDirectDisplayID) -> Bool
+  private typealias GetAmbientFn = @convention(c) (CGDirectDisplayID, UnsafeMutablePointer<UInt8>) -> Int32
+  private typealias SetAmbientFn = @convention(c) (CGDirectDisplayID, UInt8) -> Int32
 
   /// @convention(c) function types are Sendable, so this struct is Sendable
   /// and safe as a lazily-initialized global under strict concurrency.
   private struct Symbols: Sendable {
     let getBrightness: GetBrightnessFn?
     let setBrightness: SetBrightnessFn?
+    let hasAmbient: HasAmbientFn?
+    let getAmbient: GetAmbientFn?
+    let setAmbient: SetAmbientFn?
   }
 
   private static let log = Logger(subsystem: "com.rydersel.Candela", category: "DisplayServices")
@@ -36,7 +41,8 @@ public enum DisplayServices {
       "/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_LAZY
     ) else {
       log.error("DisplayServices.framework failed to dlopen; native brightness disabled (degrading to DDC/software)")
-      return Symbols(getBrightness: nil, setBrightness: nil)
+      return Symbols(getBrightness: nil, setBrightness: nil,
+                     hasAmbient: nil, getAmbient: nil, setAmbient: nil)
     }
     func resolve<T>(_ name: String, as _: T.Type) -> T? {
       guard let sym = dlsym(handle, name) else {
@@ -47,7 +53,10 @@ public enum DisplayServices {
     }
     return Symbols(
       getBrightness: resolve("DisplayServicesGetBrightness", as: GetBrightnessFn.self),
-      setBrightness: resolve("DisplayServicesSetBrightness", as: SetBrightnessFn.self)
+      setBrightness: resolve("DisplayServicesSetBrightness", as: SetBrightnessFn.self),
+      hasAmbient: resolve("DisplayServicesHasAmbientLightCompensation", as: HasAmbientFn.self),
+      getAmbient: resolve("DisplayServicesAmbientLightCompensationEnabled", as: GetAmbientFn.self),
+      setAmbient: resolve("DisplayServicesEnableAmbientLightCompensation", as: SetAmbientFn.self)
     )
   }()
 
@@ -69,6 +78,12 @@ public enum DisplayServices {
   /// framework, on whatever thread asks first, thereafter cached by static-let
   /// semantics. No new calls into the private API itself.
   public static var isAvailable: Bool { symbols.setBrightness != nil }
+
+  /// Conformance-only granularity: `isAvailable` is deliberately keyed on the
+  /// setter alone, so a getter that vanished in a macOS update would hide
+  /// behind it. `PlatformConformance` reads both.
+  static var resolvedGetter: Bool { symbols.getBrightness != nil }
+  static var resolvedSetter: Bool { symbols.setBrightness != nil }
 
   /// nil when the symbol is unavailable, the call fails, or the value is
   /// out of range (fork convention: success == (ret == 0 && value >= 0),
@@ -92,4 +107,34 @@ public enum DisplayServices {
     guard let fn = symbols.setBrightness else { return false }
     return fn(displayID, min(max(value, 0), 1)) == 0
   }
+
+  /// The ambient-compensation symbols, wrapped for `AmbientLightCompensation`.
+  ///
+  /// The wrapping is where the C conventions stop: a missing symbol becomes a
+  /// nil member rather than a call that silently does nothing, a failing read
+  /// becomes nil rather than a zero byte the call never wrote, and the
+  /// setter's return code is dropped at the boundary so no caller can mistake
+  /// it for the achieved state.
+  static let ambientLightSymbols: AmbientLightSymbols = {
+    var table = AmbientLightSymbols()
+    if let hasAmbient = symbols.hasAmbient {
+      let query: AmbientLightSymbols.SensorQuery = { displayID in hasAmbient(displayID) }
+      table.hasSensor = query
+    }
+    if let getAmbient = symbols.getAmbient {
+      let read: AmbientLightSymbols.Read = { displayID in
+        var value: UInt8 = 0
+        guard getAmbient(displayID, &value) == 0 else { return nil }
+        return value != 0
+      }
+      table.read = read
+    }
+    if let setAmbient = symbols.setAmbient {
+      let write: AmbientLightSymbols.Write = { displayID, enabled in
+        _ = setAmbient(displayID, enabled ? 1 : 0)
+      }
+      table.write = write
+    }
+    return table
+  }()
 }

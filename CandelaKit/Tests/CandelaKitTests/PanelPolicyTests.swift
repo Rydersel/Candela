@@ -83,6 +83,38 @@ struct PanelPolicyTests {
     #expect(order([Entry(hardwareName: "MAG 341C", hidden: true)]) == [])
   }
 
+  // The three ordinal tests below cover the derivation, and only that. They do
+  // NOT cover the thing that trapped: a sidebar row re-rendered against a
+  // display list that had already been emptied. That path is a SwiftUI `ForEach`
+  // in the app target, which has no test target (D21), so nothing automated
+  // reaches it. The issue's hardware verification (a Reset All with the settings
+  // window open) is the only evidence the crash is gone.
+  @Test func uniqueKeysGetNoOrdinal() {
+    #expect(DisplayOrdering.sharedIdentityOrdinals(keys: []) == [])
+    #expect(DisplayOrdering.sharedIdentityOrdinals(keys: ["mag", "dell"]) == [nil, nil])
+  }
+
+  @Test func repeatedKeysAreNumberedInListOrder() {
+    // SO21: identical units reporting no serial resolve to ONE persistence key,
+    // so they share a name and a destination; the ordinal is what tells their
+    // rows apart.
+    #expect(
+      DisplayOrdering.sharedIdentityOrdinals(keys: ["twin", "dell", "twin"])
+        == [1, nil, 2]
+    )
+    #expect(
+      DisplayOrdering.sharedIdentityOrdinals(keys: ["twin", "twin", "twin"])
+        == [1, 2, 3]
+    )
+  }
+
+  @Test func twoSharedGroupsAreNumberedIndependently() {
+    #expect(
+      DisplayOrdering.sharedIdentityOrdinals(keys: ["a", "b", "a", "b", "c"])
+        == [1, 1, 2, 2, nil]
+    )
+  }
+
   @Test func statusItemVisibilityTruthTable() {
     for hasExternal in [true, false] {
       for hasSlider in [true, false] {

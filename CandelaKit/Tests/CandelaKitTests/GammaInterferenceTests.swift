@@ -5,44 +5,6 @@ import Testing
 
 // MARK: - Fakes
 
-/// Gamma backend with a settable intactness verdict, recording every call in
-/// order (the re-apply assertion is about ordering: the check runs *before*
-/// the apply it guards).
-@MainActor
-final class FakeInterferenceGamma: GammaApplying {
-  enum Event: Equatable {
-    case verify(CGDirectDisplayID)
-    case apply(Double)
-  }
-
-  var intact = true
-  private(set) var events: [Event] = []
-  /// Displays whose baseline table was re-captured, in order — the accept
-  /// path's recapture skip is an absence assertion, so it needs a record.
-  private(set) var recaptured: [CGDirectDisplayID] = []
-
-  var verifyCount: Int { events.filter { if case .verify = $0 { return true }; return false }.count }
-  var appliedScales: [Double] {
-    events.compactMap { if case let .apply(scale) = $0 { return scale }; return nil }
-  }
-
-  @discardableResult
-  func applyGammaScale(
-    _ scale: Double, on _: CGDirectDisplayID, enforcerOn _: CGDirectDisplayID
-  ) -> Bool {
-    events.append(.apply(scale))
-    return true
-  }
-
-  func verifyTableIntact(on displayID: CGDirectDisplayID) -> Bool {
-    events.append(.verify(displayID))
-    return intact
-  }
-
-  func recaptureDefaultTable(on displayID: CGDirectDisplayID) { recaptured.append(displayID) }
-  func resetAllGamma() {}
-}
-
 @MainActor
 final class RecordingAlerts: EngineAlerting {
   private(set) var offers: [(displayName: String, onAccept: @MainActor () -> Void)] = []
@@ -66,7 +28,7 @@ final class ManualClock {
 
 @MainActor
 private struct Fixture {
-  let gamma = FakeInterferenceGamma()
+  let gamma = RecordingGamma()
   let alerts = RecordingAlerts()
   let clock = ManualClock()
   let monitor: GammaInterferenceMonitor
@@ -120,7 +82,7 @@ private struct Fixture {
 /// right after — our scale is back on the table with a single write.
 @MainActor
 @Test func controllerReappliesScaleRightAfterTheCheck() async {
-  let gamma = FakeInterferenceGamma()
+  let gamma = RecordingGamma()
   let alerts = RecordingAlerts()
   let monitor = GammaInterferenceMonitor(gamma: gamma, alerts: alerts)
   let defaults = InMemoryDefaults()
@@ -134,7 +96,8 @@ private struct Fixture {
       gamma: gamma
     ),
     prefs: DisplayPrefs(defaults: defaults, persistenceKey: "gi"),
-    displayID: 3
+    displayID: 3,
+    wireSiblings: []
   )
   controller.preGammaApplyHook = {
     monitor.checkBeforeApply(displayID: 3, displayName: "MAG341C", onSwitchToShade: {})
@@ -173,7 +136,7 @@ private struct Fixture {
 @Test func perDisplayCountsPreventCrossDisplayThresholdTripping() {
   // Backlog #5a: N displays clobbering once each must NOT trip threshold 3 —
   // the alert must name the display that actually earned it.
-  let gamma = FakeInterferenceGamma()
+  let gamma = RecordingGamma()
   let alerts = RecordingAlerts()
   let monitor = GammaInterferenceMonitor(gamma: gamma, alerts: alerts, threshold: 3)
   // Defeat the 500 ms per-display verify throttle deterministically: every
@@ -201,7 +164,7 @@ private struct Fixture {
   // SUPERSEDES the deleted `acceptSwitchesToShadeAndRearms` (which pinned
   // the fork's reset-and-re-arm accept); its switch-to-shade assertion is
   // folded in here.
-  let gamma = FakeInterferenceGamma()
+  let gamma = RecordingGamma()
   let alerts = RecordingAlerts()
   let monitor = GammaInterferenceMonitor(gamma: gamma, alerts: alerts, threshold: 1)
   gamma.intact = false
@@ -219,7 +182,7 @@ private struct Fixture {
   // interfering app may own the table — recapturing would bake its curve in
   // as the "default" and clearSoftwareLeg would later resurface it as a tint.
   let defaults = InMemoryDefaults()
-  let gamma = FakeInterferenceGamma()
+  let gamma = RecordingGamma()
   let controller = BrightnessController(
     writer: FakeDDC(readResult: nil),
     backends: BrightnessBackends(
@@ -227,7 +190,8 @@ private struct Fixture {
       hdr: nil, shade: nil, gamma: gamma
     ),
     prefs: DisplayPrefs(defaults: defaults, persistenceKey: "rc"),
-    displayID: 5
+    displayID: 5,
+    wireSiblings: []
   )
   await controller.handleReconfigure(recapture: false)
   #expect(gamma.recaptured.isEmpty)

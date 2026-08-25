@@ -52,8 +52,8 @@ final class RotationCoordinator {
   /// nobody.
   @ObservationIgnored private let gate: DisplayReconfigurationGate
   @ObservationIgnored private let session: RotationPreviewSession
-  @ObservationIgnored private var pending: Task<Void, Never>?
-  @ObservationIgnored private var countdown: Task<Void, Never>?
+  @ObservationIgnored private let queue = PreviewQueue()
+  @ObservationIgnored private let countdown = PreviewCountdownDriver()
   @ObservationIgnored private var inFlight = 0
   @ObservationIgnored private let log = Logger(
     subsystem: "com.rydersel.Candela", category: "rotation"
@@ -149,14 +149,31 @@ final class RotationCoordinator {
       lastRefusal = refusal
       syncConfirmation()
     case let .rotate(request):
-      enqueue { await self.begin(request) }
+      // Raised HERE, synchronously, and not inside the queue, which is what the
+      // other three coordinators do. Two reasons, and the second is the defect
+      // that motivated the move: a control that queues main-actor work and only
+      // then disables itself is a control two clicks get through; and `enqueue`
+      // also carries the countdown's per-second `adopt` and the departure
+      // discard, neither of which is an apply, so raising the flag inside it
+      // greyed Keep and Revert once a second for the whole preview. Counted
+      // rather than boolean, so two queued rotations do not have the first
+      // one's completion clear the flag for the second.
+      inFlight += 1
+      isApplying = true
+      queue.enqueue {
+        await self.begin(request)
+        self.inFlight -= 1
+        if self.inFlight == 0 { self.isApplying = false }
+      }
     }
   }
 
   private func begin(_ request: RotationRequest) async {
-    lastRefusal = nil
-    lastFailure = nil
-    blockedBy = nil
+    // Through the syncing funnel rather than three bare assignments: the
+    // `gate.claim` below suspends, and a window still rendering a report that
+    // has just been cleared is the empty-floating-panel defect `syncConfirmation`
+    // documents.
+    dismissReport()
     // AR12, asked BEFORE the apply: `SLSSetDisplayRotation` blocks for 0.4–1.1
     // seconds and does not come back until the panel has moved, so a refusal
     // after it would be a refusal of something that already happened.
@@ -180,13 +197,13 @@ final class RotationCoordinator {
   }
 
   @discardableResult
-  func confirm(_ answered: Preview) async -> ModePreviewOutcome {
-    await enqueueReturning { await self.resolve(answered, keeping: true) }
+  func confirm(_ answered: Preview) async -> PreviewOutcome {
+    await queue.enqueueReturning { await self.resolve(answered, keeping: true) }
   }
 
   @discardableResult
-  func revert(_ answered: Preview) async -> ModePreviewOutcome {
-    await enqueueReturning { await self.resolve(answered, keeping: false) }
+  func revert(_ answered: Preview) async -> PreviewOutcome {
+    await queue.enqueueReturning { await self.resolve(answered, keeping: false) }
   }
 
   func dismissReport() {
@@ -202,44 +219,18 @@ final class RotationCoordinator {
   func displaysChanged() {
     let present = Set(configurator.displays().map(\.id))
     guard let preview, !present.contains(preview.request.display) else { return }
-    enqueue {
+    queue.enqueue {
       await self.session.discardOnDeparture()
       await self.adopt(.clear)
     }
   }
 
   // MARK: - Serialisation
+  //
+  // The queue itself is `PreviewQueue` in CandelaKit (#68): four coordinators
+  // held four byte-identical copies of it, and the countdown driver beside it.
 
-  private func enqueue(_ operation: @escaping @MainActor () async -> Void) {
-    let previous = pending
-    inFlight += 1
-    isApplying = true
-    pending = Task { @MainActor in
-      _ = await previous?.value
-      await operation()
-      inFlight -= 1
-      if inFlight == 0 { isApplying = false }
-    }
-  }
-
-  private func enqueueReturning<T: Sendable>(
-    _ operation: @escaping @MainActor () async -> T
-  ) async -> T {
-    let previous = pending
-    inFlight += 1
-    isApplying = true
-    let task = Task { @MainActor in
-      _ = await previous?.value
-      let value = await operation()
-      inFlight -= 1
-      if inFlight == 0 { isApplying = false }
-      return value
-    }
-    pending = Task { @MainActor in _ = await task.value }
-    return await task.value
-  }
-
-  private func resolve(_ answered: Preview, keeping: Bool) async -> ModePreviewOutcome {
+  private func resolve(_ answered: Preview, keeping: Bool) async -> PreviewOutcome {
     let outcome = keeping
       ? await session.confirm(answered.request)
       : await session.revert(answered.request)
@@ -306,29 +297,22 @@ final class RotationCoordinator {
   /// synchronous reconfiguration callback must not be able to stop the expiry.
   /// The expiry is what rescues a display nobody meant to rotate.
   private func startCountdown() {
-    countdown?.cancel()
     let session = session
-    countdown = Task.detached { [weak self] in
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .seconds(1))
-        if Task.isCancelled { return }
-        let outcome = await session.tick()
-        Task { @MainActor [weak self] in
-          guard let self else { return }
-          if case let .failed(error) = outcome {
-            enqueue { await self.adopt(.set(error)) }
-          } else {
-            enqueue { await self.adopt(.keep) }
-          }
-        }
-        if outcome != nil { return }
+    countdown.start(tick: { await session.tick() }) { [weak self] outcome in
+      guard let self else { return }
+      // Through the queue, never straight to `adopt`: a tick that landed
+      // mid-apply would otherwise publish a picture the apply is about to
+      // replace.
+      if case let .failed(error) = outcome {
+        queue.enqueue { await self.adopt(.set(error)) }
+      } else {
+        queue.enqueue { await self.adopt(.keep) }
       }
     }
   }
 
   private func stopCountdown() {
-    countdown?.cancel()
-    countdown = nil
+    countdown.stop()
   }
 }
 

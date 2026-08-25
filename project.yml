@@ -9,6 +9,13 @@ packages:
     # with nothing committed to pin it. Matches the house convention (M4 pinned
     # SimplyCoreAudio exactly and MediaKeyTap to a commit).
     exactVersion: 3.0.1
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    # Exact for the same Package.resolved reason as KeyboardShortcuts. Added by
+    # the W6 auto-update work as a deliberate amendment to the v1 dependency
+    # decision; an updater is a correctness requirement for an app built on
+    # private APIs that break across macOS releases.
+    exactVersion: 2.9.6
 options:
   deploymentTarget:
     macOS: "14.0"
@@ -17,10 +24,41 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
+    # Ad-hoc is the PROJECT-wide default, which now means the test bundle only:
+    # the app target overrides it below. CandelaAppTests is never deployed and
+    # holds no TCC grant, so a real identity would buy it nothing and would make
+    # the suite unrunnable anywhere the certificate is absent.
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: ""
+schemes:
+  # Headless entry for the app suite: xcodebuild test -scheme CandelaAppTests.
+  CandelaAppTests:
+    build:
+      targets:
+        CandelaAppTests: [test]
+    test:
+      targets: [CandelaAppTests]
 targets:
+  # Host-free unit-test bundle over the app sources (AT1). No TEST_HOST, so
+  # CandelaMain.main() never runs: no status item, no pollers, no DDC writer
+  # exists in the test process, and the suite is safe to run with panels
+  # attached. App sources compile INTO the bundle, so tests reach internal
+  # types directly with no @testable and no framework extraction (AT2).
+  CandelaAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Candela
+        excludes:
+          - "Info.plist"
+      - CandelaAppTests
+    dependencies:
+      - package: CandelaKit
+      - package: KeyboardShortcuts
+      # App sources compile into the bundle, so anything the app imports the
+      # bundle must also link. No updater runs in tests: nothing calls start.
+      - package: Sparkle
   Candela:
     type: application
     platform: macOS
@@ -28,16 +66,59 @@ targets:
     dependencies:
       - package: CandelaKit
       - package: KeyboardShortcuts
+      - package: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rydersel.Candela
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        CURRENT_PROJECT_VERSION: "3"
+        # Developer ID in BOTH configurations, not Release alone. TCC keys a
+        # grant to the code identity, so an ad-hoc Debug build is a different
+        # app to the system than the Release one and re-earns the Accessibility
+        # and Screen Recording prompts every rebuild. One reset cleared 21 stale
+        # Accessibility rows, one per ad-hoc identity this project has had.
+        # Signing both configurations is what ends that.
+        #
+        # The identity is named generically so it resolves against whichever
+        # Developer ID Application certificate is in the keychain; the team is
+        # what actually pins it. Neither is a secret: both are readable out of
+        # any binary we ship with `codesign -dvvv`.
+        CODE_SIGN_IDENTITY: "Developer ID Application"
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: WGFW4X4695
+        CODE_SIGN_ENTITLEMENTS: Candela.entitlements
         # The icon ships as an asset catalog rather than a bare CFBundleIconFile.
         # An LSUIElement app has no Dock tile, so the places the icon actually
         # shows — About, notifications, System Settings > Login Items — are the
         # ones that read the catalog. Masters and the .icns live in `icons/`.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        # Hardened runtime on Release only. It is a notarization prerequisite,
+        # so it has to be on for anything shipped; keeping it off in Debug
+        # leaves the debugger unencumbered and means a Debug build never
+        # depends on the get-task-allow entitlement Xcode injects for it.
+        #
+        # The consequence to remember: Release is the FIRST place the hardened
+        # runtime is exercised, and the deploy loop builds Release, so a private
+        # framework it refused to load would surface at deploy time rather than
+        # during day-to-day Debug work. That is why the acceptance pass drives
+        # every dlopen path off a Release build specifically.
+        Release:
+          ENABLE_HARDENED_RUNTIME: YES
+          # Without this, Release carries get-task-allow and notarization
+          # rejects it outright. Xcode injects that entitlement on a plain
+          # `build` action and suppresses it only under `archive`, and the
+          # deploy loop builds rather than archives, so the default would have
+          # shipped a permanently un-notarizable binary. Measured 2026-08-17:
+          # the first signed Release build had it, and scripts/verify-signing.sh
+          # is the only thing that noticed. Nothing else fails: the app runs,
+          # codesign --verify passes, and the flaw surfaces only at submission.
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+          # A secure timestamp is required for notarization and cannot be added
+          # after the fact: an untimestamped signature is rejected. Release only,
+          # since it needs Apple's timestamp server on every signing and would
+          # otherwise put the network in the path of every Debug build.
+          OTHER_CODE_SIGN_FLAGS: "--timestamp"
     info:
       path: Candela/Info.plist
       properties:
@@ -45,3 +126,13 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSHumanReadableCopyright: "MIT licensed."
+        # Sparkle. The feed URL is permanent: it bakes into every shipped
+        # binary, so it must outlive any one hosting choice; candela.fyi is
+        # ours and the appcast path never moves. Enclosure URLs inside the
+        # appcast are per release and free to move. SUEnableAutomaticChecks
+        # set explicitly means Sparkle never shows its second-launch consent
+        # prompt; checking is on by default and installs always ask (the
+        # automatic-download default stays off).
+        SUFeedURL: "https://candela.fyi/appcast.xml"
+        SUPublicEDKey: "l1jMVT0ljq1l/b0/8htcM12F+m0RriyMnt0kTnfEhwk="
+        SUEnableAutomaticChecks: true

@@ -10,7 +10,7 @@ import os
 ///
 /// `DisplayModeCoordinator`'s shape, for its reasons, and they are not optional:
 ///
-/// 1. **Every session-touching operation is serialised** through `pending`.
+/// 1. **Every session-touching operation is serialised** through `queue`.
 ///    Without it two drops both suspend inside `begin()`, the actor serialises
 ///    them, and their main-actor continuations resume in an order unrelated to
 ///    the actor's — leaving the window describing one layout while "Keep"
@@ -62,9 +62,12 @@ final class ArrangementCoordinator {
   /// A saved layout that could not be restored exactly.
   ///
   /// Restore is unattended, so this is the ONLY way the user finds out. It
-  /// survives until they dismiss it or the display set changes — the point is
-  /// that it is still there the next time they look, not that it was true at the
-  /// moment nobody was watching. `DisplayModeCoordinator.ReapplyReport`'s job,
+  /// survives until they dismiss it, or until a later restore pass has a newer
+  /// outcome for the set that is attached then — the point is that it is still
+  /// there the next time they look, not that it was true at the moment nobody
+  /// was watching. Nothing clears it on a departure alone (SO8); the comment in
+  /// `displaysChanged` says why that is deliberate rather than an oversight.
+  /// `DisplayModeCoordinator.ReapplyReport`'s job,
   /// with one value rather than a per-display map: a layout is a fact about the
   /// whole set, so there is one of these at a time.
   private(set) var restoreNotice: ArrangementReapplyNotice?
@@ -80,6 +83,19 @@ final class ArrangementCoordinator {
   /// unwired coordinator looks unfinished in testing rather than plausibly right.
   @ObservationIgnored var displayName: (CGDirectDisplayID) -> String = { _ in "" }
 
+  /// The synthesis pairings as of now (SS1), so a layout is saved, looked up and
+  /// arrival-gated under the PANEL a synthesized size is standing in for rather
+  /// than under the virtual display that owns its picture. Without it, engaging
+  /// a size orphans every saved layout for that display set and reports the
+  /// panel as missing from a machine it is plugged into.
+  ///
+  /// A closure rather than a snapshot, for two reasons that both bite: the
+  /// pairing changes while this object lives, and its display IDs are RUNTIME
+  /// ids, reassigned across a replug. Read at the moment of use and stored
+  /// nowhere. Empty by default, which is exactly a machine with no synthesized
+  /// size engaged.
+  @ObservationIgnored var synthesisPairings: () -> [SynthesisPairing] = { [] }
+
   @ObservationIgnored private let configurator: any DisplayArrangementConfiguring
   /// AR12. Held from just before the layout applies until nothing is
   /// outstanding. Not defaulted — a per-coordinator default would compile, run,
@@ -93,8 +109,8 @@ final class ArrangementCoordinator {
   /// shy silently fails to restore anything on the reconnect the feature is
   /// named for.
   @ObservationIgnored private var arrivals = TopologyArrivalTracker()
-  @ObservationIgnored private var pending: Task<Void, Never>?
-  @ObservationIgnored private var countdown: Task<Void, Never>?
+  @ObservationIgnored private let queue = PreviewQueue()
+  @ObservationIgnored private let countdown = PreviewCountdownDriver()
   @ObservationIgnored private var inFlight = 0
   @ObservationIgnored private var screenObserver: (any NSObjectProtocol)?
   @ObservationIgnored private let log = Logger(
@@ -196,11 +212,23 @@ final class ArrangementCoordinator {
   /// object lives as long as the app and the block holds `self` weakly, so a
   /// surviving registration is inert rather than dangling.
   deinit {
-    countdown?.cancel()
-    pending?.cancel()
+    countdown.stop()
+    queue.cancel()
   }
 
   // MARK: - Sampling
+
+  /// The pairing in the spelling the persistence layer speaks (SS12): a
+  /// synthesis virtual display's ID against the identity key of the panel it is
+  /// standing in for. Built per use from the live pairing, never held.
+  ///
+  /// The panel itself is left filtered as the mirror slave it is: the pair
+  /// contributes one identity, under the panel's name. Signing both would file
+  /// the layout under a set that exists only while the size does, which is the
+  /// orphaned layout this exists to prevent.
+  private var synthesisSubstitutions: [CGDirectDisplayID: String] {
+    synthesisPairings().reduce(into: [:]) { $0[$1.virtualDisplayID] = $1.physicalIdentityKey }
+  }
 
   /// Re-reads the layout on screen. Called at launch, on every screen-parameters
   /// change, and after anything this app applies.
@@ -240,7 +268,7 @@ final class ArrangementCoordinator {
       self.recoverableLayout = nil
       syncConfirmation()
     }
-    enqueue {
+    queue.enqueue {
       guard await self.session.discardIfTopologyChanged() else { return }
       self.log.info("Dropped an unanswered arrangement preview: the display set changed")
       await self.adopt(.clear)
@@ -255,16 +283,16 @@ final class ArrangementCoordinator {
   /// Synchronous and fire-and-forget on purpose — the queue owns the ordering, so
   /// no caller can create a second in-flight apply by spawning its own task.
   func apply(_ wanted: DisplayArrangement) {
-    // Raised HERE, synchronously, and not inside `enqueue`: a control that
+    // Raised HERE, synchronously, and not inside the queue: a control that
     // queues main-actor work and only then disables itself is a control two
-    // clicks get through — and `enqueue` also carries the screen-parameters
+    // clicks get through, and the queue also carries the screen-parameters
     // reconciliation, which is not an apply and must not grey out the answer
     // buttons every time anything on the machine reconfigures. Counted rather
     // than boolean, so two queued applies do not have the first one's
     // completion clear the flag for the second.
     inFlight += 1
     isApplying = true
-    enqueue {
+    queue.enqueue {
       await self.performApply(wanted)
       self.inFlight -= 1
       if self.inFlight == 0 { self.isApplying = false }
@@ -312,7 +340,7 @@ final class ArrangementCoordinator {
   /// the same gate, and a refused pass cannot rely on the winner producing a
   /// reconfiguration event when the winner applied nothing.
   func restoreSavedArrangement() async {
-    await enqueueReturning { await self.performRestore() }
+    await queue.enqueueReturning { await self.performRestore() }
   }
 
   /// `answered` is the preview the caller was LOOKING AT. It is carried into the
@@ -320,13 +348,13 @@ final class ArrangementCoordinator {
   /// preview — so an answer can only ever resolve what the user was reading, and
   /// queue ordering is demoted to an optimisation.
   @discardableResult
-  func confirm(_ answered: Preview) async -> ModePreviewOutcome {
-    await enqueueReturning { await self.resolve(answered, keeping: true) }
+  func confirm(_ answered: Preview) async -> PreviewOutcome {
+    await queue.enqueueReturning { await self.resolve(answered, keeping: true) }
   }
 
   @discardableResult
-  func revert(_ answered: Preview) async -> ModePreviewOutcome {
-    await enqueueReturning { await self.resolve(answered, keeping: false) }
+  func revert(_ answered: Preview) async -> PreviewOutcome {
+    await queue.enqueueReturning { await self.resolve(answered, keeping: false) }
   }
 
   /// Clears everything the report card renders, and syncs the window in the same
@@ -348,28 +376,9 @@ final class ArrangementCoordinator {
   }
 
   // MARK: - Serialisation
-
-  private func enqueue(_ operation: @escaping @MainActor () async -> Void) {
-    let previous = pending
-    pending = Task { @MainActor in
-      _ = await previous?.value
-      await operation()
-    }
-  }
-
-  private func enqueueReturning<T: Sendable>(
-    _ operation: @escaping @MainActor () async -> T
-  ) async -> T {
-    let previous = pending
-    let task = Task { @MainActor () -> T in
-      _ = await previous?.value
-      return await operation()
-    }
-    // The chain is Void-typed, so the next operation waits on this one through
-    // an erased wrapper rather than on its result.
-    pending = Task { @MainActor in _ = await task.value }
-    return await task.value
-  }
+  //
+  // The queue itself is `PreviewQueue` in CandelaKit (#68): four coordinators
+  // held four byte-identical copies of it, and the countdown driver beside it.
 
   // MARK: - Operations (always inside the queue)
 
@@ -383,7 +392,10 @@ final class ArrangementCoordinator {
     // argument" is not a sentence to show someone who dropped a display back
     // where it started. Filtered here rather than reported; Task 6's proposal
     // type will filter it a step earlier, and this stays as the backstop.
-    guard wanted != live else {
+    // Compared on the ANCHORED form, the same one the plan will stage: an
+    // unanchored translation (dragging the only display, say) changes nothing
+    // relative to anything and must land here, not in the error card.
+    guard (wanted.anchored(preservingMainOf: live) ?? wanted) != live else {
       log.debug("arrangement request is a no-op")
       return
     }
@@ -439,7 +451,13 @@ final class ArrangementCoordinator {
     let topology = configurator.currentTopology()
     arrangement = topology.arrangement
 
-    let claimed = arrivals.claimArrivals(online: topology.displays)
+    // ONE read of the pairing for the whole pass, for the reason there is one
+    // enumeration: the gate, the lookup and the match have to be talking about
+    // the same machine, and an engage landing between them would have the layout
+    // looked up under one set and matched against another.
+    let substituting = synthesisSubstitutions
+
+    let claimed = arrivals.claimArrivals(online: topology.displays, substituting: substituting)
     guard !claimed.isEmpty else { return }
 
     // An outstanding preview outranks a saved layout: a person is looking at a
@@ -471,9 +489,17 @@ final class ArrangementCoordinator {
     let decision = ArrangementReapplyPolicy.decide(
       isEnabled: persistence.isRestoreEnabled,
       arrivals: claimed,
-      stored: persistence.savedArrangement(for: TopologySignature(topology.arrangement)),
+      stored: persistence.savedArrangement(
+        // The ONLINE spelling of the signature, which is the one the arrival
+        // gate above signs; the two agree by construction and by test. They can
+        // diverge on one input, a display whose bounds are unreadable, which the
+        // layout spelling drops and this one keeps: inert here, because `decide`
+        // defers on exactly that discrepancy before it consults `stored`.
+        for: TopologySignature(online: topology.displays, substituting: substituting)
+      ),
       attached: topology.displays,
-      current: topology.arrangement
+      current: topology.arrangement,
+      substituting: substituting
     )
 
     if decision.isDeferred {
@@ -492,7 +518,15 @@ final class ArrangementCoordinator {
       }
       restoreNotice = notice
       if let restoreNotice {
-        log.error("Could not restore the saved layout: \(String(describing: restoreNotice), privacy: .public)")
+        // Not every notice is a failure. A layout declined because the displays
+        // are no longer the size it was recorded at is an ordinary outcome, and
+        // logging it at `.error` puts a red line in the diagnostics for a
+        // machine that is working.
+        if restoreNotice.isWorthInterrupting {
+          log.error("Could not restore the saved layout: \(String(describing: restoreNotice), privacy: .public)")
+        } else {
+          log.info("Did not restore the saved layout: \(String(describing: restoreNotice), privacy: .public)")
+        }
       }
       syncConfirmation()
       refreshArrangement()
@@ -559,7 +593,7 @@ final class ArrangementCoordinator {
   func setRestoringLayout(_ restoring: Bool) {
     persistence.setRestoreEnabled(restoring)
     guard restoring else { return }
-    enqueue {
+    queue.enqueue {
       // NOT while a preview stands. The layout on screen during a countdown is
       // one nobody has approved, and saving it would file the very arrangement
       // the user is about to revert — the settings window and the confirmation
@@ -585,7 +619,11 @@ final class ArrangementCoordinator {
   /// arrangement the machine was never in.
   private func saveIfRestoring() {
     guard persistence.isRestoreEnabled else { return }
-    persistence.save(arrangement)
+    // SS12: filed under the panel, never under the virtual display standing in
+    // for it. A layout saved while a synthesized size stands has to be the same
+    // layout when the size is dropped, and the virtual display does not survive
+    // it.
+    persistence.save(arrangement, substituting: synthesisSubstitutions)
     didSaveArrangement()
   }
 
@@ -609,7 +647,7 @@ final class ArrangementCoordinator {
     log.error("An arrangement apply diverged; holding the previous layout so it can be restored")
   }
 
-  private func resolve(_ answered: Preview, keeping: Bool) async -> ModePreviewOutcome {
+  private func resolve(_ answered: Preview, keeping: Bool) async -> PreviewOutcome {
     let outcome = keeping
       ? await session.confirm(answered.value)
       : await session.revert(answered.value)
@@ -698,8 +736,13 @@ final class ArrangementCoordinator {
       )
       return
     }
+    // `isWorthInterrupting` rather than `!= nil`: this window is a floating panel
+    // over whatever the user is doing, and the restore pass runs at launch and on
+    // every reconnect with nobody having asked for anything. A notice that names
+    // no failure and offers no remedy does not earn that (#180). It still reaches
+    // the arrangement pane, where somebody came looking.
     if !lastInvalidLayout.isEmpty || lastFailure != nil || blockedBy != nil
-      || recoverableLayout != nil || restoreNotice != nil {
+      || recoverableLayout != nil || restoreNotice?.isWorthInterrupting == true {
       confirmation?.presentArrangementConfirmation(.report)
       return
     }
@@ -719,30 +762,22 @@ final class ArrangementCoordinator {
   /// lands mid-`begin()` must reconcile after it, not against a session that is
   /// half-way through changing.
   private func startCountdown() {
-    countdown?.cancel()
     let session = session
-    countdown = Task.detached { [weak self] in
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .seconds(1))
-        if Task.isCancelled { return }
-        let outcome = await session.tick()
-        Task { @MainActor [weak self] in
-          guard let self else { return }
-          if case let .failed(error) = outcome {
-            enqueue { await self.adopt(.set(error)) }
-          } else {
-            enqueue { await self.adopt(.keep) }
-          }
-        }
-        // The countdown fires at most once; whatever it returned, it is spent.
-        if outcome != nil { return }
+    countdown.start(tick: { await session.tick() }) { [weak self] outcome in
+      guard let self else { return }
+      // Through the queue, never straight to `adopt`: a tick that landed
+      // mid-apply would otherwise publish a picture the apply is about to
+      // replace.
+      if case let .failed(error) = outcome {
+        queue.enqueue { await self.adopt(.set(error)) }
+      } else {
+        queue.enqueue { await self.adopt(.keep) }
       }
     }
   }
 
   private func stopCountdown() {
-    countdown?.cancel()
-    countdown = nil
+    countdown.stop()
   }
 }
 

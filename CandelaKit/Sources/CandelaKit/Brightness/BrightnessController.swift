@@ -46,6 +46,38 @@ public struct BrightnessBackends {
   }
 }
 
+/// What a reset path learned about a display's HDR before it starts writing.
+public enum HDRResetDisengage: Sendable, Equatable {
+  /// The display was measured out of HDR after everything the disengage did,
+  /// so the DDC register is not locked by HDR. `restoreAfterward` is true when
+  /// HDR was live with no Candela mode recording it: someone set it elsewhere,
+  /// and a reset that clears this app's settings hands it back at the end.
+  case disengaged(restoreAfterward: Bool)
+  /// The panel's HDR state is not known: another transition took the display
+  /// mid-flight, or the drop was issued and the display did not leave HDR.
+  /// A caller must neither write DDC on the strength of this nor re-engage,
+  /// because both bet on a state nothing here established.
+  case unknown
+}
+
+/// Whether a DDC write can be trusted to reach a display right now, as measured
+/// rather than as mirrored.
+///
+/// The three cases are not a tri-state mood: `.open` is the only one that
+/// licenses a caller to report its write as landed, and the other two differ
+/// only in what a person can be told to do about it.
+public enum HDRWriteWindow: Sendable, Equatable {
+  /// Measured out of HDR with no transition racing the read: the register is
+  /// not locked, so a write that the wire then settles did reach the panel.
+  case open
+  /// Measured in HDR. DDC goes nowhere and the panel ACKs the loss, so a write
+  /// sent now is a write nothing downstream can tell from a success.
+  case locked
+  /// A transition moved this display while the read was out. The answer
+  /// describes a state that is nobody's to vouch for.
+  case unknown
+}
+
 /// Single source of truth for one display's brightness (spec §5: every input
 /// funnels through here; every surface renders from `brightness`).
 ///
@@ -56,7 +88,7 @@ public struct BrightnessBackends {
 /// 3. combined (default) → `DimmingMath.combinedSplit` across both legs;
 /// 4. combined disabled → `.ddc` hardware leg, full range.
 @MainActor @Observable
-public final class BrightnessController {
+public final class BrightnessController: PendingWireDraining {
   public private(set) var brightness: Double = 1.0
 
   /// The maximum a panel is assumed to accept until it reports one of its own
@@ -108,10 +140,12 @@ public final class BrightnessController {
   /// plain UserDefaults and not observable). Change it via `setHDRMode`.
   public private(set) var hdrMode: HDRMode
 
-  /// The fork's `usesNativeBrightness` gate (dossier §10): an HDR mode is set
-  /// AND HDR is currently live. The second half is empirically load-bearing:
-  /// with HDR off the MAG341C answers `DisplayServicesSetBrightness` with
-  /// SUCCESS but changes nothing, so native must never be routed on mode alone.
+  /// The fork's `usesNativeBrightness` gate (dossier §10), corrected by #52:
+  /// HDR is currently live, WHOEVER engaged it — System Settings can turn HDR
+  /// on with `hdrMode` still `.off`, and DDC writes cannot land there. The
+  /// live-state half is empirically load-bearing the other way too: with HDR
+  /// off the MAG341C answers `DisplayServicesSetBrightness` with SUCCESS but
+  /// changes nothing, so native must never be routed on mode alone.
   /// Role `.builtIn` is constitutively native (Task 10): the built-in panel
   /// has no DDC wire and no combined/software routing — every path-selection
   /// consumer (applyPaths, step's combined math, handleReconfigure) short-
@@ -122,7 +156,7 @@ public final class BrightnessController {
   /// pinned against the full table by
   /// `theStandalonePredicateAgreesWithTheTableEverywhere`.
   private var usesNative: Bool {
-    BrightnessPathPolicy.usesNative(role: role, hdrMode: hdrMode, isHDRActive: cachedHDRActive)
+    BrightnessPathPolicy.usesNative(role: role, isHDRActive: cachedHDRActive)
   }
 
   /// Whether the display reports HDR capability — a published mirror of the
@@ -157,7 +191,6 @@ public final class BrightnessController {
   private func pathInputs(tuning: CommandTuning) -> BrightnessPathPolicy.Inputs {
     BrightnessPathPolicy.Inputs(
       role: role,
-      hdrMode: hdrMode,
       isHDRActive: cachedHDRActive,
       forceSoftware: prefs.forceSoftware,
       avoidGamma: prefs.avoidGamma,
@@ -173,10 +206,26 @@ public final class BrightnessController {
   private(set) var cachedHDRActive = false
   private(set) var cachedSupportsHDR = false
 
+  /// What the last REFRESH observed, which is a different fact from
+  /// `cachedHDRActive`: transitions write that one optimistically (an exit sets
+  /// it false before the drop goes out, and puts it back to true when it bails),
+  /// so it moves for reasons that are requests rather than observations.
+  ///
+  /// The memo invalidation is keyed to THIS one going true-to-false. Keyed to
+  /// the optimistic mirror instead, an exit's own confirming refresh would see
+  /// false-to-false and no edge would ever survive a transition that set the
+  /// mirror on its way in.
+  @ObservationIgnored private var observedHDRActive = false
+
   /// True from an HDR transition's start until its ~2 s settle window ends;
   /// gates `isNativeActive()` (reviews I5/I15) so the poller stays away while
   /// the display blanks and re-modes.
   @ObservationIgnored private var settleInProgress = false
+
+  /// OLED care defers dim entry during a settle (OLED-care spec §8): an overlay
+  /// applied while the display blanks and re-modes is dimming nothing, and the
+  /// state machine would have to unwind it. Read-only.
+  public var isHDRSettling: Bool { self.settleInProgress }
 
   /// Mutable so `rebind(writer:panelIdentity:)` can swap in the writer a
   /// replugged display gets from rediscovery; the DDC applier is built per
@@ -190,15 +239,37 @@ public final class BrightnessController {
   /// Module-internal (not private) so in-module collaborators — `BrightnessSync`'s
   /// fan-out log — can name the display a controller belongs to.
   @ObservationIgnored let displayID: CGDirectDisplayID
+  /// Sync's ambient-hunting deadband for the movement THIS controller has
+  /// published as a source, advanced only by `BrightnessSync.fanOut`. It lives
+  /// here rather than in a table beside the sync code so it shares the
+  /// lifetime of the brightness it accumulates: a controller that goes away
+  /// takes its residual with it, and nothing has to prune stale entries.
+  ///
+  /// That is lifetime, not identity. `performRefresh` reconciles on
+  /// `CGDirectDisplayID` and REUSES the controller, so a display ID handed to
+  /// a different panel arrives here as a rebind, and the residual is cleared
+  /// in `rebind(writer:panelIdentity:)` alongside the other per-panel state.
+  @ObservationIgnored var syncDeadband = SyncDeadband()
   /// Explicitly nonisolated (immutable, Sendable) so `isNativeActive()` can
   /// answer from the poller's nonisolated context without an executor hop.
   @ObservationIgnored private nonisolated let role: DisplayRole
   private let coalescer: BrightnessWriteCoalescer
   @ObservationIgnored private var issuedGeneration: UInt64 = 0
+  /// The newest submit's TARGET, kept for `drainPendingWrites` to re-issue. The
+  /// applier is deliberately not kept: see `resubmit`.
+  @ObservationIgnored private var lastSubmittedTarget: HardwareTarget?
+  /// Submits made by the drain's own retry. Excluded from `submissionMark` so a
+  /// retry cannot look like someone else queueing work, which would make a round
+  /// that retried unable to report a quiet wire even once it was quiet.
+  @ObservationIgnored private var retriedSubmissions: UInt64 = 0
   /// Read at submit time to stamp each `PendingWrite.epoch`. Default `{ 0 }`
   /// pairs with the coalescer's accept-everything default gate, so call sites
   /// that never install an epoch pair keep the M1 behavior.
   @ObservationIgnored private var epochProvider: @Sendable () -> UInt64 = { 0 }
+  /// The gate's other half, kept here as well as in the coalescer: a settle loop
+  /// waits on it rather than on a clock. Default matches the coalescer's
+  /// accept-everything default.
+  @ObservationIgnored private var isEpochCurrent: @Sendable (UInt64) -> Bool = { _ in true }
   /// Last-written brightness is the only truth on write-only DDC panels, so it
   /// is persisted here and restored at init — without it the panel opens at
   /// the default on every launch.
@@ -211,16 +282,73 @@ public final class BrightnessController {
   /// fork's (review M35): a fresh controller always applies its first value.
   @ObservationIgnored private var lastAppliedSw: Double?
 
+  /// The 0…1 brightness portion this controller last SUBMITTED on the DDC leg,
+  /// before tuning maps it onto the register, or nil while it has never driven
+  /// that leg at all.
+  ///
+  /// The nil is as load-bearing as the number (#143). A register Candela has
+  /// never written is a register the user set with the monitor's own buttons,
+  /// and the hand-back must not stomp it; a register Candela drove to the
+  /// combined-mode floor is one Candela owes back. Kept in the PORTION domain
+  /// rather than the raw domain so `invert` and the min/max overrides cannot
+  /// make "full range" mean different things on the two sides of the
+  /// comparison: portion 1 is the brightest the panel is configured to go,
+  /// whatever register value that lands on.
+  @ObservationIgnored private var submittedDDCPortion: Double?
+
+  /// The software side of a pref re-apply that is waiting for its register write
+  /// to land (#146), or nil when nothing is held. Exposed (internal) so a test
+  /// can await the handover instead of polling for it.
+  @ObservationIgnored private(set) var heldSoftwareLeg: Task<Void, Never>?
+
+  /// Supersession token for `heldSoftwareLeg`, in the shape `dimToken` already
+  /// uses for the lock-dim ramp: anything that writes the software leg, clears
+  /// it, or re-runs path selection invalidates a held re-apply, so a hold that
+  /// resumes after the world moved on is a no-op rather than a stale write. The
+  /// task is not cancelled, only disarmed; it still has to resume to let go of
+  /// its continuation.
+  @ObservationIgnored private var softwareLegToken: UInt64 = 0
+
   /// The engine boundary (DT15). Consulted for anything that needs a display
   /// with a DESKTOP — the shade window and the gamma activity enforcer — and
   /// never for the DDC or gamma write targets, which stay the raw panel ID.
   @ObservationIgnored private let mirrorTopology: any MirrorTopologyProviding
+
+  /// The other write queues on this display's wire (its volume and contrast
+  /// controllers), whose duplicate memos have to be dropped whenever an HDR
+  /// window closes: a write ACKed while the register was locked was swallowed,
+  /// so a memo built through the window names values the panel never took.
+  ///
+  /// Stored, and required at init, because the moment that needs them is not a
+  /// call. The invalidation is keyed to the mirror's observed true-to-false
+  /// edge in `refreshHDRCaches`, and that runs from the init refresh and from
+  /// the reconfiguration loop as well as from the doors: a route where HDR was
+  /// dropped in System Settings has no caller of ours to hand anything over.
+  /// A parameter cannot reach those paths at all, and a setter called later
+  /// could be forgotten in silence, which is the failure mode this shape is
+  /// chosen against.
+  ///
+  /// A fact about the wire rather than about a call, so it never changes: a
+  /// display's three controllers are built together and reused together, and a
+  /// replug rebinds their writers in place rather than replacing the objects.
+  @ObservationIgnored private let wireSiblings: [any PendingWireDraining]
 
   /// Gamma-interference hook (Task 9 wires the monitor): invoked ONLY when
   /// the gamma backend — not the shade — is about to apply and the sw dedupe
   /// did not skip. The C1 clearing's restore-to-1.0 bypasses it on purpose:
   /// it is a restore, not a dim, and must never be suspected as interference.
   @ObservationIgnored public var preGammaApplyHook: (@MainActor () -> Void)?
+
+  /// True while this display's picture is coming from a size Candela renders
+  /// rather than from a mode the panel published (SS4). Injected because the
+  /// pairing lives a layer up, in the app's synthesis coordinator, while the
+  /// only door that can engage HDR is here.
+  ///
+  /// It gates the engage arm of `setHDRMode`, which is the half SS9 left open:
+  /// SS9 refuses a synthesis engage while HDR is on, and nothing refused the
+  /// reverse. Defaulting to false keeps every existing caller and every test
+  /// on the pre-gate behaviour.
+  @ObservationIgnored public var isShowingSynthesizedSize: @MainActor () -> Bool = { false }
 
   /// Expected-native echo slot (Task 7 contract; reviews I9/I15). One lock
   /// backs all three nonisolated poller accessors:
@@ -243,6 +371,10 @@ public final class BrightnessController {
   /// HDR settle window (ENGINEERING-NOTES: the display blanks and re-modes
   /// for ~2 s after an HDR toggle). Internal so tests can shrink it.
   @ObservationIgnored var settleDelay: Duration = .seconds(2)
+  /// Pause between the wire-settling rounds a restore runs before it re-engages
+  /// HDR. Sized in `WireQuiescence` to outlast a reconfiguration's write gate;
+  /// internal so tests can shrink it.
+  @ObservationIgnored var wireSettlePause: Duration = .milliseconds(400)
   /// Monotonic supersession token for `setHDRMode`'s post-await mutations
   /// (final review wave). Comparing `hdrMode` instead is ABA-prone: a parked
   /// `.alwaysOn` call resumes to find the mode back at `.alwaysOn` after an
@@ -255,7 +387,12 @@ public final class BrightnessController {
   @ObservationIgnored private(set) var initialHDRRefresh: Task<Void, Never>?
   /// Test seam: observes every hardware submit before the coalescer's own
   /// duplicate-skip (the boundary-walk tests assert at the submit level).
-  @ObservationIgnored var _onSubmit: ((HardwareTarget) -> Void)?
+  ///
+  /// The APPLIER rides along so the target/applier pairing is observable where
+  /// it is chosen. Every mismatch this codebase can produce is born here, in
+  /// `applyPaths`; the appliers' own guards only see it two layers later, as a
+  /// dropped write and a log line (#148).
+  @ObservationIgnored var _onSubmit: ((HardwareTarget, any BrightnessApplying) -> Void)?
 
   public init(
     writer: any DDCWriting,
@@ -268,11 +405,17 @@ public final class BrightnessController {
     legacyKey: String? = nil,
     panelIdentity: String? = nil,
     // Defaulted to an empty store, whose resolution is the identity function:
-    // an unwired engine degrades to exactly today's behaviour. Appended LAST so
-    // every existing construction site compiles unchanged.
-    mirrorTopology: any MirrorTopologyProviding = MirrorTopologyStore()
+    // an unwired engine degrades to exactly today's behaviour.
+    mirrorTopology: any MirrorTopologyProviding = MirrorTopologyStore(),
+    // NO DEFAULT, and the only place the wire's other queues are named. See the
+    // property: the invalidation edge fires on paths that have no caller, so
+    // this cannot be a parameter on the doors, and an empty default would make
+    // a display whose siblings were never wired look exactly like a display
+    // that has none.
+    wireSiblings: [any PendingWireDraining]
   ) {
     self.mirrorTopology = mirrorTopology
+    self.wireSiblings = wireSiblings
     self.writer = writer
     self.backends = backends
     self.prefs = prefs
@@ -340,7 +483,14 @@ public final class BrightnessController {
 
   // MARK: - Hardware readback
 
+  /// A read while WE hold a temporary dim reads our own write, not the user's
+  /// value: the dim is a multiplier on the way to the hardware and never
+  /// touches `brightness` or the store, so adopting the register back would
+  /// fold it in permanently and `endTemporaryDim` would then "restore" to the
+  /// corrupted number. Reached on every reconfiguration
+  /// (`AppModel.performRefresh`'s kept branch), which a lock dim can outlast.
   public func refreshFromHardware() async {
+    guard temporaryDimFactor == nil else { return }
     if role == .builtIn {
       // The built-in panel has no DDC wire — the native read is the only
       // truth (fork: `AppleDisplay.getAppleBrightness`). Publish only; no
@@ -431,7 +581,7 @@ public final class BrightnessController {
   public func setBrightness(_ value: Double) {
     let clamped = min(max(value, 0), 1)
     brightness = clamped
-    applyPaths(clamped)
+    applyPaths()
     persist(clamped)
   }
 
@@ -476,10 +626,29 @@ public final class BrightnessController {
   /// The order the fork's contract depends on is preserved inside the policy,
   /// where it is pinned by `BrightnessPathPolicyTests`; a `switch` here is
   /// order-free by construction.
-  private func applyPaths(_ value: Double) {
+  ///
+  /// **Takes no VALUE argument, deliberately.** Every leg has to derive from the
+  /// same effective value, and a parameter is exactly how that broke once:
+  /// `handleReconfigure` recomputed the software split from raw `brightness`
+  /// and re-applied an UNDIMMED software leg while the DDC leg held a temporary
+  /// dim, leaving a half-lifted dim on a locked screen that the coordinator's
+  /// re-assert could not repair (`beginTemporaryDim` no-ops on an unchanged
+  /// factor). With nothing to pass, a caller cannot pass the wrong thing. The
+  /// `delivery` argument carries no value; it only says which legs this call is
+  /// allowed to write, and both of them still derive from `effectiveBrightness`.
+  ///
+  /// Returns the DDC portion this call put on the register, or nil when the
+  /// selected path wrote none. `reapplyAfterPrefChange` needs the direction the
+  /// register moved in and must not re-derive it: a second site computing the
+  /// combined split is a second copy of the table.
+  @discardableResult
+  private func applyPaths(_ delivery: LegDelivery = .both) -> Double? {
+    supersedeHeldSoftwareLeg()
+    let value = effectiveBrightness
     let tuning = prefs.tuning(for: .brightness)
     switch BrightnessPathPolicy.path(pathInputs(tuning: tuning)) {
     case .native:
+      guard delivery.writesRegister else { return nil }
       // Local native-leg write: record the expected echo at call time (I15)
       // and invalidate any queued adoption (I9).
       echo.withLock { state in
@@ -488,12 +657,14 @@ public final class BrightnessController {
         state.converging = false
       }
       submitHardware(.native(Float(value)), applier: backends.applierNative)
+      return nil
 
     case .software:
       // `applySoftware` re-reads `avoidGamma` itself; the backend carried on the
       // path is for REPORTING. Left alone deliberately — routing the backend
       // through here would be a behaviour change wearing a refactor's clothes.
-      applySoftware(value)
+      if delivery.writesSoftware { applySoftware(value) }
+      return nil
 
     case let .combined(switching, _):
       // No `unavailableDDC` guard here any more, and its absence is the point:
@@ -502,11 +673,13 @@ public final class BrightnessController {
       // opposite. That state is `.softwareOnly` below, which is where the
       // skipped submit now lives.
       let split = DimmingMath.combinedSplit(value: value, switching: switching)
-      submitHardware(
-        .ddc(raw: brightnessRaw(split.ddc, tuning: tuning)),
-        applier: brightnessApplier(tuning: tuning)
-      )
-      applySoftware(split.sw)
+      var submitted: Double?
+      if delivery.writesRegister {
+        submitDDCBrightness(portion: split.ddc, tuning: tuning)
+        submitted = split.ddc
+      }
+      if delivery.writesSoftware { applySoftware(split.sw) }
+      return submitted
 
     case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
       // Combined mode with its DDC brightness command turned off: the register
@@ -515,13 +688,15 @@ public final class BrightnessController {
       // silently convert this display to full-range software dimming, which is a
       // different feature. `PathSelectionTests` pins it under the name
       // `aDisabledBrightnessCommandWritesNoDDCButStillFixesTheSoftwareLeg`.
-      applySoftware(DimmingMath.combinedSplit(value: value, switching: dimsBelow).sw)
+      if delivery.writesSoftware {
+        applySoftware(DimmingMath.combinedSplit(value: value, switching: dimsBelow).sw)
+      }
+      return nil
 
     case .hardware:
-      submitHardware(
-        .ddc(raw: brightnessRaw(value, tuning: tuning)),
-        applier: brightnessApplier(tuning: tuning)
-      )
+      guard delivery.writesRegister else { return nil }
+      submitDDCBrightness(portion: value, tuning: tuning)
+      return value
 
     case .unavailable:
       // DDC brightness turned off with no software leg left to carry the value —
@@ -529,8 +704,22 @@ public final class BrightnessController {
       // The old code expressed the first of those as a bare `guard … else
       // { return }` and reached the second by handing the software leg a flat 1;
       // it is now a NAMED state the pane can report.
-      return
+      return nil
     }
+  }
+
+  /// Which legs one `applyPaths` call may write.
+  ///
+  /// Only #146's ordering asks for anything but `.both`, and it asks for both
+  /// halves in turn: the register alone first, then the software side once that
+  /// write has landed. Nothing on the drag path ever splits them.
+  private enum LegDelivery {
+    case both
+    case register
+    case software
+
+    var writesRegister: Bool { self != .software }
+    var writesSoftware: Bool { self != .register }
   }
 
   /// M4 tuning on the DDC leg: min/max overrides, 9-step curve, invert. The
@@ -546,13 +735,30 @@ public final class BrightnessController {
     )
   }
 
+  /// The ONE door to the brightness register, so `submittedDDCPortion` cannot
+  /// drift from what was actually put on the wire: a submit that recorded
+  /// nothing would make the display look like one Candela never drove, and
+  /// `handBackDDCLegIfAbandoned` would then leave it at the floor (#143).
+  private func submitDDCBrightness(portion: Double, tuning: CommandTuning) {
+    submittedDDCPortion = portion
+    submitHardware(
+      .ddc(raw: brightnessRaw(portion, tuning: tuning)),
+      applier: brightnessApplier(tuning: tuning)
+    )
+  }
+
   private func brightnessApplier(tuning: CommandTuning) -> any BrightnessApplying {
     DDCCommandApplier(writer: writer, command: VCP.brightness, remapCodes: tuning.remapCodes)
   }
 
   private func submitHardware(_ target: HardwareTarget, applier: any BrightnessApplying) {
-    _onSubmit?(target)
+    _onSubmit?(target, applier)
     issuedGeneration += 1
+    // Kept so a write the queue completed without applying can be re-issued,
+    // with a fresh epoch stamp and a freshly built applier. Only the NEWEST
+    // matters: an older one that never landed was superseded by this, which is
+    // the value the panel should end up at.
+    lastSubmittedTarget = target
     coalescer.submit(
       .init(target: target, applier: applier, epoch: epochProvider(), generation: issuedGeneration)
     )
@@ -575,6 +781,78 @@ public final class BrightnessController {
     mirrorTopology.drawableDisplayID(for: displayID)
   }
 
+  /// The companion ID the last gamma write went to, so a reconfigure can clear
+  /// the baseline the island cached for it.
+  ///
+  /// Remembered rather than re-derived: a synthesis disengage destroys the
+  /// virtual display and the topology stops naming it in the same breath, so by
+  /// the time `handleReconfigure` runs there is nothing left to ask. Without
+  /// this the island keeps a baseline keyed on an ID CoreGraphics is free to
+  /// hand to the next display that arrives, and a re-engaged slot would scale a
+  /// new display's table against a destroyed one's.
+  private var lastGammaCompanionID: CGDirectDisplayID?
+
+  /// Every gamma write this controller makes, and the ONE place SS15's double
+  /// write is decided.
+  ///
+  /// While a synthesis set is engaged the panel and the virtual display holding
+  /// its framebuffer are two different display IDs with two different transfer
+  /// tables. Phase 0 measured that the slave's table stores and reads back
+  /// changed, and that whether it reaches the glass is not decidable from
+  /// software: scanout comes from the master's framebuffer, and no reachable
+  /// layer distinguishes a dimmed panel from an undimmed one. So both are
+  /// written, which is what SS15 asks for.
+  ///
+  /// **This is not a free double write, and nothing here claims otherwise.**
+  /// Zero, one or both of the two tables may reach the glass, and software
+  /// cannot tell which. Two LUTs in one scanout chain COMPOUND: 0.5 applied
+  /// twice is 0.25, a visibly darker panel than the value asked for. The
+  /// hardware pass's eyes item is therefore checking for doubled dimming exactly
+  /// as much as for missing dimming, and it is what decides the final single
+  /// routing.
+  ///
+  /// Restricted to a SYNTHESIS set (SS1's pairing, never the mirror flags). In a
+  /// mirror set the user built, the master is somebody else's desktop and
+  /// scaling its table would dim a display nobody asked about.
+  ///
+  /// The companion leg goes through the assumed-linear-baseline entry point,
+  /// because the process that created a virtual display cannot read its table
+  /// back and the ordinary leg refuses a display whose baseline it never
+  /// captured. Without it the second write is issued here and never made.
+  ///
+  /// Only the PANEL's write decides the return value. The companion can refuse
+  /// for reasons that say nothing about the dimming, and letting that answer
+  /// `landed` would clear the dedupe memo and re-attempt on every drag event:
+  /// the live-lock DT17's reporting rule exists to avoid.
+  @discardableResult
+  private func writeGammaScale(
+    _ scale: Double, using gamma: any GammaApplying, enforcerOn drawable: CGDirectDisplayID
+  ) -> Bool {
+    let landed = gamma.applyGammaScale(scale, on: displayID, enforcerOn: drawable)
+    if drawable != displayID, mirrorTopology.topology().isSynthesisSet(containing: displayID) {
+      gamma.applyGammaScale(assumingLinearBaseline: scale, on: drawable, enforcerOn: drawable)
+      lastGammaCompanionID = drawable
+    }
+    return landed
+  }
+
+  /// Hands this display's gamma tables back at scale 1.0, on every leg the dim
+  /// wrote to.
+  ///
+  /// The interference-accept path abandons gamma for the shade for good and has
+  /// to restore what it scaled. It cannot write the island directly: under an
+  /// engaged synthesis pairing the dim wrote TWO tables (SS15), and a companion
+  /// left scaled is a virtual display holding a dark framebuffer that no other
+  /// door hands back, on a display the shade is now dimming as well. Public
+  /// because the accept hook lives in the app target.
+  ///
+  /// Deliberately does NOT clear `lastAppliedSw`: the caller follows with
+  /// `handleReconfigure`, which owns that and the re-apply through the shade.
+  public func handBackGammaTables() {
+    guard let gamma = backends.gamma else { return }
+    writeGammaScale(1.0, using: gamma, enforcerOn: drawableDisplayID)
+  }
+
   /// The software leg, inline and synchronous on the main actor. `sw` is the
   /// raw 0…1 software value; the backend receives the transformed physical
   /// multiplier (dossier §3: the transform applies before any gamma/shade
@@ -586,6 +864,7 @@ public final class BrightnessController {
   /// dimmed nothing and then deduped every identical retry away forever — the
   /// display stayed bright while the engine reported the value as applied.
   private func applySoftware(_ sw: Double) {
+    supersedeHeldSoftwareLeg()
     guard lastAppliedSw != sw else { return }
     let transformed = DimmingMath.swTransform(sw, allowZero: prefs.allowZeroSwBrightness)
     let drawable = drawableDisplayID
@@ -598,8 +877,9 @@ public final class BrightnessController {
       } ?? true
     } else if let gamma = backends.gamma {
       preGammaApplyHook?()
-      // The WRITE target stays the RAW panel ID; only the enforcer resolves.
-      landed = gamma.applyGammaScale(transformed, on: displayID, enforcerOn: drawable)
+      // The WRITE target stays the RAW panel ID; only the enforcer resolves, and
+      // an engaged synthesis set adds a second write (SS15, `writeGammaScale`).
+      landed = writeGammaScale(transformed, using: gamma, enforcerOn: drawable)
     } else {
       landed = true
     }
@@ -625,9 +905,18 @@ public final class BrightnessController {
   /// on entering always-on — those are per-display user choices (documented
   /// divergence).
   private func clearSoftwareLeg() {
+    // Not merely belt-and-braces over `applyPaths`: the engage arm clears the
+    // leg and then AWAITS the HDR toggle, so a hold left armed here would fire
+    // during that suspension and re-dim a display on its way into HDR.
+    supersedeHeldSoftwareLeg()
     let drawable = drawableDisplayID
     backends.shade?.removeShade(for: drawable)
-    backends.gamma?.applyGammaScale(1.0, on: displayID, enforcerOn: drawable)
+    // Through the same helper as the dim, so the restore reaches every table the
+    // dim wrote: a synthesis companion left scaled is a virtual display holding
+    // a dark framebuffer nothing else will ever hand back.
+    if let gamma = backends.gamma {
+      writeGammaScale(1.0, using: gamma, enforcerOn: drawable)
+    }
     lastAppliedSw = nil
   }
 
@@ -643,7 +932,7 @@ public final class BrightnessController {
   /// through `applyPaths` (not a bare submit) also writes the echo slot, so the
   /// poller reads the assert back as an echo rather than an external change.
   private func assertNativeEntryBrightness() {
-    applyPaths(brightness)
+    applyPaths()
   }
 
   private var switchingValue: Double {
@@ -659,13 +948,64 @@ public final class BrightnessController {
   // MARK: - HDR state machine
 
   /// Panel entry point for the per-display HDR mode.
+  ///
+  /// Takes no sibling queues: the memos this can poison are dropped from the
+  /// wire the controller was built with, on the mirror's observed true-to-false
+  /// edge. A caller cannot know whether its call is about to close an HDR
+  /// window, and it no longer has to.
   public func setHDRMode(_ mode: HDRMode) async {
     // Role fence (T10 fix round 1, minor): HDR modes are external-display
     // machinery — the built-in is constitutively native already, and a call
     // here would persist a meaningless mode under the builtIn prefs key.
     guard role == .external else { return }
+    // SS9's missing half. HDR takes the data cable away, and a synthesized size
+    // is a mirror set standing on that same display, so engaging one over the
+    // other leaves a combination nothing in the app has measured: the panel in
+    // HDR as a mirror slave with the pairing still up.
+    //
+    // Only the ENGAGE arm, and only while HDR is not already live. A request
+    // that would merely record a state System Settings has already produced is
+    // not the thing being prevented, and refusing it would leave the mirror
+    // lying about a display that IS in HDR. The exit is never refused at all:
+    // it is the way out of exactly this state.
+    //
+    // The UI is expected to disable its engage control while a size is up, so a
+    // click racing a teardown is the only way to reach this. That expectation is
+    // what makes the refusal quiet rather than reported; the guard does not
+    // depend on it holding.
+    if mode == .alwaysOn, !cachedHDRActive, isShowingSynthesizedSize() {
+      pathLog.error(
+        "setHDRMode(.alwaysOn) refused: a synthesized size is engaged display=\(self.displayID)"
+      )
+      return
+    }
     let previous = hdrMode
-    guard mode != previous else { return }
+    // #83: `.off` is actionable whenever HDR is LIVE, not only when Candela's
+    // own mode says Candela engaged it. HDR turned on in System Settings leaves
+    // `hdrMode` at `.off`, so a plain inequality guard returned early and left
+    // the app with no path at all to drop HDR — while the reset paths that call
+    // this were relying on it to unlock the DDC register before writing.
+    //
+    // The engage arm has handled the mirror-image case since backlog #8; this
+    // is the exit catching up. Ruling: Candela's mode and the system's HDR state
+    // stay in sync, so `.off` means the display leaves HDR whoever put it there.
+    //
+    // The inequality still guards the case it exists for — a mode the display
+    // is ALREADY in is still a no-op, so a reset does not drive a pointless
+    // re-mode across every attached panel.
+    //
+    // Symmetric on purpose. The panel's HDR button reads the STATE (#84), so
+    // with HDR switched off in System Settings under a stale `.alwaysOn` the
+    // button offers "HDR On" — and a mode-only guard would return early and
+    // leave that click dead.
+    //
+    // NOT preceded by a refresh, though the cache can be stale (R3). That was
+    // tried: an await here is a suspension point BEFORE `beginHDRTransition`
+    // takes the supersession token, and it broke the overlapping-transition
+    // guarantees. The engage arm's own post-refresh re-check remains the answer
+    // to a stale cache. See #87.
+    let observed: HDRMode = cachedHDRActive ? .alwaysOn : .off
+    guard mode != previous || mode != observed else { return }
     prefs.hdrMode = mode
     hdrMode = mode
     pathLog.log("hdrMode \(previous.rawValue) -> \(mode.rawValue) display=\(self.displayID)")
@@ -698,7 +1038,10 @@ public final class BrightnessController {
       clearSoftwareLeg()
       beginHDRTransition()
       let generation = hdrTransitionGeneration
-      let engaged = await backends.hdr?.setHDR(displayID: displayID, enabled: true) ?? false
+      // ISSUED, not achieved (#65). The backend reports that it took the lock
+      // and assigned `preferHDRModes`; whether the panel switched is a separate
+      // question, and it is asked below after the settle.
+      let issued = await backends.hdr?.setHDR(displayID: displayID, enabled: true) ?? false
       // Supersession guard (fix round 2; generation token final wave): this
       // body is a bare async func and the panel spawns one unserialized Task
       // per mode change, so nothing serializes them. If a newer transition
@@ -706,13 +1049,22 @@ public final class BrightnessController {
       // here (stale rollback, clearing the newer transition's settle flag,
       // re-firing applyPaths) would be an orphaned-continuation clobber.
       guard hdrTransitionGeneration == generation else { return }
-      if engaged {
+      // The measured answer to "is this display in HDR now". A write that was
+      // never issued cannot have achieved anything, so that arm skips the read
+      // rather than paying for a panel enumeration to learn what it knows.
+      var achieved = false
+      if issued {
+        // Optimistic for the settle window only: the poller is gated off and
+        // the native leg has to believe it is live to hold the value.
         cachedHDRActive = true
         try? await Task.sleep(for: settleDelay)
         guard hdrTransitionGeneration == generation else { return } // post-settle
         settleInProgress = false
-        await refreshHDRCaches()
+        await refreshHDRCaches(measured: true)
         guard hdrTransitionGeneration == generation else { return }
+        achieved = cachedHDRActive
+      }
+      if achieved {
         assertNativeEntryBrightness()
       } else {
         // Engage failed (T8 carry-over, adjudicated M3 blocker): the mode was
@@ -722,45 +1074,449 @@ public final class BrightnessController {
         // misreport permanently. The C1 clearing already ran, so after the
         // caches settle, re-apply the current value through the normal path;
         // without it the screen is stranded un-dimmed under a low slider.
-        // No `resetDuplicateState()` here (deliberate asymmetry vs the
-        // disengage arm): a failed engage means no mode switch occurred, so
-        // the last recorded DDC value still reflects the register.
+        // No memo drop written HERE (deliberate asymmetry vs the disengage arm):
+        // neither way of reaching this arm switched modes BY ITSELF, so the last
+        // recorded DDC value normally still reflects the register.
+        //
+        // "Normally" is doing real work, and the interleaving that falsifies it
+        // is now covered by the refresh below rather than by this arm: an exit
+        // whose drop had already taken, superseded by this engage past its own
+        // fences, leaves the display OUT of HDR with memos built while the
+        // register was locked. The rollback's `refreshHDRCaches` then observes
+        // the mirror go true-to-false and drops them, which is a thing this arm
+        // cannot decide for itself: what it knows is that ITS write did nothing,
+        // not where the panel is.
+        //
+        // TWO ways of reaching it, and they are different facts (#65). The
+        // write was never issued (no panel, or the MonitorPanel lock was busy),
+        // or it was issued, returned success, and the display did not switch.
+        // The second is the class CLAUDE.md §2 names, and before #65 it was not
+        // reachable at all: the arm was chosen from the write's own return.
+        let reason = issued
+          ? "was accepted and the display did not switch"
+          : "was never issued"
         pathLog.error(
-          "setHDRMode(.alwaysOn) engage failed: rolling back to \(previous.rawValue) display=\(self.displayID)"
+          "setHDRMode(.alwaysOn) \(reason, privacy: .public): rolling back to \(previous.rawValue) display=\(self.displayID)"
         )
         prefs.hdrMode = previous
         hdrMode = previous
         settleInProgress = false
         await refreshHDRCaches()
         guard hdrTransitionGeneration == generation else { return } // backlog #1: same fence as the success arm
-        applyPaths(brightness)
+        applyPaths()
       }
     } else {
       // Leaving the native path (`.alwaysOn` → `.off`, the only remaining exit
-      // now that Boost is gone): drop HDR, wait out the settle, then re-apply
-      // the current value through the normal path. The duplicate memo is
-      // reset first — hardware left HDR at its own brightness level, so the
-      // last DDC value we recorded no longer reflects the register (I10).
-      cachedHDRActive = false
+      // now that Boost is gone).
       beginHDRTransition()
-      let generation = hdrTransitionGeneration
-      _ = await backends.hdr?.setHDR(displayID: displayID, enabled: false)
-      // Same supersession fence as the engage arm (final wave): the exit arm's
-      // post-await block clears `settleInProgress` and fires `applyPaths`, both
-      // of which belong to whichever transition is current.
-      guard hdrTransitionGeneration == generation else { return }
-      try? await Task.sleep(for: settleDelay)
-      guard hdrTransitionGeneration == generation else { return } // post-settle
-      settleInProgress = false
-      coalescer.resetDuplicateState()
-      applyPaths(brightness)
-      await refreshHDRCaches()
+      _ = await performHDRExit(generation: hdrTransitionGeneration)
     }
+  }
+
+  /// The exit sequence, with the transition token already taken by the caller:
+  /// drop HDR, wait the settle out, re-apply the current value through the
+  /// normal path, and leave the mirror holding a measured answer.
+  ///
+  /// The duplicate memos are reset before the re-apply: hardware left HDR at its
+  /// own brightness level, so the last DDC value we recorded no longer reflects
+  /// the register (I10).
+  ///
+  /// EVERY queue on this display's wire, not just this controller's. A write
+  /// issued while the register was locked is ACKed and swallowed, so any memo
+  /// built through the window names values the panel never took, and the first
+  /// thing under a reset or under a person's own next click is usually the
+  /// unmute: skipped as a duplicate of a write that never landed, and reported
+  /// applied.
+  ///
+  /// Shared by the mode door and the reset door so the two cannot drift: what
+  /// differs between them is only WHO decides there is something to do, and
+  /// that decision is made before this runs.
+  ///
+  /// Returns whether it ran to the end. FALSE means a newer transition took the
+  /// display mid-flight, so this call knows nothing about where the panel ended
+  /// up: `cachedHDRActive` was set optimistically on the way in and the measured
+  /// refresh at the bottom never ran. A caller that treats that as "HDR is off"
+  /// is asserting the one thing it failed to learn.
+  @discardableResult
+  private func performHDRExit(generation: UInt64) async -> Bool {
+    // Optimistic for the duration: the legs have to stop treating the display as
+    // native while it leaves HDR.
+    //
+    // ONE RULE FOR EVERY BAIL BELOW: assume the register is LOCKED. A bail means
+    // a newer transition took the display and this call established nothing, and
+    // between the two available wrong answers only one can do damage. Believing
+    // HDR is live routes brightness native, so nothing writes DDC and nothing
+    // writes a gamma table onto a panel that may be in HDR; believing it is off
+    // licenses both.
+    //
+    // The cost of being wrong this way is a brightness write that goes nowhere
+    // on a DDC-only panel, and the honest bound on it is LOOSE: it stands until
+    // the next reconfiguration or HDR transition refreshes the mirror, which may
+    // not be soon. It is specifically NOT bounded by the superseding
+    // transition's own refresh, which was the earlier claim here and is measured
+    // false in both directions: an engage that was never issued ends on the
+    // CACHED read (and the lock-busy arm returns before the cache is even
+    // invalidated), and in the clobbering interleaving the superseder's refresh
+    // has already happened by the time this write lands.
+    //
+    // These are the file's only post-fence mutations, and they are deliberate:
+    // the fences exist to stop a stale call from asserting state it does not
+    // know, which is exactly what leaving the optimistic false behind would be.
+    cachedHDRActive = false
+    _ = await backends.hdr?.setHDR(displayID: displayID, enabled: false)
+    // Same supersession fence as the engage arm (final wave): the post-await
+    // block clears `settleInProgress` and fires `applyPaths`, both of which
+    // belong to whichever transition is current.
+    guard hdrTransitionGeneration == generation else {
+      cachedHDRActive = true // assume locked: see the rule above
+      return false
+    }
+    try? await Task.sleep(for: settleDelay)
+    guard hdrTransitionGeneration == generation else {
+      cachedHDRActive = true // assume locked: see the rule above
+      return false // post-settle
+    }
+    settleInProgress = false
+    // KEPT after the invalidation moved to the mirror's edge, because of a
+    // window the edge cannot see: the edge fires from `refreshHDRCaches`, and
+    // this path's refresh is at the bottom, AFTER the re-apply. The re-apply is
+    // itself a DDC write whose memo is stale for I10's reason (the panel left
+    // HDR at its own brightness level), so it has to find the memos already
+    // dropped or it is skipped as a duplicate of a value the register no longer
+    // holds. Between here and the refresh below, no observation has happened
+    // yet, so nothing else in the file knows the window is over.
+    //
+    // The refresh below then fires the edge and drops them a second time, which
+    // costs one redundant write later and is the same trade the reset door's
+    // overlap already takes.
+    //
+    // A bail above leaves them standing on purpose, in step with the
+    // assume-locked rule one line up: a superseded call establishes nothing,
+    // including that the window is over. What used to be uncovered there is now
+    // the edge's job: a superseded exit whose drop TOOK is seen by whichever
+    // refresh next observes the mirror go true-to-false, including the
+    // superseding engage's own rollback.
+    invalidateWireMemos()
+    applyPaths()
+    // Measured, for the reason the engage arm is: a write that returned success
+    // is evidence of nothing. This arm does not roll back on a disengage that
+    // did not take (that belongs to the stale-mode question, not here), but the
+    // mirror it leaves behind is the panel's answer rather than the request's.
+    await refreshHDRCaches(measured: true)
+    return hdrTransitionGeneration == generation
+  }
+
+  /// Drops what every queue on this display's wire believes is in the register:
+  /// this controller's memo and its siblings'.
+  ///
+  /// One rule, one definition, three moments that need it: the observed edge
+  /// (every route out of HDR, including the ones with no caller of ours), the
+  /// exit's own re-apply, and a reset asking about a window that closed before
+  /// it was called. Over-invalidating costs a redundant write;
+  /// under-invalidating leaves a swallowed value certified as landed, which on a
+  /// write-only panel nothing downstream can detect.
+  private func invalidateWireMemos() {
+    resetWriteMemo()
+    for sibling in wireSiblings { sibling.resetWriteMemo() }
+  }
+
+  /// Asks the display whether the DDC register is free, for a caller that is
+  /// about to write it and must not report the write as landed unless it did.
+  ///
+  /// The read-only half of `disengageHDRForReset`, and it exists because the
+  /// difference matters: that door CHANGES the display (it drops HDR and clears
+  /// the stored mode), which is right for a button whose whole job is clearing
+  /// settings and wrong for one that promises only an unmute. This one measures
+  /// and reports.
+  ///
+  /// Deliberately not `isHDREngaged`. That mirror is written optimistically by
+  /// transitions and lags a System Settings toggle until the reconfiguration
+  /// arrives; a write licensed by it can go straight into a locked register
+  /// while every reading here says the register is free.
+  ///
+  /// Drops the wire's duplicate memos for the same reason the reset door does:
+  /// a value ACKed and swallowed inside an HDR window nobody observed closing
+  /// leaves a memo naming a value the register never took, and the first write
+  /// over the top of one is usually the unmute.
+  ///
+  /// The bound, stated because it is the same one the reset door carries: this
+  /// describes the display as of this call. Nothing here stops a transition
+  /// that begins after it returns, which is why a caller confirms afterwards
+  /// rather than only asking first.
+  public func hdrWriteWindow() async -> HDRWriteWindow {
+    defer { invalidateWireMemos() }
+    // The built-in takes no DDC at all, so the register question is moot; the
+    // reset door returns early on the same test.
+    guard role == .external else { return .open }
+    // An observation, not a transition (the reset door's fence, same reason):
+    // bumping the generation here would supersede a transition parked on its
+    // own await.
+    let observed = hdrTransitionGeneration
+    await refreshHDRCaches(measured: true)
+    guard hdrTransitionGeneration == observed else { return .unknown }
+    return cachedHDRActive ? .locked : .open
+  }
+
+  /// The reset paths' HDR disengage: makes the DISPLAY leave HDR, and asks the
+  /// display rather than the stored mode whether there is anything to do.
+  ///
+  /// Deliberately NOT `setHDRMode(.off)`. That door decides from the stored
+  /// mode and the cached mirror, which is right for a request a person made
+  /// about a policy and wrong here. The mirror lags a System Settings toggle
+  /// until the reconfigure lands, and in that window every input the mode door
+  /// consults says "already off" while the panel is in HDR: the request
+  /// evaporates, the reset's own D29 unmute goes into a register the monitor
+  /// still has locked, and a write-only panel ACKs the loss. So the physical
+  /// state is measured here, past the backend's cache, and it is the only thing
+  /// this decision reads.
+  ///
+  /// On an external display Candela's stored mode is cleared whatever the panel
+  /// turns out to be doing: it is a setting, and clearing settings is what the
+  /// button does. (The built-in has no HDR mode to clear and returns early.)
+  ///
+  /// The result is evidence, not a request. `.disengaged` is only reported off
+  /// the back of a MEASURED read taken after everything this call did, and only
+  /// when no other transition was seen driving this display, so a caller may
+  /// treat it as "the register is not locked". Anything else is `.unknown`, and
+  /// the caller must then neither write DDC nor re-engage, because a transition
+  /// that raced this call can leave the panel in HDR while every optimistic
+  /// mirror here says otherwise.
+  ///
+  /// The bound on that promise, stated rather than implied: it describes the
+  /// display as of this call. Nothing here can stop a transition that begins
+  /// after it returns, and the app's own reset latch does not cover the panel's
+  /// HDR button. What this rules out is a reset proceeding on a state it never
+  /// established.
+  ///
+  /// The unconditional memo sweep below is as load-bearing as the disengage
+  /// itself. Each queue skips a write whose value its memo says is already in
+  /// the register, and under HDR an I2C write is ACKed and swallowed: a memo
+  /// built through an HDR window therefore records values that never reached the
+  /// panel. Left standing, the reset's own unmute would be skipped as a
+  /// duplicate of a write that never landed, and the skip would be reported as
+  /// applied. A rebind clears those memos too, but it is neither synchronous
+  /// with this nor ordered before the unmute: it lands when a display is
+  /// rediscovered, which is not a thing this path can wait for. Doing it here is
+  /// what puts the clearing between the HDR window and the write that depends
+  /// on it.
+  ///
+  /// NOT made redundant by the observed edge, though it now covers most of what
+  /// this used to be the only answer to. The edge fires on a mirror going
+  /// true-to-false, so it can only see a window a refresh OBSERVED as live. A
+  /// window that opened and closed with no refresh in it produces no edge at
+  /// all, and the ordinary way to get one is not a missing reconfiguration but a
+  /// coalesced pair: the app's topology stream reports once per quiet window and
+  /// buffers the newest event, so HDR switched on and off again inside one
+  /// window arrives as a single delivery showing only the final state. A
+  /// non-measured read answering from the backend's own cache lags the engage
+  /// the same way. This path is about to write
+  /// DDC on the strength of those memos, and it is the one place that can pay
+  /// for certainty, because what makes a memo untrustworthy is the window it was
+  /// built through, which is in the past by the time anyone asks. Dropping a
+  /// memo the edge already dropped costs nothing.
+  public func disengageHDRForReset() async -> HDRResetDisengage {
+    defer { invalidateWireMemos() }
+    guard role == .external else { return .disengaged(restoreAfterward: false) }
+    // An observation, not a transition, so it takes the capture-and-compare
+    // fence rather than the token: bumping the generation here would supersede
+    // a transition still parked on its own await.
+    let observed = hdrTransitionGeneration
+    await refreshHDRCaches(measured: true)
+    let wasLive = cachedHDRActive
+    let raced = hdrTransitionGeneration != observed
+    // Read AFTER the await, and cleared unconditionally. A transition landing
+    // in the read window writes this mode, and a clear decided from the value
+    // that predated it would skip: on the per-display path nothing else in the
+    // reset touches this key, so the mode would survive the reset it exists to
+    // be cleared by and re-engage HDR at the next launch.
+    let previous = hdrMode
+    prefs.hdrMode = .off
+    hdrMode = .off
+    pathLog.log(
+      "reset HDR disengage: live=\(wasLive, privacy: .public) raced=\(raced, privacy: .public) mode \(previous.rawValue) -> 0 display=\(self.displayID)"
+    )
+    // Nothing to drop, and the measured read that says so is itself the
+    // evidence the register is free. `raced` disqualifies it: the answer
+    // describes a display another transition has since moved.
+    if !wasLive, !raced { return .disengaged(restoreAfterward: false) }
+    beginHDRTransition()
+    let completed = await performHDRExit(generation: hdrTransitionGeneration)
+    guard completed else {
+      pathLog.error(
+        "reset HDR disengage was superseded: display=\(self.displayID) HDR state is unknown, so nothing below may write DDC"
+      )
+      return .unknown
+    }
+    // `cachedHDRActive` is a measured answer here, and only here: the exit ran
+    // to its own confirmation read.
+    if cachedHDRActive {
+      pathLog.error(
+        "reset HDR disengage did not take: display=\(self.displayID) is still in HDR, so DDC writes below it would be swallowed"
+      )
+      return .unknown
+    }
+    // The drop took, and yet: something else was driving this display's HDR
+    // while this ran, and it is free to drive it again the moment this returns.
+    // A reset writes DDC on the strength of this answer, so the display has to
+    // be one nobody else is touching, not merely one that measured off a moment
+    // ago.
+    guard !raced else {
+      pathLog.error(
+        "reset HDR disengage raced another transition on display=\(self.displayID): the drop took, but the state is not this call's to vouch for"
+      )
+      return .unknown
+    }
+    // The restore question, answered from the mode this reset found: HDR that
+    // was live with nothing here recording it was set somewhere else, and this
+    // reset borrowed it rather than owning it.
+    return .disengaged(restoreAfterward: wasLive && previous == .off)
+  }
+
+  /// Puts back HDR that was live before a reset and that Candela did not turn
+  /// on (#83), recording no mode for it.
+  ///
+  /// The reset paths drop HDR first so the DDC register is unlocked for the
+  /// D29 unmute below them. That is not negotiable; what is, is whether the
+  /// display stays out of HDR afterwards. Ruling: it does not, when the user
+  /// engaged HDR in System Settings. A reset clears **Candela's** settings, and
+  /// the display's HDR was never one of them.
+  ///
+  /// Which is also why this is not `setHDRMode(.alwaysOn)`: that persists
+  /// `.alwaysOn`, so a reset promising to clear settings would end by writing
+  /// one, and the app would then claim an opinion the user expressed somewhere
+  /// else. Leaving `hdrMode` at `.off` under live HDR is the honest record, and
+  /// it is a state the brightness path already handles (`usesNative` routes
+  /// native under externally-engaged HDR).
+  ///
+  /// Otherwise the engage arm's machinery exactly: C1 clearing, the settle
+  /// window with the poller gated off, and the measured check (#65). There is
+  /// no rollback, because there is no mode to roll back to. A restore that does
+  /// not take leaves the display where the disengage left it and says so.
+  ///
+  /// Settling the WHOLE wire first is load-bearing and not a convenience.
+  /// Re-engaging HDR locks the DDC register, and a DDC submit is queued rather
+  /// than sent: it rides a coalescer that drains on its own task, so the reset's
+  /// unmute can still be in flight when this is called. Measured 2026-08-11: the
+  /// queued writes reached the panel after the re-engage, the last of them more
+  /// than a second later, and were swallowed while the app recorded an unmuted
+  /// display, which is the strand D29 exists to prevent. So this settles its own
+  /// queue and its siblings' before the engage goes out. They come from the
+  /// controller's wire rather than from the caller, for the reason the
+  /// invalidation's do: which queues share this register is a fact about the
+  /// display, and a caller that has to remember it is a caller that can forget.
+  ///
+  /// A queue that cannot be settled SKIPS the re-engage, loudly. That is the
+  /// safe direction by a wide margin: the cost is a display left out of HDR
+  /// that the user set in System Settings, visible and one click from fixed,
+  /// against a monitor stranded silent behind a locked register with the app
+  /// reporting it unmuted.
+  public func restoreExternalHDR() async {
+    guard role == .external else { return }
+    guard await WireQuiescence.settle(
+      [self] + wireSiblings,
+      betweenRounds: wireSettlePause,
+      isWireOpen: { [weak self] in self?.isWireOpen ?? true }
+    ) else {
+      pathLog.error(
+        "not re-engaging HDR on display=\(self.displayID): a queued write could not be confirmed as applied, and re-engaging would lock the register over it"
+      )
+      return
+    }
+    clearSoftwareLeg()
+    beginHDRTransition()
+    let generation = hdrTransitionGeneration
+    let issued = await backends.hdr?.setHDR(displayID: displayID, enabled: true) ?? false
+    guard hdrTransitionGeneration == generation else { return }
+    if issued {
+      cachedHDRActive = true
+      try? await Task.sleep(for: settleDelay)
+      guard hdrTransitionGeneration == generation else { return }
+    }
+    settleInProgress = false
+    await refreshHDRCaches(measured: true)
+    guard hdrTransitionGeneration == generation else { return }
+    if cachedHDRActive {
+      assertNativeEntryBrightness()
+    } else {
+      pathLog.error(
+        "restoreExternalHDR did not take: display=\(self.displayID) was in HDR before the reset and is not now"
+      )
+      // The C1 clearing above took the software leg down for an HDR entry that
+      // did not happen, so the screen would otherwise sit un-dimmed under a low
+      // slider. Same recovery as the engage-failure arm.
+      applyPaths()
+    }
+  }
+
+  /// One leg of a TRANSIENT HDR round trip another feature needs on this
+  /// display, taken through the controller so the brightness stack sees the
+  /// window it opens.
+  ///
+  /// Deliberately NOT `setHDRMode`. Nothing here is a preference: `hdrMode` and
+  /// `prefs.hdrMode` are untouched, so a link renegotiation cannot rewrite the
+  /// mode a person chose, and the `.off` door stays live afterwards because
+  /// `cachedHDRActive` ends this call as a measured answer rather than the
+  /// stale false the mode guard would return early on.
+  ///
+  /// What the routing buys is the whole reason it exists: DDC does not work
+  /// while the display is in HDR. The transition token supersedes a parked
+  /// transition; `settleInProgress` and the optimistic mirror take the
+  /// brightness legs off DDC BEFORE the write goes out; and the wire's
+  /// duplicate memos are dropped on the way out of every leg. A window the
+  /// brightness stack never heard about leaves values ACKed, swallowed and
+  /// recorded as landed, which on a write-only display nothing downstream can
+  /// detect.
+  ///
+  /// Returns the MEASURED state after the settle, never the write's ACK. False
+  /// whenever a newer transition took the display mid-flight: a superseded call
+  /// established nothing, so it may not claim its leg landed.
+  ///
+  /// `settle` is the caller's, not this controller's, because the caller is the
+  /// one that has to state its own worst case: six legs of a link bounce pay
+  /// this window six times, inside a gate claim nothing else can take. Omit it
+  /// to take `settleDelay`.
+  @discardableResult
+  public func setTransientHDR(_ enabled: Bool, settle: Duration? = nil) async -> Bool {
+    guard role == .external else { return false }
+    beginHDRTransition()
+    let generation = hdrTransitionGeneration
+    // Optimistic for the duration, in both directions, and written BEFORE the
+    // await: the legs have to stop treating DDC as reachable while the display
+    // enters HDR, and must not resume until the exit has been confirmed.
+    cachedHDRActive = enabled
+    _ = await backends.hdr?.setHDR(displayID: displayID, enabled: enabled)
+    guard hdrTransitionGeneration == generation else {
+      cachedHDRActive = true // assume locked: the exit path's rule, same reason
+      return false
+    }
+    try? await Task.sleep(for: settle ?? settleDelay)
+    guard hdrTransitionGeneration == generation else {
+      cachedHDRActive = true // assume locked
+      return false
+    }
+    settleInProgress = false
+    // Unconditional, and on BOTH legs. The observed edge in `refreshHDRCaches`
+    // only fires for a window some refresh saw live, and a bounce is precisely
+    // the window that can open and close between two refreshes.
+    invalidateWireMemos()
+    await refreshHDRCaches(measured: true)
+    guard hdrTransitionGeneration == generation else { return false }
+    // No `clearSoftwareLeg` on the way in, so there is no cleared leg to
+    // rebuild: leaving the window only needs the current value re-asserted
+    // through whichever path applies now that the register is back.
+    if !enabled { applyPaths() }
+    return cachedHDRActive == enabled
   }
 
   /// Re-evaluates the cached HDR state (Task 4's topology loop calls this for
   /// every surviving display after `HDRToggling.displaysReconfigured()`).
   /// Detecting an externally-toggled HDR entry runs the C1 clearing.
+  ///
+  /// The EXIT direction has no work here and is not missing: an HDR window
+  /// closing is handled inside `refreshHDRCaches`, where the observation is
+  /// made. That is what covers HDR dropped in System Settings or on the
+  /// display's own controls, which reaches Candela as a reconfiguration and
+  /// leaves the wire's memos naming values the panel swallowed.
   public func noteHDRStateMayHaveChanged() async {
     let wasNative = usesNative
     // Capture only — this is a state *observation*, not a transition, so it
@@ -790,15 +1546,29 @@ public final class BrightnessController {
     // next real reconfiguration recaptures normally.
     if recapture {
       backends.gamma?.recaptureDefaultTable(on: displayID)
+      // SS15's companion leg makes the island hold a baseline for a display this
+      // controller does not own, and a synthesis disengage destroys that display
+      // while CoreGraphics is free to reissue its ID. Dropping the baseline here
+      // is what stops a re-engaged slot from scaling a new display's table
+      // against a destroyed one's.
+      if let companion = lastGammaCompanionID, companion != displayID {
+        backends.gamma?.recaptureDefaultTable(on: companion)
+        lastGammaCompanionID = nil
+      }
     }
     backends.shade?.repinFrames()
     lastAppliedSw = nil
     guard !usesNative else { return }
+    // `effectiveBrightness`, never raw `brightness`: a reconfiguration during a
+    // temporary dim (a replug, a sibling display's HDR flip, a bus drop) would
+    // otherwise re-apply the software leg UNDIMMED while the hardware leg still
+    // holds the dim, which on a locked screen is a partially lifted dim.
+    let value = effectiveBrightness
     let sw: Double
     if prefs.forceSoftware {
-      sw = brightness
+      sw = value
     } else if !prefs.disableCombinedBrightness {
-      sw = DimmingMath.combinedSplit(value: brightness, switching: switchingValue).sw
+      sw = DimmingMath.combinedSplit(value: value, switching: switchingValue).sw
     } else {
       return // pure-DDC path has no software leg to re-apply
     }
@@ -824,13 +1594,48 @@ public final class BrightnessController {
     }
   }
 
-  private func refreshHDRCaches() async {
+  ///
+  /// `measured: true` reads the panel now, past the backend's 2 s cache. Every
+  /// decision about whether a transition ACHIEVED anything has to pass it (#65):
+  /// the cached read is fine for keeping the mirror roughly fresh, and useless
+  /// as evidence, because a cache filled during the transition would answer with
+  /// the transition's own optimism.
+  private func refreshHDRCaches(measured: Bool = false) async {
     if let hdr = backends.hdr {
       cachedSupportsHDR = await hdr.supportsHDR(displayID: displayID)
-      cachedHDRActive = await hdr.isHDREnabled(displayID: displayID)
+      cachedHDRActive = measured
+        ? await hdr.measuredHDREnabled(displayID: displayID)
+        : await hdr.isHDREnabled(displayID: displayID)
     } else {
       cachedSupportsHDR = false
       cachedHDRActive = false
+    }
+    // The DDC register just came back, whoever unlocked it. Keyed to the
+    // OBSERVED edge rather than to a call because most of the routes out of HDR
+    // have no call of ours in them: HDR switched off in System Settings or on
+    // the display's own controls arrives here as a reconfiguration, and an exit
+    // superseded by an engage that then fails to engage arrives as the
+    // rollback's refresh. Both leave memos naming values the panel ACKed and
+    // swallowed while it was locked, and the first write over the top of one is
+    // usually the unmute.
+    //
+    // Only true-to-false. An ENTRY is a window opening, and nothing built
+    // through it exists yet.
+    //
+    // The bound, stated because it is what keeps the reset door's own sweep:
+    // this sees windows a refresh OBSERVED as live. A window that opened and
+    // closed between two refreshes never sets the flag and so never produces an
+    // edge.
+    let wasObservedActive = observedHDRActive
+    observedHDRActive = cachedHDRActive
+    if wasObservedActive, !cachedHDRActive {
+      // Logged because on a write-only panel this is the only observable that
+      // separates the fix from the bug: the swallowed write and the skip that
+      // certifies it both look like success from every other angle.
+      pathLog.log(
+        "HDR window closed on display=\(self.displayID): dropping the wire's duplicate memos"
+      )
+      invalidateWireMemos()
     }
     updateNativeActive()
   }
@@ -913,6 +1718,41 @@ public final class BrightnessController {
     await coalescer.waitUntilCompleted(through: issuedGeneration)
   }
 
+  public func submissionMark() -> UInt64 { issuedGeneration &- retriedSubmissions }
+
+  public func drainPendingWrites() async -> Bool {
+    // SNAPSHOT, never a re-read: `appliedThrough` is a suspension, and anything
+    // submitted while it runs (a poller fan-out, a key, a dimming step) would
+    // otherwise be compared against a generation nothing ever waited on. That
+    // reads as a failure, retries a write that was never owed, and hands the
+    // settle loop a false reason to decline the restore.
+    let first = issuedGeneration
+    await coalescer.waitUntilCompleted(through: first)
+    if await coalescer.appliedThrough() >= first { return true }
+    guard let target = lastSubmittedTarget else { return false }
+    retriedSubmissions &+= 1
+    resubmit(target)
+    let second = issuedGeneration
+    await coalescer.waitUntilCompleted(through: second)
+    return await coalescer.appliedThrough() >= second
+  }
+
+  /// Re-issues a target the queue completed without applying, with the applier
+  /// REBUILT rather than replayed. A rebind between the original submit and
+  /// this one hands out a fresh `IOAVService`, and the captured applier still
+  /// holds the old one: the retry would then write into a service that has been
+  /// replaced, which either fails (and burns the settle's rounds) or is
+  /// acknowledged by nothing that reaches the panel. Appliers are built per
+  /// submit everywhere else for exactly this reason.
+  private func resubmit(_ target: HardwareTarget) {
+    switch target {
+    case .ddc:
+      submitHardware(target, applier: brightnessApplier(tuning: prefs.tuning(for: .brightness)))
+    case .native:
+      submitHardware(target, applier: backends.applierNative)
+    }
+  }
+
   /// Swaps the stored DDC writer (used by both the hardware write leg and
   /// `refreshFromHardware`) after a display rediscovery, and — only when
   /// `panelIdentity` says the panel on the other end has CHANGED — drops the
@@ -974,8 +1814,15 @@ public final class BrightnessController {
       maxDDCValue = Self.assumedMaxDDC
       didReadMaxDDC = false
       readEvidence = .notAttempted
+      // Sync's held movement is about the panel that was moving, not the one
+      // now on the wire.
+      syncDeadband.reset()
     }
     coalescer.resetDuplicateState()
+    // Dropped with the memo and for the memo's own reason: it names a write
+    // issued through a service we no longer hold, so re-issuing it would put a
+    // stale target on a fresh wire.
+    lastSubmittedTarget = nil
   }
 
   /// Installs the display-reconfiguration epoch pair: `provider` is read at
@@ -986,8 +1833,14 @@ public final class BrightnessController {
     isCurrent: @escaping @Sendable (UInt64) -> Bool
   ) {
     epochProvider = provider
+    isEpochCurrent = isCurrent
     coalescer.setEpochGate(isCurrent)
   }
+
+  /// Whether the wire is open right now: the same gate the coalescer consults
+  /// before applying, asked ahead of time so a settle loop can wait for it
+  /// instead of sleeping a guessed length of time.
+  private var isWireOpen: Bool { isEpochCurrent(epochProvider()) }
 
   // MARK: - Startup/wake/quit restore (D5)
 
@@ -1009,6 +1862,133 @@ public final class BrightnessController {
     return store.savedBrightness(for: storageKey) != nil
   }
 
+  // MARK: - Temporary dim (OLED care lock dim)
+
+  /// A multiplier applied to the published value on its way to the hardware,
+  /// or nil when nothing is dimming. Owned by whoever called
+  /// `beginTemporaryDim`; OLED care's lock dim is the only caller today.
+  ///
+  /// Deliberately NOT expressed as a `setBrightness` to a lower value. That
+  /// would overwrite `brightness` and the persisted store, which are the user's
+  /// value and the only truth a write-only panel has: a crash or a force-quit
+  /// while dimmed would then make the dim permanent, and a slider moved during
+  /// the dim would have nothing to be restored to.
+  ///
+  /// Scope of the "a process that dies while dimmed still reopens correctly"
+  /// claim: it is unconditional for a write-only panel, where the store IS the
+  /// truth. On a panel that answers DDC reads (the Dell here), the hazard is a
+  /// readback of a register we dimmed, and it is not confined to launch:
+  /// `refreshFromHardware` also runs on every reconfiguration, which a lock dim
+  /// outlasts. THIS process is covered, because that function returns early
+  /// while a dim is outstanding. What is left is a readback by a process that
+  /// did not set the dim: the next launch after a crash or force-quit, which
+  /// finds the register still down with no factor recorded anywhere. The store
+  /// is right either way; the readback is what would overwrite it.
+  public private(set) var temporaryDimFactor: Double?
+
+  /// The ONE place the temporary dim is folded in. Everything that computes a
+  /// leg's value starts here; `brightness` is the user's number and is never
+  /// what reaches the hardware while a dim is outstanding.
+  private var effectiveBrightness: Double {
+    brightness * (temporaryDimFactor ?? 1)
+  }
+
+  /// Supersession token for `rampTemporaryDim`. Bumped by every EXPLICIT change
+  /// of the dim state, so an in-flight ramp that resumes after one is a no-op
+  /// even if nobody cancelled its task. That is what makes "a restore is never
+  /// re-dimmed by a step that was already in the air" a property of the type
+  /// rather than of the caller's cancel ordering.
+  @ObservationIgnored private var dimToken: UInt64 = 0
+
+  /// Test seam: the ramp's step spacing. `LockDimRamp.stepInterval` in
+  /// production; tests shrink it, exactly as they shrink `settleDelay`.
+  @ObservationIgnored var lockDimRampInterval: Duration = LockDimRamp.stepInterval
+
+  /// Applies a temporary dim immediately. Idempotent for an unchanged factor,
+  /// and supersedes any ramp in flight.
+  public func beginTemporaryDim(factor: Double) {
+    dimToken &+= 1
+    applyDimFactor(factor)
+  }
+
+  /// Fades the temporary dim to `target` over `LockDimRamp.duration`, applying
+  /// the FIRST step synchronously so the dim starts on this turn of the run
+  /// loop and `temporaryDimFactor` is non-nil the moment this returns (a caller
+  /// polling it cannot catch a window where a ramp is running but no dim is
+  /// recorded). The returned task carries the remaining steps.
+  ///
+  /// Cancelling the task stops it, but the token is what makes it SAFE: any
+  /// `beginTemporaryDim`, `endTemporaryDim` or newer ramp invalidates this one,
+  /// so a step that was already suspended when the user unlocked cannot land
+  /// after the restore.
+  @discardableResult
+  public func rampTemporaryDim(to target: Double) -> Task<Void, Never> {
+    dimToken &+= 1
+    let mine = dimToken
+    var remaining = LockDimRamp.factors(to: target)[...]
+    if let first = remaining.first {
+      applyDimFactor(first)
+      remaining = remaining.dropFirst()
+    }
+    return Task { @MainActor [weak self] in
+      for factor in remaining {
+        let interval: Duration
+        // Strong self confined to the non-suspending half of the iteration and
+        // dropped before the sleep, the same shape the OLED care driver uses:
+        // a binding whose scope covered the await would retain the controller
+        // across every suspension.
+        do {
+          guard let self, self.dimToken == mine, !Task.isCancelled else { return }
+          self.applyDimFactor(factor)
+          interval = self.lockDimRampInterval
+        }
+        do { try await Task.sleep(for: interval) } catch { return }
+      }
+    }
+  }
+
+  /// Restores the published value exactly, immediately, and supersedes any ramp
+  /// in flight. Deliberately NOT ramped: someone who has just unlocked wants
+  /// their screen back now, and only the dim-in fades.
+  ///
+  /// Safe to call when nothing is dimmed (a no-op), which is what lets the
+  /// teardown paths call it unconditionally: unlock, losing enrollment,
+  /// settings reset and quit. Departure is NOT one of them: a departed
+  /// display's controller is gone, so `endAllLockDims` skips it and the next
+  /// arrival's restore pass is what puts the panel back.
+  public func endTemporaryDim() {
+    dimToken &+= 1
+    guard temporaryDimFactor != nil else { return }
+    temporaryDimFactor = nil
+    lastAppliedSw = nil
+    coalescer.resetDuplicateState()
+    applyPaths()
+  }
+
+  /// The one place a dim factor is set. Private so the token discipline above
+  /// cannot be bypassed: a public setter that skipped the bump would let a
+  /// stale ramp step outlive the thing that superseded it.
+  ///
+  /// The memo clears run ONLY on the transition out of "no dim". Between ramp
+  /// steps they would be waste: consecutive steps carry different values, which
+  /// the duplicate memo and the software dedupe both let through on their own,
+  /// and resetting per step defeats the memo's one useful job here (two ramp
+  /// steps that round to the SAME register value should collapse to one write).
+  /// The transition still needs them, for the reason `reapplyAfterPrefChange`
+  /// gives: what should be on the wire changes while the published value does
+  /// not, so a suppressed write would leave the display where it was.
+  private func applyDimFactor(_ factor: Double) {
+    let clamped = min(max(factor, 0), 1)
+    guard temporaryDimFactor != clamped else { return }
+    let starting = temporaryDimFactor == nil
+    temporaryDimFactor = clamped
+    if starting {
+      lastAppliedSw = nil
+      coalescer.resetDuplicateState()
+    }
+    applyPaths()
+  }
+
   /// Re-asserts the current value on whatever path is live (the restore
   /// pass's brightness leg). Routed through `applyPaths`, not a bare submit,
   /// so the echo slot stays honest for the poller; the software leg re-apply
@@ -1019,7 +1999,7 @@ public final class BrightnessController {
   /// whose published value is still the assumed 1.0 default over an empty
   /// store.
   public func reassertHardware() {
-    applyPaths(brightness)
+    applyPaths()
   }
 
   // MARK: - Settings re-apply (D28)
@@ -1081,7 +2061,12 @@ public final class BrightnessController {
   /// 2. clears the software dedupe and the coalescer's duplicate memo, so a
   ///    re-apply at an unchanged value still reaches the wire;
   /// 3. re-runs FULL path selection for the current published value, writing
-  ///    both legs.
+  ///    both legs (in the order the next-but-one paragraph fixes);
+  /// 4. hands the brightness register back at full range if the new path has
+  ///    stopped driving it (#143), which is the same obligation as step 1
+  ///    applied to the OTHER leg: the abandoned backend has to be torn down,
+  ///    and for DDC "torn down" means parked where software dimming assumes it
+  ///    is rather than left at the combined-mode floor.
   ///
   /// The published `brightness` is untouched: a mode switch is a re-conversion
   /// of the same perceptual value, never a reset to 100% (D4).
@@ -1091,14 +2076,140 @@ public final class BrightnessController {
   /// not a WindowServer rebuild. (Re-capturing on settings edits is a possible
   /// refinement — the baseline can otherwise go stale for a user who never
   /// replugs — but it is a behavior change, not part of this fix.)
+  ///
+  /// STILL SYNCHRONOUS, which D28 requires, but the software side may now finish
+  /// later than the call returns: see the ordering below.
+  ///
+  /// THE ORDERING (#146), which is one rule and not two. The register write
+  /// drains off-actor and takes ~17 ms on the MAG; everything on the software
+  /// side is inline and lands at once. So the leg that is going DOWN has to go
+  /// first, or the display renders a frame from the old register under the new
+  /// table and overshoots both endpoints:
+  ///
+  /// - the register RISES (the #143 hand-back, and any pref change that raises
+  ///   it): the software side goes first, inline, exactly as before, and the
+  ///   in-flight state is the old register under the new, dimmer table;
+  /// - the register DROPS (turning hardware control back on at a value the
+  ///   combined split puts at the register's floor): the software side is HELD
+  ///   until the write lands. Whatever is dimming the display now keeps dimming
+  ///   it in the meantime, so the in-flight state is the OLD state, unchanged,
+  ///   rather than a bright composite of the two.
+  ///
+  /// Held means the whole software side, teardown included, not just the
+  /// re-apply. Tearing an abandoned backend down is itself a brightening, so
+  /// holding only the re-apply would move the flash rather than remove it, and
+  /// keeping the pair together is also what preserves step 1's no-double-dim
+  /// property: the old backend is still the only one dimming until both run.
+  ///
+  /// The cost of the hold is that a display whose register write is slow keeps
+  /// its previous dimming for that long. That is the correct trade: it is the
+  /// state the user was already looking at.
   public func reapplyAfterPrefChange() {
+    coalescer.resetDuplicateState()
+    // Read BEFORE the submit below, which overwrites it.
+    let parked = submittedDDCPortion ?? 1
+    let submitted = applyPaths(.register)
+    guard let submitted, submitted < parked else {
+      applySoftwareSideOfPrefChange()
+      return
+    }
+    holdSoftwareLegUntilRegisterLands()
+  }
+
+  /// Everything in `reapplyAfterPrefChange` except the register write: tear down
+  /// the backend the new prefs do NOT select, clear the software dedupe,
+  /// re-apply the software leg, and hand the register back if the new path has
+  /// stopped driving it (steps 1, 3 and 4, plus the software half of step 2).
+  ///
+  /// `.software` delivery, never `.both`: the register has already been written
+  /// by the caller, and a second submit of the same target would put a duplicate
+  /// on a write-only bus for nothing.
+  private func applySoftwareSideOfPrefChange() {
     let choice = softwareBackendChoice
     let drawable = drawableDisplayID
     if choice != .shade { backends.shade?.removeShade(for: drawable) }
-    if choice != .gamma { backends.gamma?.applyGammaScale(1.0, on: displayID, enforcerOn: drawable) }
+    if choice != .gamma, let gamma = backends.gamma {
+      writeGammaScale(1.0, using: gamma, enforcerOn: drawable)
+    }
     lastAppliedSw = nil
-    coalescer.resetDuplicateState()
-    applyPaths(brightness)
+    applyPaths(.software)
+    handBackDDCLegIfAbandoned()
+  }
+
+  /// Parks the software side until the register write just submitted has landed
+  /// (#146). The generation is captured now, so a write submitted later cannot
+  /// extend the wait.
+  ///
+  /// Every dequeued target completes its generation, duplicates and stale epochs
+  /// included, so this cannot park forever on a write the coalescer chose not to
+  /// put on the wire.
+  private func holdSoftwareLegUntilRegisterLands() {
+    let generation = issuedGeneration
+    softwareLegToken &+= 1
+    let mine = softwareLegToken
+    heldSoftwareLeg = Task { @MainActor [weak self] in
+      await self?.coalescer.waitUntilCompleted(through: generation)
+      guard let self, self.softwareLegToken == mine else { return }
+      self.heldSoftwareLeg = nil
+      self.applySoftwareSideOfPrefChange()
+    }
+  }
+
+  /// Disarms a held software side. Called from every door that writes the
+  /// software leg or re-runs path selection, so "the world moved on" is checked
+  /// in one place rather than at each hold's resume.
+  private func supersedeHeldSoftwareLeg() {
+    softwareLegToken &+= 1
+  }
+
+  /// Hands the brightness register back at full range when the newly selected
+  /// path has stopped driving it (#143).
+  ///
+  /// Without this the teardown is one-directional: turning "Use hardware (DDC)
+  /// control" back ON writes the register immediately, while turning it OFF
+  /// wrote nothing at all, so software dimming ran on top of a panel already at
+  /// its hardware minimum. At 40% combined that is DDC 0, and at 100% software
+  /// there is nothing left to brighten with, because the gamma table is already
+  /// at 1.0. The app reported 100% over a panel at its minimum backlight.
+  ///
+  /// ORDER IS THE CONTRACT, and it is the opposite of the intuitive one: this
+  /// runs AFTER `applyPaths`, never before. This write only ever RAISES the
+  /// register, and the software leg it hands over to only ever LOWERS what the
+  /// register emits, so:
+  ///
+  /// - raise first and the intermediate state is a full-range register under
+  ///   the old, brighter gamma table: at 90% that is raw 100 under gamma 1.0,
+  ///   a flash to full brightness for as long as the two writes are apart, and
+  ///   the D4 failure hardware checklist item 54 forbids by name;
+  /// - raise second and the intermediate state is the old register under the
+  ///   new, dimmer table, which is never brighter than either endpoint.
+  ///
+  /// No ordering is transient-free. The software leg is inline and synchronous
+  /// while the register write drains off-actor through the coalescer, so the
+  /// two land milliseconds apart whatever we do. What the ordering buys is that
+  /// the gap sits INSIDE the two endpoints instead of overshooting past both.
+  ///
+  /// The mirror image of this rule, a pref change that DROPS the register while
+  /// the software leg brightens, is #146, and it cannot be fixed by reordering
+  /// two synchronous statements: `reapplyAfterPrefChange` holds the software
+  /// side until the register write has actually landed. Same rule stated once:
+  /// the leg that goes down goes first.
+  ///
+  /// Gated on `unavailableDDC` exactly as `restoreFullRangeDDC` is: a command
+  /// the display has declared it does not support, or the user has switched
+  /// off, is not one to write on the way out. That leaves the tuning grid's own
+  /// Off switch able to strand a display the same way this fixes, which is the
+  /// same shape as D29 rule 1 (undo the disabling effect BEFORE persisting the
+  /// value that disables it) and belongs in that control, not here.
+  private func handBackDDCLegIfAbandoned() {
+    guard role == .external, !usesNative else { return }
+    // Only a register THIS controller drove below full range is ours to hand
+    // back. nil is a panel whose brightness the user set on the monitor itself.
+    guard let parked = submittedDDCPortion, parked < 1 else { return }
+    let tuning = prefs.tuning(for: .brightness)
+    guard !tuning.unavailableDDC else { return }
+    guard !BrightnessPathPolicy.path(pathInputs(tuning: tuning)).drivesDDCBrightness else { return }
+    submitDDCBrightness(portion: 1, tuning: tuning)
   }
 
   /// Quit restore: write the register's FULL-RANGE equivalent of the
@@ -1111,15 +2222,18 @@ public final class BrightnessController {
   /// the coalescer drains off-actor, so the quit path's barrier (Task 10)
   /// only has to keep the process alive until the write lands, never block
   /// the main thread on DDC I/O.
+  ///
+  /// Reads `brightness`, so a quit during a temporary dim writes the UNDIMMED
+  /// value: the register is handed back to the user's setting on the way out.
+  /// That is a backstop, not the contract. The owner of the dim still ends it
+  /// explicitly at teardown, because this call returns early on three paths
+  /// (native included, which is where an HDR display's dim lives).
   public func restoreFullRangeDDC() {
     guard role == .external, !usesNative, !prefs.forceSoftware else { return }
     let tuning = prefs.tuning(for: .brightness)
     guard !tuning.unavailableDDC else { return }
     coalescer.resetDuplicateState()
-    submitHardware(
-      .ddc(raw: brightnessRaw(brightness, tuning: tuning)),
-      applier: brightnessApplier(tuning: tuning)
-    )
+    submitDDCBrightness(portion: brightness, tuning: tuning)
   }
 
   /// Test seam: observes the coalescer's duplicate-memo reset counter (the
@@ -1238,6 +2352,11 @@ actor BrightnessWriteCoalescer {
     )
 
   private var completedGeneration: UInt64 = 0
+  /// The highest generation that actually reached hardware, was skipped because
+  /// its exact target was already there, or was superseded by a newer write
+  /// that did one of those. Compare it against the submitter's own counter to
+  /// learn whether anything is still owed to the panel.
+  private var appliedGeneration: UInt64 = 0
   private var waiters: [(generation: UInt64, continuation: CheckedContinuation<Void, Never>)] = []
 
   init(isEpochCurrent: @escaping @Sendable (UInt64) -> Bool = { _ in true }) {
@@ -1320,6 +2439,10 @@ actor BrightnessWriteCoalescer {
   /// Suspends until a target with generation >= `generation` has been written
   /// (or skipped as a duplicate or stale-epoch, or superseded). Returns
   /// immediately for generation 0 (nothing was ever submitted).
+  /// See `appliedGeneration`. Read AFTER a `waitUntilCompleted` for the
+  /// generation in question, or it answers about a queue still in flight.
+  func appliedThrough() -> UInt64 { appliedGeneration }
+
   func waitUntilCompleted(through generation: UInt64) async {
     guard generation > completedGeneration else { return }
     await withCheckedContinuation { waiters.append((generation, $0)) }
@@ -1335,6 +2458,13 @@ actor BrightnessWriteCoalescer {
       // the generation below (the M1 deadlock rule: every dequeued target
       // completes, so no waiter is ever left suspended). `lastApplied` does
       // not advance on a skip: the skipped target never hit hardware.
+      // Whether this target ends up ON the wire, which is a different fact from
+      // its generation completing. Every dequeued target completes (the
+      // deadlock rule below), including the two skips, so a caller that waits
+      // for completion and concludes "the value is on the panel" is trusting a
+      // counter that says nothing of the kind. `appliedGeneration` is the fact
+      // itself, and it is the one the reset paths wait on.
+      var landed = false
       let isEpochCurrent = epochGate.withLock { $0 }
       if isEpochCurrent(write.epoch) {
         // Duplicate-skip (round 2): never rewrite the target already on the
@@ -1358,6 +2488,7 @@ actor BrightnessWriteCoalescer {
           // panel report a fault it never had. Both fields therefore move
           // together, inside one critical section, or neither does.
           let didApply = await write.applier.apply(write.target)
+          landed = didApply
           lastApplied.withLock { state in
             guard state.resets == memo.resets else { return }
             state.lastFailed = !didApply
@@ -1365,7 +2496,17 @@ actor BrightnessWriteCoalescer {
               state.target = write.target
             }
           }
+        } else {
+          // Skipped because this exact target is already on the wire, which is
+          // the state the caller wanted: landed, without a redundant write.
+          landed = true
         }
+      }
+      if landed {
+        // A superseded older write is covered without being dequeued: the newer
+        // target replaced it in the slot precisely because it is the value that
+        // should be on the panel, and its generation is higher.
+        appliedGeneration = max(appliedGeneration, write.generation)
       }
       complete(write.generation)
     }

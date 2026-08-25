@@ -198,27 +198,37 @@ private func makePoller(
 
 @Test func divergenceSwitchesToFastCadence() async {
   let probe = Probe(expected: 0.5, generation: 1, hardware: 0.9)
-  let poller = makePoller(probe, fast: .milliseconds(10), idle: .milliseconds(500))
+  // The idle interval dwarfs waitUntil's whole window on purpose: run() ticks
+  // BEFORE it sleeps, so a poller that switches to fast produces five reads in
+  // ~40 ms, while one stuck on idle cannot produce read two inside 3 s. The
+  // gate below is therefore the cadence assertion. Its predecessor asserted
+  // elapsed time between reads with a 1 s bound, which starvation on a hosted
+  // runner crossed at 1.198 s while still on the fast cadence; no bound under
+  // the idle math survives that, so the elapsed check is gone rather than
+  // loosened again (it had already moved once, off spans of 387 and 512 ms).
+  let poller = makePoller(probe, fast: .milliseconds(10), idle: .seconds(30))
   let task = Task { await poller.run() }
   let got = await waitUntil { probe.reads.count >= 5 }
   task.cancel()
   #expect(got)
-  let reads = probe.reads
-  guard reads.count >= 5 else { return }
-  // Four idle intervals would be 2 s; four fast ones ~40 ms.
-  #expect(reads[4].at - reads[0].at < .milliseconds(300))
 }
 
 @Test func echoStaysOnIdleCadence() async {
   let probe = Probe(expected: 0.5, generation: 1, hardware: 0.5)
   let poller = makePoller(probe, fast: .milliseconds(5), idle: .milliseconds(200))
   let task = Task { await poller.run() }
+  // Await the first read rather than betting 250 ms produces one: a starved
+  // scheduler can delay the poller's first timeslice, and "it ran at all" is
+  // not the claim under test. Same shape as #114's fix, applied before it was
+  // observed failing (#115).
+  let started = await waitUntil { !probe.reads.isEmpty }
   try? await Task.sleep(for: .milliseconds(250))
   task.cancel()
-  let count = probe.reads.count
-  // Idle cadence over 250 ms: 2 reads. Fast cadence would be ~50.
-  #expect(count >= 1)
-  #expect(count <= 4)
+  #expect(started)
+  // Idle cadence over the window: 2 reads. Fast cadence would be ~50, so only
+  // the upper bound can indicate the wrong cadence, and starvation moves the
+  // count the safe way.
+  #expect(probe.reads.count <= 4)
 }
 
 // MARK: - Lifecycle

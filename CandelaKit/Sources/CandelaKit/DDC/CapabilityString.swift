@@ -5,7 +5,7 @@ import Foundation
 /// and it must resolve to *enabled*, because a false grey removes a working
 /// control with no visible reason while a false enable costs one pointless
 /// slider.
-public enum VCPSupport: Sendable, Equatable {
+public enum VCPSupport: Sendable, Equatable, CaseIterable {
   case supported
   case unsupported
   case unknown
@@ -135,7 +135,7 @@ public enum CapabilityString {
   /// That `nil` used to be described as free, on the grounds that D24 lets it
   /// reach the UI as `.unknown`, which `VolumeSliderPolicy` resolves to
   /// *enabled*. That remains true of `VolumeSliderPolicy`, and is false of
-  /// `DisplayDiagnosticsSection`, which is now also a consumer and reads the
+  /// `DiagnosticsPage`, which is now also a consumer and reads the
   /// same `nil` as a statement about the DISPLAY rather than about our parser:
   ///
   /// - `CapabilityString.tag("mccs_ver"/"model"/"type", …)` renders "Not

@@ -19,6 +19,36 @@ final class SettingsActions {
   @ObservationIgnored var performReset: () -> Void = {}
   @ObservationIgnored var postReset: () -> Void = {}
   @ObservationIgnored var showOnboarding: () -> Void = {}
+  /// Opens (or re-focuses) a display's Display Health window (OCR-A1, #185).
+  /// A closure for the same reason as `showOnboarding`: the windows are an
+  /// AppKit island the views cannot see, wired by `StatusItemController` at
+  /// launch. The argument is the display's persistence key.
+  @ObservationIgnored var openDisplayHealth: (String) -> Void = { _ in }
+  /// Cross-pane navigation for the care cross-links (SC4, SC6): a pane that
+  /// points at another destination (OLED Care to Health, Protection to a
+  /// display's page) changes the sidebar selection through this, never by
+  /// owning selection state of its own. Wired by `SettingsRootView`, which is
+  /// where the selection lives; the default is a no-op so a view rendered
+  /// outside the shell (tests, previews) navigates nowhere rather than
+  /// crashing.
+  @ObservationIgnored var reveal: (SettingsDestination) -> Void = { _ in }
+  /// A one-shot handoff for the care cross-links that promise a display (SC4):
+  /// set to a persistence key by the link just before `reveal(.pane(.health))`,
+  /// adopted into the Health pane's switcher when that pane appears, and
+  /// cleared on adoption. Nil means the pane keeps whatever scope it had.
+  ///
+  /// Not folded into `reveal`'s argument, because `SettingsDestination` is the
+  /// sidebar's vocabulary and `.pane(.health)` names a pane rather than a
+  /// display; the scope belongs to the link and dies with it. Without it the
+  /// OLED Care page's Health row lands on whichever external sorts first, and
+  /// every per-display write below the switcher then names the wrong monitor
+  /// while the row's own note promised "this display" (SC10).
+  ///
+  /// `@ObservationIgnored` like the closures above, and that is not an
+  /// oversight: nothing observes this. The only writer is a cross-link on
+  /// another pane, so Health is never on screen when it is set and the value is
+  /// always read by a fresh appearance.
+  @ObservationIgnored var pendingHealthScope: String?
   @ObservationIgnored private weak var model: AppModel?
 
   init(model: AppModel) {
@@ -27,19 +57,28 @@ final class SettingsActions {
 
   /// Call after EVERY pref write. `persistenceKey` scopes the dimming
   /// re-apply to one display; nil (app-level prefs) re-applies every external.
-  func prefDidChange(_ name: PrefName, persistenceKey: String? = nil) {
-    apply(PrefPropagation.effects(forChange: name), persistenceKey: persistenceKey)
+  /// `virtualSlot` scopes the virtual-display convergence the same way: the
+  /// pane passes the slot whose `configured` it wrote, so one slot's Create
+  /// can never recreate another slot's drifted-but-unapplied edits (VD17).
+  func prefDidChange(_ name: PrefName, persistenceKey: String? = nil, virtualSlot: Int? = nil) {
+    apply(
+      PrefPropagation.effects(forChange: name),
+      persistenceKey: persistenceKey, virtualSlot: virtualSlot
+    )
   }
 
   /// One fan-out for a batch write (the per-display reset). The union is NOT
   /// any single member's row — resetting a display writes `hideDisplay`, which
   /// carries `.updateStatusItem` that `forceSw` does not — so a batch must
   /// never be collapsed onto one representative name.
-  func prefsDidChange(_ names: [PrefName], persistenceKey: String? = nil) {
-    apply(PrefPropagation.effects(forChanges: names), persistenceKey: persistenceKey)
+  func prefsDidChange(_ names: [PrefName], persistenceKey: String? = nil, virtualSlot: Int? = nil) {
+    apply(
+      PrefPropagation.effects(forChanges: names),
+      persistenceKey: persistenceKey, virtualSlot: virtualSlot
+    )
   }
 
-  private func apply(_ effects: Set<PrefEffect>, persistenceKey: String?) {
+  private func apply(_ effects: Set<PrefEffect>, persistenceKey: String?, virtualSlot: Int? = nil) {
     if effects.contains(.rearmTap) { rearmTap() }
     if effects.contains(.updateStatusItem) { updateStatusItem() }
     if effects.contains(.recheckPermissions) { recheckPermissions() }
@@ -61,6 +100,18 @@ final class SettingsActions {
         || state.display.persistenceKey == persistenceKey {
         state.controller.reapplyAfterPrefChange()
       }
+    }
+    if effects.contains(.reapplyOledCare), let model {
+      // Separate from `.reapplyDimming` on purpose: OLED care re-arms its own
+      // timers and re-evaluates its own dim leg, and must not put the DDC bus
+      // to work on every timeout tweak.
+      model.oledCare.reapplyAfterPrefChange(persistenceKey: persistenceKey)
+    }
+    if effects.contains(.syncVirtualDisplays) {
+      // VD14: converge live virtual displays to the slot prefs, scoped to
+      // the written slot when the caller named one. The model hops off the
+      // main actor itself; nothing here blocks.
+      model?.syncVirtualDisplays(slot: virtualSlot)
     }
   }
 }

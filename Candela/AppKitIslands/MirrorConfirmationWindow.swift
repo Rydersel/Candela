@@ -29,18 +29,9 @@ final class MirrorConfirmationWindow: MirrorConfirmationPresenting {
   // MARK: - MirrorConfirmationPresenting
 
   func presentMirrorConfirmation(_ content: MirrorConfirmationContent) {
-    // A report is not about a display, so it goes on the main display — the one
-    // the user is certainly looking at.
-    let target: CGDirectDisplayID = switch content {
-    case let .preview(displayID): drawableDisplayID(displayID)
-    case .report: CGMainDisplayID()
-    }
-    // No screen even after resolving: the display has departed, or the list has
-    // not caught up with the reconfiguration yet. Hide rather than leave a
-    // window naming the previous state up — a preview retries this on every
-    // countdown tick, so a momentarily stale screen list self-heals a second
-    // later.
-    guard let screen = NSScreen.screens.first(where: { $0.displayID == target }) else {
+    guard let screen = ConfirmationScreen.resolve(
+      for: content, drawable: drawableDisplayID
+    ) else {
       dismissMirrorConfirmation()
       return
     }
@@ -111,12 +102,12 @@ struct MirrorConfirmationView: View {
   @ViewBuilder private var reportBody: some View {
     ConfirmationCard {
       ConfirmationTitle(MirroringCopy.reportTitle)
-      // Every refusal states a reason, and there are SEVEN of them. There is no
+      // Every refusal states a reason, and there are EIGHT of them. There is no
       // "it did not work", and no `default:` arm — `MirroringCopy.refusal`
       // switches exhaustively so a new case is a compile error rather than a
       // silently generic sentence.
       if let refusal = coordinator.lastRefusal {
-        // Named through the coordinator, because one of the seven refusals
+        // Named through the coordinator, because one of the eight refusals
         // carries the displays it is about and says nothing true without them.
         ConfirmationCaption(MirroringCopy.refusal(refusal, name: coordinator.displayName))
       }

@@ -1,0 +1,559 @@
+# The first workflow in this repository that compiles a line of Swift (#139).
+# The other three all check the CONTEXT layer (docs, skills, router, issue
+# tracker), so until now the engine's 1397 tests were guarded on the honour
+# system: green meant somebody remembered to run `swift test` locally and read
+# the output.
+#
+# Three jobs. Two of them run tests:
+#   test             CandelaKit's suite, the engine's automated coverage
+#   app-build        the app target compiles, which the Kit suite cannot tell
+#                    you, then CandelaAppTests runs over the app's own sources
+#   hardware-ledger  reports how stale the last hardware verification run is,
+#                    and gates nothing on the answer
+#
+# Why a hosted runner is a valid environment for the suite and not a degraded
+# one: CandelaKit is hardware-free by design (CLAUDE.md §5), imports no AppKit
+# or SwiftUI, and needs no attached panel, no Accessibility grant and no signing
+# identity. Everything that touches a display sits behind a protocol and is
+# faked in the tests, so a machine with no monitors runs the whole suite rather
+# than a subset of it. Nothing here verifies display BEHAVIOUR, and nothing here
+# ever will: that is what candela-probe and the hardware passes are for. The
+# third job is not an exception to that. It performs no hardware check; it reads
+# the record a person's run on the rig left behind and reports what is
+# outstanding.
+name: Build and test
+
+on:
+  # push is restricted to main while pull_request carries everything else, and
+  # the split is deliberate rather than copied. A workflow triggered by an
+  # unrestricted push AND by pull_request runs twice on every commit to an open
+  # PR's branch. The three context workflows can absorb that on ubuntu; this one
+  # should not, because the repository is private and macOS runner minutes bill
+  # at 10x the Linux rate. The duplicate would be the most expensive thing in
+  # the pipeline and would buy no signal at all.
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# No `paths:` filter, and unlike context.yml that is a decision rather than an
+# oversight waiting to be tuned. context.yml documents at length how its path
+# lists had to be widened by hand once a check grew, and how six citations sat
+# unguarded until somebody noticed. The same maintenance here would fail worse:
+# the engine's tests cover types the app target consumes, so a filter that
+# misses a path lets a real break through as green. The suite is well under a
+# minute; always running it is both simpler and safer.
+
+permissions:
+  contents: read
+
+# A newer push makes the older run's verdict worthless, and on a 10x-billed
+# runner there is no reason to pay for the answer to a superseded question.
+concurrency:
+  group: build-and-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Pinned to macos-26, not macos-latest, and matched to the dev machine's
+    # major version on purpose. The label decides which Swift compiler runs, and
+    # a compiler older than the one the code is written against produces reds
+    # that describe the runner rather than the diff. macos-15 carries Xcode 16
+    # (Swift 6.0/6.1) against Xcode 26 locally, which is a real gap to gamble on
+    # for no benefit. `latest` is the same gamble with the added property that it
+    # moves without a commit.
+    #
+    # The cost of pinning is that this line needs a bump when the image is
+    # retired, which GitHub announces and which fails loudly rather than
+    # silently. That is the cheaper failure.
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Printed, never asserted. Pinning an exact Xcode build here would redden
+      # the pipeline the day the image rolls forward, a standing maintenance
+      # cost with no matching risk: the package declares swift-tools 6.0 and a
+      # macOS 14 floor, so it builds on any toolchain new enough for both. What
+      # this step buys is attribution. When a run fails for a reason the diff
+      # does not explain, the first question asked is which toolchain it ran on,
+      # and the answer should already be in the log.
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Run the suite
+        working-directory: CandelaKit
+        shell: bash
+        run: |
+          set -euo pipefail
+          # pipefail is load-bearing here, not boilerplate. A pipeline reports
+          # the exit status of its LAST command, so `swift test | tee` without it
+          # reports tee's status, and tee succeeds whatever swift test did. Every
+          # failing suite would be published as green. That is the same
+          # report-a-success-you-did-not-achieve defect CLAUDE.md §2 catalogues,
+          # one layer up from the hardware.
+          swift test 2>&1 | tee "$RUNNER_TEMP/kit-tests.log"
+
+      # A gate nobody has seen fail is a gate nobody should trust, which is the
+      # discipline both context.yml and issue-hygiene.yml already apply to
+      # themselves. The failure mode worth guarding is not a red build; it is a
+      # GREEN one that exercised nothing, and reaching it takes no bug at all.
+      # A test target dropped from Package.swift, a filter matching no test, a
+      # build that produced an empty bundle: each exits 0 having run zero tests,
+      # and the step above cannot tell that apart from a pass.
+      #
+      # So the run's own summary line is read back out of the log. Absence of
+      # that line is a failure in its own right: it means either nothing ran or
+      # the output format moved, and under both readings the zero-exit above has
+      # stopped being evidence of anything.
+      #
+      # Both halves were demonstrated failing on this runner before the workflow
+      # merged [MEASURED 2026-08-11], because a gate whose red path nobody has
+      # watched is a gate nobody should trust:
+      #   run 31542488117  one expectation flipped to a wrong value. `swift test`
+      #                    exited 1, the status survived the pipe into tee, and
+      #                    the job went red at "Run the suite".
+      #   run 31542654491  the suite filtered down to a name matching nothing.
+      #                    `swift test` printed "Test run with 0 tests in 0
+      #                    suites passed" and exited 0, so "Run the suite" was
+      #                    GREEN; this step is what failed the job. That is the
+      #                    exact vacuous pass the floor exists for, and it needed
+      #                    no bug to produce.
+      - name: Positive control (the run discovered the suite)
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/kit-tests.log"
+
+          # The floor is a collapse detector, not a ratchet. It sits far below
+          # the 1397 tests present when this was written so ordinary churn
+          # (deleting a suite, folding two together, moving coverage into the
+          # app target) never has to touch it, and far enough above zero that a
+          # run discovering nothing cannot slip past. If it ever stops
+          # discriminating, raise it; do not track the real count with it.
+          floor=1000
+
+          line="$(grep -E 'Test run with [0-9]+ tests' "$log" | tail -1 || true)"
+          if [ -z "$line" ]; then
+            echo "::error::swift test printed no run summary. Either it executed no tests, or the summary format changed and this control has gone blind. Under both readings the green exit code from the previous step is not evidence that anything was exercised."
+            exit 1
+          fi
+
+          count="$(printf '%s\n' "$line" | sed -E 's/.*Test run with ([0-9]+) tests.*/\1/')"
+          echo "Reported by the run: $line"
+
+          if [ "$count" -lt "$floor" ]; then
+            echo "::error::Only $count tests ran, under the floor of $floor. The suite has collapsed or is being filtered, and a pass over $count tests is not the gate this job exists to be."
+            exit 1
+          fi
+          echo "Positive control OK: $count tests discovered and run, above the floor of $floor."
+
+  # Added on evidence, not on principle. The open question in #139 was whether a
+  # hosted image can compile this app at all: the app target is macOS 14 at its
+  # deployment floor but calls at least one macOS 26 SDK symbol behind an
+  # `#available` check (`sharedBackgroundVisibility`, SettingsRootView.swift),
+  # which needs a macOS 26 SDK to compile even though it needs macOS 26 only to
+  # RUN. GitHub's images do not always carry the newest Xcode, and a build job
+  # that cannot compile the tree is worse than none.
+  #
+  # Measured on the runner, 2026-08-11: macos-26-arm64 image 20260728.0273 runs
+  # macOS 26.5.2 on arm64 with Xcode 26.6 (17F113) selected, Swift 6.3.3, and the
+  # macOS 26.5 SDK. Every Xcode from 26.0.1 to 26.6 is installed. That is AHEAD
+  # of the dev machine (Xcode 26.4, Swift 6.3), same major version and same
+  # architecture, so the job compiles what a developer compiles. It built clean
+  # in 49 seconds.
+  #
+  # What this job is for: the Kit suite cannot see the app target at all.
+  # CandelaKit is barred from importing SwiftUI, so every SwiftUI view, every
+  # AppKit island and every use of the engine's API from the app side goes
+  # uncompiled by `swift test`, and a signature change in the Kit that breaks a
+  # call site in Candela/ passes that suite and always will. Compiling the app
+  # here is what closes the hole.
+  #
+  # The job now also RUNS a suite over those sources: CandelaAppTests, a
+  # host-free unit-test bundle that compiles the app's own sources into itself
+  # and calls their symbols directly, with no TEST_HOST and no launched app.
+  # `CandelaMain.main()` never runs inside it, so no status item, no poller and
+  # no DDC writer ever exists in the test process; the suite is as safe on a
+  # machine with panels attached as it is meaningful on a runner with none.
+  #
+  # What that covers: view-adjacent derivation (which rows a surface produces,
+  # in what order, with what enabled and why), the copy builders, and a render
+  # smoke layer asserting a view rasterises at all. What it does NOT cover, and
+  # what no green here may be read as covering: display behaviour of any kind,
+  # window presentation, reset ordering, `SMAppService` registration, TCC
+  # grants. Those need a launched app in front of a person and stay manual.
+  app-build:
+    # Not `needs: test`. They are independent questions and running them in
+    # parallel answers both on every push, where chaining would hide a build
+    # break behind an unrelated test failure and cost a second round trip to
+    # find it. Neither job is long enough for the sequencing to save anything.
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # Not preinstalled on the image (verified: `which xcodegen` finds nothing).
+      # Unpinned, because Homebrew has no ergonomic way to pin a formula version
+      # and the generator's output is checked by the build that follows it: if a
+      # newer xcodegen emitted a broken project, this job goes red rather than
+      # quietly shipping one. The project file itself is generated and gitignored
+      # (CLAUDE.md §3), so there is nothing to compare against anyway.
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      # project.yml is the source of truth and Candela.xcodeproj is gitignored,
+      # so CI has to generate it exactly as a developer does.
+      - name: Generate the project
+        run: xcodegen generate
+
+      # An explicit -derivedDataPath for the same reason CLAUDE.md §3 requires
+      # one in the deploy loop: it puts the product somewhere known, so the check
+      # below is looking at THIS build's output and not at whatever a shared
+      # location happened to hold.
+      # The signing override is deliberate and spelled out rather than defaulted.
+      # project.yml signs the app target with the Developer ID identity in both
+      # configurations, which a GitHub runner cannot do: it has no keychain and
+      # no certificate, and shipping the private key to CI to give it one would
+      # be a far worse trade than building unsigned here. Overriding on the
+      # command line keeps the failure honest in the other direction too, since
+      # a developer whose certificate is missing gets a codesign error instead
+      # of a silent ad-hoc fallback that looks like a successful signed build.
+      # The entitlements are NOT overridden, so this job still proves the file
+      # parses and applies.
+      - name: Build the app
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project Candela.xcodeproj -scheme Candela \
+            -configuration Debug -derivedDataPath "$RUNNER_TEMP/dd" build \
+            CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM=""
+
+      # `** BUILD SUCCEEDED **` is a claim about the build, not about a product.
+      # Treating it as proof that an app exists is the same mistake as treating a
+      # DDC write ACK as proof a monitor changed (CLAUDE.md §2): check the
+      # achieved state. A misconfigured scheme or a target that compiled to
+      # nothing can both exit 0, so the binary is looked for by name.
+      - name: Positive control (a product actually came out)
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/dd/Build/Products/Debug/Candela.app"
+          if [ ! -x "$app/Contents/MacOS/Candela" ]; then
+            echo "::error::xcodebuild reported success but produced no executable at $app/Contents/MacOS/Candela. The build is not building what this job claims it is."
+            exit 1
+          fi
+          echo "Positive control OK: $(file -b "$app/Contents/MacOS/Candela")"
+
+      # Folded into app-build rather than given a third job, for the same
+      # 10x-billing reason the trigger split at the top of this file documents.
+      # The test bundle compiles the app's sources, so a separate runner would
+      # have to repeat this job's checkout, `brew install xcodegen` and
+      # `xcodegen generate` in full before it could run one test, and would buy
+      # no signal that running it from here does not already buy. The setup is
+      # already paid for; reuse it.
+      #
+      # Its own -derivedDataPath, separate from the build above. The product
+      # control that just passed described THIS job's Debug build, and a test
+      # build writing over that location would leave the control describing
+      # something else.
+      #
+      # Unmeasured as of 2026-08-17, and stated rather than assumed: the render
+      # smoke layer drives `ImageRenderer`, which is proven only on an unlocked
+      # local session. Whether offscreen rendering works in an xctest process on
+      # a headless runner is an open question, and THE FIRST RUN OF THIS STEP IS
+      # THE MEASUREMENT. If those tests fail here for environmental reasons, the
+      # fix is an environment gate on the smoke layer alone (runs locally, skips
+      # on the runner, with the measured fact written back into this comment)
+      # while the structural layer keeps running everywhere regardless. The gate
+      # is deliberately not built ahead of the evidence: gating on a guess would
+      # silently drop coverage that may well work.
+      - name: Run the app suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          # pipefail for the same reason the Kit job's "Run the suite" step
+          # spells out: a pipeline reports its LAST command's status, so without
+          # it this reports tee's, and tee succeeds whatever xcodebuild did.
+          # Every failing suite would be published as green.
+          xcodebuild test -project Candela.xcodeproj -scheme CandelaAppTests \
+            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/dd-tests" \
+            2>&1 | tee "$RUNNER_TEMP/app-tests.log"
+
+      # The Kit job's control, applied to the app suite for the same reason: a
+      # zero exit from a run that discovered nothing is indistinguishable from a
+      # pass. A test bundle that built empty, a scheme that stopped listing the
+      # target, a filter matching no name: each exits 0 having exercised
+      # nothing, and the step above cannot tell those apart from success. So the
+      # run's own summary line is read back out of the log, and its absence is
+      # itself a failure.
+      - name: Positive control (the app suite discovered its tests)
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/app-tests.log"
+
+          # Both halves were demonstrated failing on this runner before this
+          # step merged, the same discipline the Kit job applied to itself
+          # [MEASURED 2026-08-17]:
+          #   run 32065655446  one expectation flipped to a wrong value; the
+          #                    job went red at "Run the app suite" itself.
+          #   run 32065124183  the suite filtered to a name matching nothing.
+          #                    xcodebuild printed a summary of 0 tests and
+          #                    exited 0, so "Run the app suite" stayed GREEN;
+          #                    this step is what failed the job. That is the
+          #                    exact vacuous pass the floor exists for.
+          #
+          # A collapse detector, not a ratchet, exactly as the Kit job's floor
+          # is. It sits far below the count this suite had when the step was
+          # written, so ordinary churn (folding two suites together, moving
+          # coverage down into the Kit) never has to touch it, and far enough
+          # above zero that a run discovering nothing cannot slip past. If it
+          # ever stops discriminating, raise it; never track the real count.
+          floor=25
+
+          line="$(grep -E 'Test run with [0-9]+ tests' "$log" | tail -1 || true)"
+          if [ -z "$line" ]; then
+            echo "::error::The app suite printed no run summary. Either it executed no tests, or the summary format changed and this control has gone blind. Under both readings the green exit code from the previous step is not evidence that anything was exercised."
+            exit 1
+          fi
+
+          count="$(printf '%s\n' "$line" | sed -E 's/.*Test run with ([0-9]+) tests.*/\1/')"
+          echo "Reported by the run: $line"
+
+          if [ "$count" -lt "$floor" ]; then
+            echo "::error::Only $count app tests ran, under the floor of $floor. The suite has collapsed or is being filtered, and a pass over $count tests is not the gate this step exists to be."
+            exit 1
+          fi
+          echo "Positive control OK: $count app tests discovered and run, above the floor of $floor."
+
+  # The hardware tier NEVER gates a merge. Nothing about a panel can be observed
+  # from a Linux runner, so this job makes no claim about display behaviour at
+  # all: it reads the newest committed run record and says out loud how far the
+  # tree has moved since a person last ran the invariant suite on the rig.
+  # Outstanding hardware verification is a fact to make visible, not a red build
+  # to route around. A gate that blocks merges on something CI cannot itself
+  # perform teaches people to bypass it, and a bypass habit costs more than the
+  # staleness it was meant to catch.
+  #
+  # What IS blocking here is mechanism breakage. A record that does not parse,
+  # or that names a commit this repository has never held, means the ledger has
+  # stopped being evidence of anything, and a green run over an unreadable
+  # record is the same vacuous pass the two suites above guard themselves
+  # against. So the split is: unreadable ledger, red; outstanding hardware,
+  # green with the number written down.
+  #
+  # The v1 shape of the outstanding-ness statement: it is WHOLE SUITE. Every
+  # commit after the record's counts as outstanding, whether or not it could
+  # plausibly touch a display invariant, because mapping a diff onto the
+  # individual invariants it endangers is real work and a guess at it would
+  # under-report. Per-invariant mapping is future work, named as such in
+  # docs/verification-ledger/README.md.
+  hardware-ledger:
+    # Not `needs:` anything, for a stronger reason than the app-build job's. It
+    # compiles nothing, consumes no product of the other two, and answers a
+    # question whose truth does not depend on whether this commit's tests pass.
+    # Chaining it would only delay the report by the length of a macOS build.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # fetch-depth: 0 is load-bearing rather than cautious. Both questions this
+      # job asks are history questions: whether the recorded commit exists at
+      # all, and how many commits separate it from HEAD. Against the default
+      # shallow clone the first answers "no" for any record older than the last
+      # push and the second answers a smaller number than the truth, so the job
+      # would report confident nonsense.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The bootstrap state is a legitimate answer, not an error. Until the
+      # first record is committed the directory holds only its README, and a
+      # repository that has never run the suite should say exactly that in the
+      # summary rather than going red at everyone until somebody plugs in a
+      # monitor.
+      - name: Read the newest ledger record
+        id: newest
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="docs/verification-ledger"
+
+          # Lexically last, under LC_ALL=C so the runner's locale cannot reorder
+          # it. The filename convention is <yyyy-MM-dd>-<sha7>.json, and a
+          # zero-padded ISO date sorts lexically in chronological order, so the
+          # last name is the newest run. Two runs on the same day sort by SHA
+          # prefix, which is arbitrary; that is accepted, because both describe
+          # the same day's rig and the counts they report differ only in the
+          # detail lines.
+          record="$(LC_ALL=C ls -1 "$dir"/*.json 2>/dev/null | LC_ALL=C sort | tail -n 1 || true)"
+
+          if [ -z "$record" ]; then
+            # A ledger directory holding files that are not records is drift,
+            # not a bootstrap. If the naming convention moves, or a record lands
+            # under the wrong name, the glob above matches nothing and this step
+            # would otherwise announce "never verified" over a directory full of
+            # verification runs. That is the loudest possible wrong answer, so
+            # anything besides the README fails here instead.
+            strays="$(LC_ALL=C ls -1 "$dir" 2>/dev/null | grep -v '^README\.md$' || true)"
+            if [ -n "$strays" ]; then
+              echo "::error::$dir holds files that are neither run records nor its README, so the newest-record selection matched nothing: $(printf '%s' "$strays" | tr '\n' ' '). Either the <yyyy-MM-dd>-<sha7>.json convention has drifted or a record was written under the wrong name; under both readings the bootstrap message below would be a false report of a repository that has never been verified."
+              exit 1
+            fi
+
+            echo "no hardware verification records yet"
+            echo "$dir holds no run record, so nothing here can say when the invariant suite last ran on the rig. Produce the first one on the rig with: candela-probe regress --record $dir --commit \$(git rev-parse HEAD)"
+            {
+              echo "## Hardware verification ledger"
+              echo
+              echo "**no hardware verification records yet**"
+              echo
+              echo "\`$dir\` holds no run record. Nothing here can say when the invariant suite last ran on the rig."
+              echo
+              echo "Produce the first record on the rig, against the deployed build:"
+              echo
+              echo '```'
+              echo "candela-probe regress --record $dir --commit \$(git rev-parse HEAD)"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Newest ledger record: $record"
+          echo "found=true" >> "$GITHUB_OUTPUT"
+
+          # The delimiter form, not `record=$record`. Defence in depth rather
+          # than a hole being closed: `ls -1 | sort | tail -n 1` can only ever
+          # yield a single newline-free line, so nothing today can write a
+          # second line into $GITHUB_OUTPUT and set an output this step never
+          # meant to set. The form is what keeps that true if the selection
+          # above is ever rewritten to obtain the filename some other way. The
+          # delimiter is generated per run so it cannot be guessed by whoever
+          # named the file.
+          delim="RECORD_EOF_${RANDOM}${RANDOM}"
+          {
+            echo "record<<$delim"
+            echo "$record"
+            echo "$delim"
+          } >> "$GITHUB_OUTPUT"
+
+      # The control the two suites above apply to themselves, applied to this
+      # one: a step that reports on a file it never successfully read would go
+      # green over a truncated, half-written or hand-edited record and publish
+      # its silence as a clean bill of health. So the record is read back for
+      # the two fields that decide whether it is evidence at all, and the SHA it
+      # names is looked up in the history this checkout actually has.
+      #
+      # Skipped, not passed, in the bootstrap state. There is no record to
+      # control, and a control that quietly succeeds when its subject is absent
+      # is the failure mode the whole pattern exists to prevent.
+      - name: Positive control (the record parsed and names a real commit)
+        if: steps.newest.outputs.found == 'true'
+        shell: bash
+        env:
+          RECORD: ${{ steps.newest.outputs.record }}
+        run: |
+          set -euo pipefail
+          record="$RECORD"
+
+          # -e is what makes this a control rather than a read: without it jq
+          # prints "null" and exits 0 for a missing key, so a record with no
+          # commit field would sail through and the next step would ask git
+          # about the string "null".
+          if ! commit="$(jq -er '.commit' "$record")"; then
+            echo "::error::$record has no readable .commit field. A run record that cannot say which build it tested is not evidence about any build, and the outstanding-count below would be measured from nothing."
+            exit 1
+          fi
+          if ! schema="$(jq -er '.schema' "$record")"; then
+            echo "::error::$record has no readable .schema field. This job reads the record with schema 1's field names; without the version it cannot know whether those names still mean what it assumes."
+            exit 1
+          fi
+
+          # Pinned deliberately. When the record format grows a version, this
+          # reader has to be taught the new one before it can report on it, and
+          # going red here is how that gets noticed. Reporting schema 2's fields
+          # under schema 1's assumptions would publish numbers nobody has
+          # checked.
+          if [ "$schema" != "1" ]; then
+            echo "::error::$record is at schema $schema and this job reads schema 1. Teach the hardware-ledger job the new record shape, then bump this check."
+            exit 1
+          fi
+
+          # ^{commit} rather than a bare existence test: it demands the object
+          # be a commit, so a record naming a tree or a blob SHA fails here
+          # instead of producing an unusable rev-list range in the next step.
+          if ! git cat-file -e "${commit}^{commit}" 2>/dev/null; then
+            echo "::error::$record names commit $commit, which is not in this repository's history. Either the record was written against a rewritten or unpushed branch, or its commit field is wrong; under both readings the ledger has stopped describing this tree."
+            exit 1
+          fi
+
+          echo "Positive control OK: $record parses at schema $schema and names $commit, which exists in this history."
+
+      # Reporting only. Nothing in this step compares a count to a threshold, so
+      # there is no arithmetic here that can turn outstanding hardware into a
+      # red build. The step ends on an explicit exit 0 to keep that property
+      # visible to the next person editing it.
+      - name: Record the outstanding state
+        if: steps.newest.outputs.found == 'true'
+        shell: bash
+        env:
+          RECORD: ${{ steps.newest.outputs.record }}
+        run: |
+          set -euo pipefail
+          record="$RECORD"
+
+          commit="$(jq -r '.commit' "$record")"
+          timestamp="$(jq -r '.timestamp' "$record")"
+          label="$(jq -r '.label' "$record")"
+          platform="$(jq -r '.platform' "$record")"
+          passed="$(jq -r '.passed' "$record")"
+          failed="$(jq -r '.failed' "$record")"
+          skipped="$(jq -r '.skipped' "$record")"
+          inconclusive="$(jq -r '.inconclusive' "$record")"
+
+          # The whole-suite v1 statement: every commit reachable from HEAD but
+          # not from the recorded one, with no attempt to judge which of them
+          # could have moved a display invariant.
+          behind="$(git rev-list --count "${commit}..HEAD")"
+
+          names="$(jq -r '.checks[]? | select(.outcome == "inconclusive") | .name' "$record")"
+
+          {
+            echo "## Hardware verification ledger"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Newest record | \`$(basename "$record")\` |"
+            echo "| Run | \`$label\` on \`$platform\`, $timestamp |"
+            echo "| Commit tested | \`$commit\` |"
+            echo "| Passed | $passed |"
+            echo "| Failed | $failed |"
+            echo "| Skipped | $skipped |"
+            echo "| Inconclusive | $inconclusive |"
+            echo
+            if [ -n "$names" ]; then
+              # Spelled out by name because an inconclusive is the result most
+              # easily misread as a pass. It means the check's own positive
+              # control did not fire, so the check proved nothing either way,
+              # and it never closes an outstanding item (R-B).
+              echo "Inconclusive checks (proved nothing, and no substitute for a pass):"
+              echo
+              printf '%s\n' "$names" | sed 's/^/- /'
+              echo
+            fi
+            echo "**$behind commits on this ref since the last hardware run.**"
+            echo
+            echo "Outstanding-ness is whole-suite: any commit after the recorded one counts, with no judgement about which invariants it could touch. This job gates nothing."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Newest record $record: $passed passed, $failed failed, $skipped skipped, $inconclusive inconclusive, $behind commits since."
+          exit 0

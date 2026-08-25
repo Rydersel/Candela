@@ -41,8 +41,8 @@ public enum DisplayRotation: Int, Sendable, CaseIterable, Codable {
 /// than collapsed into "it did not work".
 ///
 /// **RT13** — deliberately short. A refusal list that guesses at what the
-/// hardware will refuse goes stale. Mirroring needed seven because CoreGraphics
-/// really does refuse seven ways; rotation is not known to refuse at all, so
+/// hardware will refuse goes stale. Mirroring needed eight because CoreGraphics
+/// really does refuse eight ways; rotation is not known to refuse at all, so
 /// anything not listed here is attempted and the verification in
 /// `applyRotation` produces a truthful failure if it does not take.
 public enum RotationRefusal: Sendable, Equatable {

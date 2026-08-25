@@ -11,6 +11,7 @@ struct ArrangementReapplyPolicyTests {
     switch name {
     case "mag": DisplayConfigIdentity(vendor: 0x3669, model: 0x3DD0, serial: 0, isBuiltIn: false)
     case "dell": DisplayConfigIdentity(vendor: 0x10AC, model: 0x436A, serial: 0x4433334C, isBuiltIn: false)
+    case "vd": DisplayConfigIdentity(vendor: 0xCA11, model: 0x1, serial: 0x1, isBuiltIn: false)
     default: DisplayConfigIdentity(vendor: 0, model: 0, serial: 0, isBuiltIn: true)
     }
   }
@@ -181,6 +182,94 @@ struct ArrangementReapplyPolicyTests {
     #expect(TopologySignature(online: mirrored) == TopologySignature(online: attached))
   }
 
+  // MARK: - Synthesized sizes (SS12)
+
+  /// The MAG showing a synthesized size: the virtual display (id 7) owns the
+  /// desktop and the panel is its slave, so the panel holds no tile.
+  private var engagedOnline: [ConfiguredDisplay] {
+    [display(3, "mag", mirrors: 7), display(7, "vd"), display(2, "dell")]
+  }
+
+  private var engagedOnScreen: DisplayArrangement {
+    DisplayArrangement(tiles: [tile(7, "vd", left, mirroredIDs: [3]), tile(2, "dell", right)])
+  }
+
+  private var pairing: [CGDirectDisplayID: String] { [7: Self.identity("mag").key] }
+
+  /// SS12's whole point at the arrival gate: engaging a size is not a change of
+  /// display SET. Without this the set reads as new, every display in it counts
+  /// as having arrived, and the saved layout is re-asserted over whatever the
+  /// user last did by hand.
+  @Test func engagingASynthesizedSizeIsNotASetChange() {
+    var arrivals = TopologyArrivalTracker()
+    #expect(arrivals.claimArrivals(online: attached, substituting: [:]) == [2, 3])
+
+    // The VD is a display nobody has seen before, so it arrives; the two
+    // panels, which never left, do not.
+    #expect(arrivals.claimArrivals(online: engagedOnline, substituting: pairing) == [7])
+    #expect(arrivals.claimArrivals(online: engagedOnline, substituting: pairing).isEmpty)
+  }
+
+  /// The control. Without the map the same engage resets the tracker, which is
+  /// the re-assertion above stated as the bug it would be.
+  @Test func withoutTheMapEngagingASizeResetsTheArrivalGate() {
+    var arrivals = TopologyArrivalTracker()
+    #expect(arrivals.claimArrivals(online: attached, substituting: [:]) == [2, 3])
+    #expect(arrivals.claimArrivals(online: engagedOnline, substituting: [:]) == [2, 3, 7])
+  }
+
+  /// The restore decision itself, with a size standing. The layout was saved
+  /// for the panel; the origins land on the virtual display, which is the only
+  /// member of the pair a plan can move.
+  @Test func aLayoutSavedForThePanelIsRestoredOntoTheEngagedPair() {
+    let decision = ArrangementReapplyPolicy.decide(
+      isEnabled: true, arrivals: [7], stored: saved,
+      attached: engagedOnline, current: engagedOnScreen, substituting: pairing
+    )
+    let layout = decision.arrangementToApply
+    #expect(decision.notice == nil)
+    #expect(layout?.tile(7)?.rect.origin == DisplayPoint(x: 1920, y: 0))
+    #expect(layout?.tile(2)?.rect.origin == DisplayPoint(x: 0, y: 0))
+  }
+
+  /// And the control for that: unsubstituted, the pair reads as a set the saved
+  /// layout is not about, and the user gets a report naming a display they have
+  /// never heard of.
+  @Test func withoutTheMapTheEngagedPairIsReportedAsADifferentSet() {
+    let decision = ArrangementReapplyPolicy.decide(
+      isEnabled: true, arrivals: [7], stored: saved,
+      attached: engagedOnline, current: engagedOnScreen
+    )
+    #expect(decision.arrangementToApply == nil)
+    #expect(decision.notice == .setDiffers(
+      missing: [Self.identity("mag").key], extra: [Self.identity("vd").key]
+    ))
+  }
+
+  /// A size that CHANGES the desktop's footprint, which is what a synthesized
+  /// size normally does. The v1 pin declined this on geometry and the hardware
+  /// overturned it (2026-08-18): refusing hands the virtual display to the
+  /// OS's default placement, on the wrong side of the arrangement. The layout
+  /// is found under the panel, the substitute is re-anchored at the panel's
+  /// saved tile, and the plan is applied with nothing to report.
+  @Test func aSizeThatChangesTheFootprintIsFoundAndApplied() {
+    // A stop the size ladder actually offers under a 1920x1080 panel.
+    let resized = DisplayArrangement(tiles: [
+      tile(7, "vd", DisplayRect(x: 0, y: 0, width: 1728, height: 972), mirroredIDs: [3]),
+      tile(2, "dell", right),
+    ])
+    let decision = ArrangementReapplyPolicy.decide(
+      isEnabled: true, arrivals: [7], stored: saved,
+      attached: engagedOnline, current: resized, substituting: pairing
+    )
+    #expect(decision.notice == nil)
+    #expect(!decision.isDeferred)
+    let layout = decision.arrangementToApply
+    #expect(layout?.tile(7)?.rect == DisplayRect(x: 1920, y: 0, width: 1728, height: 972))
+    #expect(layout?.tile(2)?.rect.origin == DisplayPoint(x: 0, y: 0))
+    if let layout { #expect(ArrangementRules.problems(in: layout).isEmpty) }
+  }
+
   // MARK: - The read-side trap (AR4)
 
   /// **`ArrangementSnapshot` SKIPS a display whose `CGDisplayBounds` is
@@ -287,21 +376,76 @@ struct ArrangementReapplyPolicyTests {
     #expect(!decision.isDeferred)
   }
 
-  /// **AR7, and it is on the ordinary path.** Stored MODES are reapplied before
-  /// the layout is (§7.4), so a display can be a different size than it was when
-  /// the layout was captured — and the recorded origins then overlap. macOS
-  /// cannot be made to hold an invalid layout, and this is the exact case
-  /// `expectsExactOrigins` turns the post-commit check off for, so sending it
-  /// unattended would commit a layout nobody chose with nothing left to notice.
-  @Test func aSavedLayoutThatNoLongerTilesIsReportedRatherThanSent() {
-    // The Dell is now twice as wide, so the MAG's stored origin sits inside it.
+  /// **§7.4, and #180 is what it costs to get this wrong.** Stored MODES are
+  /// reapplied before the layout is, so a display really can be a different size
+  /// than it was when the layout was captured. Its recorded origins are then
+  /// about a machine that no longer exists, and nothing is applied.
+  ///
+  /// What must NOT happen is the app rebuilding the old origins onto the new
+  /// footprints, discovering that its own reconstruction overlaps, and reporting
+  /// that overlap as a refusal. That is what shipped: a panel at every launch
+  /// telling the user two displays covered each other while they sat side by
+  /// side.
+  @Test func aSavedLayoutRecordedAtDifferentSizesAppliesNothingAndReportsNoOverlap() {
+    // The Dell is now twice as wide, and macOS has already moved the MAG right
+    // to make room, so the machine on screen is perfectly legal.
     let resized = DisplayArrangement(tiles: [
       tile(2, "dell", DisplayRect(x: 0, y: 0, width: 3840, height: 1080)),
       tile(3, "mag", DisplayRect(x: 3840, y: 0, width: 1920, height: 1080)),
     ])
+    #expect(ArrangementRules.problems(in: resized).isEmpty)
+
     let decision = ArrangementReapplyPolicy.decide(
       isEnabled: true, arrivals: bothArrived, stored: saved,
       attached: attached, current: resized
+    )
+    #expect(decision.arrangementToApply == nil)
+    #expect(decision.notice == .savedForDifferentGeometry([Self.identity("dell").key]))
+    #expect(!decision.isDeferred)
+  }
+
+  /// The state is permanent: the saved layout is not rewritten, so this same
+  /// decision is reached again on every launch and every reconnect until the
+  /// user arranges the displays themselves. A surface that interrupts them for
+  /// it is therefore not a report, it is a recurring alarm with no off switch,
+  /// and there is nothing in it for them to act on.
+  ///
+  /// Genuine restore failures are unaffected: unattended, silence about an
+  /// attempt that went wrong is indistinguishable from one that worked, and that
+  /// is a different thing from silence about deciding not to attempt.
+  @Test func onlyAStaleFootprintIsKeptOffTheConfirmationSurface() {
+    #expect(!ArrangementReapplyNotice.savedForDifferentGeometry(["a"]).isWorthInterrupting)
+
+    let interrupting: [ArrangementReapplyNotice] = [
+      .ambiguousIdentity(["a"]),
+      .setDiffers(missing: ["a"], extra: ["b"]),
+      .layoutNoLongerFits([.overlap(1, 2)]),
+      .failed(DisplayConfigError(cgErrorCode: 1000)),
+    ]
+    for notice in interrupting {
+      #expect(notice.isWorthInterrupting, "\(notice) must still reach the user")
+    }
+  }
+
+  /// **AR7 stays as the backstop it was**, reachable now only for a stored
+  /// layout that does not tile at the very sizes it recorded: hand-edited or
+  /// corrupt data, since a layout is only ever saved from one the machine
+  /// achieved. macOS cannot be made to hold an invalid layout, and this is the
+  /// exact case `expectsExactOrigins` turns the post-commit check off for, so
+  /// sending it unattended would commit a layout nobody chose with nothing left
+  /// able to notice.
+  @Test func aStoredLayoutThatDoesNotTileAtItsOwnRecordedSizesIsStillRefused() {
+    let overlapping = SavedArrangement(entries: [
+      SavedArrangementEntry(
+        identity: Self.identity("dell").key, x: 0, y: 0, width: 1920, height: 1080
+      ),
+      SavedArrangementEntry(
+        identity: Self.identity("mag").key, x: 960, y: 0, width: 1920, height: 1080
+      ),
+    ])
+    let decision = ArrangementReapplyPolicy.decide(
+      isEnabled: true, arrivals: bothArrived, stored: overlapping,
+      attached: attached, current: onScreen
     )
     #expect(decision.arrangementToApply == nil)
     #expect(decision.notice == .layoutNoLongerFits([.overlap(2, 3)]))

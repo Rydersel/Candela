@@ -24,6 +24,13 @@ struct PanelView: View {
   /// opening either one opens the other underneath it.
   @State private var expandedSection: PanelDisclosureID?
 
+  /// False until the entrance settle has played for THIS open. The menu takes
+  /// the view hierarchy with it on close (the same fact the hover resets rely
+  /// on), so onAppear re-fires on every open and the settle plays each time.
+  @State private var hasEntered = false
+
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   var body: some View {
     // Prefs are plain UserDefaults, not observable. Touching prefsRevision
     // here is what re-renders the panel after a settings pane (or a
@@ -69,13 +76,22 @@ struct PanelView: View {
         }
         ForEach(externals) { state in
           let name = Self.title(for: state.display)
+          // One prefs read per row, handed to both slider predicates: they each
+          // built their own before the derivations moved to plain inputs.
+          let rowPrefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
           VStack(alignment: .leading, spacing: 8) {
-            DisplayHeaderRow(controller: state.controller, displayName: name)
+            DisplayHeaderRow(
+              controller: state.controller, displayName: name,
+              // Asked of the engine that owns the pairing, not of the catalog:
+              // a catalog refresh landing inside an engage window answers
+              // "not engaged" while the mirror is already up.
+              isShowingSynthesizedSize: model.synthesis.isEngaged(displayID: state.display.id)
+            )
             DisplaySliderRow(
               controller: state.controller, displayName: name,
               snapsToStops: snapsToStops, showsPercent: showsPercent
             )
-            if showsVolumeSlider(for: state) {
+            if Self.showsVolumeSlider(for: state, prefs: rowPrefs) {
               let volumeEnabled = model.volumeSliderEnabled(state)
               ValueSliderRow(
                 controller: state.volume,
@@ -98,11 +114,17 @@ struct PanelView: View {
                 mutedSystemImage: "speaker.slash.fill"
               )
               .disabled(!volumeEnabled)
-              // The reason changed with the signal: this is the monitor
-              // declining the feature, not macOS failing to find a speaker.
-              .help(volumeEnabled ? "" : "\(name) reports no volume control over DDC")
+              // The reason comes from the policy that made the decision, so it
+              // cannot describe a cause other than the one that applied (D24).
+              // It used to be one hardcoded sentence blaming the display for
+              // every grey, including the greys the user caused.
+              //
+              // Revealed on hover rather than as a tooltip: no tooltip is
+              // delivered anywhere in this panel (#130). The short form, because
+              // this renders under the display's own header.
+              .panelHoverReason(model.volumeSliderCompactReason(state))
             }
-            if showsContrastSlider(for: state) {
+            if Self.showsContrastSlider(for: state, prefs: rowPrefs) {
               ValueSliderRow(
                 controller: state.contrast,
                 systemImage: "circle.lefthalf.filled",
@@ -136,12 +158,30 @@ struct PanelView: View {
       .padding(.horizontal, 14)
       .padding(.vertical, 12)
       Divider()
+      if Self.showsKeepAwake(appPrefs: appPrefs) {
+        keepAwakeRow
+        Divider()
+      }
       footer
     }
     .frame(width: 280)
+    // The entrance: the content settles down into place from under the menu's
+    // top edge while fading in. The offset draws outside layout, so nothing
+    // reflows; the menu window clips the first frames, which is what makes the
+    // slide read as unfurling from the icon rather than as movement.
+    .opacity(hasEntered ? 1 : 0)
+    .offset(y: hasEntered ? 0 : -6)
+    .onAppear {
+      withAnimation(Motion.entrance(reduceMotion: reduceMotion)) { hasEntered = true }
+    }
     // The menu can close without a mouse-exit event, and it takes the panel's
-    // view hierarchy with it — the same signal the hover fixes below rely on.
-    .onDisappear { expandedSection = nil }
+    // view hierarchy with it; the same signal the hover fixes below rely on.
+    // hasEntered re-arms here so the settle plays on the NEXT open, not once
+    // per app launch.
+    .onDisappear {
+      expandedSection = nil
+      hasEntered = false
+    }
   }
 
   // MARK: - What the panel renders
@@ -160,10 +200,22 @@ struct PanelView: View {
   /// `SWIFT_STRICT_CONCURRENCY: complete`.
   @MainActor
   static func visibleDisplays(_ model: AppModel) -> [AppModel.DisplayState] {
+    visibleDisplays(model.displays, prefs: standardPrefs)
+  }
+
+  /// The same derivation over plain inputs, so it can be asked what it renders
+  /// without an `AppModel` and without the app's own prefs domain. The
+  /// `AppModel` form above is the only production caller and passes exactly
+  /// what it used to read inline.
+  @MainActor
+  static func visibleDisplays(
+    _ states: [AppModel.DisplayState],
+    prefs: (String) -> DisplayPrefs
+  ) -> [AppModel.DisplayState] {
     DisplayOrdering.panelOrder(
-      model.displays,
-      isHidden: { DisplayPrefs(persistenceKey: $0.display.persistenceKey).hideDisplay },
-      title: { title(for: $0.display) }
+      states,
+      isHidden: { prefs($0.display.persistenceKey).hideDisplay },
+      title: { title(for: $0.display, prefs: prefs) }
     )
   }
 
@@ -173,17 +225,31 @@ struct PanelView: View {
   /// `visibleDisplays` — it reads `AppModel`.
   @MainActor
   static func showsBuiltIn(_ model: AppModel) -> Bool {
-    model.builtIn != nil && !DisplayPrefs(persistenceKey: "app").hideBuiltInDisplay
+    showsBuiltIn(hasBuiltIn: model.builtIn != nil, appPrefs: standardPrefs("app"))
+  }
+
+  static func showsBuiltIn(hasBuiltIn: Bool, appPrefs: DisplayPrefs) -> Bool {
+    hasBuiltIn && !appPrefs.hideBuiltInDisplay
   }
 
   /// The name every part of the panel shows for a display — header, slider
   /// accessibility label, and tooltips all go through this one call, so a
   /// rename in the Displays pane (T13) moves all of them together.
   static func title(for display: ExternalDisplay) -> String {
+    title(for: display, prefs: standardPrefs)
+  }
+
+  static func title(for display: ExternalDisplay, prefs: (String) -> DisplayPrefs) -> String {
     DisplayOrdering.title(
-      friendlyName: DisplayPrefs(persistenceKey: display.persistenceKey).friendlyName,
+      friendlyName: prefs(display.persistenceKey).friendlyName,
       hardwareName: display.name
     )
+  }
+
+  /// The prefs the app itself runs on. Named so the seams above take a factory
+  /// rather than reaching for `UserDefaults.standard` from inside a derivation.
+  static func standardPrefs(_ persistenceKey: String) -> DisplayPrefs {
+    DisplayPrefs(persistenceKey: persistenceKey)
   }
 
   /// Two different empties, said differently: "nothing is attached" is a fact
@@ -231,18 +297,31 @@ struct PanelView: View {
   /// register the app is willing to write, and greying says "this monitor says
   /// it does not implement volume", while these conjuncts mean the control does
   /// not apply here at all.
-  private func showsVolumeSlider(for state: AppModel.DisplayState) -> Bool {
-    let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
-    return state.volume.isAvailable && !prefs.hideVolumeSlider
+  @MainActor
+  static func showsVolumeSlider(for state: AppModel.DisplayState, prefs: DisplayPrefs) -> Bool {
+    showsVolumeSlider(
+      commandIsAvailable: state.volume.isAvailable, hideVolumeSlider: prefs.hideVolumeSlider)
+  }
+
+  static func showsVolumeSlider(commandIsAvailable: Bool, hideVolumeSlider: Bool) -> Bool {
+    commandIsAvailable && !hideVolumeSlider
   }
 
   /// D2: contrast slider behind the app-level `showContrast` pref (default
   /// false, fork parity), never for a disabled command, never for a
   /// `forceSoftware` display (fork stepContrast/menu: `!isSw()`, R5 — the
   /// latter two again via `isAvailable`).
-  private func showsContrastSlider(for state: AppModel.DisplayState) -> Bool {
-    let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
-    return prefs.showContrast && state.contrast.isAvailable
+  ///
+  /// `showContrast` is app-level and unkeyed, so the display's own prefs object
+  /// answers for it: one read per row instead of a second object.
+  @MainActor
+  static func showsContrastSlider(for state: AppModel.DisplayState, prefs: DisplayPrefs) -> Bool {
+    showsContrastSlider(
+      commandIsAvailable: state.contrast.isAvailable, showContrast: prefs.showContrast)
+  }
+
+  static func showsContrastSlider(commandIsAvailable: Bool, showContrast: Bool) -> Bool {
+    showContrast && commandIsAvailable
   }
 
   /// Visually quiet Accessibility banner (spec §6: banner, not alert):
@@ -285,6 +364,53 @@ struct PanelView: View {
   /// and Display menu-bar panels all end with a settings row, and diverging
   /// from that purely to differ from the fork would trade a real convention
   /// for a cosmetic distinction.
+  /// The one control here that is not about a display: it holds a power
+  /// assertion for the app, so it sits outside the per-display stack rather
+  /// than inside a section that would imply it applies to that panel alone.
+  ///
+  /// ONE LINE, and its height never changes with its state. The first version
+  /// showed a caption while the toggle was on, which grew the panel while the
+  /// hosting `NSMenu` was already open and clipped the footer off the bottom
+  /// [MEASURED 2026-08-19, seen on screen]. `panelHoverReason` is the panel's
+  /// idiom for explaining a control and it takes the same precaution from the
+  /// other side: it reserves its caption's height whenever a reason exists, so
+  /// that hovering never resizes anything.
+  ///
+  /// The consequence this control carries, that OLED care's idle dim, blackout
+  /// and unfocused dim cannot engage while it is on (A-21), is therefore stated
+  /// in Settings > Menu Bar, next to the switch that hides this row.
+  private var keepAwakeRow: some View {
+    HStack(spacing: 0) {
+      // Label leading, control trailing, like the Resolution and Mirroring rows
+      // above it. A `Toggle` left to size itself centres its label and switch as
+      // one group, which is the only alignment in the panel that would not match
+      // its neighbours: measured on screen 2026-08-19, not reasoned about.
+      Label("Keep display awake", systemImage: "cup.and.saucer.fill")
+        .font(.system(size: 12))
+      Spacer(minLength: 8)
+      Toggle("", isOn: Binding(
+        get: { model.keepAwake.isOn },
+        set: { model.keepAwake.setOn($0) }
+      ))
+      .labelsHidden()
+      .toggleStyle(.switch)
+      .controlSize(.mini)
+      // The visible label is the `Label` above, which `labelsHidden` detached
+      // from the control: without this the switch announces as unnamed.
+      .accessibilityLabel("Keep display awake")
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 8)
+  }
+
+  /// Whether the panel draws the keep-awake row at all (the Menu Bar pane's
+  /// switch). Presentation only: a hidden row does not release an assertion an
+  /// earlier toggle took, so this asks nothing about `KeepAwake` itself.
+  @MainActor
+  static func showsKeepAwake(appPrefs: DisplayPrefs) -> Bool {
+    !appPrefs.hideKeepAwake
+  }
+
   private var footer: some View {
     HStack(spacing: 0) {
       FooterPillButton(systemImage: "gearshape", title: "Settings…") {
@@ -319,6 +445,24 @@ enum PanelMenu {
   }
 }
 
+extension PanelView {
+  /// Why the panel's HDR button cannot act, or nil when it can (SS9's missing
+  /// half, #194).
+  ///
+  /// Only the ENGAGE direction is refused. With HDR already live the button
+  /// offers the exit, and that is the one move that takes the display out of
+  /// the combination this refusal exists to prevent: greying it would be the
+  /// D29 rule 3 shape, a recovery control unavailable in the state it recovers
+  /// from. The same asymmetry is in `BrightnessController.setHDRMode`, which is
+  /// the guarantee; this is the explanation.
+  static func hdrRefusalReason(
+    isShowingSynthesizedSize: Bool, isHDREngaged: Bool
+  ) -> String? {
+    guard isShowingSynthesizedSize, !isHDREngaged else { return nil }
+    return SynthesisCopy.hdrBlockedBySynthesizedSize
+  }
+}
+
 /// Section header for one display: name, an "HDR" state badge, and a trailing
 /// HDR-mode toggle button. Everything is secondary-colored — the slider is
 /// the row's only emphasis, the way Control Center keeps section chrome quiet.
@@ -330,18 +474,27 @@ enum PanelMenu {
 private struct DisplayHeaderRow: View {
   let controller: BrightnessController
   let displayName: String
+  let isShowingSynthesizedSize: Bool
 
   @State private var isHovering = false
 
+  /// Reads the STATE, not the mode pref (#84). `hdrMode` is Candela's policy;
+  /// `isHDREngaged` is what the display is actually doing, and they diverge the
+  /// moment HDR is toggled in System Settings. The badge to the left of this
+  /// button already reads the state, so sourcing the label from the mode put a
+  /// flat contradiction on screen — an "HDR" badge beside an "HDR Off" button,
+  /// for a display in HDR.
   private var modeLabel: String {
-    switch controller.hdrMode {
-    case .off: return "HDR Off"
-    case .alwaysOn: return "HDR On"
-    }
+    controller.isHDREngaged ? "HDR On" : "HDR Off"
   }
 
+  /// Same source, so the click always moves the display AWAY from what the
+  /// label reports. Both directions need the engine door to act on a mode it
+  /// nominally already holds — `.off` on an externally-engaged display, and
+  /// `.alwaysOn` on one externally switched off — which is what
+  /// `setHDRMode`'s state-aware guard is for.
   private var nextMode: HDRMode {
-    controller.hdrMode == .off ? .alwaysOn : .off
+    controller.isHDREngaged ? .off : .alwaysOn
   }
 
   var body: some View {
@@ -363,6 +516,25 @@ private struct DisplayHeaderRow: View {
       Spacer(minLength: 4)
       hdrModeButton
     }
+    // On the whole row rather than on the button: the modifier draws its caption
+    // in a leading-aligned column under the content it wraps, and the button's
+    // own slot is a few characters wide. Swallowing the row's hover costs
+    // nothing, because the only hoverable thing in it is the button and the
+    // button is disabled whenever a reason exists.
+    //
+    // The caption's height is reserved only while a reason exists, so this row
+    // grows by one line when a size engages. That is a reconfiguration, which
+    // ends menu tracking, so the panel is rebuilt at its new height before
+    // anyone sees it: not the case that clipped the footer during keep awake,
+    // where a control inside an OPEN panel changed the panel's own height.
+    .panelHoverReason(refusalReason)
+  }
+
+  private var refusalReason: String? {
+    PanelView.hdrRefusalReason(
+      isShowingSynthesizedSize: isShowingSynthesizedSize,
+      isHDREngaged: controller.isHDREngaged
+    )
   }
 
   /// Cycling control, not a menu: the panel is hosted in an `NSMenu` item, and
@@ -389,8 +561,11 @@ private struct DisplayHeaderRow: View {
     // controls visible so people learn what the app supports). `supportsHDR`
     // is observation-tracked, so the button enables live once the async
     // capability refresh lands.
-    .disabled(!controller.supportsHDR)
-    .help("Toggle HDR for \(displayName)")
+    .disabled(!controller.supportsHDR || refusalReason != nil)
+    // No `.help`: the panel delivers no tooltip at all (#130), on this ENABLED
+    // control least of all, since measuring it here is what proved the cause is
+    // menu tracking rather than the greying next door. The accessibility label
+    // below is what actually names this control.
     .accessibilityLabel("\(displayName) HDR mode")
     .accessibilityValue(modeLabel)
   }
@@ -429,66 +604,8 @@ private struct HDRModeButtonStyle: ButtonStyle {
   }
 }
 
-/// Bridges the controller (source of truth) to the slider's binding.
-/// setBrightness is synchronous and coalesces hardware writes, so drag
-/// streams are safe to feed directly.
-private struct DisplaySliderRow: View {
-  let controller: BrightnessController
-  let displayName: String
-  let snapsToStops: Bool
-  let showsPercent: Bool
-
-  var body: some View {
-    CandelaSlider(
-      value: Binding(
-        get: { controller.brightness },
-        set: { controller.setBrightness($0) }
-      ),
-      accessibilityLabel: "\(displayName) brightness",
-      snapsToStops: snapsToStops,
-      showsPercent: showsPercent
-    )
-  }
-}
-
-/// Volume/contrast row: the same capsule slider as brightness, one visual
-/// language for every value in the section.
-///
-/// Muted volume renders as 0 with a slashed speaker — `isMuted` and a genuine
-/// value of 0 are distinct states (T10 handoff) and the icon is what tells
-/// them apart, since the knob sits at the leading edge either way. The stored
-/// value survives being muted: dragging up from 0 unmutes and lands on the
-/// dragged value through the controller's mute-companion logic.
-private struct ValueSliderRow: View {
-  let controller: DDCValueController
-  let systemImage: String
-  let accessibilityLabel: String
-  let snapsToStops: Bool
-  let showsPercent: Bool
-  /// Substituted while muted; nil for commands that never mute (contrast).
-  var mutedSystemImage: String?
-
-  /// Volume is the command whose 0 means "mute". Having a muted glyph IS the
-  /// definition of that here — contrast has none and never mutes.
-  private var mutesAtZero: Bool { mutedSystemImage != nil }
-  private var isMuted: Bool { controller.isMuted && mutesAtZero }
-
-  var body: some View {
-    CandelaSlider(
-      value: Binding(
-        get: { isMuted ? 0 : controller.value },
-        set: { controller.setValue($0) }
-      ),
-      systemImage: isMuted ? (mutedSystemImage ?? systemImage) : systemImage,
-      accessibilityLabel: isMuted ? "\(accessibilityLabel), muted" : accessibilityLabel,
-      snapsToStops: snapsToStops,
-      // D29: never let snapping pull a volume drag onto 0, which the engine
-      // treats as a hardware mute (VCP 0x8D). Contrast keeps the 0 stop.
-      snapsToZero: !mutesAtZero,
-      showsPercent: showsPercent
-    )
-  }
-}
+// `DisplaySliderRow` and `ValueSliderRow` live in `SliderRows.swift` — shared
+// with the settings hero so the D29 rule-4 `snapsToZero` derivation exists once.
 
 /// Footer action button: a symbol and a word on a subtle rounded background
 /// that appears on hover, with a distinct pressed state.

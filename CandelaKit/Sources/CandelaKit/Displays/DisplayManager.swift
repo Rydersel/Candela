@@ -169,7 +169,7 @@ public actor DisplayManager {
         .reconfigureEvent(displayID: displayID, flags: flags)
     }, userInfo)
     if result != .success {
-      topologyLog.error("CGDisplayRegisterReconfigurationCallback failed: \(result.rawValue) — topology intake is dead")
+      topologyLog.error("CGDisplayRegisterReconfigurationCallback failed: \(result.rawValue); topology intake is dead")
     }
   }
 
@@ -213,7 +213,7 @@ public actor DisplayManager {
           return !state.asleep
         }
         if emit {
-          topologyLog.log("topology quiet window elapsed — signaling refresh")
+          topologyLog.log("topology quiet window elapsed, signaling refresh")
           topology.yield(())
         }
       }

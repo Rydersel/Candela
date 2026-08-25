@@ -1,4 +1,6 @@
 //  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
+//  Transplanted from the MonitorControl project (MIT), from
+//  Support/AppDelegate.swift (`playVolumeChangedSound`, `getSystemSettings`).
 
 import AVFoundation
 import Foundation

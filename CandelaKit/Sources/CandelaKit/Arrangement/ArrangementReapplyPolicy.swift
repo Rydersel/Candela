@@ -17,11 +17,13 @@ public enum ArrangementReapplyNotice: Sendable, Equatable {
   /// Nothing was changed — a layout is a statement about a whole set, and half
   /// of one is a different arrangement rather than a smaller one.
   case setDiffers(missing: [String], extra: [String])
-  /// **AR7.** The saved origins no longer tile the displays they are about —
-  /// the usual cause being that one of them has changed resolution since, so its
-  /// footprint is a different size and the recorded positions now overlap or
-  /// strand something. Reachable on the ordinary path, because stored MODES are
-  /// reapplied before the layout is (§7.4).
+  /// **AR7.** The saved origins do not tile the displays they are about, at the
+  /// very sizes those displays were recorded at. A resolution change is NOT this
+  /// case and must not be reported as it (#180); see `savedForDifferentGeometry`.
+  /// What is left is data that never described a legal layout at all, which a
+  /// layout saved from an achieved one cannot be: hand-edited or corrupt
+  /// preferences. Kept as the backstop, because it is the one refusal that stops
+  /// an illegal layout from being sent.
   ///
   /// Nothing was changed. macOS cannot be made to hold an invalid layout — it
   /// silently moves things somewhere of its own choosing — and it is exactly the
@@ -29,9 +31,42 @@ public enum ArrangementReapplyNotice: Sendable, Equatable {
   /// for, so sending it unattended would be committing a layout nobody chose
   /// with nothing left able to notice.
   case layoutNoLongerFits([ArrangementProblem])
+  /// **#180.** The right displays are attached and at least one is not the size
+  /// the layout was measured against, so its origins are about a machine that no
+  /// longer exists. Names the identity keys that changed. Nothing was applied.
+  ///
+  /// Distinct from `layoutNoLongerFits`, and the distinction is the whole bug:
+  /// the origins DID tile, on the footprints they were recorded on. Rebuilding
+  /// them onto today's footprints and reporting the result as an overlap
+  /// described a collision that existed only inside the app, in the sentence
+  /// written for a user who had just dragged one display onto another.
+  case savedForDifferentGeometry([String])
   /// The apply itself failed, including the post-commit check that fires when
   /// CoreGraphics reports success for a layout it did not achieve (#53).
   case failed(DisplayConfigError)
+
+  /// Whether this is worth putting a surface in front of somebody for.
+  ///
+  /// Restore runs unattended, so the default is yes: silence about an attempt
+  /// that went wrong is indistinguishable from one that worked. A stale
+  /// footprint is the one thing here that is neither. Nothing was attempted, the
+  /// machine is in a layout macOS derived from the saved one when the size
+  /// changed, and the decision is PERMANENT: the saved layout is deliberately
+  /// never rewritten, so the same answer is reached at every launch and every
+  /// reconnect until the user arranges the displays themselves. A panel for that
+  /// is not a report; it is a recurring alarm with nothing in it to act on.
+  ///
+  /// It is still a notice, and it still reaches the arrangement pane, where
+  /// somebody has come looking and the sentence answers a question they are
+  /// already asking.
+  ///
+  /// Exhaustive on purpose: a case added later has to decide.
+  public var isWorthInterrupting: Bool {
+    switch self {
+    case .savedForDifferentGeometry: false
+    case .ambiguousIdentity, .setDiffers, .layoutNoLongerFits, .failed: true
+    }
+  }
 }
 
 /// One restore decision: what to put on screen, and what to say.
@@ -115,12 +150,18 @@ public enum ArrangementReapplyPolicy {
   ///     display and the wake as three arrivals.
   ///   - current: the layout on screen, as `ArrangementSnapshot` read it.
   ///     Compared against `attached` rather than trusted — see the guard below.
+  ///   - substituting: SS12's map, a synthesis virtual display's ID to the
+  ///     identity key of the panel it is standing in for. The same one the
+  ///     layout was saved under, so a layout saved for the panel is matched
+  ///     against the pair that is showing its picture rather than reported as a
+  ///     display set the user has never seen.
   public static func decide(
     isEnabled: Bool,
     arrivals: Set<CGDirectDisplayID>,
     stored: SavedArrangement?,
     attached: [ConfiguredDisplay],
-    current: DisplayArrangement
+    current: DisplayArrangement,
+    substituting: [CGDirectDisplayID: String] = [:]
   ) -> ArrangementReapplyDecision {
     guard isEnabled else { return .doNothing }
     // Before the deferral gates, and deliberately: with nothing having arrived
@@ -144,7 +185,7 @@ public enum ArrangementReapplyPolicy {
 
     guard let stored else { return .doNothing }
 
-    switch ArrangementPersistence.resolve(stored, against: current) {
+    switch ArrangementPersistence.resolve(stored, against: current, substituting: substituting) {
     case let .exact(layout):
       // The skip is not an optimisation. Applying the layout the machine is
       // already in still triggers a full CoreGraphics reconfiguration — which
@@ -171,6 +212,14 @@ public enum ArrangementReapplyPolicy {
     case let .setDiffers(missing, extra):
       return ArrangementReapplyDecision(
         arrangementToApply: nil, notice: .setDiffers(missing: missing, extra: extra)
+      )
+
+    case let .geometryDiffers(identities):
+      // A refusal, not "not now": nothing later restores a display to a size it
+      // no longer has, so holding the arrivals would retry this on every event
+      // forever.
+      return ArrangementReapplyDecision(
+        arrangementToApply: nil, notice: .savedForDifferentGeometry(identities)
       )
 
     case .none:
@@ -241,8 +290,17 @@ public struct TopologyArrivalTracker: Sendable, Equatable {
   /// layout but not from the machine. A reset over that transient would make the
   /// whole set read as newly arrived and re-assert a saved layout over a change
   /// the user had just made by hand.
-  public mutating func claimArrivals(online: [ConfiguredDisplay]) -> Set<CGDirectDisplayID> {
-    let signature = TopologySignature(online: online)
+  ///
+  /// **SS12**: `substituting` names each synthesis virtual display by the panel
+  /// it is standing in for, so engaging or dropping a synthesized size is not a
+  /// change of display SET. Without it every display on the machine reads as
+  /// newly arrived the moment a size engages, which re-asserts the saved layout
+  /// over whatever the user last did by hand. Runtime IDs, handed in with the
+  /// sample; nothing here stores one.
+  public mutating func claimArrivals(
+    online: [ConfiguredDisplay], substituting: [CGDirectDisplayID: String] = [:]
+  ) -> Set<CGDirectDisplayID> {
+    let signature = TopologySignature(online: online, substituting: substituting)
     if signature != self.signature {
       self.signature = signature
       // The SET changed, so every display in it is part of an arrangement that

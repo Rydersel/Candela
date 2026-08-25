@@ -57,7 +57,71 @@ public final class ModePersistence: @unchecked Sendable {
     defaults.removeObject(forKey: key(PrefName.storedDisplayMode, identity))
   }
 
+  /// Resolves a stored choice against the live list, first in the orientation
+  /// it was recorded in and then transposed.
+  ///
+  /// A quarter turn swaps the axes of the WHOLE mode list, so a descriptor
+  /// recorded un-rotated cannot match anything a rotated display publishes,
+  /// even though the identical panel-native mode is present with its sides
+  /// swapped. The transposed arm exists for that case, and is consulted ONLY
+  /// when the literal arm found nothing at the stored logical size.
+  ///
+  /// That condition is the whole rule. If the literal arm DID find the stored
+  /// logical size, the record was saved in the frame the display is in now, so
+  /// a transposed twin sitting in the same list is a genuinely different
+  /// desktop shape rather than a rotation artifact: taking it would change the
+  /// shape of the screen to fix a refresh delta. A literal
+  /// `.refreshRateDiffers` or `.scaleDiffers` therefore beats a transposed
+  /// `.exact`. Below that line, where the literal arm has only a different size
+  /// or nothing at all to offer, the better-ranked outcome wins and the literal
+  /// arm takes ties.
+  ///
+  /// Whenever the literal arm answers at the stored size, this returns before a
+  /// second pass exists, so that case is bit-for-bit the resolution it always
+  /// was. It is the stored size being present that decides this, not the
+  /// display's orientation: an un-rotated display whose stored size has since
+  /// vanished from the list does run the second pass, and finds nothing there
+  /// to prefer.
+  ///
+  /// A transposed exact match reports `.exact` and so applies silently, on
+  /// purpose: it is the same panel-native picture the user chose, and a
+  /// substitution notice for a pure orientation swap reads as a bug rather
+  /// than as honesty.
+  public static func resolve(
+    _ descriptor: DisplayModeDescriptor, in modes: [DisplayMode]
+  ) -> ModeMatch {
+    let literal = resolveLiteral(descriptor, in: modes)
+    switch literal {
+    case .exact, .refreshRateDiffers, .scaleDiffers:
+      return literal
+    case .sizeDiffers, .none:
+      let transposed = resolveLiteral(descriptor.transposed, in: modes)
+      return rank(transposed) > rank(literal) ? transposed : literal
+    }
+  }
+
+  /// Outcome quality, best first. Mirrors `resolveLiteral`'s own step order
+  /// rather than inventing a second opinion about which compromise is worse:
+  /// exact, then the same geometry at another rate, then the same logical size
+  /// at another framebuffer, then another size, then nothing.
+  ///
+  /// Only ever asked about the two arms below the same-logical-size line, where
+  /// neither has the stored size to offer and they are genuinely comparable.
+  private static func rank(_ match: ModeMatch) -> Int {
+    switch match {
+    case .exact: 4
+    case .refreshRateDiffers: 3
+    case .scaleDiffers: 2
+    case .sizeDiffers: 1
+    case .none: 0
+    }
+  }
+
   /// Resolution order, specified because it runs unattended on every reconnect.
+  ///
+  /// Orientation-literal by design: `resolve` is what tries the other
+  /// orientation, and it does so by handing this method a transposed
+  /// descriptor rather than by loosening any comparison here.
   ///
   /// 1. exact geometry + refresh
   /// 2. same geometry, nearest refresh
@@ -72,7 +136,7 @@ public final class ModePersistence: @unchecked Sendable {
   /// can explain to the user or reproduce in a bug report: the nearest logical
   /// size typically exists at two framebuffers and six refresh rates, and even
   /// at exact geometry two rates can sit inside the match window at once.
-  public static func resolve(
+  private static func resolveLiteral(
     _ descriptor: DisplayModeDescriptor, in modes: [DisplayMode]
   ) -> ModeMatch {
     guard !modes.isEmpty else { return .none }
@@ -97,7 +161,7 @@ public final class ModePersistence: @unchecked Sendable {
     // That was a visible defect, not a theoretical one: `quantizedRefresh`
     // keeps 59.9 and 60 apart and `DisplayModeCopy` renders them as separate
     // picker rows, so selecting 59.9 could resolve to the 60 mode — whose
-    // `ioModeID` is the one already current, which `DisplayModeSection.apply`
+    // `ioModeID` is the one already current, which `DisplayHubView.apply`
     // then early-returns on. The picker snapped back and nothing happened.
     // Taking the nearest also makes this the only step that does not depend on
     // enumeration order, matching steps 2–4.
@@ -167,5 +231,22 @@ public final class ModePersistence: @unchecked Sendable {
 
   private func key(_ name: PrefName, _ identity: DisplayConfigIdentity) -> String {
     "\(name.rawValue).\(identity.key)"
+  }
+}
+
+extension DisplayModeDescriptor {
+  /// The same stored choice seen through a quarter turn: both size pairs
+  /// swapped, the refresh rate untouched, since rotation does not retime the
+  /// panel.
+  ///
+  /// Computed rather than stored, so the descriptor's five CodingKeys stay
+  /// exactly the shipped on-disk format. Nothing about a stored record changes;
+  /// only what `resolve` is willing to look for changes.
+  var transposed: DisplayModeDescriptor {
+    DisplayModeDescriptor(
+      logicalWidth: logicalHeight, logicalHeight: logicalWidth,
+      pixelWidth: pixelHeight, pixelHeight: pixelWidth,
+      refreshHz: refreshHz
+    )
   }
 }

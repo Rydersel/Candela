@@ -126,7 +126,7 @@ public enum ArrangementSnapper {
     against others: [ArrangementTile],
     threshold: Int
   ) -> Candidate? {
-    let origin = origin(moving, axis)
+    let origin = moving.start(on: axis)
     return others
       .flatMap { candidates(on: axis, moving: moving, other: $0) }
       .filter { abs($0.target - origin) <= threshold }
@@ -139,9 +139,9 @@ public enum ArrangementSnapper {
     other tile: ArrangementTile
   ) -> [Candidate] {
     let source = tile.rect
-    let movingExtent = extent(moving, axis)
-    let sourceOrigin = origin(source, axis)
-    let sourceMax = maxEdge(source, axis)
+    let movingExtent = moving.length(on: axis)
+    let sourceOrigin = source.start(on: axis)
+    let sourceMax = source.end(on: axis)
 
     func candidate(_ target: Int, _ kind: SnapKind, at position: Int) -> Candidate {
       Candidate(
@@ -158,7 +158,7 @@ public enum ArrangementSnapper {
       candidate(sourceOrigin, .align, at: sourceOrigin),
       candidate(sourceMax - movingExtent, .align, at: sourceMax),
       candidate(
-        sourceOrigin + halved(extent(source, axis) - movingExtent),
+        sourceOrigin + halved(source.length(on: axis) - movingExtent),
         .align,
         // The guide is drawn through the OTHER display's centre. The moved
         // tile's own centre can land one point off it, because both that centre
@@ -166,7 +166,7 @@ public enum ArrangementSnapper {
         // points to the canvas point) the difference is well under a pixel, and
         // drawing through the rect that is not moving keeps the guide from
         // jittering as the tile approaches.
-        at: sourceOrigin + halved(extent(source, axis))
+        at: sourceOrigin + halved(source.length(on: axis))
       ),
     ]
 
@@ -174,10 +174,7 @@ public enum ArrangementSnapper {
     // tile dragged far above another still feels a magnet from it: the two
     // cannot abut on X at all unless their Y spans overlap, so offering the
     // candidate would snap them into a layout that shares no edge.
-    let crosses = DisplayRect.spansOverlap(
-      origin(moving, axis.other), maxEdge(moving, axis.other),
-      origin(source, axis.other), maxEdge(source, axis.other)
-    )
+    let crosses = moving.spansOverlap(with: source, on: axis.other)
     if crosses {
       result.append(candidate(sourceMax, .abut, at: sourceMax))
       result.append(candidate(sourceOrigin - movingExtent, .abut, at: sourceOrigin))
@@ -232,8 +229,8 @@ public enum ArrangementSnapper {
     // The extent is taken along the other axis from the SNAPPED rect, so the
     // guide spans where the tile actually is rather than where it was grabbed.
     let across = candidate.axis.other
-    let from = min(origin(snapped, across), origin(candidate.otherRect, across))
-    let to = max(maxEdge(snapped, across), maxEdge(candidate.otherRect, across))
+    let from = min(snapped.start(on: across), candidate.otherRect.start(on: across))
+    let to = max(snapped.end(on: across), candidate.otherRect.end(on: across))
 
     return SnapLine(
       axis: candidate.axis,
@@ -243,19 +240,5 @@ public enum ArrangementSnapper {
       from: from,
       to: to
     )
-  }
-
-  // MARK: - Axis projection
-
-  private static func origin(_ rect: DisplayRect, _ axis: SnapAxis) -> Int {
-    axis == .x ? rect.x : rect.y
-  }
-
-  private static func extent(_ rect: DisplayRect, _ axis: SnapAxis) -> Int {
-    axis == .x ? rect.width : rect.height
-  }
-
-  private static func maxEdge(_ rect: DisplayRect, _ axis: SnapAxis) -> Int {
-    axis == .x ? rect.maxX : rect.maxY
   }
 }

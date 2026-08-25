@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import CandelaKit
 
@@ -30,7 +31,8 @@ func makeLegacyPathController(
     displayID: 1,
     store: store,
     storageKey: storageKey,
-    panelIdentity: panelIdentity
+    panelIdentity: panelIdentity,
+    wireSiblings: []
   )
 }
 
@@ -44,15 +46,34 @@ actor FakeDDC: DDCWriting {
   /// the transaction was attempted, which is exactly the distinction the
   /// failure flag exists to preserve.
   var writesSucceed = true
+  /// Codes whose writes fail while everything else succeeds (#68, absorbed from
+  /// `PartialFailDDC`). A per-command failure is a different fact from
+  /// `writesSucceed = false`: it is what pins that a remap fan-out neither
+  /// short-circuits past a failing code nor swallows the failure.
+  var failingCommands: Set<UInt8> = []
 
-  init(readResult: (current: UInt16, max: UInt16)? = (current: 50, max: 100)) {
+  init(
+    readResult: (current: UInt16, max: UInt16)? = (current: 50, max: 100),
+    failingCommands: Set<UInt8> = []
+  ) {
     self.readResult = readResult
+    self.failingCommands = failingCommands
   }
 
   func write(command: UInt8, value: UInt16) async -> Bool {
     writes.append((command, value))
-    return writesSucceed
+    landed.withLock { $0 += 1 }
+    return writesSucceed && !failingCommands.contains(command)
   }
+
+  /// Nonisolated mirror of `writes.count`. #146's ordering claim has to be
+  /// sampled at the instant the software leg goes out, and that instant is a
+  /// synchronous main-actor hook (`preGammaApplyHook`) which cannot await an
+  /// actor. Counting is enough: the question is only whether the register write
+  /// had landed by then.
+  private nonisolated let landed = OSAllocatedUnfairLock(initialState: 0)
+
+  nonisolated func landedWriteCount() -> Int { landed.withLock { $0 } }
 
   func read(command: UInt8) async -> (current: UInt16, max: UInt16)? {
     readResult

@@ -2,6 +2,8 @@ import CandelaKit
 import CoreGraphics
 import Foundation
 import Observation
+import os
+import ServiceManagement
 
 @MainActor @Observable
 final class AppModel {
@@ -61,9 +63,169 @@ final class AppModel {
   /// stored property declared above it, and the Observation macro cannot wrap a
   /// `lazy var`. Views observe the coordinator's own properties, not this
   /// reference.
-  @ObservationIgnored private(set) lazy var displayModes = DisplayModeCoordinator(
-    gate: reconfigurationGate
-  )
+  ///
+  /// The physical-facts provider is wired here rather than at a surface for
+  /// `didStoreMode`'s reason: the catalog is rebuilt at reconnect with nothing
+  /// on screen, so a view-installed provider would be absent exactly when the
+  /// panel's own size is being judged.
+  @ObservationIgnored private(set) lazy var displayModes: DisplayModeCoordinator = {
+    let coordinator = DisplayModeCoordinator(gate: reconfigurationGate)
+    coordinator.physicalFacts = { [weak self] display in
+      self?.physicalPanelFacts(for: display)
+    }
+    // A synthesized stop is a row in this coordinator's catalog and a preview on
+    // its clock, so the routing lives there; the engine lives in `synthesis`.
+    coordinator.synthesis = synthesis
+    return coordinator
+  }()
+
+  /// Synthesized sizes (SS4): the mode-synthesis engine, its preview session,
+  /// the pairing snapshot every SS7 carve-out reads, and the two per-display
+  /// prefs.
+  ///
+  /// Owned here for `displayModes`' reason and one of its own: an engage and a
+  /// disengage take tens of seconds and outlive any window that started them,
+  /// and the settings pane, the menu-bar panel and the whole-app reset all have
+  /// to drive the same engine.
+  @ObservationIgnored private(set) lazy var synthesis: SynthesisCoordinator = {
+    let coordinator = SynthesisCoordinator(
+      virtualDisplays: virtualDisplays,
+      configurator: CoreGraphicsDisplayConfigurator(),
+      gate: reconfigurationGate,
+      topologyStore: mirrorTopology,
+      // The link bounce's HDR seam, and every leg of it goes through the
+      // DISPLAY'S OWN controller rather than the shared panel service. The
+      // controller owns the transition token, the settle window and the
+      // wire-memo invalidation; HDR driven past it opens a window in which DDC
+      // writes are ACKed, swallowed and memo-recorded as landed, which on a
+      // write-only display nothing downstream can detect.
+      //
+      // No controller means no bounce. A display the app is not controlling is
+      // one nothing can vouch for, and skipping is the safe direction: the
+      // bounce is cosmetic and HDR left standing is not.
+      hdr: SynthesisHDRBounce(
+        supportsHDR: { [weak self] displayID in
+          await MainActor.run { self?.controller(for: displayID)?.supportsHDR ?? false }
+        },
+        measuredHDREnabled: { [weak self] displayID in
+          guard let controller = await MainActor.run(body: { self?.controller(for: displayID) })
+          else { return nil }
+          // A MEASURED read past the backend's own cache, and `.unknown` when a
+          // transition raced it. nil rather than a guess: the bounce refuses to
+          // decide from a state nobody established.
+          return switch await controller.hdrWriteWindow() {
+          case .locked: true
+          case .open: false
+          case .unknown: nil
+          }
+        },
+        setHDR: { [weak self] displayID, enabled, settle in
+          guard let controller = await MainActor.run(body: { self?.controller(for: displayID) })
+          else { return false }
+          return await controller.setTransientHDR(enabled, settle: settle)
+        },
+        reportHDRLeftStanding: { [weak self] displayID in
+          await MainActor.run { self?.synthesis.note(.hdrLeftStanding, for: displayID) }
+        }
+      )
+    )
+    // The prefs join. Built from the DISPLAY PREFS persistence key, which is
+    // what every per-display accessor suffixes on; `DisplayConfigIdentity.key`
+    // is a different key space and reading one while writing the other is a
+    // silent opt-in that saves and reads back false.
+    coordinator.persistenceKey = { [weak self] displayID in
+      guard let self else { return nil }
+      if let key = allControlledStates.first(where: { $0.id == displayID })?
+        .display.persistenceKey {
+        return key
+      }
+      // Launch ordering: the unattended reapply pass can run before the first
+      // controller build populates the list above. A nil here reads as "not
+      // opted in" and silently drops the relaunch restore, so ask discovery
+      // directly rather than defaulting.
+      //
+      // MEMOIZED, including the nil answer, and that is the load-bearing half.
+      // The walk is a full IOKit service iteration on the main actor, and this
+      // closure is reached from `offersSyntheticSizes`, which `refreshCatalog`
+      // calls for every observed display on every screen-parameters
+      // notification and which a Diagnostics body calls on every render. A
+      // display discovery never returns (a dummy, a non-DDC external) misses
+      // the table above PERMANENTLY, so an unmemoized fallback is an unbounded
+      // retry of a walk that has already answered. `performRefresh` clears the
+      // memo, which is exactly the event that can change the answer.
+      return discoveredPersistenceKeys.value(for: displayID) {
+        discoverDisplays(virtualDisplays.ownedDisplayIDs)
+          .first { $0.display.id == displayID }?.display.persistenceKey
+      }
+    }
+    // SS9. The achieved state first, and the stored intent as well: at launch
+    // the controllers may not exist yet, and refusing on either answer is the
+    // conservative direction for a guard whose failure mode is a silently
+    // dropped HDR.
+    coordinator.isHDREngaged = { [weak self] displayID in
+      guard let self else { return false }
+      if allControlledStates.first(where: { $0.id == displayID })?.controller.isHDREngaged == true {
+        return true
+      }
+      guard let key = allControlledStates.first(where: { $0.id == displayID })?
+        .display.persistenceKey
+      else { return false }
+      return DisplayPrefs(persistenceKey: key).hdrMode != .off
+    }
+    // `didWriteSynthesisPref` is wired in `StatusItemController`, where
+    // `SettingsActions` lives; see `didStoreMode` beside it.
+    // The opt-in decides which rows the size picker holds, and the catalog is
+    // enumerated on demand: a pref write alone re-renders the panes over the
+    // rows they already had.
+    coordinator.didChangeOffer = { [weak self] displayID in
+      self?.displayModes.refreshCatalog(for: displayID)
+    }
+    // The exact mechanism `MirroringCoordinator` uses before its own applies: a
+    // synthesis teardown reconfigures displays too, so it must not run over a
+    // preview whose fallback was captured before it.
+    coordinator.endOutstandingPreview = { [weak self] in
+      guard let self else { return true }
+      return await displayModes.endOutstandingPreview()
+    }
+    // AR12's release funnel. Synthesis shares the `.displayModes` claimant with
+    // the mode picker, so it must never release the gate itself: the
+    // coordinator decides, from BOTH sessions, whether anything is still
+    // outstanding that the claim is protecting.
+    coordinator.releaseClaimIfIdle = { [weak self] in
+      await self?.displayModes.releaseReconfigurationClaimIfIdle()
+    }
+    return coordinator
+  }()
+
+  /// PD7: the app-side half of the density join. The Kit is handed a value and
+  /// performs no lookup of its own.
+  ///
+  /// Both halves are resolved from the LIVE display list on every call, never
+  /// remembered: `hardwareFacts` is keyed by persistence key because display IDs
+  /// reassign across a replug, so the ID this is asked about only means anything
+  /// against the list as it stands right now.
+  ///
+  /// A display with no entry yields nil sizes rather than no facts, so a virtual
+  /// display still reports itself as virtual. It has to: discovery drops virtual
+  /// displays from the DDC pool, so they never have facts, and their declared
+  /// physical size is a fiction no plausibility range can catch.
+  private func physicalPanelFacts(
+    for display: ConfiguredDisplay
+  ) -> DisplayModeCoordinator.PhysicalPanelFacts {
+    // Ours by ownership, everyone else's by the optional-returning predicate
+    // (nil reads as an ordinary panel), the same pair the arrangement canvas
+    // asks. Two answers to "is this virtual" is one too many.
+    let isVirtual = virtualDisplays.ownedDisplayIDs.contains(display.id)
+      || VirtualDisplayDetection.isVirtual(display.id) == true
+    let facts = allControlledStates
+      .first { $0.id == display.id }
+      .flatMap { hardwareFacts[$0.display.persistenceKey] }
+    return DisplayModeCoordinator.PhysicalPanelFacts(
+      physicalWidthCm: facts?.physicalWidthCm,
+      physicalHeightCm: facts?.physicalHeightCm,
+      isVirtual: isVirtual
+    )
+  }
 
   /// THE topology sample every part of the app resolves through (DT15). Handed
   /// to every `BrightnessController` so the shade and the gamma activity
@@ -106,11 +268,230 @@ final class AppModel {
     gate: reconfigurationGate
   )
 
+  /// OLED care's timers and care dim (W3a). Owned here for `displayModes`'
+  /// reason — the idle timers must outlive whatever pane configured them.
+  @ObservationIgnored private(set) lazy var oledCare = OledCareCoordinator()
+
+  /// The session's ONE keep-awake holder, and it has to be one: the type
+  /// releases nothing on deinit (a nonisolated deinit cannot reach its state),
+  /// so an owner that discarded a live instance would strand its assertion
+  /// until the app quit. `AppModel` outlives every rebuild in the app,
+  /// including the settings reset's, which is why it owns this.
+  ///
+  /// Session-only by design: no pref, no storage key, and nothing in the reset
+  /// path clears it, because it is not a setting.
+  /// `@ObservationIgnored` on the REFERENCE only, exactly as `oledCare` is: the
+  /// macro turns a stored `lazy var` into a computed one otherwise. Observation
+  /// still reaches the panel, because `isOn` is observable on `KeepAwake`
+  /// itself and that is the property the row reads.
+  @ObservationIgnored private(set) lazy var keepAwake = KeepAwake()
+
+  /// Displays Candela creates (VD4). In-process ownership is what makes a
+  /// crash reclaim them; the host's owned set is the ONLY authority on "is
+  /// this one of ours" and feeds discovery's DDC-pool exclusion.
+  @ObservationIgnored let virtualDisplays = VirtualDisplayHost()
+
+  @ObservationIgnored private let log = Logger(
+    subsystem: "com.rydersel.Candela", category: "virtualdisplay"
+  )
+
+  /// Serializes every create/destroy off the main actor: the host blocks
+  /// (it polls the online list), and menu tracking starves main-actor work.
+  @ObservationIgnored private let virtualDisplayQueue = DispatchQueue(
+    label: "com.rydersel.Candela.vdsync", qos: .userInitiated
+  )
+
+  /// Slots with a create/destroy in flight on the vd queue. Observable so
+  /// the pane can disable a slot's buttons and say it is working; a create
+  /// can legitimately take ~10 s.
+  private(set) var virtualSlotBusy: Set<Int> = []
+
+  /// The last failure per slot, cleared by the next success. Observable so
+  /// the pane can say WHY a slot is not running instead of silently reverting
+  /// to a Create button.
+  private(set) var virtualSlotIssues: [Int: VirtualDisplayFailure] = [:]
+
+  /// The `.syncVirtualDisplays` effect (VD14): converge live virtual displays
+  /// to the slot prefs. Reconciliation is pure (`VirtualDisplayReconciler`);
+  /// this only executes what it returns, one action set at a time.
+  ///
+  /// - Parameter slot: scope of the convergence. The pane passes the slot
+  ///   whose `configured` was written, so one slot's Create can never
+  ///   recreate another slot that has drifted-but-unapplied edits (VD17),
+  ///   and a Safe Mode Create brings up exactly the clicked slot. nil is
+  ///   the launch sweep.
+  func syncVirtualDisplays(slot: Int? = nil) {
+    // A create landing between the reset's destroy step and the domain wipe
+    // would stand a display no pref explains (VD15).
+    guard !isResetting else { return }
+    // VD9: every configured slot has a persisted uuid BEFORE any create, so
+    // "the same display across recreations" holds on every configure path,
+    // not only the pane's.
+    for n in VirtualDisplayIdentity.userSlotRange where slot == nil || slot == n {
+      var definition = appPrefs.virtualSlot(n)
+      if definition.configured, definition.uuid == nil {
+        definition.uuid = UUID()
+        appPrefs.setVirtualSlot(definition, slot: n)
+      }
+    }
+    let definitions = appPrefs.virtualSlotDefinitions()
+    let host = virtualDisplays
+    let actions = VirtualDisplayReconciler.actions(
+      definitions: definitions, live: host.live(), isAvailable: host.isAvailable, limitedTo: slot
+    )
+    guard !actions.isEmpty else { return }
+    virtualSlotBusy.formUnion(actions.map(\.slot))
+    virtualDisplayQueue.async { [weak self] in
+      var failures: [Int: VirtualDisplayFailure] = [:]
+      var succeeded: [Int] = []
+      func runCreate(_ slot: Int) {
+        guard let definition = definitions[slot] else { return }
+        switch host.create(
+          definition.spec, slot: slot, uuid: definition.uuid ?? UUID(), appearanceTimeout: 10
+        ) {
+        case .success: succeeded.append(slot)
+        case let .failure(failure): failures[slot] = failure
+        }
+      }
+      for action in actions {
+        switch action {
+        case let .create(slot):
+          runCreate(slot)
+        case let .destroy(slot):
+          if host.destroy(slot: slot, departureTimeout: 5) {
+            succeeded.append(slot)
+          } else {
+            failures[slot] = .didNotDepart
+          }
+        case let .recreate(slot):
+          // The old display must be GONE before the same identity is
+          // re-advertised, or the create only collects the duplicate
+          // refusal after a full timeout.
+          if host.destroy(slot: slot, departureTimeout: 5) {
+            runCreate(slot)
+          } else {
+            failures[slot] = .didNotDepart
+          }
+        }
+      }
+      // Immutable copies: the vars above are confined to the queue closure,
+      // and sending them into the MainActor task as constants is what strict
+      // concurrency can prove race-free.
+      let finishedSlots = succeeded
+      let failedSlots = failures
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        for slot in finishedSlots { virtualSlotIssues[slot] = nil }
+        for (slot, failure) in failedSlots {
+          virtualSlotIssues[slot] = failure
+          // A slot that could not be created must not stay `configured`:
+          // every later sync and every launch would silently retry a doomed
+          // 10-second create. The retry becomes the user's decision.
+          var definition = appPrefs.virtualSlot(slot)
+          if definition.configured, failure != .didNotDepart {
+            definition.configured = false
+            appPrefs.setVirtualSlot(definition, slot: slot)
+          }
+        }
+        virtualSlotBusy.subtract(actions.map(\.slot))
+        notePrefsChanged()
+      }
+    }
+  }
+
+  /// Launch prelude (VD6, VD13). Normalizes the slot prefs first: a
+  /// configured slot without recreate-at-launch died with the last session
+  /// and its pref must say so before the first sync. Then logs any online
+  /// display carrying a slot identity nothing owns (the asleep-panel crash
+  /// orphan, S1 §5A) — the recreation that follows triggers the WindowServer
+  /// re-enumeration measured to clear such orphans. Safe Mode stops before
+  /// the sync: recreation is automatic startup behavior; an explicit Create
+  /// in the pane still works (VD13).
+  func syncVirtualDisplaysAtLaunch() {
+    let (normalized, changed) = VirtualDisplayReconciler.launchNormalized(
+      definitions: appPrefs.virtualSlotDefinitions()
+    )
+    for slot in changed {
+      if let definition = normalized[slot] { appPrefs.setVirtualSlot(definition, slot: slot) }
+    }
+    logOrphanedVirtualDisplays()
+    guard !safeMode else { return }
+    syncVirtualDisplays()
+  }
+
+  private func logOrphanedVirtualDisplays() {
+    var ids = [CGDirectDisplayID](repeating: 0, count: 16)
+    var count: UInt32 = 0
+    guard CGGetOnlineDisplayList(16, &ids, &count) == .success else { return }
+    let owned = virtualDisplays.ownedDisplayIDs
+    for id in ids.prefix(Int(count)) where !owned.contains(id) {
+      let vendor = CGDisplayVendorNumber(id)
+      let model = CGDisplayModelNumber(id)
+      guard vendor == VirtualDisplayIdentity.vendorID,
+            VirtualDisplayIdentity.slotRange
+            .map(VirtualDisplayIdentity.productID(slot:)).contains(model)
+      else { continue }
+      log.error(
+        "vd: orphaned slot display online at launch (id \(id), model 0x\(String(model, radix: 16), privacy: .public)); a previous instance likely died with the built-in panel asleep"
+      )
+    }
+  }
+
+  /// VD15's first half, called by the settings reset BEFORE the domain wipe
+  /// removes the slot keys: a wiped `configured` with the display still
+  /// standing would be state the pane can no longer explain.
+  func destroyAllVirtualDisplaysForReset() async {
+    // SS11: the ENGINE takes its own displays down first, and it is verified.
+    // `destroyAll` below would otherwise release the synthesis slots behind the
+    // engine's back, leaving its pairing table describing a virtual display
+    // that has departed and every SS7 carve-out reading a set that is not
+    // there. The synthesis prefs are cleared by the domain wipe that follows,
+    // which is the same ordering: teardown first, keys after.
+    //
+    // A REFUSAL (a synthesis sequence still running) is logged and the reset
+    // continues, and that is the deliberate half of this call. `destroyAll`
+    // below then does release those slots behind the engine's back, which is
+    // the lesser fault by a distance: this is the whole-app reset, and a
+    // virtual display that outlived it would stand until quit with every
+    // control that knew about it already rebuilt. The engine's table is stale
+    // for the rest of the session either way, so the log line is what a later
+    // report has to explain it by.
+    if await synthesis.disengageAllForReset() == false {
+      log.error("reset: the synthesis engine refused its teardown; the virtual displays go down without it")
+    }
+    let host = virtualDisplays
+    await withCheckedContinuation { continuation in
+      virtualDisplayQueue.async {
+        host.destroyAll(departureTimeout: 5)
+        continuation.resume()
+      }
+    }
+  }
+
   /// App-level M4 prefs (startupAction, multiKeyboardVolume, showContrast)
   /// read through one DisplayPrefs like the engine does; the persistence key
   /// is irrelevant for unsuffixed accessors. Assigned in `init` rather than
   /// inline: it needs the safe-mode flag, which arrives as an init parameter.
   @ObservationIgnored private let appPrefs: DisplayPrefs
+
+  /// Raised for the whole of any settings reset, per-display or all-settings.
+  /// ONE latch for both, because the pair is what goes wrong: a per-display
+  /// reset running alongside Reset All restores HDR through a controller the
+  /// rebuild has already replaced, so the write lands on an object nothing is
+  /// looking at while the live display keeps a locked register. Observable, so
+  /// both buttons can refuse the second click rather than relying on nobody
+  /// making it.
+  private(set) var isResetting = false
+
+  /// Claims the latch. False means a reset is already running and this one must
+  /// not start.
+  func beginReset() -> Bool {
+    guard !isResetting else { return false }
+    isResetting = true
+    return true
+  }
+
+  func endReset() { isResetting = false }
 
   /// D24: per-display VCP 0x62 verdict from the capabilities string. Observable,
   /// so the panel's volume slider enables/disables live the moment a probe
@@ -120,6 +501,14 @@ final class AppModel {
   /// session so a write-only panel (the MAG 341C) is not re-probed on every
   /// menu close.
   private(set) var volumeSupport: [String: VCPSupport] = [:]
+
+  /// The same verdict for VCP 0x8D, read from the same capabilities string in
+  /// the same pass. Separate because the two registers are separately
+  /// advertised: a display can list mute and not volume, or the reverse, and
+  /// the mute key writes whichever one the display's mute strategy selects.
+  /// Absent reads as `.unknown` for `volumeSupport`'s reasons, and never greys
+  /// the slider, which is a 0x62 surface only.
+  private(set) var muteSupport: [String: VCPSupport] = [:]
 
   /// The raw MCCS capability string, keyed by persistence key, stored ONLY on
   /// a successful read (B2).
@@ -168,6 +557,31 @@ final class AppModel {
   /// ONLY for reporting — nothing here drives it.
   @ObservationIgnored var gammaInterference: GammaInterferenceMonitor?
 
+  /// The last 20 display arrivals, departures and failed resolution restores,
+  /// newest first, for the diagnostics report (spec §7 — churn bugs are about
+  /// displays that just left, and by the time anyone copies a report the
+  /// display in question is usually gone).
+  ///
+  /// Stamped HERE, at append, because `DiagnosticsReport.render` is pure by
+  /// contract: the same snapshot must render to the same bytes forever, which
+  /// is what makes two pasted reports diffable.
+  private(set) var recentDisplayEvents: [String] = []
+
+  /// A controller rebuild empties both slots and re-discovers, so every display
+  /// looks like an arrival to `performRefresh` — see `rebuildControllers`. That
+  /// is a settings reset, not a topology change, and recording it would fill the
+  /// ring with events that never happened at the wire.
+  @ObservationIgnored private var suppressDisplayEvents = false
+
+  func noteDisplayEvent(_ description: String) {
+    guard !suppressDisplayEvents else { return }
+    let stamp = Date.now.formatted(date: .omitted, time: .shortened)
+    recentDisplayEvents.insert("\(stamp) \(description)", at: 0)
+    if recentDisplayEvents.count > 20 {
+      recentDisplayEvents.removeLast(recentDisplayEvents.count - 20)
+    }
+  }
+
   @ObservationIgnored private var capabilityProbesInFlight: Set<String> = []
 
   /// D11: session-only hardware gate, injected once and never re-read from
@@ -198,6 +612,39 @@ final class AppModel {
     prefsRevision &+= 1
   }
 
+  /// First-sight lines dismissed this session (SO22), by persistence key.
+  /// In-memory ON PURPOSE — never a marker pref: the line renders while the
+  /// display's pref domain is empty, and writing anything to dismiss it would
+  /// defeat the emptiness check it is gated on. Dying with the process is the
+  /// intended lifetime for an informational line about a display that is,
+  /// definitionally, about to acquire stored values or stay untouched.
+  private(set) var dismissedFirstSightKeys: Set<String> = []
+
+  func dismissFirstSight(_ persistenceKey: String) {
+    dismissedFirstSightKeys.insert(persistenceKey)
+  }
+
+  /// Where each display's stranded-mute recovery got to, by persistence key.
+  ///
+  /// Owned here rather than by `BannerRegion` because that region has TWO live
+  /// placements (the hub root and whatever sub-page is pushed over it), and
+  /// `@State` would give them a phase each: the user would click on one page
+  /// and walk back to find the outcome gone. In memory and session-scoped for
+  /// the same reason the first-sight dismissals are: it describes an action
+  /// just taken, not a setting.
+  private(set) var muteRecoveryPhases: [String: MuteRecoveryPhase] = [:]
+
+  enum MuteRecoveryPhase: Equatable {
+    case running
+    /// The unmute did not reach the display. Carries WHY, because HDR is a
+    /// thing the user can go and turn off and the other case is a retry.
+    case failed(StrandedMuteOutcome)
+  }
+
+  func setMuteRecoveryPhase(_ phase: MuteRecoveryPhase?, for persistenceKey: String) {
+    muteRecoveryPhases[persistenceKey] = phase
+  }
+
   /// Software-dimming islands (AppKit lives in the app target behind
   /// CandelaKit protocols). Constructed by StatusItemController and injected
   /// here — implementer's choice per the Task 6 brief, so tests can hand the
@@ -210,18 +657,45 @@ final class AppModel {
   /// when the grant appears while the panel is open).
   let accessibility = AccessibilityPermission()
 
+  /// What a discovery pass returns, named so the seam below can be spelled
+  /// without repeating the tuple.
+  typealias DiscoveredDisplays = [(
+    display: ExternalDisplay, writer: any DDCWriting, facts: DisplayHardwareFacts
+  )]
+
+  /// How this model finds displays.
+  ///
+  /// Injected for ONE case that cannot be produced by hand (#51): a different
+  /// panel arriving on a display ID we already hold, inside a SINGLE refresh
+  /// pass. Every physical unplug fires its own reconfiguration, so a same-port
+  /// swap always splits into a departure pass and an arrival pass, and the
+  /// reconciliation branch that matters is never entered. Verified on the rig
+  /// 2026-08-17 by the event ring's ordering, which distinguishes the two.
+  @ObservationIgnored private let discoverDisplays: (Set<CGDirectDisplayID>) -> DiscoveredDisplays
+
+  /// What the persistence-key fallback's discovery walk answered, per display
+  /// id, for this display configuration. A reference type so the escaping
+  /// closure that owns the fallback can write it without capturing `self`
+  /// mutably; cleared by `performRefresh`, which is the one event that can
+  /// change what discovery would say.
+  @ObservationIgnored private let discoveredPersistenceKeys = DiscoveredKeyMemo()
+
   init(
     shade: (any ShadeRendering)? = nil,
     gamma: (any GammaApplying)? = nil,
     hdrToggling: (any HDRToggling)? = nil,
     audioDevices: (any AudioDeviceProviding)? = nil,
-    safeMode: Bool = false
+    safeMode: Bool = false,
+    discoverDisplays: @escaping (Set<CGDirectDisplayID>) -> DiscoveredDisplays = {
+      DisplayDiscovery.discover(excluding: $0)
+    }
   ) {
     self.shade = shade
     self.gamma = gamma
     self.hdrToggling = hdrToggling ?? MonitorPanelService()
     self.audioDevices = audioDevices ?? CoreAudioDeviceProvider()
     self.safeMode = safeMode
+    self.discoverDisplays = discoverDisplays
     appPrefs = DisplayPrefs(persistenceKey: "app", safeMode: safeMode)
   }
 
@@ -234,12 +708,183 @@ final class AppModel {
     (builtIn.map { [$0] } ?? []) + displays
   }
 
+  /// The brightness controller driving one display, or nil when nothing is
+  /// driving it: a virtual display, a launch pass that has not built the
+  /// controllers yet, or a display that has departed. Callers that reach for a
+  /// controller to CHANGE the display treat nil as "do not proceed", never as
+  /// a licence to go around it.
+  func controller(for displayID: CGDirectDisplayID) -> BrightnessController? {
+    allControlledStates.first { $0.id == displayID }?.controller
+  }
+
+  /// SO21: two connected displays resolving to ONE persistence key — identical
+  /// units reporting no serial — share every pref, and the surfaces that show
+  /// those prefs say so. Computed from the live display list at every read,
+  /// never persisted: the state exists exactly while both units are attached.
+  ///
+  /// Asked of `DisplayOrdering.sharedIdentityOrdinals` rather than recounted
+  /// here, so shared identity has ONE definition: a key is shared exactly when
+  /// its rows get numbered. The hub's caption and the sidebar's numbering are
+  /// the two surfaces reading it, and a recount would let them drift apart
+  /// under any change to what counts as shared (excluding hidden displays, say).
+  func isSharedIdentity(_ persistenceKey: String) -> Bool {
+    let keys = displays.map(\.display.persistenceKey)
+    return zip(keys, DisplayOrdering.sharedIdentityOrdinals(keys: keys))
+      .contains { $0 == persistenceKey && $1 != nil }
+  }
+
+  // MARK: - Diagnostics report
+
+  /// Everything the diagnostics report says, gathered at the moment the button
+  /// was pressed (spec §7). EVERY controlled display, built-in included — the
+  /// report is copied into an issue about one display and read by someone who
+  /// needs to know what else was attached.
+  ///
+  /// No serial VALUE enters it, only `hasSerial`. The other half of the scrub
+  /// contract — bare pref names, never composed `UserDefaults` keys — is
+  /// `DiagnosticsPrefSummary`'s, in CandelaKit, where a test pins it over every
+  /// line it emits.
+  func diagnosticsSnapshot() -> DiagnosticsReportSnapshot {
+    DiagnosticsReportSnapshot(
+      appVersion: "\(AppInfo.version) (\(AppInfo.build))",
+      osVersion: osVersionText,
+      safeMode: safeMode,
+      accessibilityGranted: accessibility.isGranted,
+      launchAtLogin: launchAtLoginText,
+      displays: allControlledStates.map(diagnosticsEntry),
+      recentEvents: recentDisplayEvents
+    )
+  }
+
+  private func diagnosticsEntry(_ state: DisplayState) -> DiagnosticsReportSnapshot.DisplayEntry {
+    let persistenceKey = state.display.persistenceKey
+    let prefs = DisplayPrefs(persistenceKey: persistenceKey)
+    let facts = hardwareFacts[persistenceKey]
+    let isBuiltIn = builtIn?.id == state.id
+    return DiagnosticsReportSnapshot.DisplayEntry(
+      name: DisplayOrdering.title(
+        friendlyName: prefs.friendlyName, hardwareName: state.display.name
+      ),
+      hardwareName: state.display.name,
+      // The built-in never passes through `DisplayDiscovery`, so its facts are
+      // permanently absent and "not reported" would read as a failed lookup
+      // rather than as a panel with no cable.
+      connection: isBuiltIn ? "None: built-in display" : DiagnosticsCopy.transport(facts),
+      manufacturer: isBuiltIn ? nil : facts?.manufacturerID,
+      hasSerial: facts?.numericSerialNumber != nil || facts?.alphanumericSerialNumber != nil,
+      // Never `catalogs[...]?.current` directly: the catalog exists only for
+      // displays something has already shown, so the built-in's entry depends
+      // on which pages were visited this session (combined pass D8).
+      //
+      // A synthesis-engaged display answers from the ENGINE instead, and this
+      // is binding rather than a preference: the engage tail re-times the
+      // slave, so the readback names the display's own native mode [MEASURED
+      // 2026-08-18]. A report quoting it would name a real, lookup-able mode
+      // that is not the one on the glass, which is worse than naming an
+      // unresolvable one. The engine's pairing carries
+      // the slot too, which is what tells two engaged displays apart in a
+      // pasted report and is the handoff's "the stop in force belongs in the
+      // report's mode line".
+      currentMode: synthesis.pairing(forPhysical: state.id).map {
+        SynthesisCopy.reportMode(
+          width: $0.size.logicalWidth, height: $0.size.logicalHeight, slot: $0.slot)
+      } ?? displayModes.currentMode(for: state.id).map(DiagnosticsCopy.mode),
+      controlMethod: DiagnosticsCopy.brightnessPath(state.controller.brightnessPath),
+      readbackVerdict: isBuiltIn
+        ? "Not applicable: no data cable"
+        : DiagnosticsCopy.readbackVerdict(DDCReadEvidence.worst([
+          state.controller.readEvidence,
+          state.volume.readEvidence,
+          state.contrast.readEvidence,
+        ])),
+      hdrEngaged: state.controller.isHDREngaged,
+      nonDefaultPrefs: DiagnosticsPrefSummary.nonDefaultPrefs(
+        prefs, remembersMode: displayModes.isRemembering(state.id)
+      )
+    )
+  }
+
+  /// `operatingSystemVersionString` is "Version 26.0 (Build 25A100)" today. The
+  /// build number is what identifies an exact OS to whoever triages the paste,
+  /// so it is kept rather than recomposed from `operatingSystemVersion`; the
+  /// prefix swap degrades to the raw string if Apple changes the wording.
+  private var osVersionText: String {
+    let raw = ProcessInfo.processInfo.operatingSystemVersionString
+    guard raw.hasPrefix("Version ") else { return raw }
+    return "macOS " + raw.dropFirst("Version ".count)
+  }
+
+  /// D10: a LIVE read of the one source of truth, never a mirrored bool. The
+  /// three non-enabled states are distinct answers — "requires approval" is the
+  /// one a user can act on, and folding it into "not registered" is what makes
+  /// a login-item report useless.
+  private var launchAtLoginText: String {
+    switch SMAppService.mainApp.status {
+    case .enabled: "enabled"
+    case .notRegistered: "not registered"
+    case .requiresApproval: "requires approval"
+    case .notFound: "not found"
+    @unknown default: "unknown"
+    }
+  }
+
   /// Fork `!display.isDisabled` (per-display "disable keyboard control",
   /// review R1): every key loop skips a disabled display's BODY, but the tap
   /// still swallows the event — fork parity; spec Appendix A's pass-through
   /// parenthetical is wrong about the fork. Read live per call.
   func keyEnabledStates(_ states: [DisplayState]) -> [DisplayState] {
     states.filter { !DisplayPrefs(persistenceKey: $0.display.persistenceKey).isDisabled }
+  }
+
+  /// The same filter for VOLUME keys, which additionally obey D24: the
+  /// monitor's own denial of VCP 0x62, the verdict that greys the slider
+  /// (`volumeSliderEnabled` asks the same policy for the slider surfaces). One
+  /// predicate for both, so a keypress cannot write a register the display says
+  /// it does not implement while its slider sits greyed for that exact reason.
+  ///
+  /// Brightness and contrast keys keep the plain filter: the denial is about the
+  /// volume register, not about the display.
+  ///
+  /// A display dropped here SWALLOWS its press. The executor's
+  /// nothing-resolved fallbacks run BEFORE this filter (R1), so a denied display
+  /// never converts its keypress into a step of every other panel.
+  func volumeKeyEnabledStates(_ states: [DisplayState]) -> [DisplayState] {
+    states.filter { state in
+      let prefs = DisplayPrefs(persistenceKey: state.display.persistenceKey)
+      return VolumeSliderPolicy.acceptsVolumeKeys(
+        isKeyboardDisabled: prefs.isDisabled,
+        override: prefs.audioSinkOverride,
+        volumeSupport: volumeSupport[state.display.persistenceKey] ?? .unknown
+      )
+    }
+  }
+
+  /// The mute key's own filter. It asks about the register the key would write,
+  /// which the display's mute strategy chooses: the dedicated command sends VCP
+  /// 0x8D, and without it silence is a volume-register write of 0.
+  ///
+  /// The strategy is the one IN FORCE, not the raw pref: a display whose
+  /// capabilities string denies 0x8D does not get the dedicated command, and
+  /// `DDCValueController` degrades its mute to the volume register. The engine
+  /// and this filter compute it from one function, so the key cannot be judged
+  /// on a register the write will not touch.
+  ///
+  /// Unmuting never depends on this. Every route back (the display's mute
+  /// toggle, the hardware-control toggle, the reset, the stranded-mute banner)
+  /// drives the controller directly and asks no capability verdict, which is
+  /// what keeps a refusal here inside D29 rule 3.
+  func muteKeyEnabledStates(_ states: [DisplayState]) -> [DisplayState] {
+    states.filter { state in
+      let key = state.display.persistenceKey
+      let prefs = DisplayPrefs(persistenceKey: key)
+      return VolumeSliderPolicy.acceptsMuteKey(
+        isKeyboardDisabled: prefs.isDisabled,
+        override: prefs.audioSinkOverride,
+        volumeSupport: volumeSupport[key] ?? .unknown,
+        muteSupport: muteSupport[key] ?? .unknown,
+        usesDedicatedMuteCommand: usesDedicatedMuteCommand(prefs, key: key)
+      )
+    }
   }
 
   func stepBrightnessAllExternal(isUp: Bool, isFine: Bool) -> [(id: CGDirectDisplayID, name: String, newValue: Double)] {
@@ -298,23 +943,116 @@ final class AppModel {
     // device change landing between them could arm the tap on an inconsistent
     // pair (match count from one device, routing verdict from another).
     let device = audioDevices.defaultOutputDevice()
-    if KeyModePolicy.watchesMediaKeys(appPrefs.keyboardVolume),
-       AudioRoutingPolicy.shouldWatchVolumeKeys(
-         mode: volumeMode,
-         // Fork getDdcCapableDisplays (= !isSw(), review R5): forceSoftware
-         // displays don't count — a rig whose only external is forceSoftware
-         // releases the volume keys to macOS.
-         ddcDisplaysExist: !ddcCapableStates().isEmpty,
-         matchingDisplayCount: audioMatchingDisplays(for: device).count,
-         defaultOutput: device
-       ) {
-      watched.formUnion([.volumeUp, .volumeDown, .mute])
+    if KeyModePolicy.watchesMediaKeys(appPrefs.keyboardVolume) {
+      // Fork getDdcCapableDisplays (= !isSw(), review R5): the fork's own
+      // disengage gate, kept because it is where the rule came from. The
+      // per-display arming verdict below refuses a forceSoftware display too,
+      // through the same availability switch the engine checks before a write,
+      // so this line is no longer what decides such a rig on its own.
+      let ddcDisplaysExist = !ddcCapableStates().isEmpty
+      let pool = volumeKeyPool(for: device)
+      // Asked once per family, because the two arm on different registers.
+      func watches(_ actionable: Int) -> Bool {
+        AudioRoutingPolicy.shouldWatchVolumeKeys(
+          mode: volumeMode,
+          ddcDisplaysExist: ddcDisplaysExist,
+          actionableDisplayCount: actionable,
+          defaultOutput: device
+        )
+      }
+      if watches(pool.filter(armsVolumeKeys).count) {
+        watched.formUnion([.volumeUp, .volumeDown])
+      }
+      if watches(pool.filter(armsMuteKey).count) {
+        watched.insert(.mute)
+      }
     }
     return .init(
       watchedKeys: watched,
       interceptAlternateBrightnessKeys: appPrefs.interceptAlternateBrightnessKeys
     )
   }
+
+  /// The candidate pool a volume or mute press would resolve to under the
+  /// current mode, before any per-display verdict: the same three branches as
+  /// `KeyActionExecutor.volumeKeyCandidates`, which is what makes the arming
+  /// question and the acting question one question.
+  ///
+  /// The mouse mode resolves to the pointer's display at key time, and the tap
+  /// cannot know in advance where the pointer will be, so this is the union: that
+  /// mode falls back to every display when the pointer resolves no external, so
+  /// `displays` is the set a press could reach either way.
+  ///
+  /// The union is deliberately wider than any one press. With the pointer on a
+  /// display that refuses while another accepts, the keys stay armed and that
+  /// press is swallowed with nothing to show for it. That is R1 as specified: the
+  /// press was aimed at a display that refuses it, and the alternative is
+  /// spraying it at the panels the user was not pointing at.
+  private func volumeKeyPool(for device: AudioOutputDevice?) -> [DisplayState] {
+    switch volumeMode {
+    case .audioDeviceNameMatching: audioMatchingDisplays(for: device)
+    case .allScreens, .mouse: displays
+    }
+  }
+
+  /// Does this display keep the volume keys armed? Everything the executor's
+  /// verdict is made of except the per-display keyboard switch: the capability
+  /// half of `volumeKeyEnabledStates`, plus the controller's own availability
+  /// (`VolumeSliderPolicy.armsVolumeKeys` states why the switch is left out and
+  /// why availability is passed rather than re-derived).
+  ///
+  /// `state.volume.isAvailable` is read from the controller the press would go
+  /// through, not rebuilt from its two prefs here, so the tap cannot come to a
+  /// different conclusion than the write path about the same wire.
+  private func armsVolumeKeys(_ state: DisplayState) -> Bool {
+    let key = state.display.persistenceKey
+    return VolumeSliderPolicy.armsVolumeKeys(
+      commandIsAvailable: state.volume.isAvailable,
+      override: DisplayPrefs(persistenceKey: key).audioSinkOverride,
+      volumeSupport: volumeSupport[key] ?? .unknown
+    )
+  }
+
+  /// The same for the mute key, on the register the display's mute strategy
+  /// selects: the register `muteKeyEnabledStates` would write. Availability is
+  /// the volume controller's under both strategies, because that is the
+  /// controller `toggleMute` runs on.
+  private func armsMuteKey(_ state: DisplayState) -> Bool {
+    let key = state.display.persistenceKey
+    let prefs = DisplayPrefs(persistenceKey: key)
+    return VolumeSliderPolicy.armsMuteKey(
+      commandIsAvailable: state.volume.isAvailable,
+      override: prefs.audioSinkOverride,
+      volumeSupport: volumeSupport[key] ?? .unknown,
+      muteSupport: muteSupport[key] ?? .unknown,
+      usesDedicatedMuteCommand: usesDedicatedMuteCommand(prefs, key: key)
+    )
+  }
+
+  /// Which register a mute lands on for this display: the pref, vetoed by the
+  /// display's own denial of 0x8D, because `DDCValueController` degrades that
+  /// mute to the volume register rather than recording a mute nothing carries.
+  ///
+  /// ONE derivation for the tap's arming and the executor's filter, and the
+  /// same function the engine computes it with. The raw pref diverges from the
+  /// write in exactly the cell this exists for (0x8D denied, 0x62 alive): the
+  /// tap would hand macOS a mute key the engine can honour.
+  private func usesDedicatedMuteCommand(_ prefs: DisplayPrefs, key: String) -> Bool {
+    VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: prefs.enableMuteUnmute,
+      override: prefs.audioSinkOverride,
+      muteSupport: muteSupport[key] ?? .unknown
+    )
+  }
+
+  /// Re-arm hook for the media-key tap, injected by `StatusItemController`.
+  ///
+  /// The watched set now reads the capabilities verdict, and that verdict lands
+  /// asynchronously, seconds after the display appears. Without this the tap
+  /// stays armed from the pre-probe answer for the whole session: a display that
+  /// turns out to deny the register would keep swallowing keys that reach
+  /// nobody, which is the state the arming rule exists to end.
+  @ObservationIgnored var onVolumeKeyRoutingChanged: (() -> Void)?
 
   /// Fork getDdcCapableDisplays (= !isSw(), review R5): the audio/tap pool
   /// excludes forceSoftware displays — the pref exists because the display's
@@ -343,6 +1081,58 @@ final class AppModel {
   /// is untouched and retained under test, with no production caller in v1.
   func volumeSliderEnabled(_ state: DisplayState) -> Bool {
     VolumeSliderPolicy.isEnabled(
+      override: DisplayPrefs(persistenceKey: state.display.persistenceKey).audioSinkOverride,
+      volumeSupport: volumeSupport[state.display.persistenceKey] ?? .unknown
+    )
+  }
+
+  /// The tooltip for a greyed volume slider, from the same two inputs the
+  /// enablement reads, so the explanation can never describe a cause other than
+  /// the one that applied.
+  func volumeSliderDisabledReason(_ state: DisplayState, displayName: String) -> String? {
+    VolumeSliderPolicy.disabledReason(
+      displayName: displayName,
+      override: DisplayPrefs(persistenceKey: state.display.persistenceKey).audioSinkOverride,
+      volumeSupport: volumeSupport[state.display.persistenceKey] ?? .unknown
+    )
+  }
+
+  /// Would turning the mute row ON actually send this display's own mute
+  /// command? The strategy asked with the pref held on, so it answers the
+  /// switch's PROMISE rather than its position, which is what the row's spoken
+  /// label describes in both positions.
+  func dedicatedMuteCommandInReach(_ state: DisplayState) -> Bool {
+    let key = state.display.persistenceKey
+    return VolumeSliderPolicy.usesDedicatedMuteCommand(
+      prefEnabled: true,
+      override: DisplayPrefs(persistenceKey: key).audioSinkOverride,
+      muteSupport: muteSupport[key] ?? .unknown
+    )
+  }
+
+  /// The settings row's status caption: why the mute this display takes is not
+  /// the mute its row promises, or nil while the two agree.
+  ///
+  /// Reads the same three inputs `usesDedicatedMuteCommand(_:key:)` passes, and
+  /// the policy resolves them through that same function, so the caption cannot
+  /// name a degrade the engine is not doing. `muteSupport` is observed, so the
+  /// row re-reads when the capabilities probe lands seconds after the display
+  /// appears.
+  func degradedMuteReason(_ state: DisplayState) -> String? {
+    let key = state.display.persistenceKey
+    let prefs = DisplayPrefs(persistenceKey: key)
+    return VolumeSliderPolicy.degradedMuteReason(
+      commandIsAvailable: state.volume.isAvailable,
+      prefEnabled: prefs.enableMuteUnmute,
+      override: prefs.audioSinkOverride,
+      muteSupport: muteSupport[key] ?? .unknown
+    )
+  }
+
+  /// The same reason worded for the menu bar's panel, which renders it under the
+  /// display's own name header and so must not repeat that name (#130).
+  func volumeSliderCompactReason(_ state: DisplayState) -> String? {
+    VolumeSliderPolicy.compactDisabledReason(
       override: DisplayPrefs(persistenceKey: state.display.persistenceKey).audioSinkOverride,
       volumeSupport: volumeSupport[state.display.persistenceKey] ?? .unknown
     )
@@ -382,9 +1172,38 @@ final class AppModel {
         // absent, and `volumeSupport`'s stored `.unknown` below is what carries
         // "the probe ran and failed" — one state, one place.
         if let capabilities { self.capabilityString[persistenceKey] = capabilities }
+        let previousVolume = self.volumeSupport[persistenceKey]
+        let previousMute = self.muteSupport[persistenceKey]
         self.volumeSupport[persistenceKey] = capabilities.map {
           CapabilityString.support(forVCP: VCP.audioSpeakerVolume, in: $0)
         } ?? .unknown
+        // One string, both verdicts, one statement: the probe gate reads
+        // `volumeSupport`, so a mute verdict written anywhere else would be
+        // sampled from a display this pass never asked.
+        self.muteSupport[persistenceKey] = capabilities.map {
+          CapabilityString.support(forVCP: VCP.audioMuteScreenBlank, in: $0)
+        } ?? .unknown
+        // The launch restore ran before this answer existed. It is dispatched
+        // from the same main-actor turn that finishes the refresh, while this
+        // probe is still out, so a muted display was restored on the assumption
+        // that its mute command works. Where the answer says otherwise, the
+        // restore has to be redone against the register the mute actually
+        // lands on; the controller decides whether anything changed and does
+        // nothing when it did not.
+        self.displays.first { $0.display.persistenceKey == persistenceKey }?
+          .volume.restoreIfMuteStrategyChanged()
+        // These two verdicts decide which volume keys the tap watches, and they
+        // land here, after the arm. A landing answer that differs from the one
+        // the tap was armed from has to re-arm it.
+        //
+        // Compared as every reader sees them, absent folded to `.unknown`: the
+        // first probe on a display always writes an entry where there was none,
+        // and on a panel that answers nothing that is the same verdict written
+        // down, not a change to react to.
+        if self.volumeSupport[persistenceKey] != (previousVolume ?? .unknown)
+          || self.muteSupport[persistenceKey] != (previousMute ?? .unknown) {
+          self.onVolumeKeyRoutingChanged?()
+        }
       }
     }
   }
@@ -465,6 +1284,14 @@ final class AppModel {
   /// launch/menu-close call sites warning-free.
   @discardableResult
   func refresh() async -> [CGDirectDisplayID] {
+    // Cleared HERE as well as inside `performRefresh`, and the piggyback is
+    // exactly why. A caller asking for a refresh is telling us the display set
+    // may have moved; a caller that JOINS an in-flight pass never reaches
+    // `performRefresh`, so its own change would otherwise be remembered as
+    // answered until some later pass happened to run. Display ids reassign
+    // across a replug, so a memo keyed on one has to be cleared on every edge
+    // that can invalidate it, not only on the edge that recomputes it.
+    discoveredPersistenceKeys.clear()
     if let refreshTask {
       _ = await refreshTask.value
       return []
@@ -514,7 +1341,10 @@ final class AppModel {
     }
     displays = []
     builtIn = nil
+    // Every display re-enters as an "arrival" below; none of them moved.
+    suppressDisplayEvents = true
     await refresh()
+    suppressDisplayEvents = false
   }
 
   /// Reconciles `displays` against discovery, keyed by `CGDirectDisplayID`:
@@ -529,26 +1359,38 @@ final class AppModel {
   /// deinit finishes its coalescer, which lands any pending write before the
   /// drain task exits, so no explicit `waitForPendingWrites()` is needed.
   private func performRefresh() async -> [CGDirectDisplayID] {
-    var existing = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
+    // The display set is about to be re-derived, so a memoized "discovery does
+    // not know this id" is no longer evidence about anything.
+    discoveredPersistenceKeys.clear()
+    let existing = Dictionary(uniqueKeysWithValues: displays.map { ($0.id, $0) })
     var appeared: [DisplayState] = []
     var kept: [DisplayState] = []
-    displays = DisplayDiscovery.discover().map { entry in
+    let entries = discoverDisplays(virtualDisplays.ownedDisplayIDs)
+    // Reconciled on PANEL identity, not on the display ID (#51). A display ID is
+    // a slot: macOS reassigns them across a replug, so an ID that is still
+    // present can be a different monitor, and reusing its controllers would
+    // persist the new panel's brightness under the old panel's storage key and
+    // hand it the old panel's tuning. The rule and its bookkeeping live in
+    // `DisplayReconciliation`, where they are under test.
+    let plan = DisplayReconciliation.plan(
+      held: existing.mapValues(\.display.persistenceKey),
+      discovered: Dictionary(
+        uniqueKeysWithValues: entries.map { ($0.display.id, $0.display.persistenceKey) }))
+    displays = entries.map { entry in
       // B8: discovery has always read these and always thrown them away. Kept
       // for BOTH branches below — a kept display re-reports its facts on every
       // pass, and a link renegotiation is exactly when the transport string can
       // change under a display we already know.
       hardwareFacts[entry.display.persistenceKey] = entry.facts
-      if let previous = existing.removeValue(forKey: entry.display.id) {
+      if plan.reused.contains(entry.display.id), let previous = existing[entry.display.id] {
         // Fresh DisplayState (name may change), reused controllers, fresh
         // writer for all three (rebind also resets each duplicate memo).
         //
-        // The persistence key rides along because this branch runs on EVERY
-        // pass, not only after a replug, while the identity of the panel on the
-        // other end is what decides whether the controllers' read-derived facts
-        // still describe anything real. macOS reassigns display IDs across a
-        // replug and this reconciliation is keyed on the ID, so "same ID" is
-        // NOT "same monitor"; the persistence key (EDID UUID) is the only thing
-        // here that tells the two apart. See `rebind(writer:panelIdentity:)`.
+        // The persistence key rides along even though the plan has already
+        // established it is unchanged: `rebind` reads it to decide whether its
+        // read-derived facts still describe anything real, and passing it keeps
+        // that decision in one place rather than making this call site the
+        // thing that guarantees it.
         previous.controller.rebind(writer: entry.writer, panelIdentity: entry.display.persistenceKey)
         previous.volume.rebind(writer: entry.writer, panelIdentity: entry.display.persistenceKey)
         previous.contrast.rebind(writer: entry.writer, panelIdentity: entry.display.persistenceKey)
@@ -565,6 +1407,21 @@ final class AppModel {
       // gates the volume/contrast readback (`refreshFromHardware` opens with
       // `guard prefs.startupAction == .read`) for all of them at once.
       let prefs = DisplayPrefs(persistenceKey: persistenceKey, safeMode: safeMode)
+      // Built BEFORE the brightness controller because they are part of its
+      // construction: it holds this display's other write queues for the life of
+      // the wire, and drops their duplicate memos whenever it sees an HDR window
+      // close. The engine's parameter has no default, so this ordering is not a
+      // convention anyone has to remember.
+      let volume = DDCValueController(
+        writer: entry.writer, command: .volume, prefs: prefs,
+        store: UserDefaultsBrightnessStore(), storageKey: "volume.\(persistenceKey)",
+        panelIdentity: persistenceKey
+      )
+      let contrast = DDCValueController(
+        writer: entry.writer, command: .contrast, prefs: prefs,
+        store: UserDefaultsBrightnessStore(), storageKey: "contrast.\(persistenceKey)",
+        panelIdentity: persistenceKey
+      )
       let controller = BrightnessController(
         writer: entry.writer,
         backends: BrightnessBackends(
@@ -587,18 +1444,17 @@ final class AppModel {
         // Seeded here so the next pass's rebind — which happens on every
         // refresh — is not mistaken for a panel swap.
         panelIdentity: persistenceKey,
-        mirrorTopology: mirrorTopology
+        mirrorTopology: mirrorTopology,
+        wireSiblings: [volume, contrast]
       )
-      let volume = DDCValueController(
-        writer: entry.writer, command: .volume, prefs: prefs,
-        store: UserDefaultsBrightnessStore(), storageKey: "volume.\(persistenceKey)",
-        panelIdentity: persistenceKey
-      )
-      let contrast = DDCValueController(
-        writer: entry.writer, command: .contrast, prefs: prefs,
-        store: UserDefaultsBrightnessStore(), storageKey: "contrast.\(persistenceKey)",
-        panelIdentity: persistenceKey
-      )
+      // SS9's missing half, wired at the one construction site for externals:
+      // the engine owns the only door that can engage HDR, and the synthesis
+      // pairing that must veto it lives here. Weak, like every other closure
+      // this object hands to something it owns.
+      let displayID = entry.display.id
+      controller.isShowingSynthesizedSize = { [weak self] in
+        self?.synthesis.isEngaged(displayID: displayID) ?? false
+      }
       let state = DisplayState(
         display: entry.display, controller: controller, volume: volume, contrast: contrast,
         writer: entry.writer
@@ -607,6 +1463,19 @@ final class AppModel {
       return state
     }
     refreshBuiltIn()
+    // The diagnostics ring's one insertion point for externals: `appeared` and
+    // whatever is LEFT in `existing` are exactly this pass's arrivals and
+    // departures, already computed above for the controller reconciliation.
+    // Recorded here rather than from a second observer, which would have to
+    // re-derive the same difference and could disagree with it.
+    for state in appeared { noteDisplayEvent("\(state.display.name) arrived") }
+    // From the plan, so a panel REPLACED on a still-live ID is announced as
+    // leaving. Reading "whatever is left in `existing`" cannot see that one: its
+    // ID is still occupied, so the ring would show an arrival with no departure
+    // and the old panel's HUD would outlive it.
+    for state in plan.departed.sorted().compactMap({ existing[$0] }) {
+      noteDisplayEvent("\(state.display.name) departed")
+    }
     // Every controller — kept and appeared — gets the live epoch pair, so
     // each submit is stamped with the current epoch and the drain refuses
     // targets stamped before a reconfiguration/sleep.
@@ -623,6 +1492,16 @@ final class AppModel {
         { [displayManager] in displayManager.currentEpoch() },
         isCurrent: { [displayManager] in displayManager.isEpochCurrent($0) }
       )
+      // The mute companion's D24 gate, one register over from the slider's.
+      // Re-pointed on every pass for the same reason the epoch pair is: a kept
+      // controller can be looking at a panel that is not the one it saw last
+      // pass, and this verdict is keyed by persistence key. Read through a
+      // closure so a probe landing after this pass still decides the next
+      // mute, and so there is exactly one copy of the verdict.
+      let muteKey = state.display.persistenceKey
+      state.volume.setMuteWireSupport { [weak self] in
+        self?.muteSupport[muteKey] ?? .unknown
+      }
     }
     builtIn?.controller.setEpochProvider(
       { [displayManager] in displayManager.currentEpoch() },
@@ -663,12 +1542,16 @@ final class AppModel {
     // IOAVService, so an old answer is not evidence about the new wire.
     let live = Set(displays.map(\.display.persistenceKey))
     volumeSupport = volumeSupport.filter { live.contains($0.key) }
+    muteSupport = muteSupport.filter { live.contains($0.key) }
     // Same rule, same reason: a replug hands out a fresh IOAVService, so an old
     // answer is not evidence about the new wire.
     capabilityString = capabilityString.filter { live.contains($0.key) }
     hardwareFacts = hardwareFacts.filter { live.contains($0.key) }
     probeVolumeCapabilities()
-    return Array(existing.keys)
+    // Includes an ID whose panel was REPLACED: the HUD this returns to clean up
+    // belongs to the monitor that left, and the one now on that ID gets its own
+    // on the next keypress.
+    return Array(plan.departed)
   }
 
   /// Reconciles the built-in slot against discovery. Same identity rule as
@@ -677,6 +1560,9 @@ final class AppModel {
   /// writer is a permanent `NoopDDCWriter`.
   private func refreshBuiltIn() {
     guard let found = BuiltInDisplayDiscovery.discover() else {
+      // Clamshell is a real churn source and the ring would otherwise show the
+      // externals renegotiating around a departure it never mentioned.
+      if let departed = builtIn { noteDisplayEvent("\(departed.display.name) departed") }
       builtIn = nil
       return
     }
@@ -688,6 +1574,21 @@ final class AppModel {
       )
       return
     }
+    noteDisplayEvent("\(display.name) arrived")
+    // Inert value controllers: the built-in has no DDC wire, so their
+    // `isAvailable` stays true but every write no-ops on `NoopDDCWriter`.
+    // Nothing renders them (the panel shows volume/contrast for `displays`
+    // only); they exist so `DisplayState` has one shape for both slots, and so
+    // the brightness controller's wire is named here the same way it is for an
+    // external. It has no HDR backend, so nothing ever asks it to invalidate.
+    let volume = DDCValueController(
+      writer: NoopDDCWriter(), command: .volume,
+      prefs: DisplayPrefs(persistenceKey: "builtIn")
+    )
+    let contrast = DDCValueController(
+      writer: NoopDDCWriter(), command: .contrast,
+      prefs: DisplayPrefs(persistenceKey: "builtIn")
+    )
     let controller = BrightnessController(
       writer: NoopDDCWriter(), // no DDC wire; always-fails stub (re-review T10-D)
       backends: BrightnessBackends(
@@ -707,22 +1608,13 @@ final class AppModel {
       // store/storageKey/legacyKey stay nil (re-review T10-E): macOS owns
       // built-in brightness across launches; the controller seeds from a
       // native read at init.
-      mirrorTopology: mirrorTopology
+      mirrorTopology: mirrorTopology,
+      wireSiblings: [volume, contrast]
     )
-    // Inert value controllers: the built-in has no DDC wire, so their
-    // `isAvailable` stays true but every write no-ops on `NoopDDCWriter`.
-    // Nothing renders them — the panel shows volume/contrast for `displays`
-    // only — they exist so `DisplayState` has one shape for both slots.
     builtIn = DisplayState(
       display: display, controller: controller,
-      volume: DDCValueController(
-        writer: NoopDDCWriter(), command: .volume,
-        prefs: DisplayPrefs(persistenceKey: "builtIn")
-      ),
-      contrast: DDCValueController(
-        writer: NoopDDCWriter(), command: .contrast,
-        prefs: DisplayPrefs(persistenceKey: "builtIn")
-      ),
+      volume: volume,
+      contrast: contrast,
       // No DDC wire, and nothing ever probes the built-in slot (the D24 pass
       // walks `displays`, which is external-only) — but `DisplayState` has one
       // shape for both slots, so the honest stub goes here too.
@@ -764,11 +1656,25 @@ final class AppModel {
             // The built-in is in the list (its own slot, outside `displays`,
             // re-review T10-A); it moves from last to first, behaviorally
             // irrelevant (`task-11-report.md:49`).
+            // Not while a reset is running. A reset drives this display's
+            // hardware and then waits for its queue to go quiet before letting
+            // HDR back on, and sync is the one writer that submits on somebody
+            // ELSE's schedule: a built-in ramping under ambient light, or a
+            // Control Center drag, fans a write onto this display every poll
+            // tick, so the queue never goes quiet and the reset gives up on
+            // restoring the display's HDR.
+            //
+            // The movement made during the reset is DROPPED, not deferred: a
+            // disabled fan-out resets the deadband and returns, so the externals
+            // stay offset by however far the source moved in those few seconds.
+            // That is the documented meaning of the pref being off, applied for
+            // the duration rather than a new behaviour, and it is the cheaper
+            // of the two losses on offer.
             BrightnessSync.fanOut(
               delta: delta,
               from: controller,
               to: self.allControlledStates.map(\.controller),
-              isEnabled: self.appPrefs.enableBrightnessSync
+              isEnabled: self.appPrefs.enableBrightnessSync && !self.isResetting
             )
           }
         },

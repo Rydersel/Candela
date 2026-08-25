@@ -21,6 +21,55 @@ struct DisplayPrefsTests {
     }
   }
 
+  /// #110's escape hatch defaults ON, so absence must read as guarded — the
+  /// one bug that would make the hatch a hazard rather than a hatch.
+  @Test func theWireTimingGuardIsOnUntilExplicitlyTurnedOff() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "app")
+      #expect(prefs.wireTimingGuard)
+
+      prefs.wireTimingGuard = false
+      #expect(prefs.wireTimingGuard == false)
+      // App-level: stored unsuffixed, so every display sees the same answer.
+      #expect(defaults.object(forKey: "wireTimingGuard") as? Bool == false)
+
+      prefs.wireTimingGuard = true
+      #expect(prefs.wireTimingGuard)
+    }
+  }
+
+  /// A `defaults write` is the only way in, and it has to reach the same
+  /// accessor the engine reads.
+  @Test func theWireTimingGuardHonoursAnExternallyWrittenKey() {
+    withSuite { defaults in
+      defaults.set(false, forKey: "wireTimingGuard")
+      #expect(DisplayPrefs(defaults: defaults, persistenceKey: "app").wireTimingGuard == false)
+      // Read through a per-display instance too: it is not display-scoped.
+      #expect(DisplayPrefs(defaults: defaults, persistenceKey: "AAAA").wireTimingGuard == false)
+    }
+  }
+
+  /// The forms a person actually types. `defaults write … NO` stores a STRING,
+  /// and an escape hatch that ignores the commonest spelling of itself is worse
+  /// than none — the user believes the guard is off while it is still on.
+  @Test func theWireTimingGuardAcceptsEveryFalseSpellingDefaultsWriteProduces() {
+    for stored in ["NO", "no", "false", "0"] as [Any] + [0, false] {
+      withSuite { defaults in
+        defaults.set(stored, forKey: "wireTimingGuard")
+        #expect(
+          DisplayPrefs(defaults: defaults, persistenceKey: "app").wireTimingGuard == false,
+          "\(stored) should read as guard-off")
+      }
+    }
+    // And the true spellings stay guarded.
+    for stored in ["YES", "1"] as [Any] + [1, true] {
+      withSuite { defaults in
+        defaults.set(stored, forKey: "wireTimingGuard")
+        #expect(DisplayPrefs(defaults: defaults, persistenceKey: "app").wireTimingGuard)
+      }
+    }
+  }
+
   @Test func hdrModeRoundTrips() {
     withSuite { defaults in
       let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
@@ -381,13 +430,42 @@ struct DisplayPrefsTests {
     }
   }
 
+  @Test func hudPositionsAreAppLevelAndDefaultToTheShippedTopCenter() {
+    let d = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: d, persistenceKey: "irrelevant")
+    // An untouched install gets the shipped default, top center (Ryder,
+    // 2026-08-17, KMR spec amendment).
+    #expect(prefs.hudPositionBrightness == .topCenter)
+    #expect(prefs.hudPositionVolume == .topCenter)
+
+    // Top right stores raw 0, indistinguishable from absent through
+    // `integer(forKey:)`: the accessor reads key PRESENCE, so an explicit
+    // top-right choice survives the default moving away from it.
+    prefs.hudPositionBrightness = .topRight
+    #expect(prefs.hudPositionBrightness == .topRight)
+
+    prefs.hudPositionBrightness = .topLeft
+    prefs.hudPositionVolume = .topCenter
+    #expect(d.integer(forKey: "hudPositionBrightness") == 1)
+    #expect(d.integer(forKey: "hudPositionVolume") == 2)
+    // App-level: no per-display suffix, so one choice covers every display.
+    #expect(d.object(forKey: "hudPositionBrightness.irrelevant") == nil)
+
+    // The two are genuinely independent, which is the whole point of shipping
+    // two keys: setting one must not move the other.
+    let reread = DisplayPrefs(defaults: d, persistenceKey: "another-display")
+    #expect(reread.hudPositionBrightness == .topLeft)
+    #expect(reread.hudPositionVolume == .topCenter)
+  }
+
   @Test func unknownStoredRawValuesFallBackRatherThanTrap() {
     // Raw 0 is a VALID case for three of these four enums, so the default-value
     // assertions above cannot reach the `?? fallback` at all. D13's downgrade
     // story (and the retired-HDRMode-raw-1 precedent) rests entirely on it.
     let d = InMemoryDefaults()
     for key in ["menuIcon", "menuItemStyle", "keyboardBrightness",
-                "keyboardVolume", "multiKeyboardBrightness"] {
+                "keyboardVolume", "multiKeyboardBrightness",
+                "hudPositionBrightness", "hudPositionVolume"] {
       d.set(99, forKey: key)
     }
     let prefs = DisplayPrefs(defaults: d, persistenceKey: "x")
@@ -396,6 +474,28 @@ struct DisplayPrefsTests {
     #expect(prefs.keyboardBrightness == .media)
     #expect(prefs.keyboardVolume == .media)
     #expect(prefs.multiKeyboardBrightness == .mouse)
+    // Raw 0 is a valid case for these two as well, so only an out-of-range
+    // value reaches their fallback: the shipped default, top center.
+    #expect(prefs.hudPositionBrightness == .topCenter)
+    #expect(prefs.hudPositionVolume == .topCenter)
+  }
+
+  @Test func hudStyleIsAppLevelDefaultsToSystemAndFallsBackOnUnknownRaw() {
+    let d = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: d, persistenceKey: "irrelevant")
+    // Raw 0 IS the shipped default, so absent and default agree and the plain
+    // integer read is correct here, unlike the position keys.
+    #expect(prefs.hudStyle == .system)
+
+    prefs.hudStyle = .segments
+    #expect(d.integer(forKey: "hudStyle") == 1)
+    // App-level: no per-display suffix.
+    #expect(d.object(forKey: "hudStyle.irrelevant") == nil)
+    let reread = DisplayPrefs(defaults: d, persistenceKey: "another-display")
+    #expect(reread.hudStyle == .segments)
+
+    d.set(99, forKey: "hudStyle")
+    #expect(prefs.hudStyle == .system)
   }
 
   @Test func foldedRawKeysKeepTheirExactKeyStrings() {
@@ -510,5 +610,301 @@ struct DisplayPrefsTests {
     // …while the safe session itself still sees the gate.
     #expect(safe.startupAction == .doNothing)
     #expect(safe.pollingTries == 0)
+  }
+
+  // MARK: - First-sight (SO22)
+
+  @Test func anEmptyDomainHasNoStoredValue() {
+    withSuite { defaults in
+      #expect(!DisplayPrefs.hasAnyStoredValue(forKey: "AAAA-BBBB", defaults: defaults))
+    }
+  }
+
+  @Test func anySeededKeyCountsAsStored() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "AAAA-BBBB")
+      prefs.friendlyName = "Desk"
+      #expect(DisplayPrefs.hasAnyStoredValue(forKey: "AAAA-BBBB", defaults: defaults))
+      // Suffix match, not substring: another display's domain stays fresh.
+      #expect(!DisplayPrefs.hasAnyStoredValue(forKey: "BBBB", defaults: defaults))
+      #expect(!DisplayPrefs.hasAnyStoredValue(forKey: "CCCC-DDDD", defaults: defaults))
+    }
+  }
+
+  // MARK: - OLED care (W3a)
+
+  @Test func oledDefaultsAreTheRecommendedPreset() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      #expect(prefs.oledCareEnrolled == false)
+      #expect(prefs.oledIdleDimSeconds == 300)
+      #expect(prefs.oledIdleDimBrightness == 0.5)
+      #expect(prefs.oledLockDim == true)
+      #expect(prefs.oledBlackoutEnabled == false)
+      #expect(prefs.oledBlackoutSeconds == 1200)
+      #expect(prefs.oledUnfocusedDimEnabled == false)
+      #expect(prefs.oledUnfocusedDimSeconds == 600)
+      // Lighter than the idle dim's 0.5, because the level IS the black
+      // overlay's opacity — higher is darker — and an unfocused display is
+      // still in view.
+      #expect(prefs.oledUnfocusedDimBrightness == 0.7)
+      #expect(prefs.oledHoursTracking == true)
+    }
+  }
+
+  // MARK: - OLED care (W3b-1)
+
+  @Test func oledTelemetryDefaultsOffAndWindowObservationDefaultsOn() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      // Telemetry needs Screen Recording; enrolling must never turn it on.
+      #expect(prefs.oledTelemetry == false)
+      // Observation needs nothing, and is the degraded mode's only source.
+      #expect(prefs.oledWindowObservation == true)
+      #expect(prefs.oledDetectionDimming == false)
+    }
+  }
+
+  @Test func oledWindowObservationStoresInverted() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      prefs.oledWindowObservation = false
+      #expect(defaults.bool(forKey: "oledWindowObservationOff.pk") == true)
+      #expect(prefs.oledWindowObservation == false)
+      prefs.oledWindowObservation = true
+      #expect(prefs.oledWindowObservation == true)
+    }
+  }
+
+  @Test func resetOledCareRestoresTelemetryDefaults() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      prefs.oledTelemetry = true
+      prefs.oledWindowObservation = false
+      prefs.resetOledCare()
+      #expect(prefs.oledTelemetry == false)
+      // The inverted key is the one that must be cleared; clearing
+      // "oledWindowObservation" would leave this false forever.
+      #expect(prefs.oledWindowObservation == true)
+      #expect(prefs.oledDetectionDimming == false)
+    }
+  }
+
+  @Test func w3bOledPrefsArePerDisplay() {
+    withSuite { defaults in
+      let a = DisplayPrefs(defaults: defaults, persistenceKey: "a")
+      let b = DisplayPrefs(defaults: defaults, persistenceKey: "b")
+      a.oledTelemetry = true
+      a.oledWindowObservation = false
+      #expect(b.oledTelemetry == false)
+      #expect(b.oledWindowObservation == true)
+    }
+  }
+
+  @Test func oledPrefsArePerDisplay() {
+    withSuite { defaults in
+      let a = DisplayPrefs(defaults: defaults, persistenceKey: "a")
+      let b = DisplayPrefs(defaults: defaults, persistenceKey: "b")
+      a.oledCareEnrolled = true
+      a.oledIdleDimSeconds = 120
+      #expect(b.oledCareEnrolled == false)
+      #expect(b.oledIdleDimSeconds == 300)
+    }
+  }
+
+  @Test func trueDefaultOledBoolsStoreInverted() {
+    // Absence must read as ON, so these two persist under `…Off` keys. A
+    // straight `bool(forKey:)` would silently ship lock dimming disabled on
+    // every fresh install, and the getter alone cannot show the round trip.
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      prefs.oledLockDim = false
+      prefs.oledHoursTracking = false
+      #expect(prefs.oledLockDim == false)
+      #expect(prefs.oledHoursTracking == false)
+      #expect(defaults.bool(forKey: "oledLockDimOff.pk"))
+      #expect(defaults.bool(forKey: "oledHoursTrackingOff.pk"))
+      #expect(defaults.object(forKey: "oledLockDim.pk") == nil)
+      prefs.oledLockDim = true
+      prefs.oledHoursTracking = true
+      #expect(prefs.oledLockDim == true)
+      #expect(prefs.oledHoursTracking == true)
+    }
+  }
+
+  @Test func resetOledCareRemovesTheKeysRatherThanRewritingThem() {
+    // Removal, not a write-back of today's numbers: an absent key follows the
+    // preset, and a reset that pinned the current values would quietly opt the
+    // display out of every later preset change. Checking the accessors alone
+    // could not tell the two apart.
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      prefs.oledCareEnrolled = true
+      prefs.oledIdleDimSeconds = 60
+      prefs.oledIdleDimBrightness = 0.9
+      prefs.oledLockDim = false
+      prefs.oledBlackoutEnabled = true
+      prefs.oledBlackoutSeconds = 3000
+      prefs.oledUnfocusedDimEnabled = true
+      prefs.oledUnfocusedDimSeconds = 900
+      prefs.oledUnfocusedDimBrightness = 0.4
+      prefs.oledHoursTracking = false
+      prefs.oledTelemetry = true
+      prefs.oledWindowObservation = false
+      prefs.oledDetectionDimming = true
+      // Panel hours are NOT prefs — they live under `PanelHoursTracker`'s own
+      // keys and the reset must leave them alone. Written directly here
+      // because the tracker owns them, and because the sweep below needs them
+      // present to prove it distinguishes "kept" from "wiped".
+      defaults.set(3600.0, forKey: "oledPanelSeconds.pk")
+      defaults.set(120.0, forKey: "oledStandbySeconds.pk")
+      defaults.set(true, forKey: "oledStandbyNoteDismissed.pk")
+      // OC20's histogram is the same shape of thing: wear data about the glass,
+      // reset by the coordinator alongside the hours tracker, never by this.
+      defaults.set([Double](repeating: 1, count: 60), forKey: "oledWearSeconds.pk")
+      defaults.set(1, forKey: "oledWearSchema.pk")
+
+      prefs.resetOledCare()
+
+      #expect(prefs.oledCareEnrolled == false)
+      #expect(prefs.oledIdleDimSeconds == 300)
+      #expect(prefs.oledIdleDimBrightness == 0.5)
+      #expect(prefs.oledLockDim == true)
+      #expect(prefs.oledBlackoutEnabled == false)
+      #expect(prefs.oledBlackoutSeconds == 1200)
+      #expect(prefs.oledUnfocusedDimEnabled == false)
+      #expect(prefs.oledUnfocusedDimSeconds == 600)
+      #expect(prefs.oledUnfocusedDimBrightness == 0.7)
+      #expect(prefs.oledHoursTracking == true)
+      #expect(prefs.oledTelemetry == false)
+      #expect(prefs.oledWindowObservation == true)
+      #expect(prefs.oledDetectionDimming == false)
+
+      // The sweep can only see keys something wrote above, so pin the
+      // population first: a thirteenth OLED pref fails HERE, which is the
+      // prompt to add its write — and only then can the sweep catch a
+      // `resetOledCare` that forgot to remove it.
+      let oledPrefNames = PrefName.allCases.filter { $0.rawValue.hasPrefix("oled") }
+      #expect(oledPrefNames.count == 13, "a new OLED pref needs a write above")
+
+      // A SWEEP of the store, not a second hand-written key list. They are
+      // already enumerated by hand in two other places and in two spellings —
+      // `PrefName` cases in the per-display reset's fan-out, and key strings in
+      // `resetOledCare`, where `oledLockDim` and `oledHoursTracking` carry the
+      // inverted `…Off` suffix. A third copy here would have the same defect
+      // the other two do: an eleventh pref compiles clean and silently survives
+      // the reset. Asking the store instead cannot miss one.
+      let keptHoursKeys: Set<String> = [
+        "oledPanelSeconds.pk", "oledStandbySeconds.pk", "oledStandbyNoteDismissed.pk",
+        "oledWearSeconds.pk", "oledWearSchema.pk",
+      ]
+      let survivors = defaults.dictionaryRepresentation().keys
+        .filter { $0.hasPrefix("oled") && $0.hasSuffix(".pk") && !keptHoursKeys.contains($0) }
+        .sorted()
+      #expect(survivors.isEmpty, "survived the reset: \(survivors.joined(separator: ", "))")
+      // …and the wear data is still there, so "nothing left" above is not
+      // passing because the reset wiped everything.
+      #expect(keptHoursKeys.allSatisfy { defaults.object(forKey: $0) != nil })
+    }
+  }
+
+  @Test func resetOledCareLeavesOtherDisplaysAlone() {
+    withSuite { defaults in
+      let a = DisplayPrefs(defaults: defaults, persistenceKey: "a")
+      let b = DisplayPrefs(defaults: defaults, persistenceKey: "b")
+      a.oledCareEnrolled = true
+      b.oledCareEnrolled = true
+      a.resetOledCare()
+      #expect(a.oledCareEnrolled == false)
+      #expect(b.oledCareEnrolled == true)
+    }
+  }
+
+  // MARK: - Synthesized sizes (SS4)
+
+  @Test func synthesisIsOffWithNothingStoredUntilItIsAskedFor() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      #expect(prefs.offerSyntheticSizes == false)
+      #expect(prefs.storedSyntheticSize == nil)
+      // Nothing was written by the reads: a display nobody has opted in stays
+      // absent from the domain, which is what `hasAnyStoredValue` reads.
+      #expect(DisplayPrefs.hasAnyStoredValue(forKey: "pk", defaults: defaults) == false)
+    }
+  }
+
+  @Test func synthesisPrefsRoundTripUnderTheSuffixedKeys() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "AAAA-BBBB")
+      prefs.setOfferSyntheticSizes(true)
+      prefs.setStoredSyntheticSize(SyntheticSizeDescriptor(logicalWidth: 3096, logicalHeight: 1296))
+
+      #expect(prefs.offerSyntheticSizes)
+      #expect(prefs.storedSyntheticSize
+        == SyntheticSizeDescriptor(logicalWidth: 3096, logicalHeight: 1296))
+      // The exact key strings: shipped schema, same `<name>.<pk>` composition
+      // every other per-display pref uses.
+      #expect(defaults.object(forKey: "offerSyntheticSizes.AAAA-BBBB") as? Bool == true)
+      let stored = try? JSONDecoder().decode(
+        SyntheticSizeDescriptor.self,
+        from: defaults.data(forKey: "storedSyntheticSize.AAAA-BBBB") ?? Data()
+      )
+      #expect(stored == SyntheticSizeDescriptor(logicalWidth: 3096, logicalHeight: 1296))
+    }
+  }
+
+  @Test func clearingTheStoredSyntheticSizeRemovesTheKeyAndLeavesTheOptInAlone() {
+    withSuite { defaults in
+      let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+      prefs.setOfferSyntheticSizes(true)
+      prefs.setStoredSyntheticSize(SyntheticSizeDescriptor(logicalWidth: 2752, logicalHeight: 1152))
+
+      prefs.setStoredSyntheticSize(nil)
+      #expect(prefs.storedSyntheticSize == nil)
+      // REMOVED, not written as an empty value: an absent key is what the
+      // resolver reads as "no stored choice".
+      #expect(defaults.object(forKey: "storedSyntheticSize.pk") == nil)
+      // Two separate answers, as with the remembered display mode: forgetting
+      // the size must not opt the display back out.
+      #expect(prefs.offerSyntheticSizes)
+    }
+  }
+
+  @Test func anUndecodableStoredSyntheticSizeReadsAsNone() {
+    withSuite { defaults in
+      defaults.set(Data([0x7B, 0x7B]), forKey: "storedSyntheticSize.pk")
+      #expect(DisplayPrefs(defaults: defaults, persistenceKey: "pk").storedSyntheticSize == nil)
+    }
+  }
+
+  /// The opt-in reads through the COERCING accessor, so the shell spelling of a
+  /// bool reaches it. `defaults write … offerSyntheticSizes YES` stores the
+  /// STRING "YES", which `object(forKey:) as? Bool` rejects silently.
+  @Test func theSynthesisOptInAcceptsTheSpellingsDefaultsWriteProduces() {
+    for stored in ["YES", "yes", "true", "1"] as [Any] + [1, true] {
+      withSuite { defaults in
+        defaults.set(stored, forKey: "offerSyntheticSizes.pk")
+        #expect(
+          DisplayPrefs(defaults: defaults, persistenceKey: "pk").offerSyntheticSizes,
+          "stored \(stored) should read as opted in"
+        )
+      }
+    }
+  }
+
+  @Test func synthesisPrefsArePerDisplay() {
+    withSuite { defaults in
+      let a = DisplayPrefs(defaults: defaults, persistenceKey: "a")
+      let b = DisplayPrefs(defaults: defaults, persistenceKey: "b")
+      a.setOfferSyntheticSizes(true)
+      a.setStoredSyntheticSize(SyntheticSizeDescriptor(logicalWidth: 3096, logicalHeight: 1296))
+      #expect(b.offerSyntheticSizes == false)
+      #expect(b.storedSyntheticSize == nil)
+    }
+  }
+
+  @Test func synthesisKeyStringsNeverDrift() {
+    #expect(PrefName.offerSyntheticSizes.rawValue == "offerSyntheticSizes")
+    #expect(PrefName.storedSyntheticSize.rawValue == "storedSyntheticSize")
   }
 }

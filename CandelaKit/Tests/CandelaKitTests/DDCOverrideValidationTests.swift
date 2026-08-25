@@ -141,6 +141,100 @@ struct DDCOverrideApplicationTests {
   }
 }
 
+/// The whole of what a field commit decides, which both routes into it share.
+///
+/// A settings field applies its text on Return AND when focus leaves it (#144).
+/// Two routes into one write is how a second, looser validation gets written by
+/// accident: the fork accepted `abc`, `70000` and `-1` in these boxes, and a
+/// blur path that parsed its own text could put that back through a new door.
+/// `committed` is the whole decision, so there is one place for both to call
+/// and nothing left at the call site to get wrong.
+@Suite("Committing a field's text")
+struct DDCOverrideCommitTests {
+  private var tuned: CommandTuning {
+    CommandTuning(
+      unavailableDDC: true, minDDCOverride: 20, maxDDCOverride: 80,
+      curveIndex: 3, invert: true, remapCodes: [0xE1]
+    )
+  }
+
+  @Test func typedTextChangesOnlyTheEditedField() throws {
+    let after = try #require(DDCOverrideValidation.committed("30", to: tuned, field: .minimum))
+    #expect(after.minDDCOverride == 30)
+    #expect(after.maxDDCOverride == 80)
+    #expect(after.curveIndex == 3)
+    #expect(after.remapCodes == [0xE1])
+
+    let maxed = try #require(DDCOverrideValidation.committed("90", to: tuned, field: .maximum))
+    #expect(maxed.maxDDCOverride == 90)
+    #expect(maxed.minDDCOverride == 20)
+  }
+
+  /// Emptying a box is a real decision, not an abandoned edit: it stores 0 and
+  /// gives the display its own range back. Both routes have to mean that, or
+  /// clearing a box and clicking away would silently keep the old override.
+  @Test func emptyingAFieldStoresTheUnsetSentinel() throws {
+    for text in ["", "   ", "\n", "0"] {
+      let after = try #require(
+        DDCOverrideValidation.committed(text, to: tuned, field: .minimum),
+        "\(String(reflecting: text))"
+      )
+      #expect(after.minDDCOverride == DDCOverrideValidation.unset)
+      #expect(after.maxDDCOverride == 80) // and only that field
+    }
+  }
+
+  @Test func garbageAndOutOfRangeTextIsRefusedOnBothFields() {
+    for text in ["abc", "70000", "-1", "65536", "1.5", "12x", "0x10"] {
+      #expect(DDCOverrideValidation.committed(text, to: tuned, field: .minimum) == nil, "\(text)")
+      #expect(DDCOverrideValidation.committed(text, to: tuned, field: .maximum) == nil, "\(text)")
+    }
+  }
+
+  /// nil for "nothing to do", not just for "refused". A field that is left as
+  /// it was renders text that resolves to the value already stored, and a write
+  /// there would fan out to a pointless re-apply of dimming on every focus
+  /// change (D4).
+  @Test func textThatMeansTheStoredValueWritesNothing() {
+    #expect(DDCOverrideValidation.committed("20", to: tuned, field: .minimum) == nil)
+    #expect(DDCOverrideValidation.committed(" 80 ", to: tuned, field: .maximum) == nil)
+
+    let untouched = CommandTuning.unset
+    #expect(DDCOverrideValidation.committed("", to: untouched, field: .minimum) == nil)
+    #expect(DDCOverrideValidation.committed("0", to: untouched, field: .maximum) == nil)
+  }
+
+  /// The field renders `text(for:)` and commits whatever it holds, so the text
+  /// a field shows must always be a no-op commit. Anything else writes a pref
+  /// every time focus passes through a box nobody typed in.
+  @Test func theRenderedTextOfEveryStoredValueIsANoOpCommit() {
+    for stored in [0, 1, 20, 255, 65535] {
+      let tuning = CommandTuning(
+        unavailableDDC: false, minDDCOverride: stored, maxDDCOverride: stored,
+        curveIndex: 0, invert: false, remapCodes: []
+      )
+      let text = DDCOverrideValidation.text(for: stored)
+      #expect(DDCOverrideValidation.committed(text, to: tuning, field: .minimum) == nil, "\(stored)")
+      #expect(DDCOverrideValidation.committed(text, to: tuning, field: .maximum) == nil, "\(stored)")
+    }
+  }
+
+  /// One command's tuning in, the same command's tuning out. The fork wrote all
+  /// three commands on any single edit (chapter 2 QUIRK 7); nothing here can
+  /// reach another command, because no other command's tuning is in scope.
+  @Test func committingIsPureAndTouchesNoOtherCommand() throws {
+    let defaults = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "PK")
+    let before = prefs.tuning(for: .contrast)
+    let after = try #require(DDCOverrideValidation.committed("60", to: before, field: .minimum))
+    prefs.setTuning(after, for: .contrast)
+
+    #expect(defaults.object(forKey: "minDDCOverride.contrast.PK") as? Int == 60)
+    #expect(defaults.object(forKey: "minDDCOverride.brightness.PK") == nil)
+    #expect(defaults.object(forKey: "minDDCOverride.volume.PK") == nil)
+  }
+}
+
 /// Kept as a REGRESSION PIN on M4's key composition, honestly named. It tests
 /// `DisplayPrefs`, not this task, and it is green against `main` — which is why
 /// it is no longer presented as Task 14 coverage.

@@ -1,7 +1,15 @@
 import Foundation
 
-/// How a display uses macOS HDR. `alwaysOn` keeps HDR engaged; `off` leaves the
-/// display's HDR state alone.
+/// How a display uses macOS HDR — the mode Candela last DROVE the display to,
+/// not a standing policy it enforces.
+///
+/// `alwaysOn` does NOT keep HDR engaged, despite the name: nothing re-asserts
+/// it on wake, restore or reconfiguration, and the only engage path is a user
+/// action through `BrightnessController.setHDRMode`. So the mode can go stale
+/// whenever HDR is toggled in System Settings, which is why the panel reads
+/// `isHDREngaged` for what the display is actually doing (#84) and
+/// `BrightnessPathPolicy.usesNative` ignores the mode entirely (#52). #87
+/// tracks whether the mode should become a true mirror of the state.
 ///
 /// Raw value 1 was `boost` (removed 2026-07-30) — NEVER reuse it: displays that
 /// stored it must keep decoding to `.off` through `DisplayPrefs.hdrMode`'s
@@ -43,7 +51,7 @@ public enum PollingMode: Int, Sendable, CaseIterable {
 /// Overrides exist because a capabilities string is unreliable in the field:
 /// monitors truncate them, omit codes they implement, and advertise codes they
 /// ignore.
-public enum AudioSinkOverride: Int, Sendable {
+public enum AudioSinkOverride: Int, Sendable, CaseIterable {
   /// Trust `CapabilityString.support(forVCP:in:)` via `VolumeSliderPolicy`.
   case auto = 0
   /// Always greyed — the panel advertises volume it does not actually apply.
@@ -183,6 +191,148 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(clampSwitchingPoint(newValue), forKey: key("combinedSwitchingPoint")) }
   }
 
+  // MARK: - OLED care (W3a)
+
+  // The defaults ARE the Recommended preset, so enrolling writes nothing but
+  // `oledCareEnrolled` and an un-tuned display stays on the preset even as the
+  // preset changes. The two true-default bools store INVERTED, under
+  // `…Off` keys, so an absent key reads as ON rather than as OFF.
+
+  public var oledCareEnrolled: Bool {
+    get { defaults.bool(forKey: key("oledCareEnrolled")) }
+    set { defaults.set(newValue, forKey: key("oledCareEnrolled")) }
+  }
+
+  /// Idle before the care dim engages, in seconds.
+  public var oledIdleDimSeconds: Int {
+    get { defaults.object(forKey: key("oledIdleDimSeconds")) as? Int ?? 300 }
+    set { defaults.set(newValue, forKey: key("oledIdleDimSeconds")) }
+  }
+
+  /// **How bright the display is while dimmed**: 0.1 is darkest, 0.9 is barely
+  /// dimmed. This is the number the user sets and reads, and it is the ONLY
+  /// meaning of "level" anywhere above this line.
+  ///
+  /// **The stored value is its complement, the overlay's OPACITY**, which is
+  /// what the key has always held and still holds: 0.5 on disk has meant, and
+  /// still means, a half-opaque overlay. The inversion lives here, at the
+  /// accessor, so that no stored value changes meaning and no migration is
+  /// owed. Everything that already existed on disk keeps rendering exactly as
+  /// before; only the number shown to the user flipped, which was the ask
+  /// (users read "10%" as "10% brightness", not "10% dimming").
+  ///
+  /// This accessor is the only INTERPRETER of the key. The other three uses of
+  /// the string are uninterpreted: `resetOledCare` removes it, and `PrefName`
+  /// carries it as a propagation identifier. Verified before choosing this over
+  /// a new key, because the whole argument depends on it.
+  ///
+  /// The engine still dims with an overlay whose alpha is this complement; the
+  /// lock dim, which is delivered on the wire, uses this number directly as the
+  /// fraction of the user's brightness to keep.
+  public var oledIdleDimBrightness: Double {
+    get { 1 - (defaults.object(forKey: key("oledIdleDimLevel")) as? Double ?? 0.5) }
+    set { defaults.set(1 - newValue, forKey: key("oledIdleDimLevel")) }
+  }
+
+  public var oledLockDim: Bool {
+    get { !defaults.bool(forKey: key("oledLockDimOff")) }
+    set { defaults.set(!newValue, forKey: key("oledLockDimOff")) }
+  }
+
+  /// Exposure sampling. Requires Screen Recording, so it defaults OFF and is
+  /// never enabled as a side effect of enrollment — the grant is a decision
+  /// the user makes at the toggle, not one the preset makes for them.
+  public var oledTelemetry: Bool {
+    get { defaults.bool(forKey: key("oledTelemetry")) }
+    set { defaults.set(newValue, forKey: key("oledTelemetry")) }
+  }
+
+  /// Window geometry and owner-app observation (OC18). Needs no permission
+  /// and is the degraded no-permission mode's only data source, so it defaults
+  /// ON and stores inverted.
+  public var oledWindowObservation: Bool {
+    get { !defaults.bool(forKey: key("oledWindowObservationOff")) }
+    set { defaults.set(!newValue, forKey: key("oledWindowObservationOff")) }
+  }
+
+  /// Detection-driven region dimming (#20).
+  ///
+  /// **Off by default even for an enrolled display, and not in the Recommended
+  /// preset.** Every other care feature acts when the user is away or the
+  /// screen is locked; this one alters the screen while they are looking at it,
+  /// which makes it the only one where a wrong nomination is visible as a
+  /// defect rather than as protection. Opting in is the point.
+  public var oledDetectionDimming: Bool {
+    get { defaults.bool(forKey: key("oledDetectionDimming")) }
+    set { defaults.set(newValue, forKey: key("oledDetectionDimming")) }
+  }
+
+  public var oledBlackoutEnabled: Bool {
+    get { defaults.bool(forKey: key("oledBlackoutEnabled")) }
+    set { defaults.set(newValue, forKey: key("oledBlackoutEnabled")) }
+  }
+
+  public var oledBlackoutSeconds: Int {
+    get { defaults.object(forKey: key("oledBlackoutSeconds")) as? Int ?? 1200 }
+    set { defaults.set(newValue, forKey: key("oledBlackoutSeconds")) }
+  }
+
+  public var oledUnfocusedDimEnabled: Bool {
+    get { defaults.bool(forKey: key("oledUnfocusedDimEnabled")) }
+    set { defaults.set(newValue, forKey: key("oledUnfocusedDimEnabled")) }
+  }
+
+  public var oledUnfocusedDimSeconds: Int {
+    get { defaults.object(forKey: key("oledUnfocusedDimSeconds")) as? Int ?? 600 }
+    set { defaults.set(newValue, forKey: key("oledUnfocusedDimSeconds")) }
+  }
+
+  /// Brightness while dimmed, same scale and same stored complement as
+  /// `oledIdleDimBrightness`.
+  ///
+  /// Default 0.7, BRIGHTER than the idle dim's 0.5 on purpose: an unfocused
+  /// display is still in the user's view, so it gets a gentler dim than one
+  /// nobody has touched for five minutes. The stored 0.3 is unchanged; it is
+  /// the same gentler dim, written as the overlay opacity it has always been.
+  public var oledUnfocusedDimBrightness: Double {
+    get { 1 - (defaults.object(forKey: key("oledUnfocusedDimLevel")) as? Double ?? 0.3) }
+    set { defaults.set(1 - newValue, forKey: key("oledUnfocusedDimLevel")) }
+  }
+
+  public var oledHoursTracking: Bool {
+    get { !defaults.bool(forKey: key("oledHoursTrackingOff")) }
+    set { defaults.set(!newValue, forKey: key("oledHoursTrackingOff")) }
+  }
+
+  /// Returns this display to the Recommended preset by REMOVING the thirteen keys
+  /// rather than writing their current default values back.
+  ///
+  /// The difference is not cosmetic: the accessors above document that an
+  /// absent key follows the preset, so a display reset by writing today's
+  /// numbers would be pinned to them and would stop tracking a later change to
+  /// the preset — the one property the "defaults ARE the preset" design buys.
+  ///
+  /// Accumulated panel hours are deliberately NOT touched. They are wear data
+  /// about the panel, not a setting, and they sit under their own keys
+  /// (`PanelHoursTracker`); the per-display reset keeps them for the same
+  /// reason it keeps the saved brightness, volume and contrast levels.
+  public func resetOledCare() {
+    for name in [
+      "oledCareEnrolled", "oledIdleDimSeconds", "oledIdleDimLevel", "oledLockDimOff",
+      "oledBlackoutEnabled", "oledBlackoutSeconds",
+      "oledUnfocusedDimEnabled", "oledUnfocusedDimSeconds", "oledUnfocusedDimLevel",
+      "oledHoursTrackingOff",
+      // Note the inverted spelling: clearing "oledWindowObservation" would
+      // clear nothing and leave a disabled observation disabled through a
+      // reset. The accumulated exposure map is NOT cleared here, for the same
+      // reason panel hours are not — it is wear data, not a setting, and it
+      // has its own delete action in the panel health view.
+      "oledTelemetry", "oledWindowObservationOff", "oledDetectionDimming",
+    ] {
+      defaults.removeObject(forKey: key(name))
+    }
+  }
+
   // MARK: - Per-command DDC tuning
 
   public func tuning(for command: DDCCommand) -> CommandTuning {
@@ -274,6 +424,14 @@ public final class DisplayPrefs: @unchecked Sendable {
   public var longerDelay: Bool {
     get { defaults.bool(forKey: key("longerDelay")) }
     set { defaults.set(newValue, forKey: key("longerDelay")) }
+  }
+
+  /// The user closed this display's size suggestion. The Recommended mark stays
+  /// on the size itself; only the hub's callout row honors this, so the
+  /// suggestion is still legible where a size is chosen after it is waved off.
+  public var sizeRecommendationDismissed: Bool {
+    get { defaults.bool(forKey: key("sizeRecommendationDismissed")) }
+    set { defaults.set(newValue, forKey: key("sizeRecommendationDismissed")) }
   }
 
   /// Manual override for the panel's volume-slider verdict, in both directions
@@ -435,11 +593,85 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: "enableSliderPercent") }
   }
 
+  /// Where the brightness and contrast pills sit on the display they are drawn
+  /// on. The shipped default is `topCenter` (Ryder, 2026-08-17, KMR spec
+  /// amendment); `HUDPosition` stores `topRight` as 0, so the absent key and
+  /// an explicit top-right choice can only be told apart by presence, which is
+  /// why this reads `object(forKey:)` rather than `integer(forKey:)`. A stored
+  /// choice, top right included, is always honoured.
+  public var hudPositionBrightness: HUDPosition {
+    get { storedHUDPosition(forKey: "hudPositionBrightness") }
+    set { defaults.set(newValue.rawValue, forKey: "hudPositionBrightness") }
+  }
+
+  /// The volume and mute pills' own position, split along the same line
+  /// `hideOsd` already draws: volume and mute on one side, brightness and
+  /// contrast on the other.
+  ///
+  /// Two keys give each KIND a stable home of its own, so volume always reports
+  /// in one place and brightness in another. They are not a way to see both at
+  /// once: `BrightnessHUD` keys one window per DISPLAY, so on any one display
+  /// the two kinds take turns in the same window. Pressing volume and then
+  /// brightness inside the 1.5 s fade moves that window from one anchor to the
+  /// other, which is the single-window behaviour the app has always had and not
+  /// something these keys introduce.
+  public var hudPositionVolume: HUDPosition {
+    get { storedHUDPosition(forKey: "hudPositionVolume") }
+    set { defaults.set(newValue.rawValue, forKey: "hudPositionVolume") }
+  }
+
+  /// Absent key or an unknown raw value: the shipped `topCenter`. A present,
+  /// valid value is the user's choice, and 0 (top right) is a choice like any
+  /// other, which `integer(forKey:)`'s 0-for-absent could not express.
+  private func storedHUDPosition(forKey key: String) -> HUDPosition {
+    guard let stored = defaults.object(forKey: key) as? Int else { return .topCenter }
+    return HUDPosition(rawValue: stored) ?? .topCenter
+  }
+
+  /// How every indicator pill draws (KMR-A3), app-level like the two position
+  /// keys. Plain `integer(forKey:)` is correct here, unlike the positions:
+  /// raw 0 IS the shipped default, so absent and default agree.
+  public var hudStyle: HUDStyle {
+    get { HUDStyle(rawValue: defaults.integer(forKey: "hudStyle")) ?? .system }
+    set { defaults.set(newValue.rawValue, forKey: "hudStyle") }
+  }
+
   /// Hide the built-in display's panel section (Candela's positive-default
   /// equivalent of the fork's dead hideAppleFromMenu — the filter WORKS here, D2).
   public var hideBuiltInDisplay: Bool {
     get { defaults.bool(forKey: "hideBuiltInDisplay") }
     set { defaults.set(newValue, forKey: "hideBuiltInDisplay") }
+  }
+
+  /// Hide the panel's Keep Display Awake row. Presentation only: hiding the row
+  /// never releases an assertion the row took, because a control's visibility
+  /// is not a statement about the state it controls.
+  public var hideKeepAwake: Bool {
+    get { defaults.bool(forKey: "hideKeepAwake") }
+    set { defaults.set(newValue, forKey: "hideKeepAwake") }
+  }
+
+  /// D26 escape hatch for #110, with NO UI by design. Default ON, so the
+  /// stored form is the override rather than the setting: an absent key means
+  /// guarded.
+  ///
+  /// Off, the mode picker again offers revealed modes at refreshes the panel
+  /// has no native-width timing for — measured to scan out pillarboxed and
+  /// cropped on the MAG 341C. It exists because the rule is inferred from ONE
+  /// panel family's behaviour: a display the rule misjudges would otherwise
+  /// lose good modes with no way back short of a new build.
+  /// `object(forKey:)` decides only PRESENCE; `bool(forKey:)` reads the value.
+  /// Casting the object to `Bool` instead looks equivalent and is not: the cast
+  /// fails on `defaults write … wireTimingGuard NO`, which stores the STRING
+  /// "NO", and the hatch would then silently do nothing for anyone who omitted
+  /// `-bool`. Measured while verifying this key on hardware. `bool(forKey:)`
+  /// coerces "NO", "0" and `0` the way every other pref here already does.
+  public var wireTimingGuard: Bool {
+    get {
+      defaults.object(forKey: "wireTimingGuard") == nil
+        ? true : defaults.bool(forKey: "wireTimingGuard")
+    }
+    set { defaults.set(newValue, forKey: "wireTimingGuard") }
   }
 
   // App-level keys. The key strings are shipped schema — never rename them.
@@ -480,6 +712,169 @@ public final class DisplayPrefs: @unchecked Sendable {
 
   private func key(_ name: String) -> String {
     "\(name).\(persistenceKey)"
+  }
+
+  // MARK: - Virtual display slots (VD9)
+
+  // App-level, slot-suffixed keys (`virtualSlotConfigured.<slot>`), the
+  // per-command composition precedent. The keys are shipped schema; add,
+  // never rename. Defaults are the slot's remembered setup before anything
+  // was ever stored: an unconfigured 1920x1080 HiDPI display with the slot's
+  // default name.
+  private func vdKey(_ name: String, _ slot: Int) -> String { "\(name).\(slot)" }
+
+  /// Numeric fields read through the COERCING accessors behind a presence
+  /// check, never `object(forKey:) as? Int`: prefs are an escape-hatch
+  /// surface, and a shell `defaults write ... virtualSlotWidth.1 3440` stores
+  /// a STRING that the typed cast silently rejects while `defaults.bool`
+  /// accepts "YES" for `configured`, so a staged slot would half-apply (a
+  /// 1920x1080 display from a 3440-wide pref, with no error anywhere).
+  /// Width and height are clamped to the pane's own entry range so a wild
+  /// stored value cannot reach the engine.
+  public func virtualSlot(_ slot: Int) -> VirtualSlotDefinition {
+    func presentInt(_ name: String, default fallback: Int, clampedTo range: ClosedRange<Int>) -> Int {
+      defaults.object(forKey: vdKey(name, slot)) == nil
+        ? fallback
+        : min(range.upperBound, max(range.lowerBound, defaults.integer(forKey: vdKey(name, slot))))
+    }
+    let configured = defaults.bool(forKey: vdKey("virtualSlotConfigured", slot))
+    return VirtualSlotDefinition(
+      // Absent key falls back to `configured` so a slot staged before the
+      // defined marker existed (or by a shell write that only set
+      // configured) still shows its tile.
+      defined: defaults.object(forKey: vdKey("virtualSlotDefined", slot)) == nil
+        ? configured : defaults.bool(forKey: vdKey("virtualSlotDefined", slot)),
+      configured: configured,
+      name: defaults.string(forKey: vdKey("virtualSlotName", slot))
+        ?? VirtualDisplayIdentity.defaultName(slot: slot),
+      width: presentInt("virtualSlotWidth", default: 1920, clampedTo: 320 ... 8192),
+      height: presentInt("virtualSlotHeight", default: 1080, clampedTo: 320 ... 8192),
+      hiDPI: defaults.object(forKey: vdKey("virtualSlotHiDPI", slot)) == nil
+        ? true : defaults.bool(forKey: vdKey("virtualSlotHiDPI", slot)),
+      refreshHz: defaults.object(forKey: vdKey("virtualSlotRefreshHz", slot)) == nil
+        ? 60 : defaults.double(forKey: vdKey("virtualSlotRefreshHz", slot)),
+      recreateAtLaunch: defaults.bool(forKey: vdKey("virtualSlotRecreateAtLaunch", slot)),
+      uuid: defaults.string(forKey: vdKey("virtualSlotUUID", slot)).flatMap(UUID.init(uuidString:))
+    )
+  }
+
+  public func setVirtualSlot(_ definition: VirtualSlotDefinition, slot: Int) {
+    defaults.set(definition.defined, forKey: vdKey("virtualSlotDefined", slot))
+    defaults.set(definition.configured, forKey: vdKey("virtualSlotConfigured", slot))
+    defaults.set(definition.name, forKey: vdKey("virtualSlotName", slot))
+    defaults.set(definition.width, forKey: vdKey("virtualSlotWidth", slot))
+    defaults.set(definition.height, forKey: vdKey("virtualSlotHeight", slot))
+    defaults.set(definition.hiDPI, forKey: vdKey("virtualSlotHiDPI", slot))
+    defaults.set(definition.refreshHz, forKey: vdKey("virtualSlotRefreshHz", slot))
+    defaults.set(definition.recreateAtLaunch, forKey: vdKey("virtualSlotRecreateAtLaunch", slot))
+    if let uuid = definition.uuid {
+      defaults.set(uuid.uuidString, forKey: vdKey("virtualSlotUUID", slot))
+    }
+    // A nil uuid is a NO-OP, never a removal: the accessor reads nil for an
+    // unparseable stored string too, and a read-modify-write from any pane
+    // control would then delete the identity as a side effect of toggling
+    // Retina. Removal is `clearVirtualSlots` alone.
+  }
+
+  /// The slot definitions the reconciler consumes, keyed by slot. User slots
+  /// only: synthesis slots (SS6) carry no stored definition.
+  public func virtualSlotDefinitions() -> [Int: VirtualSlotDefinition] {
+    Dictionary(
+      uniqueKeysWithValues: VirtualDisplayIdentity.userSlotRange.map { ($0, virtualSlot($0)) }
+    )
+  }
+
+  /// VD15's second half: the reset calls this AFTER the live displays were
+  /// destroyed and immediately before the domain wipe (redundant with the
+  /// wipe today, load-bearing for any future partial reset). Field-by-field
+  /// removal, so a future added key needs its own line here (the same
+  /// property every reset path in this file has), and the ONLY place a
+  /// stored uuid is ever removed.
+  public func clearVirtualSlots() {
+    // The WHOLE family, deliberately: this is a removal, not an allocation,
+    // and a reset that left a synthesis slot's keys behind would be the one
+    // way stored state outlives the wipe.
+    for slot in VirtualDisplayIdentity.slotRange {
+      clearVirtualSlot(slot)
+    }
+  }
+
+  /// The pane's Remove: the slot's whole stored definition goes, tile
+  /// included. The caller unconfigures FIRST so the departing display is
+  /// destroyed from a snapshot that still described it (VD15's ordering).
+  public func clearVirtualSlot(_ slot: Int) {
+    for name in ["virtualSlotDefined", "virtualSlotConfigured", "virtualSlotName",
+                 "virtualSlotWidth", "virtualSlotHeight", "virtualSlotHiDPI",
+                 "virtualSlotRefreshHz", "virtualSlotRecreateAtLaunch", "virtualSlotUUID"] {
+      defaults.removeObject(forKey: vdKey(name, slot))
+    }
+  }
+
+  // MARK: - Synthesized sizes (SS4)
+
+  // Per-display, composed by `key(_:)` like every other per-display pref here,
+  // so both keys end `".<persistenceKey>"`. Written through the D27 path
+  // (`PrefName.offerSyntheticSizes` / `.storedSyntheticSize`).
+  //
+  // Read-only properties plus named write methods, the `ModePersistence` shape
+  // rather than the settable properties above. SS11 requires a verified engine
+  // disengage BEFORE the opt-in is persisted false, so these accessors do
+  // nothing but read and write their key: no engage, no disengage, no clearing
+  // of each other. The ordering is the caller's to get right, and an accessor
+  // with a side effect would take that choice away from it.
+
+  /// Whether synthesized stops are offered for this display (SS4). Off until
+  /// someone opts in: synthesis costs a virtual display and a mirror.
+  public var offerSyntheticSizes: Bool {
+    // `bool(forKey:)`, never `object(forKey:) as? Bool`: `defaults write …
+    // offerSyntheticSizes YES` stores the STRING "YES", which the cast rejects
+    // while this accessor coerces it (the trap measured on `wireTimingGuard`).
+    // No presence check, unlike that one: absent and stored-false mean the same
+    // thing here, so there is nothing for presence to tell apart.
+    defaults.bool(forKey: key("offerSyntheticSizes"))
+  }
+
+  public func setOfferSyntheticSizes(_ enabled: Bool) {
+    defaults.set(enabled, forKey: key("offerSyntheticSizes"))
+  }
+
+  /// The synthesized stop this display is set to, or nil when none is stored.
+  ///
+  /// A descriptor, never a mode ID: synthesized rows carry sentinel negative
+  /// `ioModeID`s that mean nothing across a relaunch, and the ladder is
+  /// regenerated on read anyway (`SyntheticSizeCatalog.size(matching:…)`).
+  /// Undecodable stored data reads as nil, so a corrupted value degrades to
+  /// "no stored choice" rather than trapping.
+  public var storedSyntheticSize: SyntheticSizeDescriptor? {
+    guard let data = defaults.data(forKey: key("storedSyntheticSize")) else { return nil }
+    return try? JSONDecoder().decode(SyntheticSizeDescriptor.self, from: data)
+  }
+
+  /// nil REMOVES the key rather than writing an empty value: absence is what
+  /// the read above reports as "no stored choice". The opt-in is untouched
+  /// either way, the same split `ModePersistence.clear` draws: forgetting the
+  /// size and opting the display out are separate answers.
+  public func setStoredSyntheticSize(_ descriptor: SyntheticSizeDescriptor?) {
+    guard let descriptor else {
+      defaults.removeObject(forKey: key("storedSyntheticSize"))
+      return
+    }
+    guard let data = try? JSONEncoder().encode(descriptor) else { return }
+    defaults.set(data, forKey: key("storedSyntheticSize"))
+  }
+
+  /// SO22: whether ANYTHING has ever been stored for this display — prefs,
+  /// saved levels, tuning. Every per-display key ends `".<persistenceKey>"`
+  /// (this type's `key`/`commandKey`, the brightness/volume/contrast stores'
+  /// `"<name>.<pk>"` storage keys), so an empty answer means the domain is
+  /// genuinely fresh, which is what distinguishes "first time seeing this
+  /// display" from "its settings failed to restore". A suffix scan, not a
+  /// prefix: the persistence key is the TAIL of every stored key.
+  public static func hasAnyStoredValue(
+    forKey persistenceKey: String, defaults: UserDefaults = .standard
+  ) -> Bool {
+    let suffix = ".\(persistenceKey)"
+    return defaults.dictionaryRepresentation().keys.contains { $0.hasSuffix(suffix) }
   }
 
   private func clampSwitchingPoint(_ point: Int) -> Int {

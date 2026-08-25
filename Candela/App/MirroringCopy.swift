@@ -32,8 +32,8 @@ enum MirroringCopy {
 
   // MARK: - Refusals
   //
-  // `MirrorRefusal` has SEVEN cases and each gets its own sentence here. They
-  // are seven cases precisely because one of them used to carry three meanings,
+  // `MirrorRefusal` has EIGHT cases and each gets its own sentence here.
+  // Several exist precisely because one case used to carry three meanings,
   // one of which was false — telling someone who has just named a perfectly good
   // master that "no display can be the mirror master" is not a rounding error,
   // it is a wrong statement about their machine. A `default:` arm anywhere that
@@ -66,7 +66,14 @@ enum MirroringCopy {
   /// `.nothingToMirror`. The named master is fine; there is nothing that can
   /// join it.
   static var nothingToMirror: LocalizedStringKey {
-    "No other display can be mirrored onto this one — macOS keeps the rest locked to the displays they are already showing."
+    "No other display can be mirrored onto this one: macOS keeps the rest locked to the displays they are already showing."
+  }
+
+  /// `.alreadyMirrored`. The named master's set already holds everything that
+  /// could join it, so the request needed no work — stated outright rather
+  /// than staged as the all-no-op transaction macOS fails at commit (#56).
+  static var alreadyMirrored: LocalizedStringKey {
+    "Every display that can mirror this one already is."
   }
 
   /// The caption for a display that is ITSELF `isAlwaysInMirrorSet`, and for
@@ -128,7 +135,7 @@ enum MirroringCopy {
   /// One sentence for whichever refusal happened, so every surface makes the
   /// same statement about the same refusal.
   ///
-  /// Returns `Text` rather than `LocalizedStringKey` because one of the seven
+  /// Returns `Text` rather than `LocalizedStringKey` because one of the eight
   /// carries a payload and its sentence is built from it; a second function for
   /// that one case would be the two-spellings problem this file exists to
   /// prevent. `Text` is the type both spellings have in common.
@@ -144,6 +151,7 @@ enum MirroringCopy {
     case .noSuchDisplay: Text(noSuchDisplay)
     case .masterIsAlwaysMirrored: Text(masterIsAlwaysMirrored)
     case .nothingToMirror: Text(nothingToMirror)
+    case .alreadyMirrored: Text(alreadyMirrored)
     case let .setCannotBeBroken(members):
       Text(verbatim: setCannotBeBroken(members: members, name: name))
     case .notInASet: Text(notInASet)
@@ -156,7 +164,9 @@ enum MirroringCopy {
   // speaks on three surfaces and a sentence written in one of them is a sentence
   // the other two cannot reuse and cannot be checked against.
 
-  static var statusLabel: LocalizedStringKey { "Status" }
+  /// The row carries the topic word since Task 13: the control sits inline in
+  /// the hub's Display section, where a bare "Status" would not say of what.
+  static var statusLabel: LocalizedStringKey { "Mirroring" }
   static var pickMaster: LocalizedStringKey { "Show the picture from" }
 
   /// What Start does when nothing on the machine is locked into a set.
@@ -204,7 +214,7 @@ enum MirroringCopy {
   }
 
   static var resolveFailure: LocalizedStringKey {
-    "Mirroring could not be undone. Nothing retries this on its own — try again."
+    "Mirroring could not be undone. Nothing retries this on its own. Try again."
   }
 
   /// A break that LEFT SOMETHING BEHIND.

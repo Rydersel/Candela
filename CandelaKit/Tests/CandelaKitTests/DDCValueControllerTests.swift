@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import CandelaKit
 
@@ -14,11 +15,16 @@ struct DDCValueControllerTests {
     let fake = FakeDDC(readResult: nil) // write-only panel by default (MAG parity)
     let store = PathMemoryStore()
     let controller: DDCValueController
+    /// The display's own VCP 0x8D verdict, as the capabilities probe publishes
+    /// it. A var and not an init constant because the probe lands mid-session
+    /// in the app, and the gate is specified to read it live.
+    var muteWireSupport: VCPSupport = .unknown
 
     init(
       command: DDCCommand, savedValue: Double? = nil,
       writer: (any DDCWriting)? = nil, // e.g. ScriptedDDC for retry/failure tests
       panelIdentity: String? = nil, // only the rebind tests care which panel this is
+      muteWireSupport: VCPSupport = .unknown,
       configure: (DisplayPrefs) -> Void = { _ in }
     ) {
       defaults = InMemoryDefaults()
@@ -30,6 +36,8 @@ struct DDCValueControllerTests {
         writer: writer ?? fake, command: command, prefs: prefs,
         store: store, storageKey: storageKey, panelIdentity: panelIdentity
       )
+      self.muteWireSupport = muteWireSupport
+      controller.setMuteWireSupport { [weak self] in self?.muteWireSupport ?? .unknown }
     }
 
     func drainedWrites() async -> [(command: UInt8, value: UInt16)] {
@@ -46,37 +54,19 @@ struct DDCValueControllerTests {
     private var reads: [(current: UInt16, max: UInt16)?]
     private var writeResults: [Bool]
     private(set) var writes: [(command: UInt8, value: UInt16)] = []
+    /// Fires DURING the nth read rather than between reads (#68, absorbed from
+    /// `HookedScriptedDDC`). That is the whole seam: it lands user input INSIDE
+    /// `refreshFromHardware`'s value loop, which is the F2 mute-generation
+    /// regression pin, and firing between reads would not reach the case.
+    private var hookAfterRead: Int?
+    private var hook: (@Sendable () async -> Void)?
 
-    init(reads: [(current: UInt16, max: UInt16)?] = [], writeResults: [Bool] = []) {
+    init(
+      reads: [(current: UInt16, max: UInt16)?] = [], writeResults: [Bool] = [],
+      hookAfterRead: Int? = nil
+    ) {
       self.reads = reads
       self.writeResults = writeResults
-    }
-
-    func write(command: UInt8, value: UInt16) async -> Bool {
-      writes.append((command, value))
-      return writeResults.isEmpty ? true : writeResults.removeFirst()
-    }
-
-    func read(command _: UInt8) async -> (current: UInt16, max: UInt16)? {
-      readCount += 1
-      return reads.isEmpty ? nil : reads.removeFirst()
-    }
-
-    func recordedWrites() -> [(command: UInt8, value: UInt16)] { writes }
-  }
-
-  /// Scripted reads plus a hook fired DURING a chosen read — the seam that
-  /// lets a test land user input inside `refreshFromHardware`'s value loop
-  /// (the F2 mute-generation regression pin).
-  private actor HookedScriptedDDC: DDCWriting {
-    private(set) var readCount = 0
-    private var reads: [(current: UInt16, max: UInt16)?]
-    private var hookAfterRead: Int
-    private var hook: (@Sendable () async -> Void)?
-    private(set) var writes: [(command: UInt8, value: UInt16)] = []
-
-    init(reads: [(current: UInt16, max: UInt16)?], hookAfterRead: Int) {
-      self.reads = reads
       self.hookAfterRead = hookAfterRead
     }
 
@@ -84,7 +74,7 @@ struct DDCValueControllerTests {
 
     func write(command: UInt8, value: UInt16) async -> Bool {
       writes.append((command, value))
-      return true
+      return writeResults.isEmpty ? true : writeResults.removeFirst()
     }
 
     func read(command _: UInt8) async -> (current: UInt16, max: UInt16)? {
@@ -346,6 +336,256 @@ struct DDCValueControllerTests {
     #expect(writes.last?.value == 50)
   }
 
+  // MARK: - The display's own denial of VCP 0x8D (D24, one register over)
+
+  @Test func dragToZeroOnADisplayThatDeniesTheMuteCommandWritesNoMuteWire() async {
+    // The whole defect: the mute companion wrote 0x8D on the value-crossing
+    // path with no verdict consulted, so a display that lists no 0x8D got a
+    // write it refuses, a persisted mute, and a muted HUD for silence nobody
+    // achieved.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unsupported
+    ) { $0.enableMuteUnmute = true }
+    harness.controller.setValue(0)
+    let writes = await harness.drainedWrites()
+    #expect(!writes.contains { $0.command == VCP.audioMuteScreenBlank })
+    // Degraded, not suppressed: the silence lands on the register the display
+    // does advertise, which is also the one the drag pointed at.
+    #expect(writes.count == 1)
+    #expect(writes.first?.command == VCP.audioSpeakerVolume)
+    #expect(writes.first?.value == 0)
+    #expect(harness.controller.isMuted) // D3: the logical flag persists either way
+    #expect(harness.prefs.muted)
+  }
+
+  @Test func steppingDownToZeroUnderTheDenialDegradesToTheVolumeRegister() async {
+    let harness = Harness(
+      command: .volume, savedValue: 1.0 / 16.0, muteWireSupport: .unsupported
+    ) { $0.enableMuteUnmute = true }
+    _ = harness.controller.step(isUp: false, isFine: false)
+    #expect(harness.controller.isMuted)
+    let writes = await harness.drainedWrites()
+    #expect(!writes.contains { $0.command == VCP.audioMuteScreenBlank })
+    #expect(writes.last?.command == VCP.audioSpeakerVolume)
+    #expect(writes.last?.value == 0)
+  }
+
+  @Test func theMuteToggleDegradesToVolumeZeroWhereTheCommandIsDenied() async {
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unsupported
+    ) { $0.enableMuteUnmute = true }
+    #expect(harness.controller.toggleMute(isFresh: true))
+    let writes = await harness.drainedWrites()
+    #expect(!writes.contains { $0.command == VCP.audioMuteScreenBlank })
+    #expect(writes.last?.command == VCP.audioSpeakerVolume)
+    #expect(writes.last?.value == 0)
+    #expect(harness.controller.value == 0.5) // stored level survives, as in the default strategy
+  }
+
+  @Test func unmutingIsNeverGatedByTheDisplaysDenial() async {
+    // D29 rule 3, and the reason the gate is one-directional: the verdict can
+    // arrive AFTER a 0x8D mute was sent under `.unknown`, so the route back
+    // must not consult it. Both unmute routes are checked, the toggle and the
+    // value crossing.
+    let toggled = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unsupported
+    ) { prefs in
+      prefs.enableMuteUnmute = true
+      prefs.muted = true
+    }
+    #expect(toggled.controller.toggleMute(isFresh: true) == false)
+    let toggleWrites = await toggled.drainedWrites()
+    #expect(toggleWrites.contains { $0.command == VCP.audioMuteScreenBlank && $0.value == 2 })
+
+    let raised = Harness(
+      command: .volume, savedValue: 0.0, muteWireSupport: .unsupported
+    ) { prefs in
+      prefs.enableMuteUnmute = true
+      prefs.muted = true
+    }
+    raised.controller.setValue(0.5)
+    let raiseWrites = await raised.drainedWrites()
+    #expect(raiseWrites.contains { $0.command == VCP.audioMuteScreenBlank && $0.value == 2 })
+    #expect(raiseWrites.contains { $0.command == VCP.audioSpeakerVolume && $0.value == 50 })
+  }
+
+  @Test func restoreOfAMutedDisplayUnderTheDenialReassertsTheVolumeRegister() async {
+    // The startup/wake half of the same defect. The dedicated-strategy restore
+    // deliberately writes ONLY the mute wire and skips the value, which is
+    // licensed by that wire carrying the silence. Where the display denies it,
+    // the skip would leave the app's mute standing over a register it never
+    // wrote and never restored.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unsupported
+    ) { prefs in
+      prefs.enableMuteUnmute = true
+      prefs.muted = true
+    }
+    harness.controller.restoreToHardware()
+    let writes = await harness.drainedWrites()
+    #expect(!writes.contains { $0.command == VCP.audioMuteScreenBlank && $0.value == 1 })
+    #expect(writes.last?.command == VCP.audioSpeakerVolume)
+    #expect(writes.last?.value == 0)
+  }
+
+  @Test func theUnmutedRestoreSendsWireTwoEvenWhereTheRegisterIsDenied() async {
+    // The load-bearing unmute after the launch window: an unmuted display's
+    // restore is what clears a 0x8D mute sent before the verdict landed, so
+    // this wire must not learn about the verdict. Gating it passes every other
+    // test in this file, which is why it has one of its own.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unsupported
+    ) { $0.enableMuteUnmute = true }
+    harness.controller.restoreToHardware()
+    let writes = await harness.drainedWrites()
+    #expect(writes.contains { $0.command == VCP.audioMuteScreenBlank && $0.value == 2 })
+    #expect(writes.contains { $0.command == VCP.audioSpeakerVolume && $0.value == 50 })
+  }
+
+  // MARK: - The verdict landing after the restore that assumed one
+
+  @Test func arestoreThatAssumedTheMuteCommandIsRedoneWhenTheDenialLands() async {
+    // The launch window: the capabilities probe is asynchronous, and the
+    // restore pass is dispatched from the same turn that finishes the refresh,
+    // so the verdict is always absent when a muted display is restored.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unknown
+    ) { prefs in
+      prefs.enableMuteUnmute = true
+      prefs.muted = true
+    }
+    harness.controller.restoreToHardware()
+    let assumed = await harness.drainedWrites()
+    #expect(assumed.count == 1)
+    #expect(assumed.first?.command == VCP.audioMuteScreenBlank) // the wrong register, unavoidably
+
+    harness.muteWireSupport = .unsupported // the probe lands
+    #expect(harness.controller.restoreIfMuteStrategyChanged())
+    let corrected = await harness.drainedWrites()
+    #expect(corrected.last?.command == VCP.audioSpeakerVolume)
+    #expect(corrected.last?.value == 0) // the silence now lands somewhere
+  }
+
+  @Test func averdictThatChangesNothingRedoesNothing() async {
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unknown
+    ) { prefs in
+      prefs.enableMuteUnmute = true
+      prefs.muted = true
+    }
+    harness.controller.restoreToHardware()
+    let assumed = await harness.drainedWrites()
+    harness.muteWireSupport = .supported // the display confirms the assumption
+    #expect(harness.controller.restoreIfMuteStrategyChanged() == false)
+    #expect((await harness.drainedWrites()).count == assumed.count)
+  }
+
+  @Test func aredoNeedsARestoreToHaveHappened() async {
+    // Nothing was restored (`startupAction` is not `.write`, or this display
+    // was never touched), so there is no assumption to supersede.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unknown
+    ) { prefs in
+      prefs.enableMuteUnmute = true
+      prefs.muted = true
+    }
+    harness.muteWireSupport = .unsupported
+    #expect(harness.controller.restoreIfMuteStrategyChanged() == false)
+    #expect((await harness.drainedWrites()).isEmpty)
+  }
+
+  @Test func anUnmutedDisplayHasNoRestoreToRedo() async {
+    // The unmuted restore writes the value and the ungated wire 2, neither of
+    // which the verdict decides, so a late answer supersedes nothing.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unknown
+    ) { $0.enableMuteUnmute = true }
+    harness.controller.restoreToHardware()
+    let restored = await harness.drainedWrites()
+    harness.muteWireSupport = .unsupported
+    #expect(harness.controller.restoreIfMuteStrategyChanged() == false)
+    #expect((await harness.drainedWrites()).count == restored.count)
+  }
+
+  @Test func arebindDropsTheAssumptionWithTheRestOfTheServiceState() async {
+    // The record names a restore issued over a service the rebind just
+    // replaced, so it goes with the memos and the last-submitted targets. The
+    // pass that rebinds runs its own restore, which records it again.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unknown
+    ) { prefs in
+      prefs.enableMuteUnmute = true
+      prefs.muted = true
+    }
+    harness.controller.restoreToHardware()
+    _ = await harness.drainedWrites()
+    harness.controller.rebind(writer: harness.fake, panelIdentity: "other")
+    harness.muteWireSupport = .unsupported
+    #expect(harness.controller.restoreIfMuteStrategyChanged() == false)
+  }
+
+  @Test func theMuteReadbackIsSkippedWhereTheDisplayDeniesTheRegister() async {
+    // Reading 0x8D on a display that lists no 0x8D and adopting the answer
+    // would record a mute state nothing ever wrote. One read happens (the
+    // value read); the mute loop never runs.
+    let scripted = ScriptedDDC(reads: [(current: 50, max: 100), (current: 1, max: 2)])
+    let harness = Harness(
+      command: .volume, savedValue: 0.25, writer: scripted, muteWireSupport: .unsupported
+    ) { prefs in
+      prefs.enableMuteUnmute = true
+      prefs.startupAction = .read
+    }
+    await harness.controller.refreshFromHardware()
+    #expect(harness.controller.value == 0.5) // the value read still lands
+    #expect(harness.controller.isMuted == false)
+    #expect(await scripted.readCount == 1)
+  }
+
+  @Test func anUnknownVerdictStillSendsTheDisplaysMuteCommand() async {
+    // D24's other half: no evidence allows. The MAG answers every read with
+    // zeros, so its verdict is permanently `.unknown` and its mute must be
+    // untouched by this gate.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unknown
+    ) { $0.enableMuteUnmute = true }
+    harness.controller.setValue(0)
+    let writes = await harness.drainedWrites()
+    #expect(writes.count == 1)
+    #expect(writes.first?.command == VCP.audioMuteScreenBlank)
+    #expect(writes.first?.value == 1)
+  }
+
+  @Test func theUserOverrideOutranksTheDisplaysDenial() async {
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unsupported
+    ) { prefs in
+      prefs.enableMuteUnmute = true
+      prefs.audioSinkOverride = .forcePresent
+    }
+    harness.controller.setValue(0)
+    let writes = await harness.drainedWrites()
+    #expect(writes.contains { $0.command == VCP.audioMuteScreenBlank && $0.value == 1 })
+  }
+
+  @Test func aVerdictLandingMidSessionDecidesTheNextMute() async {
+    // The capabilities probe is asynchronous and lands after the controller
+    // exists, so the gate reads it at write time rather than at construction.
+    let harness = Harness(
+      command: .volume, savedValue: 0.5, muteWireSupport: .unknown
+    ) { $0.enableMuteUnmute = true }
+    harness.controller.setValue(0)
+    #expect((await harness.drainedWrites()).contains {
+      $0.command == VCP.audioMuteScreenBlank && $0.value == 1
+    })
+    harness.controller.setValue(0.5) // back up, so the next drag re-crosses
+    _ = await harness.drainedWrites()
+    harness.muteWireSupport = .unsupported // the probe lands
+    harness.controller.setValue(0)
+    let writes = await harness.drainedWrites()
+    #expect(writes.last?.command == VCP.audioSpeakerVolume)
+    #expect(writes.last?.value == 0)
+  }
+
   // MARK: - Cross-coalescer isolation (test-design F3 — D1's core claim)
 
   @Test func volumeAndContrastControllersNeverCrossSuppress() async {
@@ -453,7 +693,7 @@ struct DDCValueControllerTests {
     // mute as newer and bail. Sink the capture below the value loop and the
     // capture already includes the bump — the readback's (current: 2) then
     // clobbers the fresh mute back to unmuted and this test goes red.
-    let scripted = HookedScriptedDDC(
+    let scripted = ScriptedDDC(
       reads: [(current: 50, max: 100), (current: 2, max: 2)], // value read, then 0x8D says "unmuted"
       hookAfterRead: 1
     )
@@ -713,5 +953,120 @@ struct DDCValueControllerTests {
     await harness.fake.setReadResult(nil) // the bus goes quiet: every try returns nil
     await harness.controller.refreshFromHardware()
     #expect(harness.controller.readEvidence == .noReply)
+  }
+
+  // MARK: - The mute queue's own drain (the register the strand is about)
+
+  /// The value register and the mute register ride separate coalescers, and only
+  /// the second carries 0x8D. A drain that reported the value queue's health
+  /// would be certifying the wrong register, so the mute queue gets its own
+  /// skip-and-retry, pinned here.
+  @Test func aMuteWireTheEpochGateSkippedIsNotReportedAsLanded() async {
+    let defaults = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+    prefs.enableMuteUnmute = true
+    prefs.muted = true
+    let fake = FakeDDC(readResult: nil)
+    let volume = DDCValueController(writer: fake, command: .volume, prefs: prefs)
+    let gateOpen = OSAllocatedUnfairLock(initialState: false)
+    volume.setEpochProvider({ 1 }, isCurrent: { _ in gateOpen.withLock { $0 } })
+
+    _ = volume.toggleMute() // the unmute a reset sends: 0x8D = 2
+
+    #expect(await volume.drainPendingWrites() == false, "skipped is not applied")
+    let duringGate = await fake.recordedWrites()
+    #expect(
+      !duringGate.contains { $0.command == VCP.audioMuteScreenBlank },
+      "and nothing reached the mute register"
+    )
+
+    gateOpen.withLock { $0 = true }
+
+    #expect(await volume.drainPendingWrites(), "the re-submit lands once the gate opens")
+    let afterGate = await fake.recordedWrites()
+    #expect(
+      afterGate.contains { $0.command == VCP.audioMuteScreenBlank && $0.value == 2 },
+      "and it is the unmute wire value, not the volume register"
+    )
+  }
+
+  /// The memo says a value is already in the register, so the queue skips the
+  /// write and the drain counts it as landed. That holds only if the memo
+  /// describes a register the panel was really taking writes into: under HDR an
+  /// I2C write is acknowledged and swallowed, so a memo built through an HDR
+  /// window records values that never arrived, and the skip would then certify
+  /// the reset's own unmute. Dropping the memo is what re-opens the wire.
+  @Test func aMemoDroppedOnTheHDRExitLetsTheSameRawGoOutAgain() async {
+    let defaults = InMemoryDefaults()
+    let prefs = DisplayPrefs(defaults: defaults, persistenceKey: "pk")
+    let fake = FakeDDC(readResult: nil)
+    let volume = DDCValueController(writer: fake, command: .volume, prefs: prefs)
+
+    // Stands in for a write the display ACKed while it was in HDR: recorded in
+    // the memo as though it had landed, when the panel swallowed it. Two
+    // published values that scale to the SAME raw, because that is what the
+    // memo compares and therefore what it can suppress.
+    volume.setValue(0.301)
+    await volume.waitForPendingWrites()
+    let before = await fake.recordedWrites().count
+
+    volume.resetWriteMemo()
+    volume.setValue(0.304) // raw 30 again
+    #expect(await volume.drainPendingWrites())
+
+    let after = await fake.recordedWrites()
+    #expect(after.count == before + 1, "the write went out rather than being skipped")
+    #expect(after.last?.value == 30)
+  }
+
+  // MARK: - reassertHardware (the settings reset's door)
+
+  /// The post-reset shape: a wiped store, so the controller republishes the
+  /// assumed default and `restoreToHardware` would refuse to send it (no saved
+  /// value) while `setValue(0.75)` would return before the submit (unchanged).
+  @Test func reassertSendsTheAssumedContrastDefaultOverAnEmptyStore() async {
+    let h = Harness(command: .contrast) // no savedValue: the domain was wiped
+    #expect(h.controller.value == 0.75)
+
+    h.controller.reassertHardware()
+
+    let writes = await h.drainedWrites()
+    #expect(writes.count == 1)
+    #expect(writes.last?.value == 75)
+  }
+
+  @Test func reassertSendsTheAssumedVolumeDefaultOverAnEmptyStore() async {
+    let h = Harness(command: .volume)
+    #expect(h.controller.value == 0.125)
+
+    h.controller.reassertHardware()
+
+    let writes = await h.drainedWrites()
+    #expect(writes.count == 1)
+    // Non-zero is the load-bearing half: a volume the reset drove to 0 would
+    // hardware-mute the display, which is the strand D29 rule 4 forbids.
+    #expect((writes.last?.value ?? 0) > 0)
+  }
+
+  /// D29 rule 1, in the register the reset carries across its own wipe: a
+  /// display whose unmute could not be confirmed is put back muted, and this
+  /// door must not then write a level over the silence.
+  @Test func reassertNeverDrivesAMutedDisplaysVolume() async {
+    let h = Harness(command: .volume) { prefs in prefs.muted = true }
+    #expect(h.controller.isMuted)
+
+    h.controller.reassertHardware()
+
+    #expect(await h.drainedWrites().isEmpty)
+  }
+
+  /// The one choke point every other door guards on: a display the user has
+  /// taken off the DDC wire gets no traffic from the reset either.
+  @Test func reassertRespectsTheUnavailableGate() async {
+    let h = Harness(command: .contrast) { prefs in prefs.forceSoftware = true }
+
+    h.controller.reassertHardware()
+
+    #expect(await h.drainedWrites().isEmpty)
   }
 }

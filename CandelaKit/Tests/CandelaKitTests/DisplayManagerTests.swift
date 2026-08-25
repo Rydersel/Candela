@@ -3,10 +3,30 @@ import os
 import Testing
 @testable import CandelaKit
 
-// Test debounce: 50 ms quiet window (the brief's suggested short window);
-// assertions that require the window to have elapsed wait 5× that.
+// Test debounce: 50 ms quiet window (the brief's suggested short window).
+// `settle` is used ONLY where elapsed time IS the assertion — absence checks
+// and duplicate-emission confirm windows. Arrival is awaited via `settled`,
+// never a fixed sleep: the debounce fire and the counter's consumer are both
+// detached tasks, and under full-suite load neither is guaranteed a slice
+// inside any fixed wall-clock window (#114).
 private let testDebounce: Duration = .milliseconds(50)
 private let settle: Duration = .milliseconds(250)
+
+/// Polls until `condition` holds; returns whether it did before `deadline`.
+/// The deadline only bounds a genuinely broken run — a correct run exits at
+/// the first true poll, so generosity here costs passing runs nothing.
+private func settled(
+  within deadline: Duration = .seconds(10),
+  _ condition: () -> Bool
+) async -> Bool {
+  let clock = ContinuousClock()
+  let end = clock.now.advanced(by: deadline)
+  while !condition() {
+    guard clock.now < end else { return condition() }
+    try? await Task.sleep(for: .milliseconds(5))
+  }
+  return true
+}
 
 /// Background consumer counting topology elements, so tests can assert
 /// "exactly one" / "none" without racing an iterator against a timeout.
@@ -68,6 +88,12 @@ private final class TopologyCounter: Sendable {
   #expect(manager.isEpochCurrent(5) == false) // suspended during the burst
   #expect(manager.isEpochCurrent(manager.currentEpoch()) == false)
 
+  // Await the quiet transition itself, not a wall-clock guess.
+  #expect(await settled { manager.isEpochCurrent(5) && counter.elements == 1 })
+  // "Exactly one" needs a further quiet window: only elapsed time can rule
+  // out a duplicate emission. Benign failure direction — a slow machine can
+  // delay a duplicate past the window (spurious pass), never fail a correct
+  // coalescer.
   try? await Task.sleep(for: settle)
   #expect(counter.elements == 1) // the burst debounced to ONE downstream signal
   #expect(manager.currentEpoch() == 5)
@@ -86,9 +112,10 @@ private final class TopologyCounter: Sendable {
   for _ in 1 ... 3 {
     manager._simulateReconfigureEvent()
   }
-  try? await Task.sleep(for: settle)
-  #expect(manager.isEpochCurrent(captured) == false) // stale forever
-  #expect(manager.isEpochCurrent(manager.currentEpoch())) // but the live epoch is current
+  #expect(manager.isEpochCurrent(captured) == false) // stale from the first event
+  // The live epoch becomes current at quiet — await the transition (#114).
+  #expect(await settled { manager.isEpochCurrent(manager.currentEpoch()) })
+  #expect(manager.isEpochCurrent(captured) == false) // and stale forever after it
 }
 
 // MARK: - Sleep / wake
@@ -105,6 +132,10 @@ private final class TopologyCounter: Sendable {
   #expect(manager.currentEpoch() == 1) // synchronous bump
   #expect(manager.isEpochCurrent(1) == false) // suspended
 
+  // Absence cannot be polled — there is no event to wait for, so this stays
+  // a real elapsed wait (5× the debounce window). Its failure direction is
+  // the acceptable one: a machine slow enough to starve a wrongful emission
+  // past the window makes this pass spuriously; it can never fail spuriously.
   try? await Task.sleep(for: settle)
   #expect(counter.elements == 0) // no element, even after the debounce window
   #expect(manager.isEpochCurrent(1) == false) // still suspended: only a wake clears it
@@ -125,6 +156,10 @@ private final class TopologyCounter: Sendable {
   #expect(manager.isEpochCurrent(manager.currentEpoch()) == false)
   #expect(counter.elements == 0)
 
+  // Await the wake fire (bump + emit), then hold a quiet window to pin
+  // "exactly one" — same shape and same benign failure direction as the
+  // burst test above.
+  #expect(await settled { manager.isEpochCurrent(2) && counter.elements == 1 })
   try? await Task.sleep(for: settle)
   #expect(counter.elements == 1) // one element once sober
   #expect(manager.currentEpoch() == 2) // wake fire bumps: pre-sleep epochs stay stale

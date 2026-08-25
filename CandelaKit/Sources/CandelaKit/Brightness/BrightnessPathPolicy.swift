@@ -70,6 +70,27 @@ public enum BrightnessPath: Sendable, Equatable {
   case unavailable(BrightnessPathBlock)
 }
 
+public extension BrightnessPath {
+  /// Whether this path puts the display's brightness REGISTER under Candela's
+  /// control. Read it as a question about the wire, not about the slider: a
+  /// path can move the display (the software leg does) and still answer false.
+  ///
+  /// The false answers are what matter, and #143 is why they are worth naming.
+  /// Software dimming can only ever subtract from whatever the panel is already
+  /// emitting, so it assumes a register at full range. A path that stops
+  /// driving the register therefore inherits wherever the previous path left
+  /// it, and combined mode leaves it at the hardware floor for every value
+  /// below the switching point: the app then reports 100% over a panel at its
+  /// minimum backlight, with the gamma table already at 1.0 and nothing left to
+  /// brighten with.
+  var drivesDDCBrightness: Bool {
+    switch self {
+    case .combined, .hardware: true
+    case .native, .software, .softwareOnly, .unavailable: false
+    }
+  }
+}
+
 /// The four-branch path table from `BrightnessController.applyPaths`, stated
 /// ONCE, in the Kit, under test.
 ///
@@ -81,7 +102,6 @@ public enum BrightnessPath: Sendable, Equatable {
 public enum BrightnessPathPolicy {
   public struct Inputs: Sendable, Equatable {
     public let role: DisplayRole
-    public let hdrMode: HDRMode
     public let isHDRActive: Bool
     public let forceSoftware: Bool
     public let avoidGamma: Bool
@@ -93,7 +113,6 @@ public enum BrightnessPathPolicy {
 
     public init(
       role: DisplayRole,
-      hdrMode: HDRMode,
       isHDRActive: Bool,
       forceSoftware: Bool,
       avoidGamma: Bool,
@@ -102,7 +121,6 @@ public enum BrightnessPathPolicy {
       switchingValue: Double
     ) {
       self.role = role
-      self.hdrMode = hdrMode
       self.isHDRActive = isHDRActive
       self.forceSoftware = forceSoftware
       self.avoidGamma = avoidGamma
@@ -137,7 +155,7 @@ public enum BrightnessPathPolicy {
   /// hardware branch always wins — so nothing moves at all and the honest
   /// answer is the block, not a leg advertised as dimming below 0%.
   public static func path(_ inputs: Inputs) -> BrightnessPath {
-    if usesNative(role: inputs.role, hdrMode: inputs.hdrMode, isHDRActive: inputs.isHDRActive) {
+    if usesNative(role: inputs.role, isHDRActive: inputs.isHDRActive) {
       return .native
     }
     let backend: SoftwareDimmingBackend = inputs.avoidGamma ? .overlay : .gamma
@@ -164,13 +182,14 @@ public enum BrightnessPathPolicy {
   /// The native predicate on its own, for the hot paths that need it without
   /// building an `Inputs`.
   ///
-  /// `&& isHDRActive` is empirically load-bearing: with HDR off the MAG341C
-  /// answers `DisplayServicesSetBrightness` with SUCCESS and changes nothing,
-  /// so native must never be routed on the MODE alone. Role `.builtIn` is
+  /// Live HDR is the condition; Candela's own HDR *mode* is deliberately not
+  /// an input, and both directions of that were paid for. With HDR off the
+  /// MAG341C answers `DisplayServicesSetBrightness` with SUCCESS and changes
+  /// nothing, so a mode alone must never route native. And System Settings can
+  /// engage HDR with our mode still `.off` — where DDC writes cannot land — so
+  /// live HDR must route native whoever turned it on (#52). Role `.builtIn` is
   /// constitutively native — no DDC wire, no combined/software routing.
-  public static func usesNative(
-    role: DisplayRole, hdrMode: HDRMode, isHDRActive: Bool
-  ) -> Bool {
-    role == .builtIn || (hdrMode != .off && isHDRActive)
+  public static func usesNative(role: DisplayRole, isHDRActive: Bool) -> Bool {
+    role == .builtIn || isHDRActive
   }
 }

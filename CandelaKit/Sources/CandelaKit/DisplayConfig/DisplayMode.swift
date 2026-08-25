@@ -1,5 +1,25 @@
 import Foundation
 
+/// Where this mode came from.
+///
+/// CoreGraphics and CGS share ONE mode-ID space (measured 2026-08-06 across
+/// three panels, 0 IDs absent, S6 §4), so those two are not a second identity,
+/// only a routing tag. It deliberately does NOT reach `DisplayModeDescriptor`:
+/// the persisted form stays geometry-keyed so a mode that migrates between the
+/// two sources across an OS update still re-finds (CR3).
+public enum ModeProvenance: Sendable, Equatable, Hashable {
+  /// `CGDisplayCopyAllDisplayModes`, applied with `CGConfigureDisplayWithDisplayMode`.
+  case coreGraphics
+  /// Revealed from the CGS mode list, applied with `CGSConfigureDisplayMode`.
+  case coreGraphicsServices
+  /// Not from any enumeration: a size Candela renders by mirroring the panel
+  /// onto a virtual display (SS5). It shares no ID space with the other two,
+  /// so its `ioModeID` is a sentinel from `DisplayMode.syntheticIoModeID` that
+  /// is never handed to CoreGraphics or CGS, and applying it is the
+  /// `ModeSynthesisEngine`'s job rather than a configuration transaction's.
+  case synthesized
+}
+
 /// One mode a display can run in.
 ///
 /// `ioModeID` is a RUNTIME handle only — it is not stable across replug, so it
@@ -15,11 +35,15 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
   public let refreshHz: Double
   /// `kDisplayModeNativeFlag` — the panel's own timing.
   public let isNative: Bool
+  /// Where this mode came from, and therefore what applies it: one of the two
+  /// enumerations and its matching call, or synthesis, which no configurator
+  /// call applies at all.
+  public let provenance: ModeProvenance
 
   public init(
     ioModeID: Int32, logicalWidth: Int, logicalHeight: Int,
     pixelWidth: Int, pixelHeight: Int, refreshHz: Double,
-    isNative: Bool
+    isNative: Bool, provenance: ModeProvenance = .coreGraphics
   ) {
     self.ioModeID = ioModeID
     self.logicalWidth = logicalWidth
@@ -28,6 +52,7 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
     self.pixelHeight = pixelHeight
     self.refreshHz = refreshHz
     self.isNative = isNative
+    self.provenance = provenance
   }
 
   public var id: Int32 { ioModeID }
@@ -43,6 +68,44 @@ public struct DisplayMode: Sendable, Equatable, Identifiable, Hashable {
   }
 
   public var isHiDPI: Bool { logicalWidth > 0 && pixelWidth >= logicalWidth * 2 }
+
+  /// This option exists because our own enumeration found it, not because the
+  /// public one listed it. The pickers mark these rows.
+  ///
+  /// Reads the recorded provenance and nothing else. Sharpness is not
+  /// provenance: `kCGDisplayShowDuplicateLowResolutionModes` puts HiDPI modes
+  /// INTO the CoreGraphics list, so a flag derived by diffing the two
+  /// enumerations is a synonym for `!isHiDPI`, which was built once and removed
+  /// for exactly that reason.
+  ///
+  /// Switched rather than compared so a third source cannot be added without
+  /// deciding whether the pickers mark it, and with which words. Synthesis was
+  /// that third source: it gets its own badge, so this stays true for the
+  /// revealed rows alone.
+  public var isRevealed: Bool {
+    switch provenance {
+    case .coreGraphics: false
+    case .coreGraphicsServices: true
+    case .synthesized: false
+    }
+  }
+
+  /// A size Candela renders rather than one the panel offers (SS5). Distinct
+  /// from `isRevealed` in both mechanism and badge copy.
+  public var isSynthesized: Bool {
+    switch provenance {
+    case .coreGraphics, .coreGraphicsServices: false
+    case .synthesized: true
+    }
+  }
+
+  /// The sentinel `ioModeID` for the stop at `stopIndex` in the synthetic
+  /// catalog. Negative because no real `IODisplayModeID` is, so a sentinel that
+  /// leaks into a CoreGraphics or CGS call fails loudly instead of landing on
+  /// somebody else's mode.
+  public static func syntheticIoModeID(stopIndex: Int) -> Int32 {
+    Int32(-(1000 + stopIndex))
+  }
 
   /// A scaled mode renders oversized and downsamples. The comparison is
   /// against the PANEL's native pixel count — taken from the mode flagged
@@ -108,3 +171,30 @@ extension LogicalGeometry {
 
 extension DisplayMode: LogicalGeometry {}
 extension DisplayModeDescriptor: LogicalGeometry {}
+
+public extension DisplayMode {
+  /// Whether two modes denote the same GEOMETRY: both size pairs, and the
+  /// refresh rate within tolerance.
+  ///
+  /// Spelled out twice before (#68), in `ModeReapplyPolicy`'s already-running
+  /// test and in the apply cross-check. Those two answer different questions and
+  /// must stay where they are; the predicate underneath them is one rule.
+  ///
+  /// Never `ioModeID`, and never `==`. The ID is a positional handle that is
+  /// reassigned across reconfiguration, so two equal IDs are not evidence of the
+  /// same mode and two different IDs are not evidence of different ones.
+  ///
+  /// `isNative` is deliberately excluded: it is a fact about the panel rather
+  /// than part of a mode's identity, and folding it in would make the apply
+  /// cross-check reject a mode it had just correctly resolved.
+  ///
+  /// Refresh carries the usual tolerance. CoreGraphics reports 59.997, and an
+  /// exact comparison would decide a display is never already where it is.
+  func matchesGeometry(of other: DisplayMode) -> Bool {
+    logicalWidth == other.logicalWidth
+      && logicalHeight == other.logicalHeight
+      && pixelWidth == other.pixelWidth
+      && pixelHeight == other.pixelHeight
+      && ModePersistence.refreshMatches(refreshHz, other.refreshHz)
+  }
+}

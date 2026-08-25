@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Candela's Sparkle feed. The URL https://candela.fyi/appcast.xml is baked
+     into every shipped binary and must never move; this file lives in
+     site/public/ so every site deploy carries it to that path. New releases:
+     scripts/appcast.sh prints the signed <item> to add here, newest first. -->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Candela Updates</title>
+    <link>https://candela.fyi/appcast.xml</link>
+    <description>Update feed for Candela.</description>
+    <language>en</language>
+    <item>
+      <title>Version 0.1.0</title>
+      <pubDate>Tue, 25 Aug 2026 16:10:31 +0000</pubDate>
+      <sparkle:version>3</sparkle:version>
+      <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure
+        url="https://candela.fyi/Candela-0.1.0.zip"
+        sparkle:edSignature="fmXi0GPoXqayPmaVZ9glq5BnFGMhvtkXyCakERGFU37DYbsrFawj6v87BY3ydqynFU4A1hD0FgKoWnt3RAccDg==" length="4682448"
+        type="application/octet-stream"/>
+    </item>
+  </channel>
+</rss>

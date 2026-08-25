@@ -95,6 +95,29 @@ struct DisplayReconfigurationGateTests {
     #expect(await gate.holder == .arrangement)
   }
 
+  /// **That re-entrant grant does NOT nest, and two operations sharing one
+  /// claimant have to be written knowing it.** A single release frees the gate
+  /// however many times it was claimed, so an operation that claims, finishes
+  /// and releases hands back a claim another operation of the same claimant is
+  /// still relying on.
+  ///
+  /// Synthesized sizes made this live rather than theoretical: `.displayModes`
+  /// now covers the mode picker AND the synthesis engine, whose engage and
+  /// disengage run for tens of seconds and whose preview stands for thirty more.
+  /// The app's answer is ONE releasing funnel per claimant, releasing only when
+  /// nothing that claimant owns is outstanding. This is the property that makes
+  /// that mandatory rather than merely tidy.
+  @Test func aSecondClaimByTheSameClaimantDoesNotNest() async {
+    let gate = DisplayReconfigurationGate()
+    #expect(await gate.claim(.displayModes) == .granted)
+    #expect(await gate.claim(.displayModes) == .granted)
+
+    await gate.release(.displayModes)
+
+    #expect(await gate.holder == nil)
+    #expect(await gate.claim(.arrangement) == .granted)
+  }
+
   /// The fail-open case. A release that did not check who is holding would hand
   /// the gate to whoever calls it next, which is the interleave the gate exists
   /// to prevent — and it would do it with every surface still reporting success.

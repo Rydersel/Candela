@@ -1,11 +1,11 @@
 //  Copyright © MonitorControl. @JoniVR, @theOneyouseek, @waydabber and others
 //  Based on MediaKeyTap by Nicholas Hurden (MIT)
 
-import AppKit
 // @preconcurrency: same mutable-C-global import quirk as AccessibilityPermission.
 @preconcurrency import ApplicationServices
 import CandelaKit
 import CoreGraphics
+import Foundation
 import os
 
 /// CGEventTap island that intercepts brightness/volume media keys and the
@@ -32,6 +32,11 @@ import os
 ///   until `tapCreate` returns, after the callback closure is built).
 /// - Only the `Sendable` `MediaKeyPress` escapes the callback; `onPress` is
 ///   invoked on the tap thread and the consumer hops actors itself.
+/// - **No thread this island owns may touch AppKit or HIToolbox**: not the tap
+///   thread, not the prober, not the monitor. None of them is the main queue,
+///   and AppKit entry points reach HIToolbox code that asserts on it. That is
+///   why the island imports no AppKit at all and decodes the system-defined
+///   payload straight off the CGEvent (see `sysDefinedSubtypeField`).
 @MainActor
 final class MediaKeyEventTap {
   struct WatchConfig: Sendable {
@@ -41,7 +46,12 @@ final class MediaKeyEventTap {
     var interceptAlternateBrightnessKeys: Bool
   }
 
-  enum TapError: Error { case creationFailed }
+  enum TapError: Error {
+    case creationFailed
+    /// The private CGEvent field indices the system-defined decode depends on
+    /// did not read back what was written. See `sysDefinedFieldsUsable`.
+    case eventFieldsUnrecognized
+  }
 
   /// #59 watchdog logging. `notice` persists to the unified log by default,
   /// so a post-incident `log show` can reconstruct a wedge without a debug
@@ -111,6 +121,9 @@ final class MediaKeyEventTap {
   /// running.
   func start(config: WatchConfig) throws {
     stop()
+    // Arm nothing if the private field indices moved: an unverified decode
+    // would swallow every aux key on the system, silently.
+    guard Self.sysDefinedFieldsUsable else { throw TapError.eventFieldsUnrecognized }
     configLock.withLock { $0 = config }
 
     // Capture locals, not self: the trampoline lives for the tap thread's
@@ -260,17 +273,33 @@ final class MediaKeyEventTap {
     // release as the process death that recovered the machine each time.
     let prober = Thread {
       Self.watchdogLog.debug("prober started")
+      // The trust check and the self-ping run at DIFFERENT cadences, and the
+      // reason is a measured platform deadline: WindowServer force-times-out a
+      // tap whose owner has lost its Accessibility grant after ~1s, and a wedge
+      // that has already formed is cleared only by process death. A 2s poll
+      // cannot win that race — it samples strictly slower than the deadline it
+      // exists to beat. Trust is therefore sampled every 0.5s.
+      //
+      // The ping stays at 2s. It is a liveness probe for the event pipeline,
+      // not a race against a deadline, and posting it four times as often would
+      // put four times the synthetic traffic through a tap whose whole failure
+      // mode is stalling.
+      let trustPollInterval: TimeInterval = 0.5
+      let pollsPerPing = 4
+      var pollsSinceLastPing = pollsPerPing
       while true {
         let current = watchdogRuntime.withLockUnchecked { $0.port === watchdogPort }
         guard current else { Self.watchdogLog.debug("prober: port gone, exiting"); return }
         // Post the ping only if the previous one arrived — a stuck ping must
         // keep its original timestamp so the monitor's clock runs from the
         // FIRST unanswered post.
-        let shouldPost = heartbeat.withLock { hb -> Bool in
+        let dueForPing = pollsSinceLastPing >= pollsPerPing
+        let shouldPost = dueForPing && heartbeat.withLock { hb -> Bool in
           guard hb.pingPosted == nil else { return false }
           hb.pingPosted = Date()
           return true
         }
+        pollsSinceLastPing = dueForPing ? 1 : pollsSinceLastPing + 1
         if shouldPost {
           // NX_SYSDEFINED with no payload: inside our tap's event mask, so
           // the callback sees and swallows it; inert to the rest of the
@@ -291,13 +320,13 @@ final class MediaKeyEventTap {
         let trusted = AXIsProcessTrustedWithOptions(nil)
         heartbeat.withLock { $0.probing = nil; $0.alive = Date() }
         if !trusted {
-          Self.watchdogLog.notice("grant revoked — tearing down tap")
+          Self.watchdogLog.notice("grant revoked, tearing down tap")
           Self.teardown(watchdogRuntime)
           Self.watchdogLog.notice("teardown complete")
           onEmergencyTeardown?()
           return
         }
-        Thread.sleep(forTimeInterval: 2)
+        Thread.sleep(forTimeInterval: trustPollInterval)
       }
     }
     prober.name = "MediaKeyEventTap.wsProber"
@@ -308,22 +337,43 @@ final class MediaKeyEventTap {
     // block). Ping unanswered > 5 s: pipeline wedged. Probe/AX in flight
     // > 5 s or prober loop silent > 12 s: the prober is stuck in a call.
     // 5 s tolerates the platform's legitimate stalls (mode changes and
-    // rotation block up to ~1.1 s, measured on #11). A system sleep trips
-    // these on wake; `onEmergencyTeardown` re-checks the grant after a settle
-    // delay and rebuilds the tap, so a false fire self-heals.
+    // rotation block up to ~1.1 s, measured on #11). The thresholds and the
+    // decision live in `TapWatchdogVerdict`.
+    //
+    // A system sleep is the one staleness that means nothing: both threads
+    // stop with the machine, and at the next wake (a 2 s dark wake every
+    // ~15 minutes while the lid is closed) the monitor can run first and read
+    // the prober's stamp exactly as old as the sleep. That was a real exit
+    // and relaunch, 87 times in three days, always `proberDead` alone. The
+    // verdict compares the wall clock against the uptime clock, which stops
+    // during sleep, and a tick that straddled a sleep resets the stamps and
+    // decides nothing.
     let monitor = Thread {
       Self.watchdogLog.debug("monitor started")
+      var previousTick = TapWatchdogClock.now()
       while true {
         Thread.sleep(forTimeInterval: 1)
         let current = watchdogRuntime.withLockUnchecked { $0.port === watchdogPort }
         guard current else { Self.watchdogLog.debug("monitor: port gone, exiting"); return }
+        let now = TapWatchdogClock.now()
         let hb = heartbeat.withLock { $0 }
-        let pingLost = hb.pingPosted.map { Date().timeIntervalSince($0) > 5 } ?? false
-        let probeStuck = hb.probing.map { Date().timeIntervalSince($0) > 5 } ?? false
-        let proberDead = Date().timeIntervalSince(hb.alive) > 12
-        if pingLost || probeStuck || proberDead {
+        let outcome = TapWatchdogVerdict.evaluate(
+          sample: .init(pingPosted: hb.pingPosted, probing: hb.probing, alive: hb.alive),
+          previousTick: previousTick, now: now
+        )
+        previousTick = now
+        switch outcome {
+        case .healthy:
+          continue
+        case .sleptAcrossTick(let seconds):
+          Self.watchdogLog.notice(
+            "slept \(Int(seconds)) s across a tick; stamps reset, no verdict"
+          )
+          heartbeat.withLock { $0.pingPosted = nil; $0.probing = nil; $0.alive = now.wall }
+          continue
+        case .wedged(let pingLost, let probeStuck, let proberDead):
           Self.watchdogLog.fault(
-            "EMERGENCY — pingLost=\(pingLost) probeStuck=\(probeStuck) proberDead=\(proberDead)"
+            "EMERGENCY: pingLost=\(pingLost) probeStuck=\(probeStuck) proberDead=\(proberDead)"
           )
           Self.teardown(watchdogRuntime)
           // Invalidating the port is NOT enough once the wedge has formed
@@ -333,8 +383,9 @@ final class MediaKeyEventTap {
           // this investigation. So: spawn a detached relauncher and exit.
           // The relauncher's sleep outlives our death, by which point the
           // pipeline is free again and the app comes back with the banner
-          // showing. A false fire (e.g. a wake edge) costs one app blink.
-          Self.watchdogLog.fault("event pipeline wedged — exiting to clear it; relauncher spawned")
+          // showing. A false fire costs one app blink, which is why the sleep
+          // case above never reaches here.
+          Self.watchdogLog.fault("event pipeline wedged: exiting to clear it; relauncher spawned")
           let relauncher = Process()
           relauncher.executableURL = URL(fileURLWithPath: "/bin/sh")
           relauncher.arguments = [
@@ -386,6 +437,89 @@ final class MediaKeyEventTap {
 
   // MARK: - Tap-thread event handling
 
+  /// PRIVATE API: CGEvent integer field indices 99 and 149 are undocumented.
+  /// They hold an NX_SYSDEFINED event's subtype and its compound `data1`, the
+  /// same two values `NSEvent.subtype` and `NSEvent.data1` expose. The
+  /// tracking issue carries the `private-api` label.
+  ///
+  /// Degradation: if an index goes inert on a future macOS, the
+  /// `sysDefinedFieldsUsable` self-check below disarms interception loudly (a
+  /// `.fault` log, `start` throws, no tap is created) rather than misdecoding.
+  /// That is not a nicety. An inert field reads back 0 with no error, and 0 is
+  /// a valid payload meaning `NX_KEYTYPE_SOUND_UP` released, so without the
+  /// check a shift would silently swallow every aux key on the system.
+  ///
+  /// The check's reach is narrower than "the indices still mean what we think"
+  /// [MEASURED 2026-08-12]: it proves only that each index is still a live
+  /// writable compound slot. Going inert is the dominant failure and is caught,
+  /// but a shift ONTO another live slot is not: probing (99, 150) or
+  /// (100, 149) reports usable, while (98, 149), (99, 148), (97, 151) and
+  /// (250, 999) all disarm. Nothing cheaper closes that gap. A semantic check
+  /// would need `NSEvent`, which is the thing being removed.
+  ///
+  /// [MEASURED 2026-08-12] Subtypes 0...40 plus 100, 110, 134, 200, 202 and
+  /// 210, round-tripped through `NSEvent.otherEvent` and `.cgEvent`: index 99
+  /// is the subtype and index 149 the `data1` in every one of them EXCEPT 6
+  /// and 9, which carry no compound payload at all, so index 149 is neither
+  /// readable nor writable on them. Within that range the no-payload set is
+  /// exactly {6, 9}. Nobody needs to re-measure it.
+  ///
+  /// Why not `NSEvent(cgEvent:)`, which reads both without any of this: it
+  /// looks like a pure data wrapper and is not. On a subtype-8 event it runs
+  /// HIToolbox's caps-lock state machine (`CreateEventWithCGEvent` to
+  /// `TSMSetCapsLockKeyTransitionDetected` to `TSMGetInputSourceProperty`),
+  /// which asserts it is on the main dispatch queue. The tap callback is on
+  /// the tap thread by design, so one Caps Lock press trapped the process in
+  /// `_dispatch_assert_queue_fail`. Nothing mechanical stops someone adding
+  /// `import AppKit` back and reaching for NSEvent here; this comment is the
+  /// only guard.
+  private nonisolated static let sysDefinedSubtypeField = CGEventField(rawValue: 99)!
+  private nonisolated static let sysDefinedData1Field = CGEventField(rawValue: 149)!
+
+  /// The only NX_SYSDEFINED subtype that carries media keys, and the only one
+  /// this tap decodes.
+  private nonisolated static let auxControlSubtype = Int64(NX_SUBTYPE_AUX_CONTROL_BUTTONS)
+
+  /// Write-then-read probe of the two private field indices, run once before
+  /// the first tap is armed.
+  ///
+  /// Why this is safe to run [MEASURED 2026-08-12], because the obvious guess
+  /// is wrong: a bare event retyped to NX_SYSDEFINED ALREADY carries the
+  /// compound payload, with no subtype write at all. Setting the subtype does
+  /// not grant the payload; setting it to 6 or 9 TAKES IT AWAY, and the next
+  /// write to `sysDefinedData1Field` then aborts in
+  /// `SLSEventRecordSetCompoundInt` (CGSEvent.cc:1201, the write-side twin of
+  /// the read-side assertion). So the real invariant is narrow: this probe
+  /// must never write subtype 6 or 9. It holds because the value is
+  /// hard-coded to the aux-control subtype. Do not parameterize it believing
+  /// the write protects itself.
+  private static let sysDefinedFieldsUsable: Bool = {
+    let probeData1: Int64 = 0x0002_0A00 // brightness up, pressed, no repeat
+    guard let probe = CGEvent(source: nil),
+          let sysDefined = CGEventType(rawValue: UInt32(NX_SYSDEFINED))
+    else {
+      watchdogLog.fault("media keys: cannot build a probe event; interception disarmed")
+      return false
+    }
+    probe.type = sysDefined
+    probe.setIntegerValueField(sysDefinedSubtypeField, value: auxControlSubtype)
+    probe.setIntegerValueField(sysDefinedData1Field, value: probeData1)
+    let subtype = probe.getIntegerValueField(sysDefinedSubtypeField)
+    let data1 = probe.getIntegerValueField(sysDefinedData1Field)
+    guard subtype == auxControlSubtype, data1 == probeData1 else {
+      watchdogLog.fault(
+        """
+        media keys: CGEvent system-defined field indices moved \
+        (subtype read \(subtype), expected \(MediaKeyEventTap.auxControlSubtype); \
+        data1 read \(data1), expected \(probeData1)). \
+        Interception disarmed rather than misdecoding every aux key.
+        """
+      )
+      return false
+    }
+    return true
+  }()
+
   /// Runs on the tap thread. Returns the event to pass it through to the
   /// system, or nil to swallow it after delivering a `MediaKeyPress`.
   private nonisolated static func process(
@@ -425,38 +559,24 @@ final class MediaKeyEventTap {
     }
 
     if type.rawValue == UInt32(NX_SYSDEFINED) {
-      // NSEvent(cgEvent:) is a pure data wrapper over the CGEvent — no UI,
-      // no main-thread requirement — and is used off-main here deliberately:
-      // hopping to the main thread inside the callback (as the original
-      // library did with DispatchQueue.main.sync) blocks the tap thread for
-      // the whole of any menu-tracking session until the tap times out.
-      guard let nsEvent = NSEvent(cgEvent: event), nsEvent.subtype.rawValue == 8 else {
+      // Decoded straight off the CGEvent, never via NSEvent(cgEvent:): see
+      // `sysDefinedSubtypeField` for why building an NSEvent here traps.
+      // The gate order is load-bearing, not stylistic: reading the payload
+      // field on a subtype that carries no compound data trips a CoreGraphics
+      // assertion (`event_carries_compound_data_field`), so the subtype must
+      // be checked first.
+      guard event.getIntegerValueField(Self.sysDefinedSubtypeField) == Self.auxControlSubtype else {
         return event // not a media-key system event
       }
-      let data1 = nsEvent.data1
-      let keycode = Int32((data1 & 0xFFFF_0000) >> 16)
-      let keyFlags = data1 & 0x0000_FFFF
-      let isPressed = ((keyFlags & 0xFF00) >> 8) == 0xA
-      let isRepeat = (keyFlags & 0x1) == 0x1
-      let key: MediaKey?
-      switch keycode {
-      case NX_KEYTYPE_BRIGHTNESS_UP: key = .brightnessUp
-      case NX_KEYTYPE_BRIGHTNESS_DOWN: key = .brightnessDown
-      case NX_KEYTYPE_SOUND_UP: key = .volumeUp
-      case NX_KEYTYPE_SOUND_DOWN: key = .volumeDown
-      case NX_KEYTYPE_MUTE: key = .mute
-      default: key = nil
-      }
+      let press = AuxControlDecoder.decode(
+        data1: event.getIntegerValueField(Self.sysDefinedData1Field),
+        modifiers: modifiers(from: event.flags)
+      )
       // Unwatched keys pass through untouched: this is how volume keys reach
       // the system when the audio-routing rule releases them (M4), and how
       // brightness keys pass through when no external display is connected.
-      guard let key, config.watchedKeys.contains(key) else { return event }
-      onPress(MediaKeyPress(
-        key: key,
-        isPressed: isPressed,
-        isRepeat: isRepeat,
-        modifiers: modifiers(from: event.flags)
-      ))
+      guard let press, config.watchedKeys.contains(press.key) else { return event }
+      onPress(press)
       return nil
     }
 

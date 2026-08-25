@@ -3,17 +3,19 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// The "Keep this resolution?" surface. **The primary one, for every preview**,
-/// whichever surface started it.
+/// The "Keep this resolution?" surface, the DEFAULT owner of the answer
+/// (SO6). The coordinator presents it for every preview except one that
+/// another surface owns: `.settingsBanner` (a change started from a key
+/// settings window), where the banner region answers instead, and
+/// `.guidedSetup`, where the setup window does (DM11). In both this window is
+/// never shown: one answerable surface per preview, decided at start.
 ///
 /// Why it is a window at all, and why its buttons take the first click, are
 /// `ConfirmationPanel`'s to explain — this type owns only the two things that are
 /// specific to a resolution change: where the question goes, and what it says.
 ///
-/// The pane's banner survives only as the recovery surface for when this window
-/// is on screen but unusable (see `DisplayModeSection.previewBanner`). The commit
-/// is still explicit — nothing is committed at session scope without someone
-/// pressing Keep, and doing nothing still reverts.
+/// The commit is still explicit — nothing is committed at session scope without
+/// someone pressing Keep, and doing nothing still reverts.
 @MainActor
 final class ModeConfirmationWindow: ModeConfirmationPresenting {
   private let coordinator: DisplayModeCoordinator
@@ -43,35 +45,17 @@ final class ModeConfirmationWindow: ModeConfirmationPresenting {
   // MARK: - ModeConfirmationPresenting
 
   func presentConfirmation(_ content: ModeConfirmationContent) {
-    let displayID = content.displayID
-    // The window goes where there are PIXELS. For a mode preview on a display
-    // that has since become a mirror slave this is a rescue.
-    //
-    // Resolution is one-directional in its safety, and the unsafe direction
-    // reaches here. A sample lagging a mirror ENGAGING self-heals: the lookup
-    // fails, the guard below dismisses, the panel's identity goes back to nil,
-    // and the next countdown tick — otherwise a no-op — re-runs this against a
-    // caught-up sample and puts the window up. A sample lagging a mirror
-    // BREAKING does NOT: the ex-master is a real screen, so the window appears
-    // on the WRONG display, the identity records it, and no later tick
-    // re-positions it. The window is answerable where it lands and the countdown
-    // still reverts, so the cost is a confirmation on the wrong panel for the
-    // life of one preview, not an unanswerable one.
-    let placement = drawableDisplayID(displayID)
-    // No screen even after resolving: either the display has departed (the
-    // coordinator discards the preview on the next screen-parameters
-    // notification) or the list has not caught up with the reconfiguration yet.
-    // Hide rather than leave a window naming the previous display up — a preview
-    // retries this on every countdown tick, so a momentarily stale screen list
-    // self-heals a second later.
-    guard let screen = NSScreen.screens.first(where: { $0.displayID == placement }) else {
+    guard let screen = ConfirmationScreen.resolve(
+      for: content, drawable: drawableDisplayID
+    ) else {
       dismissConfirmation()
       return
     }
 
     window.present(content, on: screen) {
       ModeConfirmationView(
-        coordinator: coordinator, content: content, displayName: displayName(displayID)
+        coordinator: coordinator, content: content,
+        displayName: displayName(content.displayID)
       )
     }
   }
@@ -174,6 +158,6 @@ struct ModeConfirmationView: View {
 
   private func subtitle(_ preview: DisplayModeCoordinator.Preview) -> String {
     let mode = "\(DisplayModeCopy.size(preview.mode)), \(DisplayModeCopy.refresh(preview.mode.refreshHz))"
-    return displayName.isEmpty ? mode : "\(displayName) — \(mode)"
+    return displayName.isEmpty ? mode : "\(displayName): \(mode)"
   }
 }

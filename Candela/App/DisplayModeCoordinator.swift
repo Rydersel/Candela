@@ -18,7 +18,7 @@ import os
 ///
 /// Two rules hold this together and neither is optional:
 ///
-/// 1. **Every session-touching operation is serialised** through `pending`.
+/// 1. **Every session-touching operation is serialised** through `queue`.
 ///    Without it, two clicks both suspend inside `begin()`, the actor
 ///    serialises them, and their main-actor continuations resume in an order
 ///    unrelated to the actor's — leaving the banner naming one mode while
@@ -30,16 +30,39 @@ import os
 final class DisplayModeCoordinator {
   /// Which surface asked for the preview that is outstanding.
   ///
-  /// It no longer decides where a PREVIEW is answered — the confirmation window
-  /// takes every preview now, whatever started it (`syncConfirmation`). What it
-  /// still decides is where a failed `begin()` is reported: the settings pane
-  /// has a row of its own for that and stays on screen, while the panel is an
-  /// `NSMenu` tracking session that ends on Escape, on a click in the menu bar,
-  /// and — the case that matters — on the selection itself, so a panel-origin
-  /// failure would otherwise be shown to nobody.
+  /// It does not decide where a PREVIEW is answered — `PreviewSurface` does,
+  /// and the two are separate values because they answer different questions
+  /// ("who asked" vs "who answers"). What origin decides is where a failed
+  /// `begin()` is reported: the settings pane has a row of its own for that and
+  /// stays on screen, while the panel is an `NSMenu` tracking session that ends
+  /// on Escape, on a click in the menu bar, and — the case that matters — on
+  /// the selection itself, so a panel-origin failure would otherwise be shown
+  /// to nobody.
   enum PreviewOrigin: Sendable {
     case settings
     case panel
+  }
+
+  /// Which surface ANSWERS the outstanding preview (SO6): exactly one is
+  /// answerable per preview. Decided at preview start and carried on the
+  /// preview, never re-derived mid-countdown, so the buttons cannot migrate
+  /// under the user's pointer.
+  ///
+  /// THREE owners, not two (DM11). `.settingsBanner` iff the change originated
+  /// from the settings window while that window was key (the caller reads its
+  /// own `controlActiveState` at the click). `.guidedSetup` iff the guided
+  /// setup flow started the apply: that window draws its own Keep and Revert
+  /// out of the observable preview state, so every other surface gives the
+  /// ANSWER up and shows passive text at most: the menu-bar panel keeps its
+  /// waiting caption, and the settings banner alone renders nothing at all
+  /// rather than a passive line. Everything else, the
+  /// panel and a settings surface in a non-key window included, is answered by
+  /// the floating `ConfirmationPanel`, which then does not show while another
+  /// owner holds the answer. A non-owning surface renders passive text at most.
+  enum PreviewSurface: Sendable {
+    case floatingPanel
+    case settingsBanner
+    case guidedSetup
   }
 
   /// Everything one display's UI renders, computed once per enumeration.
@@ -64,8 +87,123 @@ final class DisplayModeCoordinator {
     /// full list has to answer `isScaled` per mode, and only the curated rows
     /// carry a precomputed answer.
     let nativePixels: PixelSize?
+    /// How many revealed modes the #110 wire-timing guard withheld. Reported
+    /// rather than merely applied: modes vanishing with no account is the same
+    /// silence we refuse elsewhere (CR11), and on the hardware pass this count
+    /// is what distinguishes "the guard fired" from "revelation found nothing".
+    let withheldForWireTiming: Int
+    /// What the density model made of this panel, judged over the SAME curated
+    /// rows this catalog publishes (PD1): a size the wire-timing guard withheld
+    /// has no apply path, so it must never become a recommendation.
+    ///
+    /// nil when the panel's native pixels are unknown, or when no facts
+    /// provider is installed (the default closure, i.e. every test that does not
+    /// wire one). A display with no entry in the app's hardware facts is NOT
+    /// this case: the provider still answers, with nil sizes, and the model
+    /// abstains with a `.noPhysicalSize` verdict. Both cases here are "no
+    /// geometry", and no geometry means no judgement rather than one from zeros.
+    let density: DensityVerdict?
+    /// The synthesized stops this panel is offered (SS3/SS4), in the same
+    /// descending order as `rows`. Empty when the display has not opted in, is
+    /// the built-in (SS14), or has no native geometry to take a percentage of.
+    ///
+    /// Kept beside `rows` because a selection has to get from a picked ROW back
+    /// to the `SyntheticSize` the engine engages, and a row carries only its
+    /// geometry and a sentinel mode ID.
+    ///
+    /// `var` with a default only so the memberwise initialiser carries one: a
+    /// `let` with a default is left OUT of that initialiser entirely, and the
+    /// app-test fixtures that build a catalog by hand predate synthesis. The
+    /// coordinator always passes both this and the field below.
+    var syntheticStops: [SyntheticSize] = []
+    /// The stop currently on the glass, from the ENGINE's pairing table.
+    ///
+    /// The readback is not the answer, and the reason changed under this
+    /// feature. Phase 0 measured a synthesis-engaged panel reporting a
+    /// fabricated descriptor that appeared in no enumeration; since the engage
+    /// tail re-times the slave onto its own mode it reports a REAL descriptor
+    /// naming the panel's native geometry [MEASURED 2026-08-18]. Either way it
+    /// is not what is on the glass, and the second way is the dangerous one: a
+    /// reader matching against it now lands confidently on the wrong row. This
+    /// is what the current-row highlight reads instead; see `isCurrentSize`
+    /// and `onScreen`.
+    var engagedSyntheticSize: SyntheticSize?
 
     var nativeKnown: Bool { nativePixels != nil }
+
+    /// **What is on the glass**, as a mode a surface can name. The one accessor
+    /// every "what is this display running" reader goes through.
+    ///
+    /// `current` is the raw readback, and while a stop is engaged it is not the
+    /// answer. It used to be a fabricated descriptor that matched nothing,
+    /// which was survivable: a reader comparing against it simply matched
+    /// nothing either. Since the engage tail re-times the slave it is a REAL
+    /// descriptor the panel publishes (the HiDPI twin of its own mode, whose
+    /// logical size is half the panel's), so the same readers now match the
+    /// wrong row confidently. The engine's pairing decides instead (SS1),
+    /// exactly as `isCurrentSize` already does.
+    ///
+    /// The RATE comes from the readback, and only because the re-time is what
+    /// put it there: the twin it re-times onto carries the panel's own refresh
+    /// by construction, so the descriptor's rate is the glass's rate even
+    /// though its geometry is not the glass's size. Label-only; nothing may match or persist this value, and the
+    /// sentinel `ioModeID` a synthesized row carries is never sent to
+    /// CoreGraphics.
+    var onScreen: DisplayMode? {
+      guard let engagedSyntheticSize else { return current }
+      let row = SyntheticSizeCatalog.row(for: engagedSyntheticSize)
+      guard let hz = current?.refreshHz, hz > 0 else { return row }
+      return DisplayMode(
+        ioModeID: row.ioModeID,
+        logicalWidth: row.logicalWidth, logicalHeight: row.logicalHeight,
+        pixelWidth: row.pixelWidth, pixelHeight: row.pixelHeight,
+        refreshHz: hz, isNative: false, provenance: .synthesized
+      )
+    }
+
+    /// What the already-on-screen no-op guards compare against. While a stop
+    /// is engaged the answer is nil: the stop is what is on screen (SS1), and
+    /// since the engage tail re-times the slave, the panel's descriptor is a
+    /// mode it really publishes. It was the NATIVE mode exactly when this was
+    /// written, and comparing against it made picking the native size a silent
+    /// no-op, which is the one pick that disengages [MEASURED 2026-08-18: a
+    /// real mouse click did nothing]. The re-time now lands on the HiDPI twin
+    /// instead, which moves the collision to a row rather than removing it,
+    /// so the answer stays nil.
+    var alreadyOnScreenModeID: Int32? {
+      engagedSyntheticSize == nil ? current?.ioModeID : nil
+    }
+  }
+
+  /// The panel-derived values a catalog is built from, cached per
+  /// `DisplayConfigIdentity.key` while the display is showing its own desktop.
+  ///
+  /// **Reused while a synthesized size is engaged, and that is the whole
+  /// point.** An engaged panel is a mirror slave: its readbacks describe the
+  /// virtual master rather than the panel, so a pass that re-derived the native
+  /// pixels, the density verdict or the stop ladder from them would rewrite all
+  /// three from the wrong display, and the engaged row could vanish from the
+  /// picker it is meant to be checked in.
+  private struct PanelBaseline {
+    let nativePixels: PixelSize?
+    /// The native-flagged mode's LOGICAL size, which is what SS3's percentages
+    /// are percentages of. Not the pixel size: the two differ on a panel whose
+    /// native mode is HiDPI.
+    let nativeLogicalWidth: Int?
+    let nativeLogicalHeight: Int?
+    let stops: [SyntheticSize]
+  }
+
+  /// What the app layer knows about a panel that CoreGraphics mode enumeration
+  /// does not. Two joins meet here and neither belongs in the Kit (PD7): the
+  /// declared physical size, filed per `persistenceKey` because display IDs
+  /// reassign across a replug, and the is-virtual predicate, which no
+  /// plausibility range could ever stand in for (a virtual display declares a
+  /// perfectly ordinary fake size).
+  struct PhysicalPanelFacts: Equatable {
+    let physicalWidthCm: Int?
+    let physicalHeightCm: Int?
+    let isVirtual: Bool
   }
 
   struct PixelSize: Equatable {
@@ -78,6 +216,8 @@ final class DisplayModeCoordinator {
   struct Preview: Equatable {
     let displayID: CGDirectDisplayID
     let mode: DisplayMode
+    /// The one answerable surface (SO6), fixed at preview start.
+    let surface: PreviewSurface
     var secondsRemaining: Int
     /// Set when `confirm()`, `revert()` or the expiry threw. The display did
     /// not move, the session still holds the fallback, and both buttons stay
@@ -87,17 +227,48 @@ final class DisplayModeCoordinator {
     /// Reported by the session, not inferred: a failed expiry disarms the
     /// countdown while a failed commit deliberately leaves it armed.
     var isCountingDown: Bool
+    /// Non-nil when this preview is a SYNTHESIZED size (SS4): the engine has a
+    /// virtual display up and the panel mirrored onto it, and the answer goes
+    /// to `SynthesisPreviewSession` rather than `ModePreviewSession`.
+    ///
+    /// `mode` above is then the synthesized row, so every surface that draws a
+    /// size, a countdown and two buttons keeps working unchanged. Carrying the
+    /// whole `PreviewedSynthesis` is what makes an answer resolve only the
+    /// preview it was given for: a re-engage at the same size is a different
+    /// virtual display in a different slot.
+    var synthesized: PreviewedSynthesis?
+    /// A synthesis confirm, revert or expiry that failed. Its own field rather
+    /// than a case of `failure`, because `DisplayConfigError` is a CGError and
+    /// no synthesis failure is one: `.unwindIncomplete` reported as
+    /// "CoreGraphics error 0" would name a source it never came from.
+    var synthesisFailure: SynthesisFailure?
+  }
+
+  /// What to do with a synthesis failure already on screen when the coordinator
+  /// re-reads its sessions. `FailureUpdate`'s three cases over the other error
+  /// type; not that enum, for `Preview.synthesisFailure`'s reason.
+  enum SynthesisFailureUpdate {
+    case clear
+    case keep
+    case set(SynthesisFailure)
   }
 
   /// A reapply that could not honour the stored mode exactly.
   ///
   /// Reapply is unattended, so this is the ONLY way the user finds out. It is
-  /// kept per display and survives until they dismiss it, pick a mode
-  /// themselves, or unplug the display — the point is that it is still there
-  /// the next time they look, not that it was true at the moment nobody was
-  /// watching.
+  /// kept per display and survives until they dismiss it or pick a mode
+  /// themselves — the point is that it is still there the next time they look,
+  /// not that it was true at the moment nobody was watching. Unplugging the
+  /// display no longer takes it away (SO8): the display coming back is exactly
+  /// when someone is in front of it again.
   struct ReapplyReport: Equatable {
-    let displayID: CGDirectDisplayID
+    /// `DisplayConfigIdentity.key` — the SAME key the stored mode this report is
+    /// about is filed under, not a `CGDirectDisplayID`. IDs reassign across a
+    /// replug, so an ID-keyed report either has to be thrown away on departure
+    /// or risks surfacing on whichever display takes the ID next. Carried on the
+    /// report rather than only in the dictionary so a surface rendering one can
+    /// dismiss exactly the report it is showing.
+    let key: String
     /// What the user actually chose, not what we managed. Kept so the report
     /// can name it — "we could not give you X" is a different sentence from
     /// "you are on Y", and the first is the one that explains anything.
@@ -127,9 +298,17 @@ final class DisplayModeCoordinator {
   private(set) var catalogs: [CGDirectDisplayID: Catalog] = [:]
   private(set) var preview: Preview?
   private(set) var startFailure: StartFailure?
-  /// Keyed by display so one display's disappointing reconnect is never
-  /// reported on another display's page.
-  private(set) var reapplyReports: [CGDirectDisplayID: ReapplyReport] = [:]
+  /// Keyed by `DisplayConfigIdentity.key`, not by display ID, so a report
+  /// survives the replug that reassigns the ID and does not land on whatever
+  /// display inherits that ID (SO8). Read through `report(for:)`.
+  ///
+  /// It inherits that key's KNOWN LIMITATION rather than escaping it — see
+  /// `DisplayConfigIdentity`'s header. Two identical panels reporting serial 0
+  /// (the MAG 341C does) produce the SAME key, so with twins attached one
+  /// report overwrites the other and the survivor renders on both panes. The
+  /// stored mode already collides the same way for the same displays, so this
+  /// is one limitation, not a new one; fixing it means fixing the identity.
+  private(set) var reapplyReports: [String: ReapplyReport] = [:]
   /// True from the click until the reconfiguration it started has settled.
   /// `begin()` spans a real CoreGraphics mode change, and a Keep pressed inside
   /// that window is queued behind it and would commit the NEW mode while the
@@ -137,9 +316,33 @@ final class DisplayModeCoordinator {
   /// synchronously so the disable lands in the same body evaluation as the
   /// click that caused it.
   private(set) var isApplying = false
+  /// Displays whose user has applied a size in THIS session (PD8): a person who
+  /// just chose a size has answered the recommendation for now, and the durable
+  /// opt-out is the dismissal pref.
+  ///
+  /// In memory and never persisted, deliberately, for that same split: the
+  /// dismissal is the answer that outlives a launch, and a second stored
+  /// hide-forever key would be a second way to lose the suggestion for good.
+  /// Written only by a KEPT preview, so a reverted or expired try leaves the
+  /// suggestion standing.
+  private(set) var sizeAppliedByUser: Set<CGDirectDisplayID> = []
+  /// Whether the select now in flight changes the display's logical SIZE,
+  /// sampled before `begin()` moves it. PD8 is about applying a size: a refresh
+  /// rate picked at the size already on screen answers nothing about how big
+  /// things look, so it must not hide the callout.
+  @ObservationIgnored private var selectChangesSize: [CGDirectDisplayID: Bool] = [:]
 
   let configurator: any DisplayConfiguring
   let persistence: ModePersistence
+
+  /// CR10. False means the mode list is exactly what CoreGraphics publishes —
+  /// reported in diagnostics rather than silently indistinguishable from a
+  /// panel that simply has no hidden modes.
+  var revealsHiddenModes: Bool { configurator.revealsHiddenModes }
+
+  /// #110. Zero withheld modes means something different depending on this, so
+  /// the two are always reported together.
+  var guardsWireTiming: Bool { configurator.guardsWireTiming }
 
   /// AR12. Held from just before `begin()` until nothing is outstanding, so no
   /// other display-reconfiguring feature can move a display out from under a
@@ -155,12 +358,38 @@ final class DisplayModeCoordinator {
   /// for panel selections" rather than to a crash.
   @ObservationIgnored weak var confirmation: (any ModeConfirmationPresenting)?
 
-  /// Called after a commit actually wrote `storedDisplayMode`, so the
-  /// propagation seam hears about it (D27) no matter which surface answered.
-  /// Owned here because it used to be the answering view's job, and two views
+  /// Called after something actually wrote `storedDisplayMode` (a pin or a kept
+  /// preview), so the propagation seam hears about it (D27) no matter which
+  /// surface asked.
+  /// Owned here because it used to be the asking view's job, and two views
   /// answering the same question is one too many — the second one to be written
   /// is the one that forgets.
   @ObservationIgnored var didStoreMode: (CGDirectDisplayID) -> Void = { _ in }
+
+  /// Called when a stored-mode reapply could not be honoured, so the diagnostics
+  /// report's event ring carries it (spec §7). Wired for `didStoreMode`'s
+  /// reason: this happens unattended, at reconnect, with no view on screen — and
+  /// the notice a surface can still render is `report(for:)`, which holds only
+  /// the LATEST one per display and is cleared when the user dismisses it.
+  @ObservationIgnored var didReportReapply: (CGDirectDisplayID, ModeReapplyNotice) -> Void = { _, _ in }
+
+  /// The app's answer to "what is this panel physically". Injected because the
+  /// lookup it performs (`AppModel.hardwareFacts`, the owned/foreign virtual
+  /// check) lives one layer up; the coordinator only enumerates modes.
+  ///
+  /// The default returns nil, which is the pre-density behaviour exactly: no
+  /// geometry reaches the Kit, the usability floor falls back to its
+  /// fraction-of-native rule, and no catalog carries a verdict.
+  @ObservationIgnored var physicalFacts: (ConfiguredDisplay) -> PhysicalPanelFacts? = { _ in nil }
+
+  /// Synthesized sizes (SS4). Injected by `AppModel`, which owns it: a
+  /// synthesized stop is a row in THIS catalog and a preview on THIS clock, so
+  /// the routing lives here while the engine, the pairing snapshot and the
+  /// prefs live there.
+  ///
+  /// nil degrades to the pre-synthesis behaviour exactly: no synthesized rows
+  /// are offered, nothing routes to the engine, and no reapply engages.
+  @ObservationIgnored var synthesis: SynthesisCoordinator?
 
   @ObservationIgnored private let session: ModePreviewSession
   /// Per display, not one value for the coordinator. A settings-select on B
@@ -169,8 +398,14 @@ final class DisplayModeCoordinator {
   /// coordinator to `.settings` and torn down A's confirmation window while A
   /// was still counting down. Keyed, the surface follows the preview.
   @ObservationIgnored private var origins: [CGDirectDisplayID: PreviewOrigin] = [:]
-  @ObservationIgnored private var countdown: Task<Void, Never>?
-  @ObservationIgnored private var pending: Task<Void, Never>?
+  /// Keyed like `origins` and for its reason: the answering surface follows the
+  /// preview, not the coordinator. Read back in `adopt`, which rebuilds
+  /// `Preview` from the session and needs the one field the session does not
+  /// hold. A missing entry answers `.floatingPanel` — the safe default, since
+  /// the floating window shows on the display that changed.
+  @ObservationIgnored private var surfaces: [CGDirectDisplayID: PreviewSurface] = [:]
+  @ObservationIgnored private let countdown = PreviewCountdownDriver()
+  @ObservationIgnored private let queue = PreviewQueue()
   @ObservationIgnored private var inFlightSelects = 0
   /// Displays anything has asked about. `handleDisplaysChanged` re-enumerates
   /// these rather than only the currently cached ones, so a display that
@@ -178,6 +413,32 @@ final class DisplayModeCoordinator {
   /// catalog now renders as "not enumerated yet", i.e. as nothing at all, and
   /// `.task(id:)` does not re-fire for an unchanged id.
   @ObservationIgnored private var observed: Set<CGDirectDisplayID> = []
+  /// The last panel-derived values taken while each display was showing its own
+  /// desktop, keyed by `DisplayConfigIdentity.key` so they survive the replug
+  /// that reassigns display IDs. See `PanelBaseline`.
+  @ObservationIgnored private var baselines: [String: PanelBaseline] = [:]
+  /// The panel's own refresh rate at the moment a synthesized size was picked
+  /// on it: the FALLBACK for a confirmation label rendered before the engage
+  /// settles.
+  ///
+  /// The catalog's synthesized ROWS carry the `refreshHz: 0` sentinel, because
+  /// a stop is a size and the rate it runs at is not the stop's. The engaged
+  /// rate is the virtual master's achievable one and can be LOWER than the
+  /// pre-pick rate [MEASURED 2026-08-18: 100 on the wire from a 175 start],
+  /// so the label prefers the live reading and uses this only when that is
+  /// not available yet.
+  @ObservationIgnored private var synthesisPreviewRefresh: [CGDirectDisplayID: Double] = [:]
+  /// The synthesized stop an ordinary pick took down, held for as long as that
+  /// pick can still fall through.
+  ///
+  /// RULING 2026-08-18. Picking an ordinary size over a COMMITTED synthesized
+  /// set does a real, irreversible teardown before the reversible preview
+  /// starts, so "Revert" would otherwise return the person to the desktop the
+  /// display had before the stop was ever engaged rather than to the screen
+  /// they were looking at when they picked. This is what the revert, the
+  /// countdown's expiry and a failed start re-engage from. Armed only after a
+  /// teardown that succeeded, and dropped the moment the pick lands.
+  @ObservationIgnored private var restoreStopIfPickFalls: [CGDirectDisplayID: SyntheticSize] = [:]
   /// Which displays count as having just arrived — the "launch and reconnect,
   /// never continuously" rule (DM7). It lives in `CandelaKit` under test
   /// because its two failure directions are both timing, and both are invisible
@@ -231,11 +492,22 @@ final class DisplayModeCoordinator {
   /// object lives as long as the app, and the block holds `self` weakly, so a
   /// surviving registration is inert rather than dangling.
   deinit {
-    countdown?.cancel()
-    pending?.cancel()
+    countdown.stop()
+    queue.cancel()
   }
 
   // MARK: - Enumeration
+
+  /// The display's current mode: the cached catalog when one exists, else a
+  /// live query. A catalog is populated only when something has SHOWN this
+  /// display (its own pane, or the panel's warm pass, which walks externals
+  /// only), so a reader treating `catalogs` as the answer reported the
+  /// built-in's mode as "not reported" exactly when the report was copied from
+  /// another display's page (combined pass D8). Diagnostics reads this
+  /// instead; it never enumerates and never caches.
+  func currentMode(for displayID: CGDirectDisplayID) -> DisplayMode? {
+    catalogs[displayID]?.current ?? configurator.currentMode(for: displayID)
+  }
 
   /// Re-enumerates one display. Called when a pane appears, when the screen
   /// configuration changes, and after any mode this app applies — never on a
@@ -248,19 +520,125 @@ final class DisplayModeCoordinator {
       return
     }
     let all = DisplayModeCatalog.full(configurator.modes(for: displayID))
-    let native = configurator.nativePixels(for: displayID)
+    // Panel-derived values come from the last pass taken while this display was
+    // showing its own desktop whenever a synthesized size is engaged, because
+    // an engaged panel's readbacks describe the virtual master instead of the
+    // panel. See `PanelBaseline`.
+    let engagedSize = synthesis?.engagedSize(displayID: displayID)
+    let baseline = baseline(for: display, modes: all, isEngaged: engagedSize != nil)
+    let native = baseline.nativePixels.map { (width: $0.width, height: $0.height) }
+    // Sampled here, once, and handed to both the catalog and the verdict: the
+    // size the model calls "current" has to be the size this enumeration saw,
+    // not one re-read after the rows were built.
+    let current = configurator.currentMode(for: displayID)
+    // Density is a claim about physical pixels, so no native size means no
+    // geometry at all rather than geometry over zeros.
+    let geometry = native.flatMap { native in
+      physicalFacts(display).map { facts in
+        PanelGeometry(
+          nativePixelWidth: native.width, nativePixelHeight: native.height,
+          physicalWidthCm: facts.physicalWidthCm,
+          physicalHeightCm: facts.physicalHeightCm,
+          isVirtual: facts.isVirtual
+        )
+      }
+    }
+    // One value, two readers (PD1). Curating twice would let the rows the user
+    // can pick and the rows the model ranks drift apart.
+    let published = DisplayModeCatalog.curated(
+      all,
+      nativePixelWidth: native?.width ?? 0,
+      nativePixelHeight: native?.height ?? 0,
+      geometry: geometry
+    )
+    // Offered only where SS4's opt-in is on, and never on the built-in (SS14).
+    // The ladder itself is cached on the baseline, so the rows a person sees do
+    // not change under them while a size is engaged.
+    let stops = synthesis?.offersSyntheticSizes(displayID: displayID) == true && !display.isBuiltIn
+      ? baseline.stops
+      : []
+    log.debug(
+      "catalog refresh display=\(displayID) engaged=\(engagedSize.map { "\($0.logicalWidth)x\($0.logicalHeight)" } ?? "none", privacy: .public) stops=\(stops.count) published=\(published.count)"
+    )
     catalogs[displayID] = Catalog(
       display: display,
-      rows: DisplayModeCatalog.curated(
-        all,
-        nativePixelWidth: native?.width ?? 0,
-        nativePixelHeight: native?.height ?? 0
+      rows: SyntheticSizeCatalog.merged(
+        published: published, stops: stops, nativePixels: native
       ),
       all: all,
-      current: configurator.currentMode(for: displayID),
+      current: current,
       distinctLogicalSizes: Set(all.map { LogicalSize(mode: $0) }).count,
-      nativePixels: native.map { PixelSize(width: $0.width, height: $0.height) }
+      nativePixels: baseline.nativePixels,
+      withheldForWireTiming: configurator.modesWithheldByWireTimingGuard(for: displayID),
+      density: geometry.map {
+        PanelDensityModel.evaluate(
+          // PUBLISHED rows only. Wiring the size recommendation to synthesized
+          // stops is a filed non-goal for v1, and the model ranks whatever it
+          // is handed, so passing the merged list would recommend a size that
+          // costs a virtual display.
+          rows: published,
+          // The engaged size, not the readback, for `Catalog.onScreen`'s
+          // reason: while a stop is engaged the readback names the panel's own
+          // native geometry, which is not what is on the glass.
+          currentLogicalWidth: engagedSize?.logicalWidth ?? current?.logicalWidth,
+          currentLogicalHeight: engagedSize?.logicalHeight ?? current?.logicalHeight,
+          geometry: $0
+        )
+      },
+      syntheticStops: stops,
+      engagedSyntheticSize: engagedSize
     )
+  }
+
+  /// The panel-derived values for this pass: freshly measured while the display
+  /// shows its own desktop, and the last such measurement while a synthesized
+  /// size is engaged.
+  private func baseline(
+    for display: ConfiguredDisplay, modes: [DisplayMode], isEngaged: Bool
+  ) -> PanelBaseline {
+    let key = display.identity.key
+    if isEngaged, let cached = baselines[key] { return cached }
+    let nativePixels = configurator.nativePixels(for: display.id)
+      .map { PixelSize(width: $0.width, height: $0.height) }
+    // The native-flagged mode from the SAME list this catalog is built from,
+    // which is how `nativePixels(for:)` finds it too.
+    let native = modes.first(where: \.isNative)
+    let stops: [SyntheticSize] = if let native, !display.isBuiltIn {
+      SyntheticSizeCatalog.stops(
+        nativeLogicalWidth: native.logicalWidth, nativeLogicalHeight: native.logicalHeight,
+        existingRows: modes,
+        ceilingPixelWidth: VirtualDisplayIdentity.maxPixels.wide,
+        ceilingPixelHeight: VirtualDisplayIdentity.maxPixels.high
+      )
+    } else {
+      []
+    }
+    let baseline = PanelBaseline(
+      nativePixels: nativePixels,
+      nativeLogicalWidth: native?.logicalWidth,
+      nativeLogicalHeight: native?.logicalHeight,
+      stops: stops
+    )
+    // A pass that could not read the panel's own geometry is not evidence about
+    // it, so it does not replace a baseline that could. Neither is a pass that
+    // ran while the display sat in a mirror set or an engage was in flight:
+    // the engage window reads as not-engaged (the pairing snapshot is empty
+    // throughout it) while the OS list already carries the mirror-published
+    // twins, and one such pass overwrote the cached ladder with the
+    // suppressed one, hiding the engaged stop from every surface.
+    //
+    // **The cache is written ONLY from a stable pass, first sight included.**
+    // The earlier `|| baselines[key] == nil` escape hatch admitted exactly one
+    // poisoned baseline per identity and then locked it in, because a non-nil
+    // entry is never replaced while the set stands: a display first seen inside
+    // a mirror window kept a ladder derived from the master until the set came
+    // down. An unstable pass now RETURNS what it computed without storing it,
+    // so the answer is as good as before and the next stable pass is still the
+    // one that decides.
+    let unstable = synthesis?.baselineUnstable(displayID: display.id) ?? false
+    guard native != nil, !unstable else { return baselines[key] ?? baseline }
+    baselines[key] = baseline
+    return baseline
   }
 
   /// Screen configuration changed: re-enumerate what is still here, forget what
@@ -284,6 +662,16 @@ final class DisplayModeCoordinator {
         refreshCatalog(for: displayID)
       } else {
         catalogs[displayID] = nil
+        // Both are keyed by display ID, which the next display to arrive can
+        // inherit, so a departure has to take them: a suggestion silently
+        // suppressed on a panel nobody has chosen a size for is the failure
+        // this feature has no visible symptom for.
+        sizeAppliedByUser.remove(displayID)
+        selectChangesSize[displayID] = nil
+        synthesisPreviewRefresh[displayID] = nil
+        // Nothing to restore onto a display that is not attached, and the next
+        // arrival can inherit this id.
+        restoreStopIfPickFalls[displayID] = nil
       }
     }
     // A departure is what makes the next arrival an arrival, so it is recorded
@@ -295,19 +683,44 @@ final class DisplayModeCoordinator {
     // and this handler itself can run late, which is why it is told what was
     // live rather than asked to look.
     arrivals.noteObserved(live: observedLive)
-    // A report about a display that is gone describes nothing the user can act
-    // on, and would reappear on the pane of whatever takes its ID next.
-    reapplyReports = reapplyReports.filter { live.contains($0.key) }
-    // Same rule for a start failure, and it needs saying separately because the
-    // preview path self-heals here and this one cannot: a failure has no
-    // countdown re-presenting it every second, and `dropPreviewOnDepartedDisplay`
-    // returns early when nothing is outstanding. Left alone, unplugging the
-    // display leaves a window naming a display that is gone, which AppKit then
-    // relocates onto some other screen.
+    // Reports are deliberately NOT pruned here (SO8). Pruning existed for one
+    // reason — an ID-keyed report would reappear on whatever display took the ID
+    // next — and identity keying removes that hazard outright. What is left is
+    // the case the report exists for: a reapply nobody watched, on a display the
+    // user unplugged before looking. Dropping it on departure means the one
+    // moment they are back in front of that display is the moment the account of
+    // it is gone. Only a dismissal, or a later pass with a newer outcome for the
+    // same identity, clears one.
+    //
+    // A start failure is different and still cleared below: it is about a
+    // control on a page that has just disappeared, and its surface is a floating
+    // window AppKit would relocate onto another screen. It needs saying
+    // separately because the preview path self-heals here and this one cannot —
+    // a failure has no countdown re-presenting it every second, and
+    // `dropPreviewOnDepartedDisplay` returns early when nothing is outstanding.
     if let failure = startFailure, !live.contains(failure.displayID) {
       dismissStartFailure()
     }
     dropPreviewOnDepartedDisplay()
+    dropSynthesisOnDepartedDisplay(live: live)
+  }
+
+  /// A synthesis set whose physical panel has gone is taken DOWN, not
+  /// forgotten. The virtual display outlives the panel's departure and holds
+  /// one of only two synthesis slots, so dropping the record instead would
+  /// strand a display nothing can reach and lose the slot until the app
+  /// restarts.
+  ///
+  /// Reads the CURRENT list rather than the notification's, unlike the
+  /// departure bookkeeping above: this is about hardware to take down, so the
+  /// question is what is attached now, not what was attached a moment ago. A
+  /// display that left and came back before this ran has nothing to unwind.
+  private func dropSynthesisOnDepartedDisplay(live: Set<CGDirectDisplayID>) {
+    guard let synthesis, !synthesis.pairings.isEmpty || synthesis.refusal != nil else { return }
+    queue.enqueue {
+      await synthesis.noteDepartures(live: live)
+      await self.adopt(.keep, synthesis: .keep)
+    }
   }
 
   // MARK: - Reapply
@@ -366,11 +779,34 @@ final class DisplayModeCoordinator {
     // the session, but it does apply modes at SESSION scope — landing that in
     // the middle of a `begin()`/`confirm()` would move a display out from under
     // a preview whose fallback was captured before it.
-    await enqueueReturning { await self.performReapply(displays) }
+    await queue.enqueueReturning { await self.performReapply(displays) }
   }
 
-  func dismissReapplyReport(for displayID: CGDirectDisplayID) {
-    reapplyReports[displayID] = nil
+  // MARK: - Reports
+
+  /// The report for a display that is plugged in RIGHT NOW.
+  ///
+  /// The dictionary is keyed by identity, so this resolves the ID it is given
+  /// through the live display list. The emptiness test first is not a
+  /// micro-optimisation: without it every sidebar row would pay a CoreGraphics
+  /// enumeration per body evaluation for the answer "no", which is the answer
+  /// almost always.
+  func report(for displayID: CGDirectDisplayID) -> ReapplyReport? {
+    guard !reapplyReports.isEmpty, let key = identity(for: displayID)?.key else { return nil }
+    return reapplyReports[key]
+  }
+
+  func hasUnreadReport(for displayID: CGDirectDisplayID) -> Bool {
+    report(for: displayID) != nil
+  }
+
+  /// THE one place a person clears a report, whichever surface they clicked OK
+  /// in. Keyed rather than taking a display: a surface rendering a report has
+  /// the report, so it can only dismiss the one it was showing — an ID would
+  /// have to be re-resolved and could resolve to nothing (or, after a replug, to
+  /// something else).
+  func dismissReport(forKey key: String) {
+    reapplyReports[key] = nil
   }
 
   private func performReapply(_ displays: [ConfiguredDisplay]) async {
@@ -410,79 +846,134 @@ final class DisplayModeCoordinator {
       arrivals.release(previewed)
     }
     for display in displays where display.id != previewed {
-      let identity = display.identity
-      let stored = persistence.storedMode(for: identity)
-      // Enumerated for every arrival, including displays that never opted in:
-      // the opt-in gate lives inside the tested policy, so the cost of asking
-      // is one `CGDisplayCopyAllDisplayModes` per arrival — the same call
-      // `warmModeCatalogs` already makes on every menu close.
-      let decision = ModeReapplyPolicy.decide(
-        isEnabled: persistence.isEnabled(for: identity),
-        // Read from the entry the list handed us, not asked again now: the
-        // mirror state has to describe the same instant as the enumeration that
-        // claimed this arrival.
-        isMirroringAnotherDisplay: display.isMirrorSlave,
-        stored: stored,
-        available: configurator.modes(for: display.id),
-        current: configurator.currentMode(for: display.id)
-      )
-      // "Not now" — a mirror slave, or a display that cannot say what mode it is
-      // running. The claim goes back for the same reason it does above: the
-      // arrival has not been dealt with, and keeping it would mean "never", since
-      // only an observed ABSENCE re-arms one. Mirroring ends and a display wakes
-      // through reconfiguration events, and those events are what call this again.
-      if decision.isDeferred {
-        arrivals.release(display.id)
-        continue
-      }
-      guard let requested = stored,
-            decision.modeToApply != nil || decision.notice != nil
-      else { continue }
-
-      var notice = decision.notice
-      if let mode = decision.modeToApply {
-        do {
-          try configurator.apply(mode, to: display.id, scope: .session)
-          log.log("reapplied stored mode on display \(display.id): \(mode.logicalWidth)x\(mode.logicalHeight) @\(mode.refreshHz)Hz")
-        } catch {
-          // `apply` throws when staging or completion fails AND when the
-          // resolved `CGDisplayMode`'s descriptor does not match the one asked
-          // for — a reassigned `ioModeID` now denoting a different mode. On the
-          // unattended path that is precisely the failure that must not be
-          // swallowed: `try?` here would leave the display on some third mode
-          // with the app reporting a successful restore.
-          let configError = error as? DisplayConfigError
-            ?? DisplayConfigError(cgErrorCode: -1)
-          notice = .failed(configError)
-        }
-        refreshCatalog(for: display.id)
-      }
-
-      if let notice {
-        // A display can leave across the queue wait or across the apply itself
-        // — and `handleDisplaysChanged` has by then already pruned the reports
-        // it knew about. Writing this one now would leave a report on the pane
-        // of a display that is gone, until the next screen-parameters event
-        // happened to clear it. The claim goes back with it: the arrival was
-        // never completed, so its return is an arrival again.
-        guard configurator.displays().contains(where: { $0.id == display.id }) else {
-          arrivals.release(display.id)
-          continue
-        }
-        reapplyReports[display.id] = ReapplyReport(
-          displayID: display.id, requested: requested, notice: notice
-        )
-        log.error("could not restore stored mode on display \(display.id): \(String(describing: notice), privacy: .public)")
-      } else {
-        reapplyReports[display.id] = nil
-      }
+      // Synthesis reapply runs AFTER the stored-mode decision for the same
+      // display, never beside it: engaging makes the panel a mirror slave, and
+      // a stored mode applied to a slave is the case `ModeReapplyPolicy` defers
+      // for. The deferral is also why a display that already carries a
+      // synthesis set never fights its own remembered resolution.
+      guard reapplyStoredMode(for: display) == .done else { continue }
+      await reapplySynthesis(for: display)
     }
     // Reapply opens no preview, so the claim it took is spent the moment the
     // loop ends — but it can run while a preview stands on ANOTHER display, and
     // releasing then would free the claim protecting that preview. The session
     // is the authority on whether anything is outstanding; `preview` is not (it
     // is nil for several awaits after a `begin()` succeeds).
-    if await session.previewedMode == nil { await gate.release(.displayModes) }
+    if await session.previewedMode == nil, await synthesis?.session.previewedSynthesis == nil {
+      await gate.release(.displayModes)
+    }
+  }
+
+  /// How far the stored-mode half of one display's reapply got. The synthesis
+  /// half runs only after `.done`: the other two mean the display is not in a
+  /// state to be reconfigured at all, and each has already given its arrival
+  /// claim back.
+  private enum ModeReapplyStep {
+    case done
+    case deferred
+    case gone
+  }
+
+  private func reapplyStoredMode(for display: ConfiguredDisplay) -> ModeReapplyStep {
+    let identity = display.identity
+    let stored = persistence.storedMode(for: identity)
+    // Enumerated for every arrival, including displays that never opted in:
+    // the opt-in gate lives inside the tested policy, so the cost of asking
+    // is one `CGDisplayCopyAllDisplayModes` per arrival: the same call
+    // `warmModeCatalogs` already makes on every menu close.
+    let decision = ModeReapplyPolicy.decide(
+      isEnabled: persistence.isEnabled(for: identity),
+      // Read from the entry the list handed us, not asked again now: the
+      // mirror state has to describe the same instant as the enumeration that
+      // claimed this arrival.
+      isMirroringAnotherDisplay: display.isMirrorSlave,
+      stored: stored,
+      available: configurator.modes(for: display.id),
+      current: configurator.currentMode(for: display.id)
+    )
+    // "Not now": a mirror slave, or a display that cannot say what mode it is
+    // running. The claim goes back for the same reason it does above: the
+    // arrival has not been dealt with, and keeping it would mean "never", since
+    // only an observed ABSENCE re-arms one. Mirroring ends and a display wakes
+    // through reconfiguration events, and those events are what call this again.
+    if decision.isDeferred {
+      arrivals.release(display.id)
+      return .deferred
+    }
+    guard let requested = stored,
+          decision.modeToApply != nil || decision.notice != nil
+    else { return .done }
+
+    var notice = decision.notice
+    if let mode = decision.modeToApply {
+      do {
+        try configurator.apply(mode, to: display.id, scope: .session)
+        log.log("reapplied stored mode on display \(display.id): \(mode.logicalWidth)x\(mode.logicalHeight) @\(mode.refreshHz)Hz")
+      } catch {
+        // `apply` throws when staging or completion fails AND when the
+        // resolved `CGDisplayMode`'s descriptor does not match the one asked
+        // for, i.e. a reassigned `ioModeID` now denoting a different mode. On the
+        // unattended path that is precisely the failure that must not be
+        // swallowed: `try?` here would leave the display on some third mode
+        // with the app reporting a successful restore.
+        let configError = error as? DisplayConfigError
+          ?? DisplayConfigError(cgErrorCode: -1)
+        notice = .failed(configError)
+      }
+      refreshCatalog(for: display.id)
+    }
+
+    guard let notice else {
+      // Replacement, not a clear-on-departure: this pass has a newer answer
+      // for the same identity and the answer is "nothing to say".
+      reapplyReports[identity.key] = nil
+      return .done
+    }
+    // A display can leave across the queue wait or across the apply itself.
+    // Not because a report about an absent display is now unshowable (SO8
+    // keeps those), but because this one describes an attempt that never
+    // finished. The claim goes back with it: the arrival was never
+    // completed, so its return is an arrival again, and that pass writes a
+    // fresh outcome for the same identity in place of this half-answer.
+    guard configurator.displays().contains(where: { $0.id == display.id }) else {
+      arrivals.release(display.id)
+      return .gone
+    }
+    reapplyReports[identity.key] = ReapplyReport(
+      key: identity.key, requested: requested, notice: notice
+    )
+    didReportReapply(display.id, notice)
+    log.error("could not restore stored mode on display \(display.id): \(String(describing: notice), privacy: .public)")
+    return .done
+  }
+
+  /// The unattended synthesis half (SS9/SS14, through `SynthesisReapplyPolicy`).
+  ///
+  /// Everything the policy needs about the panel comes from THIS pass's
+  /// baseline, and the stored descriptor is resolved through
+  /// `SyntheticSizeCatalog.size(matching:)` before it goes in: the policy
+  /// cannot tell a genuinely stale descriptor from a caller that skipped the
+  /// lookup, so it must never be handed an unresolved one.
+  private func reapplySynthesis(for display: ConfiguredDisplay) async {
+    guard let synthesis, !display.isBuiltIn else { return }
+    // Through DisplayModeCatalog.full, exactly as refreshCatalog feeds
+    // baseline(): in the RAW list the native flag rides the HiDPI twin
+    // (logical 1720x720 on the MAG), the ladder computes from that, and every
+    // stop lands under the minor-axis floor. The stored stop then resolves
+    // nil and the relaunch restore reports staleDescriptor forever.
+    let modes = DisplayModeCatalog.full(configurator.modes(for: display.id))
+    let baseline = baseline(
+      for: display, modes: modes, isEngaged: synthesis.isEngaged(displayID: display.id)
+    )
+    let decision = await synthesis.reapply(
+      for: display,
+      nativeLogicalWidth: baseline.nativeLogicalWidth,
+      nativeLogicalHeight: baseline.nativeLogicalHeight,
+      existingRows: modes
+    )
+    // Only an engage changes what is on the glass, and it changes it enough
+    // that every derived value here is stale.
+    if case .engage = decision { refreshCatalog(for: display.id) }
   }
 
   func isRemembering(_ displayID: CGDirectDisplayID) -> Bool {
@@ -490,23 +981,107 @@ final class DisplayModeCoordinator {
     return persistence.isEnabled(for: identity)
   }
 
-  /// Turning it ON also stores what is on screen now. Without that, the toggle
-  /// does nothing until the next resolution change — a control that reads as
+  /// Turning it ON also pins what is on screen now. Without that, the toggle
+  /// would store nothing until the next kept change: a control that reads as
   /// broken on the very reconnect it was turned on for. Turning it OFF leaves
   /// the stored mode alone, matching `ModePersistence.clear`'s ruling that
-  /// "forget my choice" and "stop remembering" are separate answers.
+  /// "forget my choice" and "stop remembering" are separate answers, and
+  /// keeping the pin intact if the toggle comes back on.
+  ///
+  /// The seeding is queued and can decline (a preview outstanding on this
+  /// display — see `pinCurrentMode`), so turning it on mid-countdown enables
+  /// the flag and pins nothing. That is the intended order: the flag is the
+  /// user's answer, the pin is a mode, and there is no mode they have accepted
+  /// yet. Keeping that preview stores it, because the flag is on by then.
   func setRemembering(_ remembering: Bool, for displayID: CGDirectDisplayID) {
     guard let identity = identity(for: displayID) else { return }
     persistence.setEnabled(remembering, for: identity)
     guard remembering else { return }
-    if let current = catalogs[displayID]?.current ?? configurator.currentMode(for: displayID) {
-      // Through `store(_:on:)`, not `persistence.store` directly: this is the
-      // second place `storedDisplayMode` is written, and it announced nothing.
-      // Its caller happened to fan out the same name by hand, which is exactly
-      // the arrangement that broke the first time — the moment a second surface
-      // offers this toggle, a stored mode is written with no propagation.
-      store(current, on: displayID, for: identity)
+    pinCurrentMode(on: displayID)
+  }
+
+  /// Pins whatever is on screen now, reached from the Remember toggle's
+  /// turn-on seeding and from the hub's `Set to Current`.
+  ///
+  /// No longer the only route to `store`: a kept preview writes the stored mode
+  /// too while the toggle is on, which makes `Set to Current` redundant in the
+  /// common case and leaves it as the re-pin for a mode already on screen.
+  ///
+  /// Queued, and it asks the SESSION whether that display is mid-preview, for
+  /// `dropPreviewOnDepartedDisplay`'s reason: `preview` is nil for several
+  /// awaits after a `begin()` succeeds, so the main-actor copy would answer
+  /// "nothing outstanding" during exactly the window a pin must not be taken
+  /// in. A mode still under a countdown is one the user has not accepted — the
+  /// countdown may revert it — and pinning it records a choice they never made.
+  ///
+  /// Silently skipped rather than reported. The UI is expected to disable its
+  /// pin control while a preview stands, which leaves a click racing the
+  /// countdown as the only way to reach the guard — and a failure notice for a
+  /// pin the user can simply take again a second later is noise. The guard does
+  /// not depend on that expectation holding; it is what makes it optional.
+  ///
+  /// Also silent when the display cannot report the mode it is running —
+  /// leaving an existing pin alone beats replacing it with a guess.
+  func pinCurrentMode(on displayID: CGDirectDisplayID) {
+    queue.enqueue {
+      guard await self.session.previewedMode?.displayID != displayID else { return }
+      // A synthesis-engaged panel's readback is not the size on the glass: the
+      // engage tail re-times the slave, so it names the HiDPI twin of the
+      // panel's own mode [MEASURED 2026-08-18]. Pinning it would store a real, resolvable
+      // mode that is not the one the person is looking at and reapply it at
+      // every reconnect. The synthesized choice has its own store
+      // (`storedSyntheticSize`), written when a synthesis preview is kept.
+      guard self.synthesis?.isEngaged(displayID: displayID) != true else { return }
+      // Live read FIRST, cache only as the fallback: a countdown expiry
+      // reverts on the session actor and enqueues nothing but `adopt(.keep)`,
+      // which never refreshes the catalog — so in that window the cache still
+      // names the mode that was just reverted away from, while the display has
+      // physically changed back.
+      guard let identity = self.identity(for: displayID),
+            let current = self.configurator.currentMode(for: displayID)
+              ?? self.catalogs[displayID]?.current
+      else { return }
+      self.store(current, on: displayID, for: identity)
     }
+  }
+
+  /// Removes this display's stored resolution, leaving the opt-in flag alone.
+  ///
+  /// The two are separate answers, exactly as `ModePersistence.clear` says:
+  /// "forget the resolution I pinned" is not "stop remembering resolutions
+  /// here", and the toggle above the button is what answers the second. With
+  /// the toggle still on, the next resolution the user keeps on this display
+  /// is pinned in the cleared one's place.
+  ///
+  /// Queued for the reason `pinCurrentMode` is: the queue is what serialises
+  /// every other write to `storedDisplayMode`, and a clear that skipped it
+  /// could be overtaken by an in-flight pin and silently undone. Announced
+  /// through `didStoreMode` because the propagation seam has to hear about a
+  /// removal on the same terms as a write (D27): a clear that announced
+  /// nothing would leave the row on screen naming a mode that is gone.
+  ///
+  /// A stored SYNTHESIZED size is deliberately untouched: it is a different
+  /// store with its own control, and a button in the resolution section is not
+  /// where someone looks to retire it.
+  func forgetStoredMode(on displayID: CGDirectDisplayID) {
+    queue.enqueue {
+      guard let identity = self.identity(for: displayID) else { return }
+      self.persistence.clear(for: identity)
+      // The reapply report is about a mode that no longer exists to be
+      // reapplied, so it goes with it. Otherwise the banner that sent the user
+      // here would outlive its own subject and keep apologising for a stored
+      // resolution the app is no longer holding.
+      self.dismissReport(forKey: identity.key)
+      self.didStoreMode(displayID)
+    }
+  }
+
+  /// The pin as stored, for the row that shows it and for `Set to Current`'s
+  /// enabled state. Read-only by design: the writes go through `store`, and they
+  /// go through it BECAUSE it announces itself (`didStoreMode`).
+  func storedDescriptor(for displayID: CGDirectDisplayID) -> DisplayModeDescriptor? {
+    guard let identity = identity(for: displayID) else { return nil }
+    return persistence.storedMode(for: identity)
   }
 
   // MARK: - Preview
@@ -522,10 +1097,16 @@ final class DisplayModeCoordinator {
   /// so no caller can create a second in-flight `begin()` by spawning its own
   /// task.
   ///
-  /// `origin` is not defaulted: every caller has to say where its answer will
-  /// be offered, because getting it wrong is invisible until a countdown
-  /// expires against nobody.
-  func select(_ mode: DisplayMode, on displayID: CGDirectDisplayID, from origin: PreviewOrigin) {
+  /// `origin` and `surface` are not defaulted: every caller has to say where a
+  /// failure is reported and where the answer will be offered, because getting
+  /// either wrong is invisible until a countdown expires against nobody. The
+  /// settings callers decide `surface` from their own window's key state at the
+  /// click (SO6), the guided setup flow passes `.guidedSetup` because its own
+  /// window answers (DM11), and everything else passes `.floatingPanel`.
+  func select(
+    _ mode: DisplayMode, on displayID: CGDirectDisplayID,
+    from origin: PreviewOrigin, surface: PreviewSurface
+  ) {
     // Raised HERE, synchronously, not inside the queued operation: the whole
     // point is that the banner's buttons are already disabled by the time the
     // reconfiguration starts, so nobody can confirm a mode they are not
@@ -533,11 +1114,38 @@ final class DisplayModeCoordinator {
     // the first one's completion clear the flag for the second.
     inFlightSelects += 1
     isApplying = true
-    enqueue {
-      await self.performSelect(mode, on: displayID, from: origin)
+    queue.enqueue {
+      // Routed on PROVENANCE, which is the whole of SS5's routing rule: a
+      // synthesized row's sentinel mode ID denotes nothing in either mode-ID
+      // space, so there is no configuration transaction that could apply it.
+      // The configurator refuses one outright, and that refusal is a tripwire
+      // for a bypass rather than a path anything is meant to take.
+      if mode.isSynthesized {
+        await self.performSynthesisSelect(mode, on: displayID, from: origin, surface: surface)
+      } else {
+        await self.performSelect(mode, on: displayID, from: origin, surface: surface)
+      }
       self.inFlightSelects -= 1
       if self.inFlightSelects == 0 { self.isApplying = false }
     }
+  }
+
+  /// `select`, plus the no-op guard every mode LIST needs: applying the mode
+  /// already on screen reconfigures nothing and then demands "Keep this
+  /// resolution?" with a full countdown for a change nobody made.
+  ///
+  /// Here rather than at each call site because the settings window now offers
+  /// modes from two surfaces — the hub's size pop-up and the full list — and a
+  /// guard held in agreement by discipline is the shape this branch has been
+  /// bitten by. The menu-bar list keeps its own copy deliberately: it also has
+  /// to decide whether to end the menu's tracking session, which is a question
+  /// only that surface has.
+  func selectFromList(
+    _ mode: DisplayMode, on displayID: CGDirectDisplayID,
+    from origin: PreviewOrigin, surface: PreviewSurface, currentModeID: Int32?
+  ) {
+    guard mode.ioModeID != currentModeID else { return }
+    select(mode, on: displayID, from: origin, surface: surface)
   }
 
   /// `answered` is the preview the caller was LOOKING AT when it answered. It
@@ -551,13 +1159,13 @@ final class DisplayModeCoordinator {
   /// makes "an answer only ever resolves the preview it was given for" a
   /// property of the type, and demotes queue ordering to an optimisation.
   @discardableResult
-  func confirm(_ answered: Preview) async -> ModePreviewOutcome {
-    await enqueueReturning { await self.performResolve(answered, keeping: true) }
+  func confirm(_ answered: Preview) async -> PreviewOutcome {
+    await queue.enqueueReturning { await self.performResolve(answered, keeping: true, intent: .answered) }
   }
 
   @discardableResult
-  func revert(_ answered: Preview) async -> ModePreviewOutcome {
-    await enqueueReturning { await self.performResolve(answered, keeping: false) }
+  func revert(_ answered: Preview) async -> PreviewOutcome {
+    await queue.enqueueReturning { await self.performResolve(answered, keeping: false, intent: .answered) }
   }
 
   /// Ends any outstanding MODE preview and reports whether the display is back
@@ -588,21 +1196,76 @@ final class DisplayModeCoordinator {
   /// refuse: the same refusal `ModePreviewSession.begin` already makes across
   /// displays, for the same reason.
   func endOutstandingPreview() async -> Bool {
-    await enqueueReturning {
-      guard let outstanding = await self.session.previewedMode else { return true }
-      // Built FROM the session, so the intent check inside `performResolve`
-      // cannot see it as stale: it is by construction the preview that is
-      // outstanding. `secondsRemaining: 0` and `isCountingDown: false` are the
-      // honest description of an answer nobody waited for.
-      let answered = Preview(
-        displayID: outstanding.displayID,
-        mode: outstanding.mode,
-        secondsRemaining: 0,
-        failure: nil,
-        isCountingDown: false
-      )
-      return await self.performResolve(answered, keeping: false) == .reverted
+    await queue.enqueueReturning {
+      // BOTH previews, and both are awaited rather than short-circuited: a
+      // caller asking every size preview to stand down must not leave one of
+      // them standing because the other refused. A synthesized size is a size,
+      // so anything that had to end a mode preview has to end this one too.
+      let mode = await self.endOutstandingModePreview()
+      let synthesized = await self.endOutstandingSynthesisPreview()
+      return mode && synthesized
     }
+  }
+
+  /// Inside the queue already. Split out of `endOutstandingPreview` because the
+  /// select paths call it from inside a queued operation, where re-entering the
+  /// queue would wait on the operation doing the waiting.
+  private func endOutstandingModePreview() async -> Bool {
+    guard let outstanding = await session.previewedMode else { return true }
+    // Built FROM the session, so the intent check inside `performResolve`
+    // cannot see it as stale: it is by construction the preview that is
+    // outstanding. `secondsRemaining: 0` and `isCountingDown: false` are the
+    // honest description of an answer nobody waited for.
+    let answered = Preview(
+      displayID: outstanding.displayID,
+      mode: outstanding.mode,
+      surface: surfaces[outstanding.displayID] ?? .floatingPanel,
+      secondsRemaining: 0,
+      failure: nil,
+      isCountingDown: false,
+      synthesized: nil,
+      synthesisFailure: nil
+    )
+    // `.standDown`, and it is the whole reason the parameter exists: every
+    // caller of this is about to reconfigure displays itself.
+    return await performResolve(answered, keeping: false, intent: .standDown) == .reverted
+  }
+
+  /// The same for a synthesized size: disengage, and report whether the panel
+  /// is back on its own desktop.
+  private func endOutstandingSynthesisPreview() async -> Bool {
+    guard let synthesis, let outstanding = await synthesis.session.previewedSynthesis
+    else { return true }
+    let answered = Preview(
+      displayID: outstanding.physicalDisplayID,
+      mode: synthesizedPreviewRow(outstanding.size, on: outstanding.physicalDisplayID),
+      surface: surfaces[outstanding.physicalDisplayID] ?? .floatingPanel,
+      secondsRemaining: 0,
+      failure: nil,
+      isCountingDown: false,
+      synthesized: outstanding,
+      synthesisFailure: nil
+    )
+    return await performResolve(answered, keeping: false, intent: .standDown) == .reverted
+  }
+
+  /// Reconciles both preview sessions and gives the AR12 claim back if nothing
+  /// is outstanding.
+  ///
+  /// **THE release funnel for `.displayModes`, and the reason it is exposed.**
+  /// `adopt` is the only releaser (see its comment), which is what keeps a
+  /// claim from outliving the thing it protects AND what keeps a claim
+  /// protecting a preview from being freed by unrelated work. A claimant that
+  /// takes the gate outside a preview (`SynthesisCoordinator`'s opt-out and
+  /// its reset paths) therefore gives it back HERE rather than calling
+  /// `release` itself: a select granted during their multi-second disengage
+  /// (granted because it names the same claimant) would otherwise have its
+  /// claim freed underneath it.
+  ///
+  /// Enters the queue, so it must not be called from inside one of its
+  /// operations.
+  func releaseReconfigurationClaimIfIdle() async {
+    await queue.enqueueReturning { await self.adopt(.keep, synthesis: .keep) }
   }
 
   /// THE only place `startFailure` is cleared, for the same reason `store` is
@@ -615,39 +1278,40 @@ final class DisplayModeCoordinator {
   }
 
   // MARK: - Serialisation
-
-  private func enqueue(_ operation: @escaping @MainActor () async -> Void) {
-    let previous = pending
-    pending = Task { @MainActor in
-      _ = await previous?.value
-      await operation()
-    }
-  }
-
-  private func enqueueReturning<T: Sendable>(
-    _ operation: @escaping @MainActor () async -> T
-  ) async -> T {
-    let previous = pending
-    let task = Task { @MainActor () -> T in
-      _ = await previous?.value
-      return await operation()
-    }
-    // The chain is Void-typed, so the next operation waits on this one through
-    // an erased wrapper rather than on its result.
-    pending = Task { @MainActor in _ = await task.value }
-    return await task.value
-  }
+  //
+  // The queue itself is `PreviewQueue` in CandelaKit (#68): four coordinators
+  // held four byte-identical copies of it, and the countdown driver beside it.
 
   // MARK: - Operations (always inside the queue)
 
   private func performSelect(
-    _ mode: DisplayMode, on displayID: CGDirectDisplayID, from origin: PreviewOrigin
+    _ mode: DisplayMode, on displayID: CGDirectDisplayID,
+    from origin: PreviewOrigin, surface: PreviewSurface
   ) async {
-    // Recorded here rather than in `select` so it names the preview that is
+    // Recorded here rather than in `select` so they name the preview that is
     // about to become outstanding, not whichever click was most recent: two
     // queued selects from different surfaces each get their own surface as they
-    // land, in the order they land.
+    // land, in the order they land. (`surface` was still DECIDED at the click —
+    // the caller sampled its window's key state synchronously — this is only
+    // where the decision is filed.)
     origins[displayID] = origin
+    surfaces[displayID] = surface
+    // A new pick on this display supersedes any standing intent to put a torn
+    // down stop back: whatever happens next is about the size being chosen now.
+    // CONSUMED rather than dropped, so the stored stop goes with it: the
+    // previous pick's preview is resolved inside `ModePreviewSession.begin`'s
+    // revert-first, which reaches no arm here, so a bare drop left the pref
+    // naming a stop that will not be on the glass under either outcome.
+    dropFallenPickRestore(on: displayID, explain: false)
+    // Sampled here, before `begin()` moves the display, and promoted to
+    // `sizeAppliedByUser` only if this preview is KEPT. Every path that reaches
+    // here is an explicit choice from an offering surface (the hub's pickers,
+    // the full list, the menu bar's list); reapply and restore never preview.
+    // An unreadable current mode counts as a size change: this is a user's
+    // choice either way, and the recommendation is the thing being answered.
+    selectChangesSize[displayID] = configurator.currentMode(for: displayID).map {
+      $0.logicalWidth != mode.logicalWidth || $0.logicalHeight != mode.logicalHeight
+    } ?? true
     // Through `dismissStartFailure`, never a bare `startFailure = nil`: the
     // standalone window renders the failure, so clearing it without syncing
     // leaves an EMPTY floating panel on the display for the whole duration of
@@ -656,14 +1320,102 @@ final class DisplayModeCoordinator {
     dismissStartFailure()
     // The user has answered the report themselves — whatever reapply could not
     // do for this display, they are now doing by hand. Leaving the notice up
-    // would have it contradict the choice they just made.
-    reapplyReports[displayID] = nil
+    // would have it contradict the choice they just made. A dismissal, so it
+    // goes through the one dismissal path.
+    if let key = identity(for: displayID)?.key { dismissReport(forKey: key) }
+    // One preview at a time across both size paths (SO6's single answerable
+    // surface). `ModePreviewSession.begin` ends an outstanding preview of its
+    // OWN on another display; it has never heard of the synthesis session, so
+    // this is where the other half is ended. Refused on a failed disengage for
+    // `MirroringCoordinator`'s reason: reporting success would leave a panel
+    // mirrored onto a virtual display nobody approved.
+    //
+    // **BEFORE the claim, and the order is the whole point.** Ending a preview
+    // runs `adopt`, and `adopt` is the AR12 RELEASER: standing the other
+    // preview down after claiming would hand back the claim this operation just
+    // took, and the apply below would then run unguarded with nothing left to
+    // re-take it. Standing down first costs nothing extra, because a select was
+    // going to end the other preview either way, and the claim taken afterwards
+    // is then held continuously from here through the countdown's resolution.
+    //
+    // The refusal is REPORTED by the synthesis coordinator, which recorded the
+    // engine's own failure on the way out, rather than as a `StartFailure`
+    // here: that surface renders "CoreGraphics error <n>", and the thing that
+    // just went wrong was a virtual display refusing to come down.
+    guard await endOutstandingSynthesisPreview() else {
+      log.error("Refused a mode change on display \(displayID): an outstanding synthesized size could not be disengaged")
+      await adopt(.keep)
+      return
+    }
+    // A COMMITTED set is not a preview, so the guard above never sees it.
+    // Picking an ordinary row while a synthesized size is engaged must take
+    // the set down through the engine first (SS10): the panel is a mirror
+    // slave, and a mode applied underneath the mirror lands invisibly while
+    // the set stands. Same stand-down-before-claim ordering as above.
+    if !mode.isSynthesized, synthesis?.isEngaged(displayID: displayID) == true {
+      // Captured BEFORE the teardown, because the teardown is what makes it
+      // unrecoverable: the pairing goes, and with it the only record of which
+      // stop was on the glass when the person picked.
+      let engaged = synthesis?.engagedSize(displayID: displayID)
+      // The MODE preview stands down before the teardown, not at `begin` below.
+      // `disengageForModeChange` runs from inside this queue and therefore
+      // skips `endOutstandingPreview` entirely, so without this a preview
+      // standing on ANOTHER display would live across a multi-second display
+      // reconfiguration with a fallback captured before it. Same reason and
+      // same placement as `performSynthesisSelect`'s.
+      guard await endOutstandingModePreview() else {
+        log.error("Refused a mode change on display \(displayID): an outstanding size preview could not be reverted")
+        await adopt(.keep)
+        return
+      }
+      guard let display = configurator.displays().first(where: { $0.id == displayID }),
+            await synthesis?.disengageForModeChange(display) == true
+      else {
+        log.error("Refused a mode change on display \(displayID): the engaged synthesized size could not be disengaged")
+        await adopt(.keep)
+        return
+      }
+      // RULING 2026-08-18: this teardown is irreversible and it happens BEFORE
+      // the reversible preview below, so every way that preview can end badly
+      // has to put the stop back. Revert means "return me to the screen I was
+      // looking at when I picked", and that screen was the synthesized size.
+      // Armed here rather than at the capture, so a refused teardown leaves
+      // nothing to restore.
+      if let engaged { restoreStopIfPickFalls[displayID] = engaged }
+      // The disengage reconfigured the display; the rows this pick was made
+      // from are stale. The apply below still cross-checks the descriptor, so
+      // a reassigned ioModeID surfaces as a reported failure, never a wrong
+      // mode.
+      refreshCatalog(for: displayID)
+      // The disengage restored the pre-engage mode. When that IS the picked
+      // mode there is no change left to preview, and `begin` would wait on a
+      // reconfigure that never comes: measured 2026-08-18, the select hung
+      // and every later pick queued behind it. Ordinary picks cannot hit
+      // this (a same-value selection never fires), so it is handled here.
+      // The kept-mode funnel runs so the stored stop is cleared.
+      if let current = configurator.currentMode(for: displayID),
+         current.descriptor == mode.descriptor {
+        // The pick LANDED, so there is nothing to put back.
+        restoreStopIfPickFalls[displayID] = nil
+        if let identity = identity(for: displayID), persistence.isEnabled(for: identity) {
+          store(mode, on: displayID, for: identity)
+        } else {
+          synthesis?.clearStoredSize(displayID: displayID)
+        }
+        await adopt(.clear)
+        return
+      }
+    }
     // AR12, asked BEFORE `begin()` because that is what makes a refusal cost
     // nothing: no transaction has been opened and no display has moved, so there
     // is a sentence to say and nothing to undo. Granted when WE are already the
     // holder — a select on a second display while one is previewing is a
     // supported operation, and `ModePreviewSession.begin` handles it.
     if let holder = await gate.claim(.displayModes).refusedBy {
+      // Before the failure is published and before `adopt` gives the claim
+      // back: the pick is not happening, so the stop the teardown above took
+      // down goes back on the glass first.
+      await restoreStopAfterAFallenPick(on: displayID)
       startFailure = StartFailure(displayID: displayID, reason: .blocked(by: holder))
       // Synced by this `adopt`, which must stay immediately after the write —
       // same adjacency rule as the failure branch below.
@@ -675,6 +1427,11 @@ final class DisplayModeCoordinator {
       await adopt(.clear)
       startCountdown()
     case let .failure(error):
+      // The pick failed after an irreversible teardown, so the stop goes back
+      // before anything is published. Ahead of the `startFailure` write for
+      // the gate's sake: the claim this operation holds is what guards the
+      // re-engage, and `adopt` below is what hands it back.
+      await restoreStopAfterAFallenPick(on: displayID)
       // One of the two writes to `startFailure` that are not a clear (the other
       // is the gate refusal above). It is synced by the `adopt` below — which
       // must therefore stay immediately after it, since this is what puts the
@@ -691,23 +1448,332 @@ final class DisplayModeCoordinator {
     refreshCatalog(for: displayID)
   }
 
-  private func performResolve(_ answered: Preview, keeping: Bool) async -> ModePreviewOutcome {
-    let intent = PreviewedMode(displayID: answered.displayID, mode: answered.mode)
-    let outcome = keeping ? await session.confirm(intent) : await session.revert(intent)
+  /// `performSelect` for a synthesized stop (SS4/SS5): the same recording, the
+  /// same gate, the same countdown, a different engine underneath.
+  ///
+  /// The guards are checked HERE rather than inside the engine because a
+  /// refusal has to be a sentence about this display: HDR is on (SS9), the
+  /// display is the built-in (SS14), the opt-in is off, or the stop is no
+  /// longer one the catalog offers. Their wording is `SynthesisCopy`'s; the
+  /// distinction is `SynthesisCoordinator.Refusal.Reason`.
+  private func performSynthesisSelect(
+    _ mode: DisplayMode, on displayID: CGDirectDisplayID,
+    from origin: PreviewOrigin, surface: PreviewSurface
+  ) async {
+    guard let synthesis,
+          let display = configurator.displays().first(where: { $0.id == displayID })
+    else { return }
+    // Already on the glass, and asked FIRST, before any of the view state below
+    // is rewritten. Re-engaging would tear the pairing down and build a fresh
+    // virtual display for the size that is already showing, which is tens of
+    // seconds of reconfiguration to arrive back where it started. Asked here
+    // rather than after the catalog lookup because the side effects below are
+    // not free either: they overwrite the pre-pick rate fallback with the
+    // engaged rate, and they dismiss a refusal the person may be reading.
+    //
+    // **A stop's identity IS its logical size**, which is why comparing the
+    // picked row's geometry answers the same question the full `SyntheticSize`
+    // equality below the lookup used to. `SyntheticSize` derives its
+    // framebuffer as exactly twice its logical size, and `SyntheticSizeCatalog`
+    // emits at most one stop per logical size (one per percentage rung, each
+    // even-rounded from the same native geometry), so two stops cannot share a
+    // logical size and differ anywhere else.
+    //
+    // Through the funnel like every other exit, even though this one refuses
+    // nothing: `adopt` is the only thing that republishes the preview and syncs
+    // the window. `.keep` on both sides because nothing was refused and a
+    // preview standing on another display is none of this exit's business.
+    if let engaged = synthesis.engagedSize(displayID: displayID),
+       engaged.logicalWidth == mode.logicalWidth,
+       engaged.logicalHeight == mode.logicalHeight {
+      await adopt(.keep, synthesis: .keep)
+      return
+    }
+    origins[displayID] = origin
+    surfaces[displayID] = surface
+    // Superseded for `performSelect`'s reason, and consumed for the same one.
+    dropFallenPickRestore(on: displayID, explain: false)
+    // Sampled BEFORE the engage, while the panel is still showing its own
+    // desktop: this is the rate the mirror will preserve, and it is what the
+    // confirmation surfaces name. Recorded even if the engage then fails, since
+    // it describes the panel rather than the attempt.
+    synthesisPreviewRefresh[displayID] = configurator.currentMode(for: displayID)?.refreshHz
+    // Every synthesized pick is a size the user chose, so it answers the
+    // recommendation the same way a published size does (PD8). Promoted to
+    // `sizeAppliedByUser` only if the preview is KEPT.
+    selectChangesSize[displayID] = true
+    dismissStartFailure()
+    synthesis.dismissRefusal()
+    if let key = identity(for: displayID)?.key { dismissReport(forKey: key) }
+
+    if let reason = synthesis.refusalReason(for: display) {
+      synthesis.note(reason, for: displayID)
+      // `.keep` for the mode side: this refusal is about a synthesized size on
+      // THIS display and says nothing about a preview standing on another one.
+      await adopt(.keep, synthesis: .clear)
+      return
+    }
+    // The stop is re-found in the ladder this panel generates TODAY rather than
+    // taken from the row, so a size the catalog has stopped offering is refused
+    // instead of engaged. The row is the user's pointing finger; the catalog is
+    // the authority on what it points at.
+    guard let size = catalogs[displayID]?.syntheticStops.first(where: {
+      $0.logicalWidth == mode.logicalWidth && $0.logicalHeight == mode.logicalHeight
+    }) else {
+      synthesis.note(.sizeNoLongerOffered, for: displayID)
+      // `.keep` for the mode side: this refusal is about a synthesized size on
+      // THIS display and says nothing about a preview standing on another one.
+      await adopt(.keep, synthesis: .clear)
+      return
+    }
+    // The mode side stands down FIRST, and a failure refuses: an engage would
+    // otherwise mirror a panel whose previewed mode nobody has answered yet,
+    // and the fallback that preview holds describes a display it no longer
+    // owns. The synthesis session ends its OWN outstanding preview inside
+    // `begin`, including a cross-display one.
+    //
+    // **Before the claim**, for the reason `performSelect` states at the same
+    // step: ending a preview runs `adopt`, which is the AR12 releaser, so a
+    // stand-down after the claim would give back the claim this operation just
+    // took. The engine's engage runs for tens of seconds and the preview stands
+    // for thirty more, and every second of that has to be guarded.
+    guard await endOutstandingModePreview() else {
+      log.error("Refused a synthesized size on display \(displayID): an outstanding mode preview could not be reverted")
+      await adopt(.keep, synthesis: .keep)
+      return
+    }
+    // AR12, before anything is created, for `performSelect`'s reason: a refusal
+    // has to cost nothing.
+    if let holder = await gate.claim(.displayModes).refusedBy {
+      synthesis.note(.blocked(by: holder), for: displayID)
+      // `.keep` for the mode side: this refusal is about a synthesized size on
+      // THIS display and says nothing about a preview standing on another one.
+      await adopt(.keep, synthesis: .clear)
+      return
+    }
+    switch await synthesis.beginPreview(
+      size, onPhysical: displayID, identityKey: display.identity.key
+    ) {
+    case .success:
+      await adopt(.clear, synthesis: .clear)
+      // Guarded on a preview actually standing, which a successful engage no
+      // longer guarantees: the engage runs its own departure sweep when it
+      // lands, and the panel that just left can be this one. `adopt` is the
+      // sole writer of `preview`, so it is what reports that, and a countdown
+      // started over nothing would tick for the rest of the session with no
+      // preview any tick can resolve.
+      if preview != nil { startSynthesisCountdown() }
+    case .failure:
+      // The refusal was recorded by `beginPreview`, which is the one place both
+      // busy shapes collapse into one. Nothing is outstanding on a refusal that
+      // reached the engine and failed, so `adopt` releases the gate.
+      await adopt(.keep, synthesis: .keep)
+    }
+    refreshCatalog(for: displayID)
+  }
+
+  /// The synthesized stop as a mode a preview surface can name, with the rate
+  /// the display is actually running rather than the catalog row's
+  /// `refreshHz: 0` sentinel.
+  ///
+  /// Read LIVE first: the countdown appears after the engage tail has run, so
+  /// the readback is the rate the re-time put back on the wire. When the
+  /// re-time could not run it is whatever the mirror negotiated, which was
+  /// measured lower than the pre-pick rate [MEASURED 2026-08-18, OSD confirmed
+  /// twice], and the live reading is still the honest one. Label-only; the
+  /// answer routes on `Preview.synthesized`, which carries the whole pairing,
+  /// so nothing matches on this value.
+  private func synthesizedPreviewRow(
+    _ size: SyntheticSize, on displayID: CGDirectDisplayID
+  ) -> DisplayMode {
+    let row = SyntheticSizeCatalog.row(for: size)
+    let live = configurator.currentMode(for: displayID)?.refreshHz
+    guard let hz = [live, synthesisPreviewRefresh[displayID], catalogs[displayID]?.current?.refreshHz]
+      .compactMap({ $0 }).first(where: { $0 > 0 })
+    else { return row }
+    return DisplayMode(
+      ioModeID: row.ioModeID,
+      logicalWidth: row.logicalWidth, logicalHeight: row.logicalHeight,
+      pixelWidth: row.pixelWidth, pixelHeight: row.pixelHeight,
+      refreshHz: hz, isNative: false, provenance: .synthesized
+    )
+  }
+
+  /// Puts back the synthesized size an ordinary pick took down, when the pick
+  /// did not survive (RULING 2026-08-18).
+  ///
+  /// Unattended in shape and deliberately so: no preview, no countdown, no pref
+  /// write. Nothing is being asked of the person here, because they already
+  /// answered. What they answered was "put this back", and the pref that says
+  /// which stop they chose was never touched by the pick that fell.
+  ///
+  /// **Only ever called from an ANSWERED outcome, and only while this operation
+  /// still holds the AR12 claim.** Both halves are load-bearing.
+  /// `SynthesisCoordinator.engage` takes no claim of its own (its docstring
+  /// says the caller holds the gate), so running it from a stand-down would
+  /// perform tens of seconds of display reconfiguration inside an operation
+  /// another claimant is holding the gate for, or with nobody holding it at
+  /// all. `ResolveIntent` is what keeps those routes out. Running it before the
+  /// `adopt` that hands the claim back is what keeps this one in.
+  ///
+  /// An engine failure goes through the refusal the synthesis coordinator
+  /// already renders, never a `StartFailure`: that surface says "CoreGraphics
+  /// error <n>", and what would have gone wrong here is a virtual display.
+  private func restoreStopAfterAFallenPick(on displayID: CGDirectDisplayID) async {
+    guard let size = restoreStopIfPickFalls.removeValue(forKey: displayID) else { return }
+    guard let synthesis,
+          let display = configurator.displays().first(where: { $0.id == displayID })
+    else { return }
+    // The world can have moved while the preview stood: the opt-in switched
+    // off, HDR turned on, the display joined a mirror set. The same guard the
+    // attended and unattended engages both ask, asked once more here, so a
+    // restore cannot re-engage into a state every other path refuses.
+    if let reason = synthesis.refusalReason(for: display) {
+      log.info(
+        "Not putting the synthesized size back on display \(displayID): \(String(describing: reason), privacy: .public)"
+      )
+      // The stop vanishes here the same as on the other two consume routes,
+      // so it gets the same sentence: silence on one of three roads was the
+      // review's finding.
+      synthesis.note(reason, for: displayID)
+      synthesis.clearStoredSize(displayID: displayID)
+      return
+    }
+    // Re-found in the ladder this display generates NOW, exactly as the select
+    // path does it. The ladder is regenerated by a rotation, a native-geometry
+    // change, or anything else that lands during the preview's thirty seconds,
+    // and the guard above has no `sizeNoLongerOffered` arm because that refusal
+    // belongs to the catalog lookup the restore would otherwise bypass. The row
+    // is the pointing finger; the catalog is the authority on what it points at.
+    guard let resolved = catalogs[displayID]?.syntheticStops.first(where: {
+      $0.logicalWidth == size.logicalWidth && $0.logicalHeight == size.logicalHeight
+    }) else {
+      synthesis.note(.sizeNoLongerOffered, for: displayID)
+      synthesis.clearStoredSize(displayID: displayID)
+      return
+    }
+    log.info("Putting the synthesized size back on display \(displayID): the ordinary size it was taken down for did not stand")
+    if case let .failure(failure) = await synthesis.engage(resolved, on: display) {
+      synthesis.note(.engine(failure), for: displayID)
+    }
+    refreshCatalog(for: displayID)
+  }
+
+  /// Consumes a fallen pick's restore without performing it.
+  ///
+  /// The stored stop goes with it, and that is the point rather than a side
+  /// effect. The display is about to end up on something that is not the stop,
+  /// so a pref still naming one is the machine-versus-pref divergence the
+  /// whole restore exists to prevent, one gesture further along: the next
+  /// launch would silently re-engage a size the person last saw replaced.
+  ///
+  /// `explain` for the stand-down case only. There the stop disappears because
+  /// another display change took over, which is not something the person did,
+  /// so it gets a sentence. A superseding pick needs none: they are looking at
+  /// their own choice.
+  private func dropFallenPickRestore(on displayID: CGDirectDisplayID, explain: Bool) {
+    guard restoreStopIfPickFalls.removeValue(forKey: displayID) != nil else { return }
+    synthesis?.clearStoredSize(displayID: displayID)
+    guard explain else { return }
+    log.info("Not putting the synthesized size back on display \(displayID): another display change took over")
+    synthesis?.note(.restoreSuperseded, for: displayID)
+  }
+
+  /// Why a preview is being resolved, which is what decides whether a fallen
+  /// pick's synthesized size may be put back.
+  ///
+  /// The distinction is not cosmetic. `.reverted` is produced both when a
+  /// person answers and when some OTHER operation stands the preview down on
+  /// its way to reconfiguring the same displays: the mirror path claims the
+  /// gate and then stands previews down, the opt-out and the whole-app reset
+  /// stand them down BEFORE claiming, and a select stands them down before
+  /// taking its own claim. A restore run from any of those is an unbounded
+  /// display reconfiguration performed inside somebody else's operation, and
+  /// `SynthesisCoordinator.engage` takes no claim of its own to protect it.
+  private enum ResolveIntent {
+    /// The person answered, or their clock did. This outcome is the last word
+    /// about what should be on the glass.
+    case answered
+    /// Somebody is clearing the way for an operation of their own.
+    case standDown
+  }
+
+  private func performResolve(
+    _ answered: Preview, keeping: Bool, intent: ResolveIntent
+  ) async -> PreviewOutcome {
+    if let previewed = answered.synthesized {
+      return await performSynthesisResolve(previewed, keeping: keeping)
+    }
+    let answeredMode = PreviewedMode(displayID: answered.displayID, mode: answered.mode)
+    let outcome = keeping
+      ? await session.confirm(answeredMode)
+      : await session.revert(answeredMode)
     switch outcome {
     case .committed:
-      // Reached only via the session's match check, so the mode committed is
-      // exactly the one the user was reading — and therefore the one to store.
+      // Supersedes SO19/A6: while the Remember toggle is on, the stored mode
+      // tracks the resolution the user KEEPS, so remembering means restoring
+      // how they left it. Only this branch writes: a reverted or expired
+      // preview is a mode nobody accepted and must never become the pin.
       //
-      // Not quite structural: `confirm()` returns `lastOutcome ?? .reverted`
-      // when nothing is outstanding, and `lastOutcome` can be `.committed` from
-      // an earlier commit, so that early return precedes the match check. It is
-      // unreachable in practice — a commit clears `preview`, which is what
-      // renders the buttons — and re-storing the same mode would be harmless if
-      // it were not. The guarantee is the flow, not the type.
-      storeIfRemembering(answered.mode, on: answered.displayID)
+      // The guarantee is the FLOW, not the type. This arm keys on the outcome,
+      // and `confirm` can return a committed outcome without applying anything
+      // when it replays `lastOutcome` for an answer it has already given. That
+      // replay re-enters here and rewrites the SAME descriptor, which is what
+      // makes keying on the outcome safe rather than merely convenient. Any
+      // future path that can reach `.committed` carrying a mode the user did
+      // not accept breaks this, so it has to be checked here and not assumed.
+      //
+      // Deliberately NOT narrowed to size changes the way the recommendation
+      // below is. A kept rate-only change is still a kept resolution, and the
+      // stored descriptor carries the refresh rate.
+      //
+      // `answered.mode`, not a live read: `confirm` commits the mode that was
+      // PREVIEWED rather than whatever the display reports at confirm time,
+      // and it only reaches `.committed` when that apply succeeded and its
+      // achieved descriptor matched. Reading live here could store a mode the
+      // session deliberately refused to make permanent.
+      //
+      // In-app changes only, this version. A resolution changed in System
+      // Settings does not pass through here and does not move the pin.
+      if let identity = identity(for: answered.displayID),
+         persistence.isEnabled(for: identity) {
+        store(answered.mode, on: answered.displayID, for: identity)
+      }
+      // The kept size is an explicit choice against any stored stop, which
+      // would otherwise re-engage at the next launch over the size the person
+      // just confirmed. OUTSIDE the Remember guard above, and that is the whole
+      // point: `ModePersistence.isEnabled` defaults false, so under stock
+      // settings the clear inside `store` is never reached at all. The two
+      // prefs are unrelated and neither may gate the other.
+      if !answered.mode.isSynthesized {
+        synthesis?.clearStoredSize(displayID: answered.displayID)
+      }
+      // The pick stood, so the stop it displaced stays displaced.
+      restoreStopIfPickFalls[answered.displayID] = nil
+      // The size recommendation IS answered here (PD8): a kept size is the
+      // user's answer for this session, and only a kept one, since a revert or
+      // an expiry leaves them on the size they were already being asked about.
+      if selectChangesSize[answered.displayID] == true {
+        sizeAppliedByUser.insert(answered.displayID)
+      }
       await adopt(.clear)
     case .reverted:
+      // Revert and expiry both land here, and both mean the person is back on
+      // whatever they had. If an irreversible teardown got them here, "whatever
+      // they had" is the synthesized size, so it goes back before `adopt`
+      // releases the claim.
+      //
+      // A stand-down does NOT restore: whoever asked for it is about to
+      // reconfigure these displays for itself, and standing a virtual display
+      // up underneath that operation is the collision AR12 exists to prevent.
+      // The stash is consumed either way, so the pref can never be left naming
+      // a stop the machine is not showing.
+      switch intent {
+      case .answered:
+        await restoreStopAfterAFallenPick(on: answered.displayID)
+      case .standDown:
+        dropFallenPickRestore(on: answered.displayID, explain: true)
+      }
       await adopt(.clear)
     case let .failed(error):
       await adopt(.set(error))
@@ -721,6 +1787,65 @@ final class DisplayModeCoordinator {
     return outcome
   }
 
+  /// The synthesized half of `performResolve`.
+  ///
+  /// **The mapped return value is deliberately coarse.** `PreviewOutcome` is
+  /// the mode session's vocabulary and its failure case carries a
+  /// `DisplayConfigError`; no synthesis failure has a CGError behind it, and
+  /// fabricating one would put "CoreGraphics error 0" in front of a person
+  /// whose virtual display would not come down. So everything that resolved
+  /// NOTHING maps to `.stale`, which is exactly what the one caller that reads
+  /// this (`endOutstandingPreview`) needs: it refuses unless the panel is back.
+  /// The detail lives on the preview (`synthesisFailure`) and on
+  /// `SynthesisCoordinator.refusal`, where `SynthesisCopy` can render it.
+  private func performSynthesisResolve(
+    _ previewed: PreviewedSynthesis, keeping: Bool
+  ) async -> PreviewOutcome {
+    guard let synthesis else { return .stale }
+    // A confirm that follows a FAILED revert can hand back the identical
+    // retained pairing, because the engine keeps a pairing whose teardown did
+    // not finish. That is the one path where `.committed` is not evidence of a
+    // healthy set, so it is sampled BEFORE the answer rather than inferred from
+    // it afterwards.
+    let unwindWasIncomplete: Bool = if case .engine(.unwindIncomplete) = synthesis.refusal?.reason {
+      synthesis.refusal?.displayID == previewed.physicalDisplayID
+    } else {
+      false
+    }
+    let outcome = keeping
+      ? await synthesis.confirmPreview(previewed)
+      : await synthesis.revertPreview(previewed)
+    switch outcome {
+    case let .committed(pairing):
+      // SS11's ordering: the engage landed and was verified, the user kept it,
+      // and only now is anything written. A revert or an expiry persists
+      // nothing, which is why only this arm stores.
+      synthesis.persist(pairing, unwindWasIncomplete: unwindWasIncomplete)
+      if selectChangesSize[previewed.physicalDisplayID] == true {
+        sizeAppliedByUser.insert(previewed.physicalDisplayID)
+      }
+      await adopt(.clear, synthesis: .clear)
+      refreshCatalog(for: previewed.physicalDisplayID)
+      return .committed
+    case .reverted:
+      await adopt(.clear, synthesis: .clear)
+      refreshCatalog(for: previewed.physicalDisplayID)
+      return .reverted
+    case let .failed(failure):
+      // Surfaced, never swallowed: `.unwindIncomplete` means a virtual display,
+      // a mirror set, or both are still standing, and `revert()` is a live
+      // retry for exactly as long as the preview stays outstanding.
+      await adopt(.keep, synthesis: .set(failure))
+      refreshCatalog(for: previewed.physicalDisplayID)
+      return .stale
+    case .stale, .busy:
+      // Neither resolved anything. They differ in whether repeating helps, and
+      // that difference is already recorded as a refusal.
+      await adopt(.keep, synthesis: .keep)
+      return .stale
+    }
+  }
+
   /// Ends an outstanding preview whose display has gone.
   ///
   /// Asks the SESSION which display is outstanding, and re-reads the live list
@@ -732,7 +1857,7 @@ final class DisplayModeCoordinator {
   /// would wedge. That is the exact case this exists to prevent, so it must not
   /// consult the copy.
   private func dropPreviewOnDepartedDisplay() {
-    enqueue {
+    queue.enqueue {
       guard let outstanding = await self.session.previewedMode else { return }
       let stillHere = self.configurator.displays().contains { $0.id == outstanding.displayID }
       guard !stillHere else { return }
@@ -746,7 +1871,40 @@ final class DisplayModeCoordinator {
   /// countdown tick that resumes late, which reconciles here instead of being
   /// discarded. A discarded outcome is exactly how a preview with a disarmed
   /// countdown and no driver gets created.
-  private func adopt(_ failure: FailureUpdate) async {
+  private func adopt(
+    _ failure: FailureUpdate, synthesis synthesisFailure: SynthesisFailureUpdate = .keep
+  ) async {
+    // The synthesis session is asked FIRST, and the two can never both be
+    // outstanding: every path that starts one ends the other and refuses if it
+    // could not. Asking in a fixed order is what makes that invariant visible
+    // rather than merely true.
+    if let coordinator = synthesis,
+       let outstanding = await coordinator.session.previewedSynthesis {
+      let carried: SynthesisFailure? = switch synthesisFailure {
+      case .clear:
+        nil
+      case .keep:
+        preview?.synthesized == outstanding ? preview?.synthesisFailure : nil
+      case let .set(failure):
+        failure
+      }
+      let counting = await coordinator.session.isCountingDown
+      preview = Preview(
+        displayID: outstanding.physicalDisplayID,
+        // The row rather than the size, so every surface that draws a preview
+        // keeps drawing one thing: a mode, a countdown and two buttons.
+        mode: synthesizedPreviewRow(outstanding.size, on: outstanding.physicalDisplayID),
+        surface: surfaces[outstanding.physicalDisplayID] ?? .floatingPanel,
+        secondsRemaining: await coordinator.session.secondsRemaining,
+        failure: nil,
+        isCountingDown: counting,
+        synthesized: outstanding,
+        synthesisFailure: carried
+      )
+      if !counting { stopCountdown() }
+      syncConfirmation()
+      return
+    }
     guard let outstanding = await session.previewedMode else {
       preview = nil
       stopCountdown()
@@ -773,9 +1931,12 @@ final class DisplayModeCoordinator {
     preview = Preview(
       displayID: outstanding.displayID,
       mode: outstanding.mode,
+      surface: surfaces[outstanding.displayID] ?? .floatingPanel,
       secondsRemaining: await session.secondsRemaining,
       failure: carried,
-      isCountingDown: counting
+      isCountingDown: counting,
+      synthesized: nil,
+      synthesisFailure: nil
     )
     if !counting { stopCountdown() }
     syncConfirmation()
@@ -802,23 +1963,35 @@ final class DisplayModeCoordinator {
     // (They can only coexist on DIFFERENT displays — `performSelect` clears the
     // failure before it begins.)
     //
-    // **Origin does not decide this surface.** It used to: a settings-origin
-    // preview was answered by the banner in the settings pane and got no window
-    // at all. That made the safety question easy to miss — it was a few lines
-    // of text partway down a scrolling pane, on whichever display the settings
-    // window happened to be, while the display that actually changed showed
-    // nothing. macOS puts this question in a dialog on the display it is about,
-    // and so do we now, for every preview whatever started it.
+    // **The preview's own `surface` decides this window (SO6), fixed at
+    // start.** The floating window is the default owner: macOS puts this
+    // question in a dialog on the display it is about, and so do we for the
+    // panel and every other origin. The settings banner owns the answer when
+    // the change came from a key settings window, because the user is already
+    // reading that window, and two button rows asking one question is the
+    // two-surfaces defect the surface model exists to prevent. The guided
+    // setup flow owns it when the setup window started the apply: that window
+    // draws its own Keep and Revert out of the observable preview state
+    // (DM11). Either owner takes this window off screen; when the banner owns,
+    // it renders the buttons and the hub's other renderings are passive text.
     //
-    // It also closes a hole the origin gate left open. Nothing keeps the
-    // settings window on screen: ⌘W, or switching the sidebar to another
-    // display, takes the banner away. While the countdown is armed that is
-    // survivable — expiry reverts on its own. A failed EXPIRY is not: the
-    // countdown is disarmed, nothing auto-retries, and the display is left on a
-    // mode the user never approved with no surface anywhere to revert it from,
-    // short of quitting the app.
+    // Known residue, accepted with SO6: nothing keeps the owning banner on
+    // screen, and ownership does not migrate mid-preview. The banner region
+    // renders only on the preview's own display destination, so SWITCHING THE
+    // SIDEBAR — to another display, General, or the built-in — hides the
+    // answerable surface with the window still open and key; closing the
+    // window (⌘W) does the same. An armed countdown survives both — expiry
+    // reverts unattended. A failed EXPIRY in that state leaves the answer
+    // only on the owning banner until the user navigates back to that
+    // display's destination (or reopens the window), which is also the
+    // recovery: the banner is still there, buttons live.
     if let preview {
-      confirmation?.presentConfirmation(.preview(preview.displayID))
+      switch preview.surface {
+      case .floatingPanel:
+        confirmation?.presentConfirmation(.preview(preview.displayID))
+      case .settingsBanner, .guidedSetup:
+        confirmation?.dismissConfirmation()
+      }
       return
     }
     // A failed `begin()` produces no preview, so without this a panel selection
@@ -841,45 +2014,102 @@ final class DisplayModeCoordinator {
   /// reconfiguration callback or by blocking work in a pane must not be able to
   /// stop the expiry — the expiry is what rescues a screen nobody can read.
   private func startCountdown() {
-    countdown?.cancel()
     let session = session
-    countdown = Task.detached { [weak self] in
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .seconds(1))
-        if Task.isCancelled { return }
-        let outcome = await session.tick()
-        Task { @MainActor [weak self] in
-          guard let self else { return }
-          if case let .failed(error) = outcome {
-            enqueue { await self.adopt(.set(error)) }
-          } else {
-            enqueue { await self.adopt(.keep) }
-          }
-        }
-        // The countdown fires at most once; whatever it returned, it is spent.
-        if outcome != nil { return }
-      }
+    countdown.start(tick: { await session.tick() }) { [weak self] outcome in
+      guard let self else { return }
+      // Through the queue, never straight to `adopt`: a tick that landed
+      // mid-apply would otherwise publish a picture the apply is about to
+      // replace.
+      queue.enqueue { await self.adoptModeTick(outcome) }
     }
+  }
+
+  /// A mode tick that landed, reconciled inside the queue. nil is an ordinary
+  /// tick; anything else is the expiry having resolved the preview on the
+  /// session's own executor.
+  private func adoptModeTick(_ outcome: PreviewOutcome?) async {
+    // Sampled BEFORE the reconciliation, which is what resolves the preview
+    // away: afterwards there is nothing left to name the display it was about.
+    let displayID = preview?.displayID
+    // An expiry is a revert nobody attended, so it owes the same restore
+    // (RULING 2026-08-18) and it owes it before `adopt` gives the claim back.
+    if case .reverted = outcome, let displayID {
+      await restoreStopAfterAFallenPick(on: displayID)
+    }
+    if case let .failed(error) = outcome {
+      await adopt(.set(error))
+    } else {
+      await adopt(.keep)
+    }
+  }
+
+  /// The same clock for a synthesized size, and the same two properties that
+  /// make it safe.
+  ///
+  /// The tick reaches the SESSION ACTOR directly rather than
+  /// `SynthesisCoordinator`, which is main-actor isolated: routing it through
+  /// that object would put a wedged main thread back on the expiry's critical
+  /// path, and the expiry is what takes down a virtual display nobody answered
+  /// for. One driver serves both preview kinds because only one preview can be
+  /// outstanding at a time.
+  private func startSynthesisCountdown() {
+    guard let synthesis else { return }
+    let session = synthesis.session
+    countdown.start(tick: { await session.tick() }) { [weak self] outcome in
+      guard let self else { return }
+      queue.enqueue { await self.adoptSynthesisTick(outcome) }
+    }
+  }
+
+  /// A synthesis tick that landed, reconciled inside the queue for the mode
+  /// side's reason: a tick that arrives mid-apply must not publish a picture
+  /// the apply is about to replace.
+  private func adoptSynthesisTick(_ outcome: SynthesisPreviewOutcome?) async {
+    guard let synthesis else { return }
+    guard let outcome else {
+      await adopt(.keep, synthesis: .keep)
+      return
+    }
+    // Sampled BEFORE the reconciliation, which is what resolves the preview
+    // away: afterwards there is nothing left to name the display the expiry
+    // was about.
+    let displayID = preview?.displayID
+    // The clock resolved the preview on the session's own executor, so the
+    // pairing snapshot and the refusal state have to catch up before anything
+    // is rebuilt from them.
+    await synthesis.adoptExpiry(outcome, on: displayID ?? kCGNullDirectDisplay)
+    switch outcome {
+    case let .failed(failure):
+      await adopt(.keep, synthesis: .set(failure))
+    case .committed, .reverted, .stale, .busy:
+      await adopt(.keep, synthesis: .keep)
+    }
+    if let displayID { refreshCatalog(for: displayID) }
   }
 
   private func stopCountdown() {
-    countdown?.cancel()
-    countdown = nil
-  }
-
-  private func storeIfRemembering(_ mode: DisplayMode, on displayID: CGDirectDisplayID) {
-    guard let identity = identity(for: displayID), persistence.isEnabled(for: identity) else {
-      return
-    }
-    store(mode, on: displayID, for: identity)
+    countdown.stop()
   }
 
   /// THE only writer of `storedDisplayMode`. Announcing the write is part of
   /// making it, so no caller can perform one and forget the propagation.
+  /// Private, with exactly two callers: `pinCurrentMode` (the explicit pin and
+  /// the toggle-on seeding) and the kept-preview branch of `performResolve`.
   private func store(
     _ mode: DisplayMode, on displayID: CGDirectDisplayID, for identity: DisplayConfigIdentity
   ) {
     persistence.store(mode.descriptor, for: identity)
+    // A kept ordinary mode is an explicit choice against any stored stop,
+    // which would otherwise re-engage at the next launch over the size the
+    // user just kept. No-op when nothing is stored.
+    //
+    // NOT the only site: `store` runs only while Remember is on, which is off
+    // by default, so `performResolve`'s committed arm clears independently. It
+    // stays here for the OTHER caller, `pinCurrentMode`, where an explicit pin
+    // of an ordinary mode is the same choice made by a different gesture.
+    if !mode.isSynthesized {
+      synthesis?.clearStoredSize(displayID: displayID)
+    }
     didStoreMode(displayID)
   }
 
@@ -933,39 +2163,83 @@ protocol ModeConfirmationPresenting: AnyObject {
 }
 
 extension DisplayModeCoordinator.Catalog {
-  /// Native / HiDPI / Scaled for one mode of THIS panel — the same logical
-  /// size is native on one display and an oversized render on another.
+  /// The words that name one mode of THIS panel: the same logical size is
+  /// native on one display and an oversized render on another.
   ///
   /// **RM11 rests on this now.** The size label used to hedge ("Looks like
   /// 2560 × 1440") because a bare size can be read as a claim that the panel
   /// really is that many pixels. The hedge is gone; these words carry the
   /// claim instead, so every surface that offers a size has to wear them, and
-  /// they have to be computed in ONE place — three private copies is how the
+  /// they have to be computed in ONE place: three private copies is how the
   /// rule drifts.
   ///
   /// Words, not a formatted string: a popup item is a single label and
   /// parenthesises them, a two-column row separates them with a dot. The words
   /// are the statement; the punctuation is layout.
   ///
+  /// SO14 retires "HiDPI" from copy, and this is the one place it was still
+  /// said (the menu-bar list, left alone by the settings overhaul and tracked
+  /// as #96 rather than blessed). The inversion is macOS's own: the sharp mode
+  /// says nothing, and the 1x duplicate it used to be distinguished FROM
+  /// carries "low resolution" instead.
+  ///
+  /// `isLowResolutionDuplicate` is asked of `DisplayModeCatalog`, once per
+  /// catalog rather than once per row: the answer depends on the mode's
+  /// siblings at the same logical size, and the full list renders hundreds of
+  /// rows. Curated surfaces pass `false`; see `badgedSize`.
+  ///
   /// "Scaled" is suppressed rather than guessed when the panel's native size is
   /// unknown, and is never said about the native mode itself.
-  func badges(for mode: DisplayMode) -> [String] {
-    var badges: [String] = []
-    if mode.isNative { badges.append("Native") }
-    if mode.isHiDPI { badges.append("HiDPI") }
-    if let nativePixels, !mode.isNative,
-       mode.isScaled(nativePixelWidth: nativePixels.width, nativePixelHeight: nativePixels.height) {
-      badges.append("Scaled")
-    }
-    return badges
+  func tags(for mode: DisplayMode, isLowResolutionDuplicate: Bool) -> [String] {
+    var tags: [String] = []
+    if mode.isNative { tags.append("Native") }
+    // A synthesized row never says "Scaled": the rendered badge subsumes it
+    // (a stop is scaled by construction), and the pair together truncates a
+    // menu-bar panel row to "(Scaled, Rendered by C...)".
+    if isScaled(mode), !mode.isSynthesized { tags.append("Scaled") }
+    if isLowResolutionDuplicate { tags.append("low resolution") }
+    return tags
   }
 
-  /// The size and its badges as one label, for surfaces that draw a single
-  /// string — a popup item, a panel row, a disclosure summary.
+  /// Suppressed rather than guessed when the panel's native size is unknown,
+  /// and never said about the native mode itself.
+  private func isScaled(_ mode: DisplayMode) -> Bool {
+    guard let nativePixels, !mode.isNative else { return false }
+    return mode.isScaled(
+      nativePixelWidth: nativePixels.width, nativePixelHeight: nativePixels.height
+    )
+  }
+
+  /// The size and its tags as one label, for surfaces that draw a single
+  /// string: a popup item, a panel row, a disclosure summary.
+  ///
+  /// `isLowResolutionDuplicate: false`, deliberately and for the same reason
+  /// the Recommended list passes it (`AllModesPage.recommendedRow`): its caller
+  /// renders the CURATED list, one row per logical size, and a curated row is a
+  /// 1x mode with a sharp twin only when that mode is the panel's NATIVE one
+  /// (`representativeRanking` rule 1 outranks rule 2). Tagging a display's own
+  /// native resolution "low resolution" would be an insult rather than a
+  /// distinction, and the twin is not on screen here to be distinguished from.
+  ///
+  /// The density model's mark rides along, in the SAME bracket as the tags.
+  /// Its caller draws one string on one line, so a mark of its own would be a
+  /// second pair of brackets on a 280 pt row; and the marks a settings row can
+  /// afford to separate ("Added by Candela") are the ones that stayed in
+  /// Settings anyway.
+  ///
+  /// "Rendered by Candela" rides along too (SS5), and it is not in that
+  /// category: it is a COST rather than a note about provenance. The menu-bar
+  /// panel offers these stops from this very label, and pressing one stands a
+  /// virtual display up for as long as the size is in use, so a label that left
+  /// it out would offer the cost invisibly. It is last, after the tags and the
+  /// recommendation, for the same reason the caps warning leads elsewhere:
+  /// nothing above it is longer than a word.
   func badgedSize(_ mode: DisplayMode) -> String {
-    let badges = badges(for: mode)
-    guard !badges.isEmpty else { return DisplayModeCopy.size(mode) }
-    return "\(DisplayModeCopy.size(mode)) (\(badges.joined(separator: ", ")))"
+    var marks = tags(for: mode, isLowResolutionDuplicate: false)
+    if isRecommendedSize(mode) { marks.append(DisplayModeCopy.recommended) }
+    if mode.isSynthesized { marks.append(SynthesisCopy.badge) }
+    guard !marks.isEmpty else { return DisplayModeCopy.size(mode) }
+    return "\(DisplayModeCopy.size(mode)) (\(marks.joined(separator: ", ")))"
   }
 
   /// The mode to apply for a curated row: the chosen SIZE at the refresh rate
@@ -985,6 +2259,13 @@ extension DisplayModeCoordinator.Catalog {
   /// pane must apply the same rule; two copies would differ the first time one
   /// was touched.
   func modeKeepingCurrentRefreshRate(for row: DisplayModeRow) -> DisplayMode {
+    // A synthesized row carries the `refreshHz: 0` sentinel and has no rate to
+    // keep: while engaged the rate is the virtual master's achievable one
+    // [MEASURED 2026-08-18: 100 Hz on a 5160x2160 master, from both 175 and
+    // 100 Hz starts], and the display's own rate returns on disengage.
+    // Resolving it against the live list would match on geometry the panel
+    // does not publish, or on nothing.
+    guard !row.mode.isSynthesized else { return row.mode }
     let wanted = DisplayModeDescriptor(
       logicalWidth: row.mode.logicalWidth,
       logicalHeight: row.mode.logicalHeight,
@@ -1016,8 +2297,69 @@ extension DisplayModeCoordinator.Catalog {
   /// `ioModeID` instead would leave the checkmark off whenever the user is at a
   /// size's slower refresh rate: the curated row's representative mode is that
   /// size's FASTEST rate, so the IDs differ while the size is plainly selected.
+  ///
+  /// **While a synthesized size is engaged, the ENGINE decides this and the
+  /// readback is not consulted at all.** The engage tail re-times the slave, so
+  /// the readback names the panel's own native mode [MEASURED 2026-08-18]:
+  /// matching against it would tick a published row that is not what is on the
+  /// glass. The engaged stop is the only row that can be current then, and no
+  /// published row can be.
   func isCurrentSize(_ mode: DisplayMode) -> Bool {
-    guard let current else { return false }
+    if let engagedSyntheticSize {
+      return mode.isSynthesized
+        && engagedSyntheticSize.logicalWidth == mode.logicalWidth
+        && engagedSyntheticSize.logicalHeight == mode.logicalHeight
+    }
+    // Nothing is engaged, so a synthesized row is an offer rather than a state.
+    guard !mode.isSynthesized, let current else { return false }
     return current.logicalWidth == mode.logicalWidth && current.logicalHeight == mode.logicalHeight
+  }
+
+  /// True for the row whose LOGICAL SIZE the density model ranked best.
+  ///
+  /// A size match, the same rule `isCurrentSize` and the hub's
+  /// `curatedSelection` follow, because a recommendation IS a logical size:
+  /// `SizeRecommendation` carries no `ioModeID` precisely so that mode-id
+  /// instability can never reach it, and a curated row's representative mode is
+  /// its size's fastest rate.
+  ///
+  /// Reads `bestInBand` rather than `recommendation`, so the mark persists
+  /// while the display is already running the recommended size: a mark is an
+  /// endorsement, and the endorsement is still true once the suggestion has
+  /// nothing left to suggest. The callout keys to `recommendation` and so still
+  /// hides on every abstention. False whenever there is no verdict or nothing
+  /// applicable reached the band. Three offering surfaces ask this question,
+  /// and one helper is the only way they keep answering it the same way.
+  ///
+  /// A synthesized stop whose logical size equals the recommended one inherits
+  /// the mark. **Ruled 2026-08-18: that ships as it is**; the suppression was
+  /// declined, so do not add a guard for it here or at a call site.
+  func isRecommendedSize(_ mode: DisplayMode) -> Bool {
+    guard let recommendation = density?.bestInBand else { return false }
+    return recommendation.logicalWidth == mode.logicalWidth
+      && recommendation.logicalHeight == mode.logicalHeight
+  }
+
+  /// Whether this size is the one macOS itself calls Default for the panel.
+  ///
+  /// Built-in only, deliberately. On a high-PPI panel the default is the
+  /// looks-like size whose framebuffer IS the panel (the HiDPI native-flagged
+  /// mode: 1512x982 on a 3024x1964 panel, measured 2026-08-19), so the flag
+  /// answers the question directly. On a standard-PPI external the same flag
+  /// rides the HiDPI twin (logical 1720x720 on the MAG), which is NOT what
+  /// System Settings calls Default there, so answering for externals would
+  /// badge the wrong row confidently. Externals have the density model's
+  /// Recommended instead; the built-in never does (no physical size is ever
+  /// filed for it), which is the gap this fills.
+  ///
+  /// The 1x fallback covers a non-Retina panel, where the only native-flagged
+  /// mode is the panel size itself and that IS the default.
+  func isDefaultSize(_ mode: DisplayMode) -> Bool {
+    guard display.isBuiltIn else { return false }
+    guard let anchor = all.first(where: { $0.isNative && $0.isHiDPI })
+      ?? all.first(where: \.isNative)
+    else { return false }
+    return anchor.logicalWidth == mode.logicalWidth
+      && anchor.logicalHeight == mode.logicalHeight
   }
 }

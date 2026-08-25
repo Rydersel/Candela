@@ -9,6 +9,8 @@ import Testing
 /// hardware failures: scripted results are consumed in order, then every
 /// later apply succeeds.
 actor RecordingApplier: BrightnessApplying {
+  nonisolated let accepts = HardwareTargetKind.ddc
+
   private(set) var applied: [HardwareTarget] = []
   private var scriptedResults: [Bool]
 
@@ -203,6 +205,8 @@ final class FakeEpochGate: Sendable {
 /// Applier whose applies block until released, for racing `resetDuplicateState`
 /// against an apply that is already in flight.
 actor GatedApplier: BrightnessApplying {
+  nonisolated let accepts = HardwareTargetKind.ddc
+
   private(set) var applied: [HardwareTarget] = []
   private var permits = 0
   private var gateWaiters: [CheckedContinuation<Void, Never>] = []
@@ -269,9 +273,12 @@ actor GatedApplier: BrightnessApplying {
 /// without touching the writer.
 @Test func ddcApplierWritesBrightnessAndRejectsNativeTargets() async {
   let fake = FakeDDC()
-  let applier = DDCCommandApplier(writer: fake, command: VCP.brightness)
+  let recorder = MismatchRecorder()
+  let applier = DDCCommandApplier(writer: fake, command: VCP.brightness, onMismatch: recorder.report)
+  #expect(applier.accepts == .ddc)
   #expect(await applier.apply(.ddc(raw: 55)) == true)
   #expect(await applier.apply(.native(0.5)) == false)
+  #expect(recorder.recorded().count == 1)
   let writes = await fake.recordedWrites()
   #expect(writes.count == 1)
   #expect(writes.first?.command == VCP.brightness)
@@ -282,12 +289,19 @@ actor GatedApplier: BrightnessApplying {
 /// and rejects `.ddc` targets (wiring bug) without invoking the closure.
 @Test func nativeApplierInvokesClosureAndRejectsDDCTargets() async {
   let calls = OSAllocatedUnfairLock<[(Float, CGDirectDisplayID)]>(initialState: [])
-  let applier = NativeBrightnessApplier(displayID: 7) { value, displayID in
-    calls.withLock { $0.append((value, displayID)) }
-    return true
-  }
+  let recorder = MismatchRecorder()
+  let applier = NativeBrightnessApplier(
+    displayID: 7,
+    apply: { value, displayID in
+      calls.withLock { $0.append((value, displayID)) }
+      return true
+    },
+    onMismatch: recorder.report
+  )
+  #expect(applier.accepts == .native)
   #expect(await applier.apply(.native(0.25)) == true)
   #expect(await applier.apply(.ddc(raw: 25)) == false)
+  #expect(recorder.recorded().count == 1)
   let recorded = calls.withLock { $0 }
   #expect(recorded.count == 1)
   #expect(recorded.first?.0 == 0.25)
@@ -432,6 +446,8 @@ struct LastAppliedTargetTests {
 /// shape, but every apply reports failure. Separate rather than a flag on
 /// `GatedApplier` so the existing I1 test's expectations stay untouched.
 actor GatedFailingApplier: BrightnessApplying {
+  nonisolated let accepts = HardwareTargetKind.ddc
+
   private var started = false
   private var startObservers: [CheckedContinuation<Void, Never>] = []
   private var permits = 0
@@ -488,4 +504,85 @@ actor GatedFailingApplier: BrightnessApplying {
   await controller.waitForPendingWrites()
   #expect(controller.lastApplyFailed() == true)
   #expect(controller.lastAppliedTarget() == .ddc(raw: 40)) // the failed write never landed
+}
+
+// MARK: - Settling a set of queues
+
+/// A queue whose contents are visible: `pending` is what would still be owed to
+/// the panel if the settle loop stopped now.
+@MainActor
+final class CountingQueue: PendingWireDraining {
+  private(set) var mark: UInt64 = 0
+  private(set) var pending = 0
+
+  func enqueue() {
+    mark += 1
+    pending += 1
+  }
+
+  func submissionMark() -> UInt64 { mark }
+
+  /// Nothing here is memoised, so there is nothing to forget.
+  func resetWriteMemo() {}
+
+  func drainPendingWrites() async -> Bool {
+    pending = 0
+    return true
+  }
+}
+
+/// Stands in for anything that writes on its own timer (the poller's fan-out, a
+/// dimming ramp): while IT is being drained, it puts work on a queue that was
+/// drained earlier in the same pass.
+@MainActor
+final class RefillingQueue: PendingWireDraining {
+  private let victim: CountingQueue
+  private var refillsLeft: Int
+
+  init(victim: CountingQueue, refills: Int) {
+    self.victim = victim
+    self.refillsLeft = refills
+  }
+
+  func submissionMark() -> UInt64 { 0 }
+
+  func resetWriteMemo() {}
+
+  func drainPendingWrites() async -> Bool {
+    if refillsLeft > 0 {
+      refillsLeft -= 1
+      victim.enqueue()
+    }
+    return true
+  }
+}
+
+/// Draining a list one at a time proves only that the LAST one is empty. This
+/// is the window: work lands on an already-drained queue while a later one is
+/// still being waited on, and a caller that took the first pass as proof would
+/// then make the wire unusable over a write nobody can see fail.
+@MainActor
+@Test func settlingReDrainsAQueueRefilledDuringTheSamePass() async {
+  let queue = CountingQueue()
+  let refiller = RefillingQueue(victim: queue, refills: 1)
+  queue.enqueue()
+
+  let settled = await WireQuiescence.settle([queue, refiller], betweenRounds: .zero)
+
+  #expect(settled)
+  #expect(queue.pending == 0, "the refill was drained too, not left behind the report")
+}
+
+/// And it gives up rather than claiming a quiet wire: something submitting on
+/// every pass never settles, and saying so is what makes the caller stand down.
+@MainActor
+@Test func settlingReportsFailureWhenTheQueueIsNeverQuiet() async {
+  let queue = CountingQueue()
+  let refiller = RefillingQueue(victim: queue, refills: .max)
+
+  let settled = await WireQuiescence.settle(
+    [queue, refiller], rounds: 3, betweenRounds: .zero
+  )
+
+  #expect(!settled)
 }

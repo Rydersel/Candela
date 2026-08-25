@@ -67,8 +67,16 @@ public class Arm64DDC: NSObject {
     var send: [UInt8] = [command]
     var reply = [UInt8](repeating: 0, count: 11)
     if Self.performDDCCommunication(service: service, send: &send, reply: &reply, writeSleepTime: writeSleepTime, numOfWriteCycles: numOfWriteCycles, readSleepTime: readSleepTime, numOfRetryAttemps: numOfRetryAttemps, retrySleepTime: retrySleepTime) {
-      let max = UInt16(reply[6]) * 256 + UInt16(reply[7])
-      let current = UInt16(reply[8]) * 256 + UInt16(reply[9])
+      // The checksum alone is a 1-in-256 guard, and until now it was the ONLY
+      // guard on this path. The Intel transport has always checked the op code
+      // and result code; this one did not — so a display answering with stale
+      // bytes, or answering a DIFFERENT VCP code than the one asked for,
+      // produced a plausible `max` that silently compressed the whole range.
+      if DDCReplyFrame.rejection(for: reply, command: command) != nil {
+        return nil
+      }
+      let max = DDCReplyFrame.value(high: reply[6], low: reply[7])
+      let current = DDCReplyFrame.value(high: reply[8], low: reply[9])
       values = (current, max)
     } else {
       values = nil
@@ -142,7 +150,15 @@ public class Arm64DDC: NSObject {
     var packet: [UInt8] = [UInt8(0x80 | (send.count + 1)), UInt8(send.count)] + send + [0] // Note: the last byte is the place of the checksum, see next line!
     packet[packet.count - 1] = self.checksum(chk: send.count == 1 ? ARM64_DDC_7BIT_ADDRESS << 1 : ARM64_DDC_7BIT_ADDRESS << 1 ^ dataAddress, data: &packet, start: 0, end: packet.count - 2)
     for _ in 1 ... (numOfRetryAttemps ?? 4) + 1 {
-      for _ in 1 ... max((numOfWriteCycles ?? 2) + 0, 1) {
+      // ONE packet per logical write (#71). The inherited default was 2, which
+      // put two identical packets on the bus for every write and cost 20 ms of
+      // sleep before the caller could proceed. Duplicate writes saturate I2C
+      // and delay the apply, which is our own note in ENGINEERING-NOTES and was
+      // then measured: halving the traffic halved the on-wire time, and the
+      // Dell's readback confirms the value ACHIEVED on every write at 1 cycle.
+      // Retries above are the reliability mechanism, and they are unchanged; a
+      // blind second copy of a packet that already worked was never one.
+      for _ in 1 ... max(numOfWriteCycles ?? 1, 1) {
         usleep(writeSleepTime ?? 10000)
         success = IOAVServiceWriteI2C(service, UInt32(ARM64_DDC_7BIT_ADDRESS), UInt32(dataAddress), &packet, UInt32(packet.count)) == 0
       }

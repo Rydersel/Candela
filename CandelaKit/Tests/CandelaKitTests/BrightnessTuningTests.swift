@@ -22,7 +22,8 @@ private final class TuningHarness {
         hdr: nil, shade: nil, gamma: nil
       ),
       prefs: prefs,
-      displayID: 9
+      displayID: 9,
+      wireSiblings: []
     )
   }
 

@@ -23,10 +23,47 @@
   ///
   ///   CANDELA_DEBUG_SETTINGS=pane:general    Candela.app/Contents/MacOS/Candela
   ///   CANDELA_DEBUG_SETTINGS=pane:menuBar    (also: pane:arrangement,
-  ///                                           pane:keyboard, pane:about)
+  ///                                           pane:keyboard, pane:about,
+  ///                                           pane:health, pane:protection,
+  ///                                           pane:checkup)
+  ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/first        (also /<persistenceKey>
+  ///                                           : opens OLED Care with that
+  ///                                           display's page pushed, as the
+  ///                                           hub's "All OLED Care Settings…"
+  ///                                           link does)
+  ///   CANDELA_DEBUG_SETTINGS=pane:oledCare/first/health
+  ///                                           (a further /<page>:
+  ///                                           /display is the spelled-out
+  ///                                           default; /health opens the
+  ///                                           Display Health WINDOW over the
+  ///                                           display page, since OCR-A1 it
+  ///                                           is not a pushed page. The
+  ///                                           route replaced
+  ///                                           CANDELA_DEBUG_PANEL_HEALTH,
+  ///                                           whose whole job was reaching
+  ///                                           the health surface when it was
+  ///                                           a sheet no capture could open.)
+  ///   CANDELA_DEBUG_SETTINGS=pane:keyboard/mods  (also /target: opens the
+  ///                                           Keyboard pane with that pushed
+  ///                                           page presented, KMR11; ids are
+  ///                                           KeyboardPage raw values)
+  ///   CANDELA_DEBUG_SETTINGS=setup:mock          (the guided setup flow over
+  ///                                           the committed rig fixture:
+  ///                                           commits recorded, permissions
+  ///                                           simulated. Stage 1 of the
+  ///                                           onboarding overhaul and the
+  ///                                           permanent screenshot route for
+  ///                                           the flow's pages.)
   ///   CANDELA_DEBUG_SETTINGS=display:builtIn
   ///   CANDELA_DEBUG_SETTINGS=display:first
   ///   CANDELA_DEBUG_SETTINGS=display:<persistenceKey>
+  ///   CANDELA_DEBUG_SETTINGS=display:first/allModes   (also: /advanced,
+  ///                                           /diagnostics — opens the display
+  ///                                           destination with that sub-page
+  ///                                           already pushed; Task 9's stack
+  ///                                           has no pushing rows until the
+  ///                                           hub lands, and later capture
+  ///                                           runs want sub-pages directly)
   ///
   /// Both id spaces are CASE-SENSITIVE and camelCase: `pane:menuBar`, not
   /// `pane:menubar`; `display:builtIn`, not `display:builtin`. The valid pane
@@ -53,13 +90,33 @@
     /// The root view owns its selection as `@State`, so there is nothing to
     /// write to from outside until the view exists.
     static var pendingSelection: SettingsDestination?
+    /// Only ever set alongside a `.display` `pendingSelection`; the root view
+    /// seeds that display's navigation path with it.
+    static var pendingSubPage: DisplaySubPage?
+    /// Only ever set alongside `pane:oledCare`: the pushed-page path the pane
+    /// should open on, standing in for the hub link and the pane's own rows,
+    /// which cannot be clicked from a capture run (no Accessibility grant).
+    /// Without this the pushed pages have no route to a screenshot at all.
+    static var pendingOledPath: [OledCarePage]?
+    /// Only ever set alongside `pane:keyboard`: same job as `pendingOledPath`
+    /// for the Keyboard pane's pushed pages (KMR11).
+    static var pendingKeyboardPath: [KeyboardPage]?
+    /// Only ever set alongside `pane:oledCare/<key>/health`: Display Health is
+    /// a WINDOW now, not a pushed page (OCR-A1, #185), so the capture route
+    /// opens it over the display page it used to sit behind.
+    static var pendingHealthWindowKey: String?
 
     /// A parse that carries its own reason for failing. The reason is the whole
     /// point: `SettingsDestination?` cannot distinguish "you typo'd the pane
     /// id" from "the display you asked for is not plugged in", and those want
     /// opposite responses from whoever is driving the capture.
     enum Resolution {
-      case resolved(SettingsDestination)
+      case resolved(
+        SettingsDestination, subPage: DisplaySubPage?, oledPath: [OledCarePage]?,
+        keyboardPath: [KeyboardPage]?, healthWindowKey: String?)
+      /// `setup:mock`: not a settings destination at all; the guided setup
+      /// flow in its own window, over the fixture environment.
+      case presentSetupMock
       case rejected(String)
     }
 
@@ -76,41 +133,129 @@
     static func resolve(_ value: String, externalKeys: [String]) -> Resolution {
       let parts = value.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
       guard parts.count == 2 else {
-        return .rejected("\(quoted(value)) is not <kind>:<id> — expected pane:<id> or display:<key>")
+        return .rejected(
+          "\(quoted(value)) is not <kind>:<id>; expected pane:<id>, display:<key> or setup:mock")
       }
       let body = String(parts[1])
       switch parts[0] {
-      case "pane":
-        guard let id = PaneID(rawValue: body) else {
-          let known = PaneID.allCases.map(\.rawValue).joined(separator: ", ")
-          return .rejected("unknown pane \(quoted(body)) — ids are case-sensitive: \(known)")
+      case "setup":
+        switch body {
+        case "mock": return .presentSetupMock
+        default:
+          return .rejected(
+            "unknown setup value \(quoted(body)); ids are case-sensitive: mock")
         }
-        return .resolved(.pane(id))
+      case "pane":
+        // Optional suffixes, accepted only on the panes with pushed pages:
+        // `oledCare` takes `/<displayKey>[/<page>]`, `keyboard` takes
+        // `/<page>` (KMR11). Rejected elsewhere rather than ignored, because
+        // a suffix that silently did nothing would capture the top of a pane
+        // and look like evidence that the landing position was tested.
+        let segments = body.split(separator: "/", omittingEmptySubsequences: false)
+        // Named rather than left to the unknown-pane message, for the retired
+        // measurement page's reason: capture scripts written before the merge
+        // still ask for it, and a bare "unknown pane" would not say where the
+        // update controls went.
+        if segments[0] == "updates" {
+          return .rejected("the Updates pane merged into About; its controls are the About page's now, so use 'pane:about'")
+        }
+        guard let id = PaneID(rawValue: String(segments[0])) else {
+          let known = PaneID.allCases.map(\.rawValue).joined(separator: ", ")
+          return .rejected("unknown pane \(quoted(String(segments[0]))); ids are case-sensitive: \(known)")
+        }
+        guard segments.count > 1 else {
+          return .resolved(.pane(id), subPage: nil, oledPath: nil, keyboardPath: nil, healthWindowKey: nil)
+        }
+        if id == .keyboard {
+          guard segments.count == 2 else {
+            return .rejected("pane:keyboard takes at most one /<page>")
+          }
+          guard let page = KeyboardPage(rawValue: String(segments[1])) else {
+            let known = KeyboardPage.allCases.map(\.rawValue).joined(separator: ", ")
+            return .rejected("unknown keyboard page \(quoted(String(segments[1]))); ids are case-sensitive: \(known)")
+          }
+          return .resolved(.pane(id), subPage: nil, oledPath: nil, keyboardPath: [page], healthWindowKey: nil)
+        }
+        guard id == .oledCare else {
+          return .rejected("pane \(quoted(id.rawValue)) takes no suffix; only 'oledCare' and 'keyboard' do")
+        }
+        guard segments.count <= 3 else {
+          return .rejected("pane:oledCare takes at most /<displayKey>/<page>")
+        }
+        let targetBody = String(segments[1])
+        let key: String
+        if targetBody == "first" {
+          guard let first = externalKeys.first else {
+            return .rejected("pane:oledCare/first found no external display connected")
+          }
+          key = first
+        } else {
+          guard externalKeys.contains(targetBody) else {
+            let list = externalKeys.map(quoted).joined(separator: ", ")
+            return .rejected("unknown display key \(quoted(targetBody)); connected externals: \(list)")
+          }
+          key = targetBody
+        }
+        let path: [OledCarePage] = [.display(key)]
+        var healthWindowKey: String?
+        if segments.count == 3 {
+          // Validated like everything else here: a typo'd page must not
+          // silently capture the display page.
+          switch String(segments[2]) {
+          case "display": break
+          // A window, not a page (OCR-A1): the display page stays behind it.
+          case "health": healthWindowKey = key
+          // Named rather than left to the default, because capture scripts
+          // written before SC5 still ask for it and "unknown page" would not
+          // tell anyone where the controls went.
+          case "measurement":
+            return .rejected("the OLED Care measurement page retired; its controls are on the Health pane, so use 'pane:health'")
+          default:
+            return .rejected("unknown OLED page \(quoted(String(segments[2]))); ids are case-sensitive: display, health")
+          }
+        }
+        return .resolved(
+          .pane(id), subPage: nil, oledPath: path, keyboardPath: nil,
+          healthWindowKey: healthWindowKey)
       case "display":
+        // Optional `/subPage` suffix pushes that sub-page onto the display's
+        // navigation stack. Validated like everything else here: a typo'd
+        // sub-page must not silently capture the hub.
+        let segments = body.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+        let keyBody = String(segments[0])
+        var subPage: DisplaySubPage?
+        if segments.count == 2 {
+          guard let page = DisplaySubPage(rawValue: String(segments[1])) else {
+            let known = DisplaySubPage.allCases.map(\.rawValue).joined(separator: ", ")
+            return .rejected("unknown sub-page \(quoted(String(segments[1]))); ids are case-sensitive: \(known)")
+          }
+          subPage = page
+        }
         // The built-in is not in `externalKeys` (AppModel keeps it in its own
         // slot), but it IS a real destination — `SettingsRootView` routes the
         // literal key "builtIn" to `BuiltInDisplayPane`.
         let known = ["builtIn"] + externalKeys
-        if body == "first" {
+        if keyBody == "first" {
           guard let key = externalKeys.first else {
-            return .rejected("display:first — no external display connected; try display:builtIn")
+            return .rejected("display:first found no external display connected; try display:builtIn")
           }
-          return .resolved(.display(key))
+          return .resolved(.display(key), subPage: subPage, oledPath: nil, keyboardPath: nil, healthWindowKey: nil)
         }
-        guard known.contains(body) else {
+        guard known.contains(keyBody) else {
           let list = known.map(quoted).joined(separator: ", ")
-          return .rejected("unknown display key \(quoted(body)) — connected: \(list)")
+          return .rejected("unknown display key \(quoted(keyBody)); connected: \(list)")
         }
-        return .resolved(.display(body))
+        return .resolved(.display(keyBody), subPage: subPage, oledPath: nil, keyboardPath: nil, healthWindowKey: nil)
       default:
-        return .rejected("unknown kind \(quoted(String(parts[0]))) — expected pane or display")
+        return .rejected("unknown kind \(quoted(String(parts[0]))); expected pane, display or setup")
       }
     }
 
     /// Kept as the brief's named interface, and as the shape most callers want.
     /// `resolve` is the one that can say why.
     static func destination(from value: String, externalKeys: [String]) -> SettingsDestination? {
-      guard case let .resolved(destination) = resolve(value, externalKeys: externalKeys) else {
+      guard case let .resolved(destination, _, _, _, _) = resolve(value, externalKeys: externalKeys)
+      else {
         return nil
       }
       return destination
@@ -125,21 +270,44 @@
         return
       }
       switch resolve(value, externalKeys: externalKeys) {
-      case let .resolved(destination):
-        log("opening \(describe(destination))")
+      case let .resolved(destination, subPage, oledPath, keyboardPath, healthWindowKey):
+        log(
+          "opening \(describe(destination, subPage: subPage, oledPath: oledPath, keyboardPath: keyboardPath, healthWindowKey: healthWindowKey))"
+        )
         // Set BEFORE opening: `SettingsRootView.onAppear` runs as part of the
         // window coming up, so a later assignment would miss it entirely.
         pendingSelection = destination
+        pendingSubPage = subPage
+        pendingOledPath = oledPath
+        pendingKeyboardPath = keyboardPath
+        pendingHealthWindowKey = healthWindowKey
         SettingsOpener.open()
+      case .presentSetupMock:
+        log("presenting the guided setup mock")
+        OnboardingMockPresenter.present()
       case let .rejected(reason):
         log("ignored: \(reason)")
       }
     }
 
-    private static func describe(_ destination: SettingsDestination) -> String {
+    private static func describe(
+      _ destination: SettingsDestination, subPage: DisplaySubPage?, oledPath: [OledCarePage]?,
+      keyboardPath: [KeyboardPage]?, healthWindowKey: String?
+    ) -> String {
       switch destination {
-      case let .pane(id): "pane \(quoted(id.rawValue))"
-      case let .display(key): "display \(quoted(key))"
+      case let .pane(id):
+        "pane \(quoted(id.rawValue))"
+          + (oledPath.map { ", pushed to \(quoted($0.map(describe).joined(separator: "/")))" } ?? "")
+          + (keyboardPath.map { ", pushed to \(quoted($0.map(\.rawValue).joined(separator: "/")))" } ?? "")
+          + (healthWindowKey.map { ", health window for \(quoted($0))" } ?? "")
+      case let .display(key):
+        "display \(quoted(key))" + (subPage.map { ", sub-page \(quoted($0.rawValue))" } ?? "")
+      }
+    }
+
+    private static func describe(_ page: OledCarePage) -> String {
+      switch page {
+      case let .display(key): "display(\(key))"
       }
     }
 

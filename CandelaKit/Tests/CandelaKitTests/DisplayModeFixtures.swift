@@ -46,6 +46,64 @@ enum DisplayModeFixtures {
     m(1720, 720, 3440, 1440, native: true),
   ]
 
+  /// The three MAG ladder rungs the flat 720 minor-axis floor hid: measured in
+  /// the CGS revelation pass, aspect-correct at 2x and at the panel's own
+  /// 175 Hz, yet every one has a minor axis under 720 because the panel is
+  /// 21:9. They are the acceptance case for the density floor, so they live
+  /// apart from `mag` rather than inside it: `mag` is the published ladder, and
+  /// these arrive only with revelation on.
+  static let magRevealedMidLadder: [DisplayMode] = [
+    m(1280, 536, 2560, 1072, hz: 175, provenance: .coreGraphicsServices),
+    m(1344, 562, 2688, 1124, hz: 175, provenance: .coreGraphicsServices),
+    m(1600, 670, 3200, 1340, hz: 175, provenance: .coreGraphicsServices),
+  ]
+
+  /// The MAG's 1x ladder, where the rates it really offers survive. `mag`
+  /// above is the HiDPI ladder and carries one rate per size, because curation
+  /// collapses the rest — so nothing there can exercise a question about
+  /// refresh rates at a size.
+  static let magRateLadder: [DisplayMode] = [
+    m(3440, 1440, 3440, 1440, hz: 175, native: true),
+    m(3440, 1440, 3440, 1440, hz: 120),
+    m(3440, 1440, 3440, 1440, hz: 60),
+    m(2560, 1080, 2560, 1080, hz: 60),
+    m(1920, 1080, 1920, 1080, hz: 120),
+    m(1920, 1080, 1920, 1080, hz: 60),
+  ]
+
+  /// Built-in MacBook Pro panel, native 3024×1964. Captured 2026-08-17. Raw
+  /// dump: `docs/spikes/s2-resolutions/fixtures/builtin-modes-2026-08-17.txt`.
+  static let builtInNativePixels = (3024, 1964)
+
+  /// One representative entry per distinct pixel footprint: the 132 published
+  /// modes collapse to 12 once refresh rates are dropped. Prefers the HiDPI
+  /// (scaled) logical variant, matching the dell and mag arrays' convention:
+  /// the dump marks native=true on both rows of the 3024×1964 framebuffer
+  /// (the 1x 3024×1964 row and its 1512×982 HiDPI sibling), so the fixture's
+  /// native entry is the HiDPI row, same as dell's 1080×1920 and mag's
+  /// 1720×720.
+  static let builtIn: [DisplayMode] = [
+    m(960, 600, 1920, 1200), m(1024, 640, 2048, 1280),
+    m(1024, 665, 2048, 1330), m(1147, 716, 2294, 1432),
+    m(1147, 745, 2294, 1490), m(1280, 800, 2560, 1600),
+    m(1352, 845, 2704, 1690), m(1352, 878, 2704, 1756),
+    m(1512, 945, 3024, 1890),
+    m(1512, 982, 3024, 1964, native: true),
+    m(1800, 1125, 3600, 2250), m(1800, 1169, 3600, 2338),
+  ]
+
+  /// Physical panel size in integer centimetres, from the shipped
+  /// `Arm64DDC.physicalSizeCm` read (CoreDisplay EDID image-size keys,
+  /// integer mm/10). Measured 2026-08-17 through a temporary patch, since
+  /// reverted. The Dell reports its panel-native landscape size here even
+  /// though it is mounted rotated 270°: the raw dump's `CGDisplayScreenSize`
+  /// figures differ from these by up to 1cm, and by orientation on the Dell,
+  /// because that read answers in the rotated frame instead. These Arm64DDC
+  /// values are the ones production feeds into the density model.
+  static let magPhysicalCm = (80, 34)
+  static let dellPhysicalCm = (60, 34)
+  static let builtInPhysicalCm = (30, 19)
+
   static func mode(
     _ id: Int32, logical: (Int, Int), pixels: (Int, Int), hz: Double = 60
   ) -> DisplayMode {
@@ -63,15 +121,20 @@ enum DisplayModeFixtures {
   /// it leaves every fixture's `ioModeID` unchanged — which matters, because
   /// `DisplayModeCatalog` tie-breaks on `ioModeID` and the ordered assertions
   /// in `DisplayModeCatalogTests` would shift if these moved.
+  /// `provenance` is deliberately outside the ID derivation, for the same
+  /// reason the removed `surfaced:` parameter was: adding it leaves every
+  /// existing fixture's `ioModeID` untouched, and the ordered assertions in
+  /// `DisplayModeCatalogTests` tie-break on that value.
   private static func m(
     _ lw: Int, _ lh: Int, _ pw: Int, _ ph: Int,
-    hz: Double = 60, native: Bool = false
+    hz: Double = 60, native: Bool = false,
+    provenance: ModeProvenance = .coreGraphics
   ) -> DisplayMode {
     DisplayMode(
       ioModeID: Int32(truncatingIfNeeded: lw &* 100_003 &+ lh &* 397 &+ Int(hz)),
       logicalWidth: lw, logicalHeight: lh,
       pixelWidth: pw, pixelHeight: ph, refreshHz: hz,
-      isNative: native
+      isNative: native, provenance: provenance
     )
   }
 }

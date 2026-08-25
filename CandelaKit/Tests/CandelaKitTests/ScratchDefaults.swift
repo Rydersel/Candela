@@ -36,7 +36,18 @@ class InMemoryDefaults: UserDefaults, @unchecked Sendable {
   override func set(_ value: Double, forKey key: String) { set(value as Any?, forKey: key) }
   override func set(_ value: Float, forKey key: String) { set(value as Any?, forKey: key) }
 
-  override func bool(forKey key: String) -> Bool { object(forKey: key) as? Bool ?? false }
+  /// Coerces the way the real `UserDefaults` documents, rather than casting to
+  /// `Bool` and giving up. `defaults write <domain> <key> NO` stores the STRING
+  /// "NO", and `wireTimingGuard` — an escape hatch a human types by hand — is
+  /// read through this accessor. A strict double would have passed its tests
+  /// while the shipped hatch ignored the commonest way of setting it.
+  override func bool(forKey key: String) -> Bool {
+    switch object(forKey: key) {
+    case let number as NSNumber: return number.boolValue  // catches Bool and Int
+    case let string as String: return (string as NSString).boolValue
+    default: return false
+    }
+  }
   override func integer(forKey key: String) -> Int { object(forKey: key) as? Int ?? 0 }
   override func double(forKey key: String) -> Double { object(forKey: key) as? Double ?? 0 }
   override func float(forKey key: String) -> Float { object(forKey: key) as? Float ?? 0 }
@@ -46,4 +57,20 @@ class InMemoryDefaults: UserDefaults, @unchecked Sendable {
   /// a silent fall-through to the superclass would read the real defaults
   /// domain rather than this instance's dictionary.
   override func data(forKey key: String) -> Data? { object(forKey: key) as? Data }
+  /// Added when `WearSignalTracker` became the first type to store an array.
+  /// Without it this call fell through to the superclass and read the
+  /// developer's real preferences domain, which is precisely what this class
+  /// exists to prevent and what nothing would have reported.
+  override func array(forKey key: String) -> [Any]? { object(forKey: key) as? [Any] }
+
+  /// This instance's dictionary, not the superclass's merged domains — the
+  /// same reason every accessor above is overridden (the superclass would
+  /// report the fallback suite plus the global domain, i.e. never the keys the
+  /// test wrote). `DisplayPrefs.hasAnyStoredValue` scans it, and it is what
+  /// lets a test ask "what is left in the store?" rather than checking a
+  /// hand-written list of keys — the only form that catches a key nobody
+  /// remembered.
+  override func dictionaryRepresentation() -> [String: Any] {
+    lock.withLock { storage }
+  }
 }

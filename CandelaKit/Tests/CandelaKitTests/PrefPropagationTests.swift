@@ -33,6 +33,23 @@ struct PrefPropagationTests {
     #expect(PrefName(rawValue: "menuItemStyle") == nil)
     #expect(PrefName(rawValue: "showTickMarks") == nil)
     #expect(PrefName(rawValue: "longerDelay") == nil)
+    // #110's escape hatch has no UI by design (D26) — being read at use is not
+    // the reason (`pollingMode` is read at use and IS a case); having no pane
+    // to write it through is. Nothing can route a change, so it gets no row.
+    #expect(PrefName(rawValue: "wireTimingGuard") == nil)
+  }
+
+  @Test func oledEngineStateIsNotAPrefName() {
+    // Hours accumulation is engine state written by the tracker, not a
+    // setting a pane may route through (same rule as `muted`).
+    #expect(PrefName(rawValue: "oledPanelSeconds") == nil)
+    #expect(PrefName(rawValue: "oledStandbySeconds") == nil)
+    // Same rule for the note's dismissal: the tracker persists it, no pane
+    // writes it, so it must never become a case a pane could route through.
+    #expect(PrefName(rawValue: "oledStandbyNoteDismissed") == nil)
+    // The two inverted storage keys are keys, not propagation identifiers.
+    #expect(PrefName(rawValue: "oledLockDimOff") == nil)
+    #expect(PrefName(rawValue: "oledHoursTrackingOff") == nil)
   }
 
   @Test func prefNameRawValuesAreTheOnDiskKeys() {
@@ -47,7 +64,52 @@ struct PrefPropagationTests {
     // #13 added the two arrangement keys: 35 -> 37.
     #expect(PrefName.restoreArrangement.rawValue == "restoreArrangement")
     #expect(PrefName.savedArrangements.rawValue == "savedArrangements")
-    #expect(PrefName.allCases.count == 37)
+    // The settings overhaul promoted three read-at-use prefs: 37 -> 40. Their
+    // raw values are the keys `DisplayPrefs` already writes, so a typo here
+    // would strand every value a user has already set.
+    #expect(PrefName.pollingMode.rawValue == "pollingMode")
+    #expect(PrefName.pollingCount.rawValue == "pollingCount")
+    #expect(PrefName.separateCombinedScale.rawValue == "separateCombinedScale")
+    // W3a added ten OLED-care keys: 40 -> 50. Two of them are the exception to
+    // the heading above — `oledLockDim` and `oledHoursTracking` store INVERTED
+    // (`…Off`), so their raw value is a propagation identifier, not the key
+    // (precedent: the `forceSw` accessor is named `forceSoftware`).
+    #expect(PrefName.oledCareEnrolled.rawValue == "oledCareEnrolled")
+    #expect(PrefName.oledLockDim.rawValue == "oledLockDim")
+    // W3b-1 added two: 50 -> 52. `oledWindowObservation` is a third member of
+    // the inverted-storage exception above (`oledWindowObservationOff`).
+    //
+    // The 52 is the UNION of two branches that each counted from 47: W3b-1 saw
+    // 47 -> 49, the settings overhaul saw 47 -> 50, and both landed. Counted
+    // from the enum, not arithmetic on the two claims.
+    #expect(PrefName.oledTelemetry.rawValue == "oledTelemetry")
+    #expect(PrefName.oledWindowObservation.rawValue == "oledWindowObservation")
+    // The two on-screen indicator positions added two more: 53 -> 55. Their raw
+    // values are the keys `DisplayPrefs` writes, and a typo in either would move
+    // one pill and strand the position the user chose for the other.
+    #expect(PrefName.hudPositionBrightness.rawValue == "hudPositionBrightness")
+    #expect(PrefName.hudPositionVolume.rawValue == "hudPositionVolume")
+    // KMR-A3 added the pill style beside them.
+    #expect(PrefName.hudStyle.rawValue == "hudStyle")
+    // #14 added the eight virtual-display slot keys: 55 -> 63; the Add/Remove
+    // rework added `virtualSlotDefined`: 63 -> 64. The raw values are the
+    // base names `DisplayPrefs` composes with `.<slot>`, the per-command
+    // precedent.
+    #expect(PrefName.virtualSlotConfigured.rawValue == "virtualSlotConfigured")
+    #expect(PrefName.virtualSlotUUID.rawValue == "virtualSlotUUID")
+    #expect(PrefName.virtualSlotDefined.rawValue == "virtualSlotDefined")
+    // The density model's hub callout added its per-display dismissal: 64 -> 65.
+    #expect(PrefName.sizeRecommendationDismissed.rawValue == "sizeRecommendationDismissed")
+    // KMR-A3's indicator style: 65 -> 66.
+    // SS4 added the two synthesized-size keys: 66 -> 68. `storedSyntheticSize`
+    // holds a JSON descriptor, the `storedDisplayMode` precedent, and both raw
+    // values are the keys `DisplayPrefs` composes with `.<pk>`.
+    #expect(PrefName.offerSyntheticSizes.rawValue == "offerSyntheticSizes")
+    #expect(PrefName.storedSyntheticSize.rawValue == "storedSyntheticSize")
+    // Keep awake's panel-row visibility: 68 -> 69. Hide-shaped like
+    // `hideBuiltInDisplay`, so an absent key means the row is shown.
+    #expect(PrefName.hideKeepAwake.rawValue == "hideKeepAwake")
+    #expect(PrefName.allCases.count == 69)
   }
 
   // MARK: - Rows
@@ -60,11 +122,23 @@ struct PrefPropagationTests {
     //   audioDeviceNameOverride  — via `audioMatchingDisplays(for:)`
     //   disableAltBrightnessKeys — directly, in the WatchConfig
     // Task 7 adds two more (`keyboardBrightness`/`keyboardVolume` decide
-    // whether the tap runs at all), for six.
+    // whether the tap runs at all), for six. Gating the watched set on whether a
+    // volume or mute press could land at all adds the last three:
+    //   audioSinkOverride: the user's override half of that verdict
+    //   enableMuteUnmute: picks WHICH register the mute key would write, so it
+    //                     picks which verdict arms the mute key
+    //   unavailableDDC: the engine's own switch, checked before every DDC write,
+    //                   so a volume command switched off can take no key
     for name: PrefName in [.multiKeyboardVolume, .forceSw, .audioDeviceNameOverride,
-                           .disableAltBrightnessKeys, .keyboardBrightness, .keyboardVolume] {
+                           .disableAltBrightnessKeys, .keyboardBrightness, .keyboardVolume,
+                           .audioSinkOverride, .enableMuteUnmute, .unavailableDDC] {
       #expect(PrefPropagation.effects(forChange: name).contains(.rearmTap), "\(name.rawValue)")
     }
+    // NOT `isDisabled`, and that is a ruling rather than an oversight: a display
+    // whose keyboard control is off swallows its press (R1), the same as it does
+    // for brightness, so it must keep the keys armed rather than hand them to
+    // macOS. Only what makes the press impossible releases them.
+    #expect(!PrefPropagation.effects(forChange: .isDisabled).contains(.rearmTap))
     // Fork bug 3 (D2) is closed by CONSTRUCTION, not by this table:
     // `StatusItemController` builds `KeyRouterConfig` inside the tap's press
     // closure, so the fine-scale prefs are read at event time on every press.
@@ -133,6 +207,34 @@ struct PrefPropagationTests {
     #expect(PrefPropagation.effects(forChange: .forceSw)
       == [.refreshUI, .rearmTap, .reapplyDimming, .rebuildPanel])
     #expect(PrefPropagation.effects(forChange: .startupAction) == [.refreshUI])
+    // Both halves of the volume verdict, exact: neither may drag the DDC bus.
+    // `audioSinkOverride` greys a slider and releases a key; it writes nothing.
+    #expect(PrefPropagation.effects(forChange: .audioSinkOverride)
+      == [.refreshUI, .rearmTap, .rebuildPanel])
+    #expect(PrefPropagation.effects(forChange: .enableMuteUnmute)
+      == [.refreshUI, .rearmTap])
+    // The engine's availability switch keeps its dimming and panel work; the tap
+    // row is added to it, not swapped in.
+    #expect(PrefPropagation.effects(forChange: .unavailableDDC)
+      == [.refreshUI, .rearmTap, .reapplyDimming, .rebuildPanel])
+  }
+
+  @Test func oledCarePrefsFanOutToOledCare() {
+    let oled: [PrefName] = [
+      .oledCareEnrolled, .oledIdleDimSeconds, .oledIdleDimLevel, .oledLockDim,
+      .oledBlackoutEnabled, .oledBlackoutSeconds,
+      .oledUnfocusedDimEnabled, .oledUnfocusedDimSeconds, .oledUnfocusedDimLevel,
+      .oledHoursTracking, .oledTelemetry, .oledWindowObservation,
+      .oledDetectionDimming,
+    ]
+    for name in oled {
+      #expect(PrefPropagation.effects(forChange: name).contains(.reapplyOledCare), "\(name.rawValue)")
+      #expect(PrefPropagation.effects(forChange: name).contains(.refreshUI), "\(name.rawValue)")
+    }
+    // Exact, not merely non-empty: OLED care runs its own timers and dimming
+    // leg, so a stray `.reapplyDimming` here would re-write the DDC bus on
+    // every idle-timeout tweak.
+    #expect(PrefPropagation.effects(forChange: .oledCareEnrolled) == [.refreshUI, .reapplyOledCare])
   }
 
   // MARK: - Batch fan-out (the per-display reset rides on this)
@@ -153,5 +255,64 @@ struct PrefPropagationTests {
     #expect(union == [.refreshUI, .rearmTap, .reapplyDimming, .rebuildPanel, .updateStatusItem])
     #expect(union != PrefPropagation.effects(forChange: .forceSw))
     #expect(PrefPropagation.effects(forChanges: []).isEmpty)
+  }
+
+  @Test func promotedReadAtUsePrefsAreCasesWithUIOnlyRows() {
+    // Settings overhaul SO/A1: these gained real UI, so D27 requires cases.
+    // They are read at use (DDC-read time / key time), so their row is
+    // refreshUI alone, which is a deliberate answer rather than a missing one.
+    // `enableMuteUnmute` used to sit here and no longer does: it also decides
+    // which register the mute key would write, and so which verdict arms it.
+    for name in [PrefName.pollingMode, .pollingCount, .separateCombinedScale] {
+      #expect(PrefPropagation.effects(forChange: name) == [.refreshUI])
+    }
+  }
+
+  @Test func virtualSlotLifecycleRidesOnConfiguredAlone() {
+    // VD14/VD17: only the `configured` write converges live displays, so
+    // editing a running slot's fields never yanks a display under the user;
+    // the pane's Create/Apply/Remove buttons are `configured` writes.
+    #expect(PrefPropagation.effects(forChange: .virtualSlotConfigured)
+      == [.refreshUI, .syncVirtualDisplays])
+    for name in [PrefName.virtualSlotName, .virtualSlotWidth, .virtualSlotHeight,
+                 .virtualSlotHiDPI, .virtualSlotRefreshHz, .virtualSlotRecreateAtLaunch,
+                 .virtualSlotUUID, .virtualSlotDefined] {
+      #expect(PrefPropagation.effects(forChange: name) == [.refreshUI], "\(name.rawValue)")
+    }
+  }
+
+  @Test func theSizeSuggestionDismissalRefreshesTheUIAndNothingElse() {
+    // The hub's suggestion row is closed by the person reading it, so the write
+    // is a pane write and D27 makes it a case. Nothing else may ride on it: the
+    // suggestion names a resolution but changes none, so a `.rebuildPanel` row
+    // would redraw the menu bar over a row someone dismissed, and anything
+    // touching the display would turn a "not now" into a mode change.
+    //
+    // The contrast with `oledStandbyNoteDismissed` above is the whole rule: that
+    // one is written by the hours tracker and so is engine state, this one has a
+    // button.
+    #expect(PrefPropagation.effects(forChange: .sizeRecommendationDismissed) == [.refreshUI])
+  }
+
+  @Test func indicatorPositionsRefreshTheUIAndNothingElse() {
+    // Read by `KeyActionExecutor` as it announces a pill, so the next press
+    // already uses the new position: no re-arm, no rebuild, and above all no
+    // `.reapplyDimming`, which would put a DDC write on the bus every time
+    // someone tried a position out.
+    for name in [PrefName.hudPositionBrightness, .hudPositionVolume, .hudStyle] {
+      #expect(PrefPropagation.effects(forChange: name) == [.refreshUI])
+    }
+  }
+
+  @Test func synthesisPrefsRefreshTheUIAndNothingElse() {
+    // The same answer, and for the same reason, as the two remembered-mode rows
+    // (SS11): engaging and disengaging a synthesis set is verified engine work
+    // the caller does AROUND the write, so a row that fanned out to display
+    // work would run it a second time, unsequenced, from the pref edit.
+    // `.refreshUI` is what the opt-in owes: it decides which rows the size
+    // picker shows (SS4).
+    for name in [PrefName.offerSyntheticSizes, .storedSyntheticSize] {
+      #expect(PrefPropagation.effects(forChange: name) == [.refreshUI], "\(name.rawValue)")
+    }
   }
 }
