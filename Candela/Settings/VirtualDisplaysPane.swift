@@ -541,9 +541,24 @@ struct VirtualDisplaysPane: View {
 /// state. At hero size it stands on the glyph's foot, which is what makes an
 /// empty page read as a stage with nothing on it yet; beside real tiles it is
 /// a face alone, so the row stays a row.
+///
+/// It owns its hover state rather than taking one, because the cue is INSIDE
+/// the drawing: a dashed placeholder is the one tile on this row that can be
+/// mistaken for an empty-slot indicator, so the affordance has to be the
+/// outline and the glyph coming up, which no wrapper or `ButtonStyle` can
+/// reach. The real slot tiles next to it need none of this; they already look
+/// like objects and carry a selected state.
+///
+/// The lift follows the preview widgets' doorway affordance: scale skipped
+/// under Reduce Motion, shadow deepened either way so a non-moving cue is
+/// always there. The tint is a change of opacity on colors the tile already
+/// draws, so it survives an unfocused window the way a system accent would not.
 private struct GhostDisplayTile: View {
   var accent: Color
   var isHero: Bool
+
+  @State private var hovering = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     GeometryReader { proxy in
@@ -553,27 +568,33 @@ private struct GhostDisplayTile: View {
       let shape = RoundedRectangle(cornerRadius: isHero ? 12 : 6, style: .continuous)
       VStack(spacing: 0) {
         ZStack {
-          shape.fill(accent.opacity(0.06))
+          shape.fill(accent.opacity(hovering ? 0.13 : 0.06))
           shape.strokeBorder(
-            accent.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [7, 6]))
+            accent.opacity(hovering ? 0.75 : 0.4),
+            style: StrokeStyle(lineWidth: 1, dash: [7, 6]))
           VStack(spacing: isHero ? 8 : 3) {
             Image(systemName: "plus")
               .font(.system(size: isHero ? 30 : 16, weight: .light))
             Text("Add Display")
               .font(.system(size: isHero ? 13 : 10))
           }
-          .foregroundStyle(accent.opacity(0.8))
+          .foregroundStyle(accent.opacity(hovering ? 1 : 0.8))
         }
         .frame(height: max(1, bounds.height - standHeight - baseHeight))
         if isHero {
           Rectangle()
-            .fill(accent.opacity(0.24))
+            .fill(accent.opacity(hovering ? 0.34 : 0.24))
             .frame(width: 14, height: standHeight)
           Capsule()
-            .fill(accent.opacity(0.2))
+            .fill(accent.opacity(hovering ? 0.3 : 0.2))
             .frame(width: bounds.width * 0.24, height: baseHeight)
         }
       }
     }
+    // A render transform, so the row does not reflow around a hovered tile.
+    .scaleEffect(hovering && !reduceMotion ? 1.03 : 1)
+    .shadow(color: .black.opacity(hovering ? 0.28 : 0), radius: 8, y: 3)
+    .onHover { hovering = $0 }
+    .animation(SettingsTheme.hoverMotion, value: hovering)
   }
 }
