@@ -51,7 +51,10 @@ struct CheckupPlanTests {
   }
 
   @Test func worstCaseFieldTimeIsThreeShowingsOfEveryField() {
-    // 8 pixel and gray fields at 20 s, white at 10 s, witness at 20 s, each up to 3 showings.
-    #expect(CheckupPlan.worstCaseFieldSeconds == (7 * 20 + 10 + 20) * 3)
+    // 8 pixel and gray fields at 20 s, white at 10 s, witness at 20 s, each up
+    // to 3 showings, plus one confirmation re-show per plant field at that
+    // field's own cap: 4 pixel fields at 20 s and white at 10 s.
+    #expect(CheckupPlan.worstCaseFieldSeconds == (7 * 20 + 10 + 20) * 3 + (4 * 20 + 10))
+    #expect(CheckupPlan.worstCaseFieldSeconds == 600)
   }
 }

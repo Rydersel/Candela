@@ -6,11 +6,13 @@ import Observation
 /// The checkup state machine (CK25). It owns the report under construction and
 /// every verdict in it: the pages render what this says and decide nothing.
 ///
-/// Two rules shape the whole type. Nothing but the user aborts a run (CK27), so
-/// a refusal is recorded and the flow moves on, and both exits that are not the
-/// summary still save a report. And the planted control is the only thing that
-/// grades a person's attestations (CK21), so its detect, retry and miss states
-/// live here rather than in any page.
+/// Three rules shape the whole type. Nothing but the user aborts a run (CK27),
+/// so a refusal is recorded and the flow moves on, and both exits that are not
+/// the summary still save a report. A run that has ended stays ended: a leg
+/// still in flight when the user leaves must not write into a report already
+/// saved. And the planted control is the only thing that grades a person's
+/// attestations (CK21), so its detect, retry and miss states live here rather
+/// than in any page.
 @MainActor
 @Observable
 final class CheckupFlowModel {
@@ -56,6 +58,11 @@ final class CheckupFlowModel {
   /// the control back in the same place.
   private var plantOrigin: (x: Int, y: Int)?
   private var plantSize = CheckupFlowModel.firstPlantPixels
+  /// Fields whose one confirmation re-show (CK22) has been spent.
+  private var secondDotShown: Set<String> = []
+  /// The leg being awaited, which is what a disconnect happened DURING; `page`
+  /// is still the page the run left, and would name the wrong step.
+  private var legInFlight: CheckupPage?
   private var finished = false
 
   init(environment: CheckupEnvironment) {
@@ -69,7 +76,7 @@ final class CheckupFlowModel {
 
   var canShowAgain: Bool {
     guard let kind = currentFieldKind else { return false }
-    return showings[CheckupCheckID.field(kind), default: 0] < CheckupPlan.maxShowingsPerField
+    return cappedShowings(of: kind) < CheckupPlan.maxShowingsPerField
   }
 
   var answered: Bool {
@@ -79,11 +86,14 @@ final class CheckupFlowModel {
 
   var currentPlantSize: Int { plantSize }
 
-  /// The control's origin, for the suite only: no page may read it, which is
-  /// the whole point of a withheld position.
-  var plantRegionForTest: (x: Int, y: Int)? {
-    plant.map { (x: $0.x, y: $0.y) }
-  }
+  #if DEBUG
+    /// The control's origin, for the suite only: a page that read this would
+    /// hand back the position CK20 exists to withhold, so it is not in the
+    /// shipping binary at all.
+    var plantRegionForTest: (x: Int, y: Int)? {
+      plant.map { (x: $0.x, y: $0.y) }
+    }
+  #endif
 
   // MARK: - The page machine
 
@@ -99,26 +109,41 @@ final class CheckupFlowModel {
       page = .plan
 
     case .plan:
+      legInFlight = .identity
       await runIdentity()
+      guard !finished else { return }
+      legInFlight = nil
       page = .identity
 
     case .identity:
+      legInFlight = .capabilities
       await runCapabilities()
+      guard !finished else { return }
+      legInFlight = nil
       page = .capabilities
 
     case .capabilities:
+      legInFlight = .nativeMode
       running = true
-      record(await runners?.mode.runNativeMode() ?? [])
+      let native = await runners?.mode.runNativeMode() ?? []
+      guard !finished else { return }
+      record(native)
       running = false
+      legInFlight = nil
       page = .nativeMode
 
     case .nativeMode:
+      legInFlight = .refresh
       running = true
-      record(await runners?.mode.runRefreshSweep() ?? [])
+      let sweep = await runners?.mode.runRefreshSweep() ?? []
+      guard !finished else { return }
+      record(sweep)
       // The sweep is the last leg that moves the mode, so the display goes back
       // here. `restore()` reports the ACHIEVED mode, not that the apply returned.
       let restored = await runners?.mode.restore() ?? true
+      guard !finished else { return }
       running = false
+      legInFlight = nil
       guard restored else {
         finish(.incomplete(reason: "the display could not be restored to its starting mode"))
         return
@@ -137,6 +162,14 @@ final class CheckupFlowModel {
       if let first = CheckupFieldKind.protocolOrder.first { page = .fieldInstruction(first) }
 
     case .fieldInstruction(let kind):
+      // Leaving the control field is the last chance to say what became of the
+      // control, and an unresolved one was not detected (CK21). Without this a
+      // timed-out or second-dot-only showing would grade the rest of the sweep
+      // as if the control had been found.
+      if kind == Self.plantedField, let record = plantRecord,
+        record.detectedAtPixels == nil, !record.missed {
+        markControlMissed()
+      }
       recordUnanswered(kind)
       await moveOn(after: kind)
 
@@ -183,9 +216,13 @@ final class CheckupFlowModel {
     guard let index = CheckupFieldKind.protocolOrder.firstIndex(of: kind) else { return }
     let next = CheckupFieldKind.protocolOrder.index(after: index)
     guard next < CheckupFieldKind.protocolOrder.endIndex else {
+      legInFlight = .hdr
       running = true
-      record(await runners?.hdr.run() ?? [])
+      let hdr = await runners?.hdr.run() ?? []
+      guard !finished else { return }
+      record(hdr)
       running = false
+      legInFlight = nil
       page = .hdr
       return
     }
@@ -198,6 +235,7 @@ final class CheckupFlowModel {
     guard let runners else { return }
     running = true
     let found = await runners.identity()
+    guard !finished else { return }
     running = false
     identity = found
     guard let found else {
@@ -225,7 +263,9 @@ final class CheckupFlowModel {
     // leg anyway would write an observation over a pre-graded row.
     guard steps.contains(where: { $0.pregraded == nil }) else { return }
     running = true
-    record(await runners.capabilities.run())
+    let capabilities = await runners.capabilities.run()
+    guard !finished else { return }
+    record(capabilities)
     running = false
   }
 
@@ -233,13 +273,14 @@ final class CheckupFlowModel {
 
   func startShowing() {
     guard let display = selectedDisplay, let kind = instructionFieldKind else { return }
-    show(kind: kind, plant: plantForShowing(kind), on: display)
+    // A call past the cap leaves the page where it is, with `canShowAgain`
+    // already false: the bound lives here, not in whichever button called.
+    guard show(kind: kind, plant: plantForShowing(kind), on: display) else { return }
     page = .fieldShowing(kind)
   }
 
   /// CK17: the user asks for a repeat, never the flow.
   func showAgain() {
-    guard canShowAgain else { return }
     startShowing()
   }
 
@@ -253,11 +294,22 @@ final class CheckupFlowModel {
     page = instructionPage(for: kind)
   }
 
-  private func show(kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry) {
+  /// CK17's cap, enforced where every showing passes rather than at one button.
+  /// The confirmation re-show is exempt (the protocol asks for it) and is not
+  /// counted against the cap, so a field tops out at four showings.
+  @discardableResult
+  private func show(
+    kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry,
+    confirmation: Bool = false
+  ) -> Bool {
+    guard confirmation || cappedShowings(of: kind) < CheckupPlan.maxShowingsPerField else {
+      return false
+    }
     showings[CheckupCheckID.field(kind), default: 0] += 1
     self.plant = plant
     environment.presenter.show(kind: kind, plant: plant, on: display)
     secondsRemaining = kind.capSeconds
+    return true
   }
 
   private func endShowing(kind: CheckupFieldKind, elapsed: Int) {
@@ -265,6 +317,11 @@ final class CheckupFlowModel {
     secondsRemaining = 0
     guard let display = selectedDisplay else { return }
     environment.bookShowing(display.identityKey, kind, TimeInterval(elapsed))
+  }
+
+  private func cappedShowings(of kind: CheckupFieldKind) -> Int {
+    let id = CheckupCheckID.field(kind)
+    return showings[id, default: 0] - (secondDotShown.contains(id) ? 1 : 0)
   }
 
   /// The control rides the FIRST pixel field alone: CK20 discloses a single
@@ -291,7 +348,7 @@ final class CheckupFlowModel {
     switch page {
     case .fieldShowing(let kind):
       let shown = plant
-      endShowing(kind: kind, elapsed: max(1, kind.capSeconds - secondsRemaining))
+      endShowing(kind: kind, elapsed: elapsedSeconds(of: kind))
       if kind == .witness {
         answerWitness(answer)
         return
@@ -299,13 +356,18 @@ final class CheckupFlowModel {
       answerField(kind: kind, plant: shown, answer: answer, tappedRegion: tappedRegion)
 
     case .fieldConfirmSecondDot(let kind):
-      endShowing(kind: kind, elapsed: max(1, kind.capSeconds - secondsRemaining))
+      endShowing(kind: kind, elapsed: elapsedSeconds(of: kind))
       answerSecondDot(kind: kind, answer: answer, tappedRegion: tappedRegion)
       page = instructionPage(for: kind)
 
     default:
       break
     }
+  }
+
+  /// Never zero: a field that was on the panel at all emitted light.
+  private func elapsedSeconds(of kind: CheckupFieldKind) -> Int {
+    max(1, kind.capSeconds - secondsRemaining)
   }
 
   /// CK19. "Round and uncut" is the only thing in the whole checkup that
@@ -345,30 +407,54 @@ final class CheckupFlowModel {
       return
     }
     switch answer {
-    case .moreThanOne:
-      // A mark at the control still found the control, even alongside another.
-      if let plant, let tappedRegion, Self.isInside(tappedRegion, plant) { detect(plant) }
-      // CK22: the same field again with no control on it, so a mark the user
-      // still sees is the display's own.
-      if let display = selectedDisplay { show(kind: kind, plant: nil, on: display) }
-      page = .fieldConfirmSecondDot(kind)
+    case .roundAndUncut, .notRound:
+      // The witness card's answers; a field never offers them, and neither
+      // credits nor misses the control.
+      page = instructionPage(for: kind)
       return
+    default:
+      break
+    }
+    // Only an answer that reports a mark can credit the control, and only when
+    // the mark is where the control is. A showing that ended without crediting
+    // it is a miss at the size it was planted at, whatever the answer said (CK21).
+    let credited: Bool = {
+      guard answer != .nothing, let plant, let tappedRegion else { return false }
+      return Self.isInside(tappedRegion, plant)
+    }()
+    if let plant {
+      if credited { detect(plant) } else { registerMiss() }
+    }
+
+    switch answer {
+    case .moreThanOne:
+      // CK22: the same field again with no control on it, so a mark the user
+      // still sees is the display's own. One confirmation per field.
+      if kind.carriesPlant, !secondDotShown.contains(CheckupCheckID.field(kind)),
+        let display = selectedDisplay {
+        secondDotShown.insert(CheckupCheckID.field(kind))
+        show(kind: kind, plant: nil, on: display, confirmation: true)
+        page = .fieldConfirmSecondDot(kind)
+        return
+      }
+      recordField(kind, verdict: gradedVerdict(kind, .selfReported(Self.defectText(tappedRegion))))
 
     case .oneMark:
-      if let plant, let tappedRegion, Self.isInside(tappedRegion, plant) {
-        detect(plant)
+      if plant != nil, credited {
         recordField(kind, verdict: .selfReported("one mark, at the planted control"))
       } else if plant != nil {
-        // The one mark they saw was not the control, so the control went unseen.
-        missed(kind: kind)
-        return
+        // The one mark they saw was not the control, so the control went unseen
+        // and the miss above is the whole of what this showing established.
+        recordField(kind, verdict: gradedVerdict(kind, .selfReported(Self.defectText(tappedRegion))))
       } else {
         recordField(kind, verdict: .selfReported(Self.defectText(tappedRegion)))
       }
 
     case .nothing:
       if plant != nil {
-        missed(kind: kind)
+        // A missed control is not an attestation about the panel: the retry or
+        // the miss recorded above is what this showing said.
+        page = instructionPage(for: kind)
         return
       }
       recordField(
@@ -376,7 +462,6 @@ final class CheckupFlowModel {
         verdict: .selfReported(kind.carriesPlant ? "nothing seen" : Self.noControlText))
 
     case .roundAndUncut, .notRound:
-      // The witness card's answers; a field never offers them.
       break
     }
     page = instructionPage(for: kind)
@@ -387,12 +472,18 @@ final class CheckupFlowModel {
   ) {
     switch answer {
     case .nothing:
-      recordField(kind, verdict: .selfReported("a second mark was not confirmed"))
+      recordField(kind, verdict: gradedVerdict(kind, .selfReported("a second mark was not confirmed")))
     case .oneMark, .moreThanOne:
-      recordField(kind, verdict: .selfReported(Self.defectText(tappedRegion)))
+      recordField(kind, verdict: gradedVerdict(kind, .selfReported(Self.defectText(tappedRegion))))
     case .roundAndUncut, .notRound:
       break
     }
+  }
+
+  /// A pixel field's attestation only means something at a known sensitivity;
+  /// with the control missed it is inconclusive whatever the user reported.
+  private func gradedVerdict(_ kind: CheckupFieldKind, _ verdict: CheckupVerdict) -> CheckupVerdict {
+    kind.carriesPlant && plantRecord?.missed == true ? .inconclusive(Self.ungradedText) : verdict
   }
 
   static func defectText(_ region: (x: Int, y: Int)?) -> String {
@@ -407,15 +498,19 @@ final class CheckupFlowModel {
 
   /// CK21's miss: one larger retry on the same field, then the sweep is
   /// ungraded. The copy frames both as a fact about resolution, never a failure.
-  private func missed(kind: CheckupFieldKind) {
+  private func registerMiss() {
+    guard plantRecord?.missed != true else { return }
     if plantSize < Self.retryPlantPixels {
       plantSize = Self.retryPlantPixels
-      page = instructionPage(for: kind)
       return
     }
+    markControlMissed()
+  }
+
+  private func markControlMissed() {
     plantRecord = CheckupPlantRecord(disclosed: true, detectedAtPixels: nil, missed: true)
-    recordField(kind, verdict: .inconclusive(Self.ungradedText))
-    page = instructionPage(for: kind)
+    guard let planted = Self.plantedField else { return }
+    recordField(planted, verdict: .inconclusive(Self.ungradedText))
   }
 
   static func isInside(_ region: (x: Int, y: Int), _ plant: CheckupPlant) -> Bool {
@@ -431,13 +526,20 @@ final class CheckupFlowModel {
 
   func displayDisconnected(_ id: CGDirectDisplayID) {
     guard let display = selectedDisplay, display.id == id else { return }
-    endRun(reason: "the display disconnected during \(page.name)")
+    endRun(reason: "the display disconnected during \((legInFlight ?? page).name)")
   }
 
   private func endRun(reason: String) {
     guard !finished else { return }
-    environment.presenter.hide()
-    secondsRemaining = 0
+    // A field on the panel is light that was emitted, so it books on the way
+    // out exactly once (CK17); anything else just makes sure nothing is left up.
+    if let kind = showingFieldKind {
+      endShowing(kind: kind, elapsed: elapsedSeconds(of: kind))
+    } else {
+      environment.presenter.hide()
+      secondsRemaining = 0
+    }
+    running = false
     if let mode = runners?.mode {
       // CK27: the mode goes back on every exit path. Its outcome cannot change
       // a completion the user or the cable already decided, so it is not awaited.
@@ -504,7 +606,7 @@ final class CheckupFlowModel {
 
   private func recordUnanswered(_ kind: CheckupFieldKind) {
     guard !claims.contains(where: { $0.id == CheckupCheckID.field(kind) }) else { return }
-    recordField(kind, verdict: .selfReported("no answer given"))
+    recordField(kind, verdict: gradedVerdict(kind, .selfReported("no answer given")))
   }
 
   private func instructionPage(for kind: CheckupFieldKind) -> CheckupPage {

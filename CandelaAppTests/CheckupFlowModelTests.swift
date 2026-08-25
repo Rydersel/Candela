@@ -41,11 +41,11 @@ struct CheckupFlowModelTests {
                            supportsPQEOTF: false, supportsHDRGammaEOTF: false, productName: "DELL")
   }
 
-  private func environment(presenter: FakePresenter, entry: CheckupDisplayEntry, booked: @escaping (CheckupFieldKind, TimeInterval) -> Void = { _, _ in }) -> CheckupEnvironment {
+  private func environment(presenter: FakePresenter, entry: CheckupDisplayEntry, booked: @escaping (CheckupFieldKind, TimeInterval) -> Void = { _, _ in }, capabilities: any CheckupCapabilitiesRunning = FakeCaps()) -> CheckupEnvironment {
     let identity = identity()
     return CheckupEnvironment(
       displays: [entry], macOSBuild: "b", appBuild: "3",
-      runners: { _ in CheckupRunnerSet(identity: { identity }, capabilities: FakeCaps(), mode: FakeMode(), hdr: FakeHDR()) },
+      runners: { _ in CheckupRunnerSet(identity: { identity }, capabilities: capabilities, mode: FakeMode(), hdr: FakeHDR()) },
       presenter: presenter, bookShowing: { _, kind, s in booked(kind, s) },
       now: { Date(timeIntervalSinceReferenceDate: 800_000_000) },
       makeRNG: { SeededGenerator(seed: 1) })
@@ -172,5 +172,134 @@ struct CheckupFlowModelTests {
     var v = entry(); v.isVirtual = true
     let flow = CheckupFlowModel(environment: environment(presenter: FakePresenter(), entry: v))
     #expect(flow.selectableDisplays.isEmpty)
+  }
+
+  /// A leg still in flight when the cable goes is the one way a saved report can
+  /// be written to after the fact: the continuation comes back to a run that
+  /// already ended.
+  @Test func aRunEndedDuringALegKeepsTheSavedReport() async throws {
+    let gate = CheckupLegGate()
+    let flow = CheckupFlowModel(environment: environment(
+      presenter: FakePresenter(), entry: entry(), capabilities: GatedCapabilities(gate: gate)))
+    var saved: [CheckupReportEnvelope] = []
+    flow.onSaved = { saved.append($0) }
+    await flow.advance(); flow.selectedDisplay = flow.environment.displays[0]
+    await flow.advance()                      // displayPick -> plan
+    await flow.advance()                      // plan -> identity
+    let leg = Task { await flow.advance() }   // identity -> capabilities, suspends in run()
+    while await gate.entered == false { await Task.yield() }
+    flow.displayDisconnected(7)
+    #expect(flow.page == .summary)
+    let savedReport = try #require(saved.first).report
+    // The reason names the leg that was in flight, not the page it left.
+    #expect(savedReport.completion == .incomplete(reason: "the display disconnected during capabilities"))
+    await gate.open()
+    await leg.value
+    #expect(flow.page == .summary)
+    #expect(flow.claims == savedReport.claims)
+    #expect(flow.running == false)
+    #expect(saved.count == 1)
+  }
+
+  @Test func abandoningWhileAFieldIsShowingBooksThatShowing() async {
+    var booked: [(CheckupFieldKind, TimeInterval)] = []
+    let presenter = FakePresenter()
+    let flow = CheckupFlowModel(environment: environment(
+      presenter: presenter, entry: entry(), booked: { booked.append(($0, $1)) }))
+    await toFirstField(flow); flow.startShowing(); flow.answer(.roundAndUncut, tappedRegion: nil); await flow.advance()
+    flow.startShowing()
+    for _ in 0..<5 { flow.timeoutTick() }
+    flow.abandon(reason: "closed")
+    #expect(booked.filter { $0.0 == .black }.map(\.1) == [5])
+    #expect(presenter.hides == presenter.shown.count)
+  }
+
+  @Test func aSecondMarkAwayFromTheControlStillRetriesTheControl() async throws {
+    let flow = CheckupFlowModel(environment: environment(presenter: FakePresenter(), entry: entry()))
+    await toFirstField(flow); flow.startShowing(); flow.answer(.roundAndUncut, tappedRegion: nil); await flow.advance()
+    flow.startShowing()
+    flow.answer(.moreThanOne, tappedRegion: (x: 10, y: 10))   // nowhere near the control
+    #expect(flow.page == .fieldConfirmSecondDot(.black))
+    #expect(flow.currentPlantSize == 8)
+    flow.answer(.oneMark, tappedRegion: (x: 100, y: 200))
+    flow.startShowing()
+    flow.answer(.oneMark, tappedRegion: flow.plantRegionForTest)
+    let record = try #require(flow.plantRecord)
+    #expect(record.detectedAtPixels == 8)
+    #expect(!record.missed)
+  }
+
+  @Test func leavingTheControlFieldUnresolvedRecordsAMiss() async throws {
+    let flow = CheckupFlowModel(environment: environment(presenter: FakePresenter(), entry: entry()))
+    await toFirstField(flow); flow.startShowing(); flow.answer(.roundAndUncut, tappedRegion: nil); await flow.advance()
+    flow.startShowing()
+    for _ in 0..<20 { flow.timeoutTick() }    // timed out, never answered
+    await flow.advance()
+    let record = try #require(flow.plantRecord)
+    #expect(record.missed)
+    #expect(record.detectedAtPixels == nil)
+    #expect(flow.claims.contains { $0.id == "field.black" && $0.verdict.kind == "inconclusive" })
+    #expect(flow.page == .fieldInstruction(.red))
+  }
+
+  @Test func noSequenceOfShowingsPassesTheCap() async {
+    var booked: [(CheckupFieldKind, TimeInterval)] = []
+    let flow = CheckupFlowModel(environment: environment(
+      presenter: FakePresenter(), entry: entry(), booked: { booked.append(($0, $1)) }))
+    await toFirstField(flow); flow.startShowing(); flow.answer(.roundAndUncut, tappedRegion: nil); await flow.advance()
+    flow.startShowing()                                             // showing 1
+    flow.answer(.moreThanOne, tappedRegion: nil)                    // the confirmation, exempt
+    flow.answer(.nothing, tappedRegion: nil)
+    flow.startShowing(); for _ in 0..<20 { flow.timeoutTick() }     // showing 2
+    flow.showAgain(); for _ in 0..<20 { flow.timeoutTick() }        // showing 3
+    flow.startShowing()                                             // past the cap: nothing happens
+    flow.showAgain()
+    #expect(flow.page == .fieldInstruction(.black))
+    #expect(!flow.canShowAgain)
+    #expect(booked.filter { $0.0 == .black }.count == 4)
+
+    // Bounded: a cap defect that leaves the page on a showing would otherwise
+    // spin here forever, since `advance` is a no-op while a field is up.
+    for _ in 0..<10 where flow.page != .fieldInstruction(.gray7) { await flow.advance() }
+    #expect(flow.page == .fieldInstruction(.gray7))
+    flow.startShowing()                                             // showing 1
+    flow.answer(.moreThanOne, tappedRegion: nil)                    // no control, so no confirmation
+    #expect(flow.page == .fieldInstruction(.gray7))
+    flow.startShowing(); for _ in 0..<20 { flow.timeoutTick() }     // showing 2
+    flow.showAgain(); for _ in 0..<20 { flow.timeoutTick() }        // showing 3
+    flow.startShowing()
+    #expect(booked.filter { $0.0 == .gray7 }.count == 3)
+  }
+}
+
+/// Suspends a runner leg until the test lets it finish, so an exit can land
+/// while the leg is still in flight.
+actor CheckupLegGate {
+  private(set) var entered = false
+  private var waiting: CheckedContinuation<Void, Never>?
+  private var opened = false
+
+  func wait() async {
+    entered = true
+    if opened { return }
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      waiting = continuation
+    }
+  }
+
+  func open() {
+    opened = true
+    waiting?.resume()
+    waiting = nil
+  }
+}
+
+struct GatedCapabilities: CheckupCapabilitiesRunning {
+  let gate: CheckupLegGate
+
+  func run() async -> [CheckupClaim] {
+    await gate.wait()
+    return [CheckupClaim(family: .capabilities, id: CheckupCheckID.capabilityBrightness,
+                         verdict: .observed("read 50, wrote 50, read 50"))]
   }
 }
