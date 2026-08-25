@@ -43,15 +43,28 @@ public enum CheckupField {
     kind == .black ? (255, 255, 255) : (0, 0, 0)
   }
 
-  /// Linear luminance of the field, for the exposure booking.
-  public static func luminance(of kind: CheckupFieldKind) -> Double {
+  /// The witness card's shared circle-and-square diameter, in pixels. Hoisted
+  /// so `image()` and `luminance(of:)` cannot drift apart on the geometry.
+  private static func witnessDiameter(pixelWidth: Int, pixelHeight: Int) -> Double {
+    Double(min(pixelWidth / 2, pixelHeight)) * 0.75
+  }
+
+  /// Linear luminance of the field, for the exposure booking (CK17). The
+  /// witness and ramp fields are not flat, so their luminance depends on the
+  /// geometry `image()` actually draws at this size.
+  public static func luminance(of kind: CheckupFieldKind, pixelWidth: Int, pixelHeight: Int) -> Double {
     func linear(_ v: UInt8) -> Double {
       let c = Double(v) / 255
       return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
     }
     switch kind {
-    case .ramp: return 0.5 * (linear(255) + linear(0)) / 2 + 0.25 * linear(128)
-    case .witness: return 0.1
+    case .ramp:
+      // Simpson's rule over the three sampled stops of the black-to-white ramp.
+      return (linear(0) + 4 * linear(128) + linear(255)) / 6
+    case .witness:
+      let d = witnessDiameter(pixelWidth: pixelWidth, pixelHeight: pixelHeight)
+      let coverage = (Double.pi * (d / 2) * (d / 2) + d * d) / (Double(pixelWidth) * Double(pixelHeight))
+      return coverage * linear(255)
     default:
       let f = fill(for: kind)
       return 0.2126 * linear(f.r) + 0.7152 * linear(f.g) + 0.0722 * linear(f.b)
@@ -64,24 +77,33 @@ public enum CheckupField {
     width: Int, height: Int, size: Int, using rng: inout G
   ) -> CheckupPlant {
     let mx = width / 20, my = height / 20
-    let x = Int.random(in: mx...(width - mx - size), using: &rng)
-    let y = Int.random(in: my...(height - my - size), using: &rng)
+    let x = clampedRandomPosition(min: mx, max: width - mx - size, using: &rng)
+    let y = clampedRandomPosition(min: my, max: height - my - size, using: &rng)
     return CheckupPlant(x: x, y: y, size: size)
+  }
+
+  /// A plant bigger than the usable area lands at the margin rather than
+  /// trapping `Int.random(in:)` on an inverted range.
+  private static func clampedRandomPosition<G: RandomNumberGenerator>(
+    min lowerBound: Int, max upperBound: Int, using rng: inout G
+  ) -> Int {
+    guard upperBound >= lowerBound else { return lowerBound }
+    return Int.random(in: lowerBound...upperBound, using: &rng)
   }
 
   public static func image(
     kind: CheckupFieldKind, pixelWidth: Int, pixelHeight: Int, plant: CheckupPlant?
   ) -> CGImage? {
     guard pixelWidth > 0, pixelHeight > 0,
+      let space = CGColorSpace(name: CGColorSpace.sRGB),
       let ctx = CGContext(
         data: nil, width: pixelWidth, height: pixelHeight, bitsPerComponent: 8,
-        bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+        bytesPerRow: 0, space: space,
         bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
     else { return nil }
     // Top-left origin, so the plant's y is the y a user would tap.
     ctx.translateBy(x: 0, y: CGFloat(pixelHeight))
     ctx.scaleBy(x: 1, y: -1)
-    ctx.interpolationQuality = .none
 
     let f = fill(for: kind)
     ctx.setFillColor(red: CGFloat(f.r) / 255, green: CGFloat(f.g) / 255, blue: CGFloat(f.b) / 255, alpha: 1)
@@ -97,7 +119,7 @@ public enum CheckupField {
     case .witness:
       // A circle on the left, a square on the right, equal diameters, white on
       // black; a stretched aspect turns the circle into an ellipse on glass.
-      let d = CGFloat(min(pixelWidth / 2, pixelHeight)) * 0.75
+      let d = CGFloat(witnessDiameter(pixelWidth: pixelWidth, pixelHeight: pixelHeight))
       ctx.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
       ctx.fillEllipse(in: CGRect(x: CGFloat(pixelWidth) / 4 - d / 2, y: CGFloat(pixelHeight) / 2 - d / 2, width: d, height: d))
       ctx.fill(CGRect(x: CGFloat(pixelWidth) * 3 / 4 - d / 2, y: CGFloat(pixelHeight) / 2 - d / 2, width: d, height: d))
@@ -114,9 +136,14 @@ public enum CheckupField {
   }
 
   /// Reads one pixel back, top-left origin. A test helper, public so the
-  /// paint tool's readback can use the same reader.
-  public static func pixel(in image: CGImage, x: Int, y: Int) -> (r: UInt8, g: UInt8, b: UInt8) {
-    guard let data = image.dataProvider?.data, let ptr = CFDataGetBytePtr(data) else { return (0, 0, 0) }
+  /// paint tool's readback can use the same reader. `nil` on a failed data
+  /// read or a non-8-bit-per-component image: never confused with a real
+  /// black pixel.
+  public static func pixel(in image: CGImage, x: Int, y: Int) -> (r: UInt8, g: UInt8, b: UInt8)? {
+    guard image.bitsPerComponent == 8,
+      let data = image.dataProvider?.data,
+      let ptr = CFDataGetBytePtr(data)
+    else { return nil }
     let offset = y * image.bytesPerRow + x * (image.bitsPerPixel / 8)
     return (ptr[offset], ptr[offset + 1], ptr[offset + 2])
   }
