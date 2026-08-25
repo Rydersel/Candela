@@ -1,15 +1,18 @@
 import CandelaKit
 import CoreGraphics
 import Foundation
+import os
 
 /// The live half of `CheckupEnvironment`: the app's own objects in, the value
 /// the flow model runs over out.
 ///
 /// Split the way `OnboardingLiveEnvironment` is split, and for its reason:
-/// every rule that decides something lives in `entries(from:)`, which is pure
-/// and reachable from a test with no display attached, no catalog enumerated
+/// what decides something lives in `entries(from:)` and `readingCapabilities`,
+/// both reachable from a test with no display attached, no catalog enumerated
 /// and no wire. The live side below fills the fields in and decides nothing.
 enum CheckupLiveEnvironment {
+  private static let log = Logger(subsystem: "com.rydersel.Candela", category: "checkup")
+
   /// One display as the live layer reads it, before any checkup rule applies.
   struct Source {
     var id: CGDirectDisplayID
@@ -52,27 +55,68 @@ enum CheckupLiveEnvironment {
     }
   }
 
-  /// Strings this builder read for itself, for a display the D24 probe has no
-  /// entry for. Kept here rather than pushed into `AppModel`, whose cache is
-  /// written only by that probe and only from its own epoch check.
-  @MainActor private static var readAtBuild: [String: String] = [:]
-  @MainActor private static var readsInFlight: Set<String> = []
+  /// The DDC path behind one display, as the capability fill-in needs it.
+  struct CapabilityProbe {
+    var writer: any DDCWriting
+    var hdrEngaged: Bool
+  }
+
+  /// Reads a capability string for every external the D24 probe has no entry
+  /// for, BEFORE the plan grades anything off it.
+  ///
+  /// The probe misses for a display whose read failed once: a failure caches
+  /// the verdict and not the string, and `CapabilityProbePolicy` then declines
+  /// to ask again that session. Without this the checkup would inherit that
+  /// nil, and a nil classes the panel write-only, so one transient failure
+  /// would put "readback cannot be observed" in a saved report about a Dell.
+  ///
+  /// The policy's own clauses, in its terms: the guard above IS its cached-nil
+  /// case, restated; nothing of this builder's can be outstanding because the
+  /// read is awaited here rather than launched; and HDR skips the read, since
+  /// DDC is dead while HDR is engaged and the write-only text is what a
+  /// silent panel earns.
+  @MainActor
+  static func readingCapabilities(
+    into sources: [Source], probes: [String: CapabilityProbe]
+  ) async -> [Source] {
+    var filled: [Source] = []
+    filled.reserveCapacity(sources.count)
+    for var source in sources {
+      guard source.capabilities == nil, !source.isBuiltIn,
+        let probe = probes[source.identityKey],
+        CapabilityProbePolicy.shouldProbe(
+          cached: nil, inFlight: false, hdrEngaged: probe.hdrEngaged)
+      else {
+        filled.append(source)
+        continue
+      }
+      source.capabilities = await probe.writer.readCapabilityString()
+      filled.append(source)
+    }
+    return filled
+  }
 
   @MainActor
   static func current(
     model: AppModel,
     presenter: any CheckupFieldPresenting,
     coordinator: OledCareCoordinator
-  ) -> CheckupEnvironment {
+  ) async -> CheckupEnvironment {
     let configurator = CoreGraphicsDisplayConfigurator()
     let states = model.allControlledStates
-    let sources = states.map { source(for: $0, model: model, configurator: configurator) }
-    let entries = entries(from: sources)
     // Keyed on the same string the entries carry, uniqued rather than trapping:
     // two identical panels can share an EDID UUID, which is a documented
     // limitation of the persistence key and not a reason to crash the app.
-    let writers = Dictionary(
-      states.map { ($0.display.persistenceKey, $0.writer) }, uniquingKeysWith: { first, _ in first })
+    let probes = Dictionary(
+      states.map {
+        ($0.display.persistenceKey,
+         CapabilityProbe(writer: $0.writer, hdrEngaged: $0.controller.isHDREngaged))
+      },
+      uniquingKeysWith: { first, _ in first })
+    let sources = await readingCapabilities(
+      into: states.map { source(for: $0, model: model, configurator: configurator) },
+      probes: probes)
+    let entries = entries(from: sources)
     let capabilities = Dictionary(
       sources.map { ($0.identityKey, $0.capabilities) }, uniquingKeysWith: { first, _ in first })
     let pixels = Dictionary(
@@ -87,14 +131,22 @@ enum CheckupLiveEnvironment {
       runners: { entry in
         runnerSet(
           for: entry,
-          writer: writers[entry.identityKey] ?? NoopDDCWriter(),
+          writer: probes[entry.identityKey]?.writer ?? NoopDDCWriter(),
           capabilities: capabilities[entry.identityKey] ?? nil,
           hdr: hdr,
           configurator: configurator)
       },
       presenter: presenter,
       bookShowing: { [weak coordinator] identityKey, kind, seconds in
-        let size = pixels[identityKey] ?? (0, 0)
+        // A zero size makes the witness card's coverage NaN, and the booking's
+        // clamp passes a NaN through as full white, so the ledger would gain a
+        // full-white showing that never happened. Nothing to book is better.
+        guard let size = pixels[identityKey], size.0 > 0, size.1 > 0 else {
+          log.error("""
+          checkup showing not booked: no pixel size for \(identityKey, privacy: .public)
+          """)
+          return
+        }
         coordinator?.bookCheckupShowing(
           identityKey: identityKey,
           luminance: CheckupField.luminance(
@@ -132,43 +184,15 @@ enum CheckupLiveEnvironment {
         friendlyName: prefs.friendlyName, hardwareName: state.display.name),
       isBuiltIn: isBuiltIn,
       isVirtual: isVirtual,
-      capabilities: capabilityString(for: state, model: model, isBuiltIn: isBuiltIn),
+      // The D24 probe's string where it has one; `readingCapabilities` above
+      // fills the rest in before anything is graded off them.
+      capabilities: model.capabilityString[key],
       // Discovery admits externals with a live DDC service and nothing else,
       // so membership in that list IS the answer; the built-in slot carries a
       // `NoopDDCWriter` and has no wire at all.
       hasDDCService: !isBuiltIn,
       pixelWidth: native?.width ?? Int(CGDisplayPixelsWide(state.id)),
       pixelHeight: native?.height ?? Int(CGDisplayPixelsHigh(state.id)))
-  }
-
-  /// The D24 probe caches a string for every display it is allowed to ask, so
-  /// this is normally a cache hit. It misses for a display the probe skipped
-  /// (HDR engaged, where DDC is dead anyway) or whose read failed once, since
-  /// a failure caches the verdict and not the string.
-  ///
-  /// Such a display gets one read of its own, started HERE and never at app
-  /// launch. The read is async and this builder is synchronous, so its answer
-  /// lands for the NEXT checkup rather than this one: the run being assembled
-  /// sees the same nil the cache had, and a panel that answers nothing is
-  /// classed write-only, which is what a nil already meant everywhere else.
-  @MainActor
-  private static func capabilityString(
-    for state: AppModel.DisplayState, model: AppModel, isBuiltIn: Bool
-  ) -> String? {
-    let key = state.display.persistenceKey
-    if let cached = model.capabilityString[key] { return cached }
-    if let read = readAtBuild[key] { return read }
-    guard !isBuiltIn, !readsInFlight.contains(key) else { return nil }
-    readsInFlight.insert(key)
-    let writer = state.writer
-    Task { @MainActor in
-      let answer = await writer.readCapabilityString()
-      readsInFlight.remove(key)
-      // Stored only on a successful read, the probe's rule: a nil is a failed
-      // transaction, and remembering it would outlive whatever caused it.
-      if let answer { readAtBuild[key] = answer }
-    }
-    return nil
   }
 
   // MARK: - Runners
@@ -194,8 +218,7 @@ enum CheckupLiveEnvironment {
     return CheckupRunnerSet(
       identity: { identity },
       capabilities: capabilitiesRunner(for: entry, writer: writer, capabilities: capabilities),
-      mode: CheckupLiveModeRunner(
-        configurator: CoreGraphicsDisplayConfigurator(), displayID: entry.id),
+      mode: CheckupLiveModeRunner(configurator: configurator, displayID: entry.id),
       hdr: CheckupLiveHDRRunner(
         hdr: hdr, displayID: entry.id, identity: identity ?? unreadIdentity(for: entry)))
   }

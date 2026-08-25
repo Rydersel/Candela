@@ -3,8 +3,9 @@ import CoreGraphics
 import Foundation
 
 /// One attached display as the checkup flow sees it (CK26). Virtual displays
-/// are carried rather than filtered upstream, so the pick page excludes them in
-/// one place and a report can never key on one.
+/// are filtered out where the entries are built, so a report can never key on
+/// one; the pick page's own guard is belt and braces over a list that never
+/// carries one.
 struct CheckupDisplayEntry: Equatable, Sendable, Identifiable {
   var id: CGDirectDisplayID
   /// The EDID-derived key every stored run is filed under; never the display id.

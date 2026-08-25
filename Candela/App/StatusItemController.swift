@@ -141,6 +141,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// freeze the store at the launch sample without anything saying so.
   private lazy var mirrorSampler = MirrorTopologySampler(store: model.mirrorTopology)
   private let log = Logger(subsystem: "com.rydersel.Candela", category: "keys")
+  private let checkupLog = Logger(subsystem: "com.rydersel.Candela", category: "checkup")
 
   func applicationDidFinishLaunching(_: Notification) {
     // D11: the notice states exactly what safe mode does and exactly what it
@@ -803,16 +804,16 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     if let checkupWindow { return checkupWindow }
     let controller = CheckupWindowController(
       environment: { [unowned self] in
-        CheckupLiveEnvironment.current(
+        await CheckupLiveEnvironment.current(
           model: self.model,
           presenter: self.checkupController().fieldWindow,
           coordinator: self.model.oledCare)
       },
-      onSaved: { envelope in
+      onSaved: { [checkupLog] envelope in
         do {
           try CheckupStore(directory: CheckupStore.defaultDirectory()).save(envelope)
         } catch {
-          Logger(subsystem: "com.rydersel.Candela", category: "checkup").error(
+          checkupLog.error(
             "checkup report could not be saved: \(String(describing: error), privacy: .public)")
         }
       })

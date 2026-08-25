@@ -13,10 +13,13 @@ import SwiftUI
 /// island the model only ever sees through `CheckupFieldPresenting`.
 @MainActor
 final class CheckupWindowController: NSObject, NSWindowDelegate {
-  private let environment: () -> CheckupEnvironment
+  private let environment: () async -> CheckupEnvironment
   private let onSaved: (CheckupReportEnvelope) -> Void
   private var window: NSWindow?
   private var model: CheckupFlowModel?
+  /// Held while an environment is being built, so a second click during the
+  /// capability read does not install a second flow over the first.
+  private var presenting = false
   /// The presenter the flow drives. Owned here because the tap that reports a
   /// mark, the strip that carries the answers on a one-display run, and the
   /// countdown all live on it.
@@ -24,7 +27,7 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
   private var tick: Task<Void, Never>?
 
   init(
-    environment: @escaping () -> CheckupEnvironment,
+    environment: @escaping () async -> CheckupEnvironment,
     onSaved: @escaping (CheckupReportEnvelope) -> Void
   ) {
     self.environment = environment
@@ -37,16 +40,27 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     self.window = window
     // A fresh presentation gets a fresh flow over a fresh harvest; a present()
     // while the window is already up only brings it forward, keeping the user's
-    // place in a run that is already recording claims.
-    if !window.isVisible {
-      installFlow(in: window)
-      window.center()
-    }
+    // place in a run that is already recording claims. Read before the window
+    // is ordered front, which is what makes it visible.
+    let needsFlow = !window.isVisible
     // Same reason as the setup window: the modern `NSApp.activate()` cannot
     // activate an accessory app from inside a status-item tracking session, so
-    // this stays the deprecated call and stays inside the click's event context.
+    // this stays the deprecated call and stays inside the click's event
+    // context. The environment build below cannot: it asks a silent display
+    // for its capability string, and the plan is graded off the answer.
     NSApp.activate(ignoringOtherApps: true)
     window.makeKeyAndOrderFront(nil)
+    guard needsFlow, !presenting else { return }
+    presenting = true
+    Task { @MainActor in
+      defer { presenting = false }
+      let environment = await self.environment()
+      // The window can have been closed while the read was out; installing a
+      // flow into it now would start a run nobody is looking at.
+      guard window.isVisible else { return }
+      self.installFlow(in: window, environment: environment)
+      window.center()
+    }
   }
 
   /// CK27: the target going away ends the run as incomplete, with the leg it
@@ -55,8 +69,8 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     model?.displayDisconnected(id)
   }
 
-  private func installFlow(in window: NSWindow) {
-    var environment = self.environment()
+  private func installFlow(in window: NSWindow, environment: CheckupEnvironment) {
+    var environment = environment
     // The flow calls `show` and `hide` on whatever presenter its environment
     // carries, and everything this controller does around a showing is done on
     // the window it owns, so that window is the presenter.
