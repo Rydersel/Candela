@@ -33,8 +33,8 @@ struct AboutPane: View {
         // The sentence is the row's, not hand-attached to the button:
         // `SettingsActionRow` republishes it as the control's accessibility
         // hint (contract 3), which the standalone lockup could not do.
-        SettingsActionRow(verbatim: checkNowLine) {
-          Button("Check for Updates…") { updater.checkForUpdates() }
+        SettingsActionRow(verbatim: checkNowLine, dividerFollows: true) {
+          Button("Check for Updates") { updater.checkForUpdates() }
             .buttonStyle(SettingsPrimaryButtonStyle())
             .disabled(!updater.canCheckForUpdates)
         }
@@ -62,9 +62,9 @@ struct AboutPane: View {
         SettingsActionRow(
           "Walks through Open at Login, the keyboard keys and the Accessibility permission again."
         ) {
-          Button("Run Setup Again…") { actions.showOnboarding() }
+          Button("Run Setup Again") { actions.showOnboarding() }
             .buttonStyle(SettingsPrimaryButtonStyle())
-            .accessibilityLabel("Run Setup Again…")
+            .accessibilityLabel("Run Setup Again")
         }
       }
 

@@ -272,15 +272,18 @@ struct SettingsActionRow<Actions: View>: View {
 
   private let sentence: Text
   private let caption: SettingsCaption?
+  private let dividerFollows: Bool
   private let actions: Actions
 
   init(
     _ sentence: LocalizedStringKey,
     caption: SettingsCaption? = nil,
+    dividerFollows: Bool = false,
     @ViewBuilder actions: () -> Actions
   ) {
     self.sentence = Text(sentence)
     self.caption = caption
+    self.dividerFollows = dividerFollows
     self.actions = actions()
   }
 
@@ -289,10 +292,12 @@ struct SettingsActionRow<Actions: View>: View {
   init(
     verbatim sentence: String,
     caption: SettingsCaption? = nil,
+    dividerFollows: Bool = false,
     @ViewBuilder actions: () -> Actions
   ) {
     self.sentence = Text(verbatim: sentence)
     self.caption = caption
+    self.dividerFollows = dividerFollows
     self.actions = actions()
   }
 
@@ -318,7 +323,16 @@ struct SettingsActionRow<Actions: View>: View {
         .accessibilityHint(sentence)
     }
     .frame(maxWidth: .infinity)
-    .padding(.vertical, SettingsTheme.rowVerticalPadding)
+    // No vertical padding of its own, unlike `SettingRow`: the trailing button
+    // carries its own, and adding a row's worth on top of that stacked about
+    // twenty points of air over a one-line sentence at the head of a card.
+    //
+    // What is left is the card's own padding, which centres a row that is the
+    // card's only one. A row a divider follows is not centred by it: that row
+    // takes the card's padding above and a bare hairline below, which reads as
+    // a button shoved against the line under a card's worth of air. So it
+    // stands the missing padding in itself, by name so the two cannot drift.
+    .padding(.bottom, dividerFollows ? SettingsTheme.cardVerticalPadding : 0)
     // This row's rhythm is supplied here, so a row component nested inside it
     // adds none of its own and the card keeps one rhythm.
     .environment(\.settingsRowIsPadded, true)

@@ -13,7 +13,7 @@ struct SettingsCard<Content: View>: View {
   var body: some View {
     content
       .padding(.horizontal, 14)
-      .padding(.vertical, 10)
+      .padding(.vertical, SettingsTheme.cardVerticalPadding)
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(
         RoundedRectangle(cornerRadius: SettingsTheme.cardRadius, style: .continuous)
