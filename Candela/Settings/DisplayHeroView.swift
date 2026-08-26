@@ -336,9 +336,8 @@ struct DisplayHeroView: View {
         // composition, and a slider that took every point the window gained
         // would strand the label at the far edge of a widening card.
         //
-        // The panel's slider, not `ThemedSlider`, so it does not bring the
-        // window-drag exemption with it: without this the movable-by-background
-        // window takes the mouse-down and a drag on the knob moves the window.
+        // `control()` is not a `ThemedSlider`, so it lacks the drag exemption one
+        // carries; without it the movable-by-background window takes the knob drag.
         control()
           .frame(width: sliderWidth)
           .blocksWindowDrag()
