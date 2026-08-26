@@ -155,7 +155,7 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
     }
     let matches = achieved.pixelWidth == native.pixelWidth
       && achieved.pixelHeight == native.pixelHeight
-    let text = "achieved \(Self.describe(achieved)); macOS reports"
+    let text = "achieved \(Self.describe(achieved)), as macOS reports it"
     return [
       CheckupClaim(
         family: .nativeMode, id: CheckupCheckID.nativeMode,
@@ -210,13 +210,13 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
         claims.append(
           CheckupClaim(
             family: .refresh, id: id,
-            verdict: .observed("\(Self.hz(rate)) Hz achieved; macOS reports")))
+            verdict: .observed("\(Self.hz(rate)) Hz achieved, as macOS reports it")))
       } else {
         claims.append(
           CheckupClaim(
             family: .refresh, id: id,
             verdict: .refused(
-              "requested \(Self.hz(rate)) Hz, achieved \(Self.hz(achieved)) Hz; macOS reports")))
+              "requested \(Self.hz(rate)) Hz, achieved \(Self.hz(achieved)) Hz, as macOS reports it")))
       }
     }
     return claims

@@ -118,7 +118,7 @@ struct CheckupLiveRunnersTests {
     let native = mode(1, w: 3840, h: 2160, hz: 60, native: true)
     let ok = FakeConfigurator(modeList: [native], current: native)
     let claims = await CheckupLiveModeRunner(configurator: ok, displayID: 1).runNativeMode()
-    #expect(claims.first?.verdict == .observed("achieved 3840 by 2160 at 60 Hz; macOS reports"))
+    #expect(claims.first?.verdict == .observed("achieved 3840 by 2160 at 60 Hz, as macOS reports it"))
 
     let refusing = FakeConfigurator(modeList: [native], current: native, refuse: [1])
     let refused = await CheckupLiveModeRunner(configurator: refusing, displayID: 1).runNativeMode()
@@ -146,7 +146,7 @@ struct CheckupLiveRunnersTests {
       .runRefreshSweep()
     #expect(claims.map(\.id) == ["refresh.60", "refresh.120"])
     #expect(claims[0].verdict.kind == "observed")
-    #expect(claims[1].verdict == .refused("requested 120 Hz, achieved 60 Hz; macOS reports"))
+    #expect(claims[1].verdict == .refused("requested 120 Hz, achieved 60 Hz, as macOS reports it"))
   }
 
   @Test func ntscAndSixtyAreSweptAsTwoRatesUnderTwoIds() async {

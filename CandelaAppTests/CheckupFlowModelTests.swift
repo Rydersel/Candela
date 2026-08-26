@@ -27,7 +27,7 @@ struct CheckupFlowModelTests {
   }
   struct FakeMode: CheckupModeRunning {
     func runNativeMode() async -> [CheckupClaim] { [CheckupClaim(family: .nativeMode, id: CheckupCheckID.nativeMode, verdict: .observed("achieved"))] }
-    func runRefreshSweep() async -> [CheckupClaim] { [CheckupClaim(family: .refresh, id: "refresh.60", verdict: .observed("60 Hz achieved; macOS reports"))] }
+    func runRefreshSweep() async -> [CheckupClaim] { [CheckupClaim(family: .refresh, id: "refresh.60", verdict: .observed("60 Hz achieved, as macOS reports it"))] }
     func restore() async -> Bool { true }
   }
   struct FakeHDR: CheckupHDRRunning {
