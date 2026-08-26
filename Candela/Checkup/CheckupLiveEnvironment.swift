@@ -5,7 +5,7 @@ import Foundation
 import os
 
 /// The live half of `CheckupEnvironment`. Split like `OnboardingLiveEnvironment`:
-/// what decides something lives in `entries(from:)` and `readingCapabilities`,
+/// what decides something lives in `entries(from:)` and `readingLiveState`,
 /// testable with no display attached; the live side fills fields in and decides nothing.
 enum CheckupLiveEnvironment {
   private static let log = Logger(subsystem: "com.rydersel.Candela", category: "checkup")
@@ -58,21 +58,17 @@ enum CheckupLiveEnvironment {
     }
   }
 
-  /// One pass over the live state the plan grades off: the panel's HDR state
-  /// read now, then a capability string for every external the D24 probe has no
-  /// entry for, all BEFORE the plan grades anything.
+  /// Reads the live state the plan grades off, BEFORE it grades anything: HDR from
+  /// the panel itself, then a capability string for every external the D24 probe
+  /// lacks one for. A nil `hdr` leaves the caller's value alone; the built-in is
+  /// never measured.
   ///
-  /// HDR comes from the display itself, not from the controller's cached
-  /// mirror: that mirror goes stale the moment HDR is toggled outside the app,
-  /// and a stale `false` pre-grades the capability rows "write-only over DDC"
-  /// when the honest answer is that readback cannot be observed in HDR at all.
-  /// A nil seam leaves the caller's value alone; the built-in is never measured.
-  ///
-  /// A failed capability read caches the verdict and not the string, and
-  /// `CapabilityProbePolicy` then declines to ask again that session; inheriting
-  /// that nil would class a Dell write-only and put "readback cannot be
-  /// observed" in a saved report. HDR still skips the read, since DDC is dead
-  /// while HDR is engaged.
+  /// The controller's HDR mirror goes stale when HDR is toggled outside the app,
+  /// and a stale `false` pre-grades the capability rows write-only when readback
+  /// cannot be observed in HDR at all. A failed capability read caches the verdict,
+  /// not the string, and `CapabilityProbePolicy` will not retry that session, so
+  /// inheriting that nil would class a Dell write-only in a saved report. HDR skips
+  /// the capability read since DDC is dead while HDR is engaged.
   @MainActor
   static func readingLiveState(
     into sources: [Source], writers: [String: any DDCWriting], hdr: (any HDRToggling)?
@@ -183,16 +179,14 @@ enum CheckupLiveEnvironment {
       // `NSScreen` is what actually stops the draw. Either alone lets a run fabricate a showing.
       isMirroring: CGDisplayMirrorsDisplay(state.id) != kCGNullDirectDisplay
         || OverlayWindow.screen(for: state.id) == nil,
-      // The D24 probe's string where it has one; `readingCapabilities` above
+      // The D24 probe's string where it has one; `readingLiveState` above
       // fills the rest in before anything is graded off them.
       capabilities: model.capabilityString[key],
       // Discovery admits only externals with a live DDC service, so membership
       // is the answer; the built-in carries a `NoopDDCWriter`.
       hasDDCService: !isBuiltIn,
-      // A starting value only: `readingLiveState` replaces it for every
-      // external with a read of the panel itself, because this is the app's
-      // cached mirror and anything toggled outside the app leaves it stale.
-      // The built-in has no DDC path for HDR to gate.
+      // Starting value only: `readingLiveState` re-reads the panel, since this cached
+      // mirror goes stale when HDR is toggled outside the app. The built-in has no DDC.
       hdrEngaged: !isBuiltIn && state.controller.isHDREngaged,
       pixelWidth: native?.width ?? Int(CGDisplayPixelsWide(state.id)),
       pixelHeight: native?.height ?? Int(CGDisplayPixelsHigh(state.id)),

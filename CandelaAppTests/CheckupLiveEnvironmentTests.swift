@@ -90,8 +90,7 @@ struct CheckupLiveEnvironmentTests {
     #expect(entries[0].panelClass == .readsDDC)
   }
 
-  /// The app's cached HDR mirror is not a true mirror of the panel: HDR
-  /// engaged from outside the app leaves it reading `false`, which pre-grades
+  /// HDR engaged outside the app leaves the cached mirror `false`, which pre-grades
   /// the capability rows write-only when readback cannot be observed at all.
   @Test @MainActor func hdrIsMeasuredFromTheDisplayRatherThanTheCachedMirror() async {
     let filled = await CheckupLiveEnvironment.readingLiveState(
@@ -106,9 +105,8 @@ struct CheckupLiveEnvironmentTests {
     #expect(caps.allSatisfy { $0.pregraded == .notObserved(CheckupPlan.hdrEngagedCapabilityText) })
   }
 
-  /// The inverse, so the measurement is the answer in both directions: a mirror
-  /// left reading engaged after HDR was turned off outside the app does not
-  /// cost a Dell its capability rows.
+  /// The inverse: a mirror left reading engaged after HDR was turned off outside
+  /// the app must not cost a Dell its capability rows.
   @Test @MainActor func aMeasuredReadClearsAStaleEngagedMirror() async {
     var stale = dell(capabilities: "(vcp(10 12))")
     stale.hdrEngaged = true
