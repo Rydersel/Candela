@@ -335,7 +335,13 @@ struct DisplayHeroView: View {
         // Fixed, never a maximum: the level column is part of the hero's
         // composition, and a slider that took every point the window gained
         // would strand the label at the far edge of a widening card.
-        control().frame(width: sliderWidth)
+        //
+        // The panel's slider, not `ThemedSlider`, so it does not bring the
+        // window-drag exemption with it: without this the movable-by-background
+        // window takes the mouse-down and a drag on the knob moves the window.
+        control()
+          .frame(width: sliderWidth)
+          .blocksWindowDrag()
       }
       if let caption {
         Text(verbatim: caption)
