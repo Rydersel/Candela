@@ -282,12 +282,17 @@ struct CheckupFlowModelTests {
     await flow.advance()                      // plan -> identity
     let leg = Task { await flow.advance() }   // identity -> capabilities, suspends in run()
     while await gate.entered == false { await Task.yield() }
-    await flow.advance()                      // refused: the leg owns the page
+    let second = Task { await flow.advance() }
+    // Bounded: with the guard this runs out; without it the second advance
+    // reaches the same gate and the count moves.
+    for _ in 0..<200 where await gate.entries == 1 { await Task.yield() }
+    #expect(await gate.entries == 1)
     #expect(flow.page == .identity)
     await gate.open()
     await leg.value
+    await second.value
     #expect(flow.page == .capabilities)
-    #expect(await gate.entries == 1)
+    #expect(flow.claims.filter { $0.family == .capabilities }.count == 1)
   }
 
   /// CK16: once per field however many times it was shown, and never on a run
@@ -430,7 +435,10 @@ actor CheckupLegGate {
   /// How many times a leg reached the gate, which is how a second advance
   /// running the same leg again becomes visible.
   private(set) var entries = 0
-  private var waiting: CheckedContinuation<Void, Never>?
+  /// Every waiter, not one: a defect that lets a second advance into the same
+  /// leg would otherwise strand the first here and hang the suite instead of
+  /// failing it.
+  private var waiting: [CheckedContinuation<Void, Never>] = []
   private var opened = false
 
   func wait() async {
@@ -438,14 +446,14 @@ actor CheckupLegGate {
     entries += 1
     if opened { return }
     await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-      waiting = continuation
+      waiting.append(continuation)
     }
   }
 
   func open() {
     opened = true
-    waiting?.resume()
-    waiting = nil
+    for continuation in waiting { continuation.resume() }
+    waiting.removeAll()
   }
 }
 
