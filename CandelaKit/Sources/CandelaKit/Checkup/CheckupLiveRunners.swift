@@ -167,7 +167,16 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
   public func runRefreshSweep() -> [CheckupClaim] {
     rememberCurrentMode()
     let modes = configurator.modes(for: displayID)
-    guard let native = modes.first(where: \.isNative) else { return [] }
+    guard let native = modes.first(where: \.isNative) else {
+      // Silence would leave the plan's sweep row with no claim at all, which
+      // reads as a check that never happened rather than one that had nothing
+      // to sweep.
+      return [
+        CheckupClaim(
+          family: .refresh, id: CheckupCheckID.refreshSweep,
+          verdict: .notObserved("no native mode in the catalog for this display"))
+      ]
+    }
     // CoreGraphics modes only. A synthesized size is one Candela renders, and a
     // REVEALED mode can be bound to an unrelated wire timing and scan out
     // cropped while every readback reports clean.
@@ -289,7 +298,9 @@ public struct CheckupLiveHDRRunner: CheckupHDRRunning {
     let text =
       transitions.map { Self.transitionText(target: $0.target, settled: $0.settled) }
       .joined(separator: "; ") + suffix
-    let allSettled = transitions.allSatisfy(\.settled)
+    // The restore counts: a panel left in the other HDR state is exactly the
+    // achieved-state miss this leg exists to catch, whatever the transitions did.
+    let allSettled = transitions.allSatisfy(\.settled) && restored
     return CheckupClaim(
       family: .hdr, id: CheckupCheckID.hdrSettle,
       verdict: allSettled ? .observed(text) : .refused(text))

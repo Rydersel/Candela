@@ -503,9 +503,20 @@ case "identity":
   }
   let identityConfigurator = CoreGraphicsDisplayConfigurator()
   let identityNative = identityConfigurator.nativePixels(for: target).map { ($0.width, $0.height) } ?? (0, 0)
-  let identityKey = DisplayConfigIdentity.key(
-    vendor: CGDisplayVendorNumber(target), model: CGDisplayModelNumber(target),
-    serial: CGDisplaySerialNumber(target), isBuiltIn: CGDisplayIsBuiltin(target) != 0)
+  // The key the APP files a run under, so a probe reading and a stored report
+  // name the same display: DisplayDiscovery's persistence key (the EDID UUID,
+  // or name-manufacturer-serial) for an external, and the built-in's fixed
+  // spelling. DisplayConfigIdentity's key is a separate namespace for mode
+  // state and would name a directory nothing writes.
+  let identityKey: String
+  if CGDisplayIsBuiltin(target) != 0 {
+    identityKey = "builtIn"
+  } else if let discovered = DisplayDiscovery.discover().first(where: { $0.display.id == target }) {
+    identityKey = discovered.display.persistenceKey
+  } else {
+    print("display \(target) has no DDC service, so the app files no checkup runs under it")
+    exit(5)
+  }
   guard let identity = CheckupIdentityFacts.read(
     displayID: target, identityKey: identityKey, vendorID: CGDisplayVendorNumber(target),
     modelID: CGDisplayModelNumber(target), nativePixels: identityNative,

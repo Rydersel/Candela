@@ -20,7 +20,7 @@ struct CheckupPlanTests {
   }
 
   @Test func theWriteOnlyPlanPregradesEveryCapabilityRow() {
-    let plan = CheckupPlan.make(panelClass: .writeOnlyDDC)
+    let plan = CheckupPlan.make(panelClass: .writeOnlyDDC, hdrEngaged: false)
     let caps = plan.filter { $0.family == .capabilities }
     #expect(caps.count == 3)
     #expect(caps.allSatisfy { $0.pregraded?.kind == "notObserved" })
@@ -29,15 +29,15 @@ struct CheckupPlanTests {
   }
 
   @Test func theReadsDDCPlanPregradesNothing() {
-    #expect(CheckupPlan.make(panelClass: .readsDDC).allSatisfy { $0.pregraded == nil })
+    #expect(CheckupPlan.make(panelClass: .readsDDC, hdrEngaged: false).allSatisfy { $0.pregraded == nil })
   }
 
   @Test func planOrderFollowsTheFamilyOrder() {
-    let families = CheckupPlan.make(panelClass: .readsDDC).map(\.family)
+    let families = CheckupPlan.make(panelClass: .readsDDC, hdrEngaged: false).map(\.family)
     #expect(families == families.sorted { a, b in
       CheckupFamily.allCases.firstIndex(of: a)! < CheckupFamily.allCases.firstIndex(of: b)!
     })
-    #expect(CheckupPlan.make(panelClass: .readsDDC).map(\.id).first == CheckupCheckID.identity)
+    #expect(CheckupPlan.make(panelClass: .readsDDC, hdrEngaged: false).map(\.id).first == CheckupCheckID.identity)
   }
 
   @Test func refreshIdsKeepOneDecimalSoNTSCDoesNotCollideWithSixty() {
@@ -48,6 +48,33 @@ struct CheckupPlanTests {
     #expect(CheckupCheckID.refresh(hz: 59.9998) == "refresh.60")
     #expect(CheckupCheckID.refresh(hz: 59.94) == "refresh.59.9")
     #expect(CheckupCheckID.refresh(hz: 119.88) == "refresh.119.9")
+  }
+
+  /// A run started with the panel in HDR cannot read DDC at all, so the three
+  /// capability rows say so instead of blaming the panel. The write-only text is
+  /// the one that would be false on a Dell whose cached string never arrived.
+  @Test func anHDREngagedRunPregradesTheCapabilityRowsWithTheHDRReason() {
+    for panelClass in [CheckupPanelClass.readsDDC, .writeOnlyDDC] {
+      let caps = CheckupPlan.make(panelClass: panelClass, hdrEngaged: true)
+        .filter { $0.family == .capabilities }
+      #expect(caps.count == 3)
+      #expect(caps.allSatisfy { $0.pregraded == .notObserved(CheckupPlan.hdrEngagedCapabilityText) })
+      #expect(caps.allSatisfy { $0.pregraded?.text.contains("HDR mode") == true })
+      #expect(caps.allSatisfy { $0.pregraded?.text.contains("write-only") == false })
+    }
+    // Nothing outside the capability family is pre-graded by HDR.
+    #expect(
+      CheckupPlan.make(panelClass: .readsDDC, hdrEngaged: true)
+        .filter { $0.family != .capabilities }
+        .allSatisfy { $0.pregraded == nil })
+  }
+
+  /// A display with no DDC path has no DDC path in or out of HDR, and its own
+  /// reason is the true one.
+  @Test func noDDCKeepsItsOwnReasonWhileHDRIsEngaged() {
+    let caps = CheckupPlan.make(panelClass: .noDDC, hdrEngaged: true)
+      .filter { $0.family == .capabilities }
+    #expect(caps.allSatisfy { $0.pregraded?.text.contains("no DDC path") == true })
   }
 
   @Test func worstCaseFieldTimeIsThreeShowingsOfEveryField() {

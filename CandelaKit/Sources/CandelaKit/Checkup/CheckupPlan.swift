@@ -39,11 +39,24 @@ public enum CheckupPlan {
     return .readsDDC
   }
 
-  public static func make(panelClass: CheckupPanelClass) -> [Step] {
-    let capabilityVerdict: CheckupVerdict? = switch panelClass {
-    case .readsDDC: nil
-    case .writeOnlyDDC: .notObserved("this panel is write-only over DDC; readback cannot be observed")
-    case .noDDC: .notObserved("this display has no DDC path; readback cannot be observed")
+  /// The reason the capability rows carry when the run starts with the panel in
+  /// HDR. Public because the flow and the copy layer both quote it.
+  public static let hdrEngagedCapabilityText =
+    "DDC readback cannot be observed while this display is in HDR mode"
+
+  /// `hdrEngaged` is a property of the RUN, not of the panel, so it stays out of
+  /// `CheckupPanelClass`: that value is stored on every report as the panel's own
+  /// classification, and a raw value added to it would fail an older decoder.
+  /// While HDR is engaged the DDC classing is not trustworthy either, so the HDR
+  /// text outranks the write-only one; only a display with no DDC path at all
+  /// keeps its own reason.
+  public static func make(panelClass: CheckupPanelClass, hdrEngaged: Bool) -> [Step] {
+    let capabilityVerdict: CheckupVerdict? = switch (panelClass, hdrEngaged) {
+    case (.noDDC, _): .notObserved("this display has no DDC path; readback cannot be observed")
+    case (_, true): .notObserved(hdrEngagedCapabilityText)
+    case (.readsDDC, false): nil
+    case (.writeOnlyDDC, false):
+      .notObserved("this panel is write-only over DDC; readback cannot be observed")
     }
     var steps: [Step] = [
       Step(id: CheckupCheckID.identity, family: .identity, pregraded: nil),

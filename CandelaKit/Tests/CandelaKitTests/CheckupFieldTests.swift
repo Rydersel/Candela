@@ -83,6 +83,57 @@ struct CheckupFieldTests {
     #expect(p.y == 1)
   }
 
+  /// The 104 pt strip on a one-display run covers the bottom of the panel, and a
+  /// plant under it is a miss the user could not have avoided. 3024x1964 in a
+  /// 982 pt view is the built-in, the panel the only-display run actually happens on.
+  @Test func aBottomExclusionKeepsEveryPlantOutOfTheStripBand() {
+    let height = 1964
+    let band = Int(104.0 * Double(height) / 982.0)
+    #expect(band == 208)
+    for seed in 0..<500 {
+      var rng = SeededGenerator(seed: UInt64(seed))
+      let p = CheckupField.plantPosition(
+        width: 3024, height: height, size: 8, bottomExclusion: band, using: &rng)
+      #expect(p.y + p.size <= height - band, "seed \(seed) planted at y=\(p.y)")
+      #expect(p.y >= height / 20, "seed \(seed) planted at y=\(p.y)")
+    }
+  }
+
+  /// The positive control for the test above: without the band the same seeds do
+  /// reach into it, so the assertion is one that can fail.
+  @Test func withoutTheExclusionSomeSeedsLandInTheStripBand() {
+    let height = 1964, band = 208
+    var reached = 0
+    for seed in 0..<500 {
+      var rng = SeededGenerator(seed: UInt64(seed))
+      let p = CheckupField.plantPosition(width: 3024, height: height, size: 8, using: &rng)
+      if p.y + p.size > height - band { reached += 1 }
+    }
+    #expect(reached > 0)
+  }
+
+  /// A zero size makes the witness card's coverage NaN, and the exposure
+  /// booking's clamp passes NaN through as full white.
+  @Test func luminanceIsZeroRatherThanNaNOnAZeroSizedSurface() {
+    for kind in CheckupFieldKind.allCases {
+      #expect(CheckupField.luminance(of: kind, pixelWidth: 0, pixelHeight: 0) == 0, "\(kind)")
+      #expect(CheckupField.luminance(of: kind, pixelWidth: 100, pixelHeight: 0) == 0, "\(kind)")
+      #expect(CheckupField.luminance(of: kind, pixelWidth: 0, pixelHeight: 100) == 0, "\(kind)")
+    }
+  }
+
+  /// Out of bounds must be nil and not a read past the buffer, and never a
+  /// plausible black pixel.
+  @Test func pixelRefusesCoordinatesTheImageDoesNotHave() throws {
+    let image = try #require(
+      CheckupField.image(kind: .white, pixelWidth: 8, pixelHeight: 4, plant: nil))
+    #expect(CheckupField.pixel(in: image, x: 8, y: 0) == nil)
+    #expect(CheckupField.pixel(in: image, x: 0, y: 4) == nil)
+    #expect(CheckupField.pixel(in: image, x: -1, y: 0) == nil)
+    #expect(CheckupField.pixel(in: image, x: 0, y: -1) == nil)
+    #expect(CheckupField.pixel(in: image, x: 7, y: 3) != nil)
+  }
+
   @Test func luminanceTableMatchesTheFields() {
     #expect(CheckupField.luminance(of: .black, pixelWidth: 3840, pixelHeight: 2160) == 0)
     #expect(CheckupField.luminance(of: .white, pixelWidth: 3840, pixelHeight: 2160) == 1)

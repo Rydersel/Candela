@@ -174,6 +174,19 @@ struct CheckupLiveRunnersTests {
     #expect(claims.map(\.id) == ["refresh.60"])
   }
 
+  /// Silence would leave the plan's sweep row with no claim at all, which reads
+  /// as a check that never ran rather than one with nothing to sweep.
+  @Test func aCatalogWithNoNativeModeEmitsTheSweepRowAsNotObserved() async {
+    let scaled = mode(1, w: 2560, h: 1440, hz: 60)
+    let configurator = SweepConfigurator(modeList: [scaled], capAt: 240)
+    let claims = await CheckupLiveModeRunner(configurator: configurator, displayID: 1)
+      .runRefreshSweep()
+    #expect(claims.map(\.id) == [CheckupCheckID.refreshSweep])
+    #expect(
+      claims[0].verdict == .notObserved("no native mode in the catalog for this display"))
+    #expect(claims[0].family == .refresh)
+  }
+
   @Test func restoreReportsWhetherTheDisplayIsActuallyBackOnItsOriginalMode() async {
     let m60 = mode(1, w: 3840, h: 2160, hz: 60, native: true)
     let m120 = mode(2, w: 3840, h: 2160, hz: 120)
@@ -369,7 +382,9 @@ struct CheckupLiveRunnersTests {
           "toggled off, preferHDRModes stayed on; toggled on, preferHDRModes settled on"))
   }
 
-  @Test func aRestoreThatDoesNotSettleIsSaidOutLoud() async {
+  /// A panel left in the other HDR state is an achieved-state miss, so the
+  /// claim is refused however cleanly the transitions themselves read.
+  @Test func aRestoreThatDoesNotSettleIsSaidOutLoudAndRefusesTheClaim() async {
     let hdr = FakeHDR()
     hdr.honorSetsUpTo = 1
     let claims = await hdrRunner(hdr, pq: true).run()
@@ -377,7 +392,7 @@ struct CheckupLiveRunnersTests {
     #expect(hdr.enabled == true)
     #expect(
       claims[1].verdict
-        == .observed(
+        == .refused(
           "toggled on, preferHDRModes settled on; restore to the prior state did not settle"))
   }
 }
