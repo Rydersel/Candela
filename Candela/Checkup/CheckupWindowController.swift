@@ -119,8 +119,14 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
   /// The field covers the target, so the flow window belongs on another display
   /// when there is one; otherwise the field's strip carries the controls (CK16).
   private func moveOffTarget(_ entry: CheckupDisplayEntry?) {
-    guard let window, let entry else { return }
-    guard let host = NSScreen.screens.first(where: { $0.displayID != entry.id }) else { return }
+    guard let window else { return }
+    let screens = NSScreen.screens.compactMap { screen -> CheckupFlowWindowHost.Screen? in
+      screen.displayID.map { .init(id: $0, frame: screen.frame) }
+    }
+    guard
+      let pick = CheckupFlowWindowHost.host(for: window.frame, target: entry?.id, screens: screens),
+      let host = NSScreen.screens.first(where: { $0.displayID == pick.id })
+    else { return }
     let frame = host.visibleFrame
     let size = window.frame.size
     window.setFrameOrigin(
