@@ -8,9 +8,6 @@ struct CheckupFlowView: View {
   /// The field's last tap. The field is on another display and the answer
   /// buttons are here, so the region travels with the answer.
   var tappedRegion: () -> (x: Int, y: Int)? = { nil }
-  /// Fires when the target changes, so the controller can move this window off
-  /// the display that is about to be covered by a field.
-  var onSelectedDisplayChanged: (CheckupDisplayEntry?) -> Void = { _ in }
 
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -26,7 +23,6 @@ struct CheckupFlowView: View {
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: model.page)
     .frame(minWidth: 720, minHeight: 560)
     .preferredColorScheme(.dark)
-    .onChange(of: model.selectedDisplay) { _, entry in onSelectedDisplayChanged(entry) }
   }
 
   @ViewBuilder

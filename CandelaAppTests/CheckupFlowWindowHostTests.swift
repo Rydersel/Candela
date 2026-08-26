@@ -38,8 +38,4 @@ import Testing
       for: windowOnBuiltIn, target: builtIn.id, screens: [builtIn])
     #expect(host == nil)
   }
-
-  @Test func noTargetMeansNoMove() {
-    #expect(CheckupFlowWindowHost.host(for: windowOnBuiltIn, target: nil, screens: screens) == nil)
-  }
 }
