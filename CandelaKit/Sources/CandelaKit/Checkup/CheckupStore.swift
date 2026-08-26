@@ -39,16 +39,23 @@ public struct CheckupStore: Sendable {
     s.map { $0.isLetter || $0.isNumber || $0 == "-" ? String($0) : "_" }.joined()
   }
 
+  /// The bytes of a stored or exported envelope. One encoder for both, so a
+  /// file written from the pane's history is byte-identical to the one the run
+  /// itself stored, and `load` plus `validate()` answer the same on either.
+  public static func encoded(_ envelope: CheckupReportEnvelope) throws -> Data {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    encoder.dateEncodingStrategy = .iso8601
+    return try encoder.encode(envelope)
+  }
+
   @discardableResult
   public func save(_ envelope: CheckupReportEnvelope) throws -> URL {
     let folder = directory.appendingPathComponent(Self.safe(envelope.report.identity.identityKey), isDirectory: true)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     let name = Self.stamp().string(from: envelope.report.startedAt).replacingOccurrences(of: ":", with: "-") + ".json"
     let url = folder.appendingPathComponent(name)
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    encoder.dateEncodingStrategy = .iso8601
-    try encoder.encode(envelope).write(to: url, options: .atomic)
+    try Self.encoded(envelope).write(to: url, options: .atomic)
     // Same canonical form as list(): macOS temp dirs sit under /var, a symlink
     // to /private/var, and the two must compare equal for the same file.
     return url.resolvingSymlinksInPath()

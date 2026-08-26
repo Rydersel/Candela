@@ -501,10 +501,7 @@ struct CheckupSummaryPage: View {
     panel.nameFieldStringValue = CheckupStore.exportFileName(for: envelope.report)
     guard panel.runModal() == .OK, let url = panel.url else { return }
     do {
-      let encoder = JSONEncoder()
-      encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-      encoder.dateEncodingStrategy = .iso8601
-      try encoder.encode(envelope).write(to: url, options: .atomic)
+      try CheckupStore.encoded(envelope).write(to: url, options: .atomic)
     } catch {
       // Silence here would look exactly like a saved file. The report exists to
       // be handed to somebody, so a save that did not happen has to say so.
@@ -515,7 +512,7 @@ struct CheckupSummaryPage: View {
   private func copySummary() {
     guard let report = model.report else { return }
     NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(Self.plainText(report), forType: .string)
+    NSPasteboard.general.setString(CheckupSummaryText.render(report), forType: .string)
     justCopied = true
     // Cancelled and replaced on every copy, so a second click restarts the two
     // seconds rather than letting the first click's timer clear the label early.
@@ -525,37 +522,6 @@ struct CheckupSummaryPage: View {
       guard !Task.isCancelled else { return }
       justCopied = false
     }
-  }
-
-  /// Exactly what this page shows, as text. The pane's fuller document is a
-  /// separate renderer; this one exists so the button copies the page in front
-  /// of the person rather than a second, differently-shaped report.
-  static func plainText(_ report: CheckupReport) -> String {
-    var lines = [
-      CheckupReport.headerSentence, "", CheckupCopy.subjectLine(for: report), "",
-      report.summary.line,
-    ]
-    switch report.completion {
-    case .complete: lines.append(CheckupCopy.summaryComplete)
-    case .incomplete(let reason): lines.append(CheckupCopy.summaryIncomplete(reason: reason))
-    }
-    if let occlusion = CheckupCopy.occlusionLine(fieldIDs: report.partiallyOccludedFields) {
-      lines.append(occlusion)
-    }
-    for family in CheckupFamily.allCases {
-      let claims = report.claims.filter { $0.family == family }
-      guard !claims.isEmpty else { continue }
-      lines.append("")
-      lines.append(CheckupCopy.familyTitle(family))
-      for claim in claims {
-        let detail = claim.detectedAt.map { " " + CheckupCopy.detectedAt(pixels: $0) } ?? ""
-        lines.append(
-          "- \(CheckupCopy.claimLabel(id: claim.id)): "
-            + "\(CheckupCopy.verdictLabel(claim.verdict)): \(claim.verdict.text)\(detail)")
-      }
-      if family == .visualField { lines.append(CheckupCopy.selfReportedNote) }
-    }
-    return lines.joined(separator: "\n")
   }
 }
 
