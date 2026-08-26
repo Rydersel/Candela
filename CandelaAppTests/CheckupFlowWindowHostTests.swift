@@ -1,8 +1,6 @@
 import CoreGraphics
 import Testing
 
-@testable import Candela
-
 /// The flow window leaves the target display only when it has to. A window
 /// already off the target stays where the person is looking; one sitting on
 /// the target moves to the nearest other screen, never to whichever screen
