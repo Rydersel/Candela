@@ -47,8 +47,11 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
 
   var windowForTest: NSWindow? { window }
 
-  func show(kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry) {
-    guard let screen = OverlayWindow.screen(for: display.id) else { return }
+  /// False when the display has no `NSScreen`, which is what a display mirroring
+  /// another looks like from here: there is no glass of our own to draw on, and
+  /// the previous field would otherwise stay up while the flow counted a showing.
+  func show(kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry) -> Bool {
+    guard let screen = OverlayWindow.screen(for: display.id) else { return false }
     let window =
       self.window
       ?? NSWindow(
@@ -97,6 +100,7 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
       NSCursor.setHiddenUntilMouseMoves(true)
       window.orderFrontRegardless()
     }
+    return true
   }
 
   /// Driven by the same one-second tick as the flow page, so the two never disagree.

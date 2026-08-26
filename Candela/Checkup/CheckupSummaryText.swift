@@ -56,7 +56,14 @@ enum CheckupSummaryText {
     lines.append("\(AppInfo.productName): \(report.appBuild)")
     // Its own paragraph: this sentence is why a "not observed" below is about
     // DDC, not the picture.
-    lines += ["", CheckupCopy.panelClassLine(report.panelClass)]
+    // Read back off the capability rows rather than stored a second time: the
+    // pre-graded reason IS the record that HDR was engaged, and a separate copy
+    // could disagree with it.
+    let hdrEngaged = report.claims.contains {
+      $0.family == .capabilities
+        && $0.verdict == .notObserved(CheckupPlan.hdrEngagedCapabilityText)
+    }
+    lines += ["", CheckupCopy.panelClassLine(report.panelClass, hdrEngaged: hdrEngaged)]
     return lines
   }
 

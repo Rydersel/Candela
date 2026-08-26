@@ -25,6 +25,9 @@ final class CheckupFlowModel {
   /// CK16: fields whose lower edge carried the instruction strip. Recorded on
   /// the report, since a reader cannot otherwise tell they were not the whole panel.
   private(set) var partiallyOccludedFields: [String] = []
+  /// Why the last showing never reached the glass, nil once one does. The
+  /// instruction page says so rather than leaving a dead Start button.
+  private(set) var showFailureReason: String?
   private(set) var plantRecord: CheckupPlantRecord?
   private(set) var report: CheckupReport?
   private(set) var envelope: CheckupReportEnvelope?
@@ -66,9 +69,10 @@ final class CheckupFlowModel {
     self.environment = environment
   }
 
-  /// CK26: a virtual display is never a checkup target.
+  /// CK26: a virtual display is never a checkup target, and neither is one
+  /// mirroring another, which has no screen of its own to draw a field on.
   var selectableDisplays: [CheckupDisplayEntry] {
-    environment.displays.filter { !$0.isVirtual }
+    environment.displays.filter { !$0.isVirtual && !$0.isMirroring }
   }
 
   var canShowAgain: Bool {
@@ -93,13 +97,18 @@ final class CheckupFlowModel {
   // MARK: - The page machine
 
   func advance() async {
-    guard !finished else { return }
+    // A leg already in flight owns the page it will move to; a second advance
+    // would run the next one over it and record both against the wrong step.
+    guard !finished, legInFlight == nil else { return }
+    // Read on the page it happened on; continuing past that page is the user
+    // acknowledging it.
+    showFailureReason = nil
     switch page {
     case .scenario:
       page = .displayPick
 
     case .displayPick:
-      guard let display = selectedDisplay, !display.isVirtual else { return }
+      guard let display = selectedDisplay, !display.isVirtual, !display.isMirroring else { return }
       begin(with: display)
       page = .plan
 
@@ -195,7 +204,7 @@ final class CheckupFlowModel {
   private func begin(with display: CheckupDisplayEntry) {
     startedAt = environment.now()
     runners = environment.runners(display)
-    plan = CheckupPlan.make(panelClass: display.panelClass)
+    plan = CheckupPlan.make(panelClass: display.panelClass, hdrEngaged: display.hdrEngaged)
     generator = AnyRandomNumberGenerator(base: environment.makeRNG())
     // CK5: what this panel class cannot answer is recorded before anything
     // runs, so the plan page and the report say the same thing.
@@ -297,13 +306,20 @@ final class CheckupFlowModel {
     guard confirmation || cappedShowings(of: kind) < CheckupPlan.maxShowingsPerField else {
       return false
     }
+    // The presenter goes first and nothing is recorded until it says the field
+    // reached the glass: a counted showing books emission and grades an
+    // attestation, and neither may stand for a field nobody saw.
+    guard environment.presenter.show(kind: kind, plant: plant, on: display) else {
+      showFailureReason = CheckupCopy.fieldNotShown
+      return false
+    }
+    showFailureReason = nil
     let id = CheckupCheckID.field(kind)
     showings[id, default: 0] += 1
     if display.isOnlyDisplay, !partiallyOccludedFields.contains(id) {
       partiallyOccludedFields.append(id)
     }
     self.plant = plant
-    environment.presenter.show(kind: kind, plant: plant, on: display)
     secondsRemaining = kind.capSeconds
     return true
   }
@@ -328,7 +344,8 @@ final class CheckupFlowModel {
     else { return nil }
     if plantOrigin == nil, var generator {
       let position = CheckupField.plantPosition(
-        width: display.pixelWidth, height: display.pixelHeight, size: plantSize, using: &generator)
+        width: display.pixelWidth, height: display.pixelHeight, size: plantSize,
+        bottomExclusion: Self.stripBandPixels(on: display), using: &generator)
       self.generator = generator
       plantOrigin = (x: position.x, y: position.y)
     }
@@ -505,6 +522,16 @@ final class CheckupFlowModel {
     recordField(planted, verdict: .inconclusive(Self.ungradedText))
   }
 
+  /// The instruction strip's height in the field image's pixels, and zero on any
+  /// run that has somewhere else to put its instructions. A plant under the
+  /// strip is a miss the person could not have avoided, which lands as a double
+  /// miss and the copy that says a mark of that size would not be visible.
+  static func stripBandPixels(on display: CheckupDisplayEntry) -> Int {
+    guard display.isOnlyDisplay, display.pointHeight > 0 else { return 0 }
+    return Int(
+      Double(CheckupFieldWindow.stripHeight) * Double(display.pixelHeight) / display.pointHeight)
+  }
+
   static func isInside(_ region: (x: Int, y: Int), _ plant: CheckupPlant) -> Bool {
     let reach = plant.size * plantNeighbourhoodInPlants
     return abs(region.x - plant.x) <= reach && abs(region.y - plant.y) <= reach
@@ -558,6 +585,9 @@ final class CheckupFlowModel {
     // The report stands either way; only a hashed envelope can be saved (CK7).
     guard let envelope = try? CheckupReportEnvelope(report: report) else { return }
     self.envelope = envelope
+    // With no display picked there is no identity to file under, and an empty
+    // key writes the run into the store's root instead of a display's folder.
+    guard selectedDisplay != nil else { return }
     onSaved(envelope)
   }
 

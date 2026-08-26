@@ -1,3 +1,4 @@
+import AppKit
 import CandelaKit
 import CoreGraphics
 import Foundation
@@ -18,19 +19,27 @@ enum CheckupLiveEnvironment {
     var name: String
     var isBuiltIn: Bool
     var isVirtual: Bool
+    /// Mirroring another display, so it has no `NSScreen` and no field can be
+    /// drawn on it.
+    var isMirroring: Bool
     /// The cached MCCS capabilities string. nil is "nobody has a string for
     /// this display", never "this display advertises nothing" (D24).
     var capabilities: String?
     var hasDDCService: Bool
+    /// Whether the panel is in HDR right now. DDC is dead while it is.
+    var hdrEngaged: Bool
     var pixelWidth: Int
     var pixelHeight: Int
+    var pointHeight: Double
   }
 
   /// CK26: a virtual display is never a target, so it is dropped here rather
-  /// than at every surface. `isOnlyDisplay` counts what survives the filter: a
-  /// display the flow cannot target is also one the flow window cannot be sent to (CK16).
+  /// than at every surface. A mirroring display goes the same way, for the
+  /// reason in `CheckupCopy.mirroringReason`. `isOnlyDisplay` counts what
+  /// survives the filter: a display the flow cannot target is also one the flow
+  /// window cannot be sent to (CK16).
   static func entries(from sources: [Source]) -> [CheckupDisplayEntry] {
-    let real = sources.filter { !$0.isVirtual }
+    let real = sources.filter { !$0.isVirtual && !$0.isMirroring }
     return real.map { source in
       CheckupDisplayEntry(
         id: source.id,
@@ -38,20 +47,17 @@ enum CheckupLiveEnvironment {
         name: source.name,
         isBuiltIn: source.isBuiltIn,
         isVirtual: source.isVirtual,
+        isMirroring: source.isMirroring,
         panelClass: CheckupPlan.panelClass(
           capabilities: source.capabilities,
           hasDDCService: source.hasDDCService,
           isBuiltIn: source.isBuiltIn),
+        hdrEngaged: source.hdrEngaged,
         pixelWidth: source.pixelWidth,
         pixelHeight: source.pixelHeight,
+        pointHeight: source.pointHeight,
         isOnlyDisplay: real.count == 1)
     }
-  }
-
-  /// The DDC path behind one display, as the capability fill-in needs it.
-  struct CapabilityProbe {
-    var writer: any DDCWriting
-    var hdrEngaged: Bool
   }
 
   /// Reads a capability string for every external the D24 probe has no entry
@@ -62,20 +68,20 @@ enum CheckupLiveEnvironment {
   /// the read, since DDC is dead while HDR is engaged.
   @MainActor
   static func readingCapabilities(
-    into sources: [Source], probes: [String: CapabilityProbe]
+    into sources: [Source], writers: [String: any DDCWriting]
   ) async -> [Source] {
     var filled: [Source] = []
     filled.reserveCapacity(sources.count)
     for var source in sources {
       guard source.capabilities == nil, !source.isBuiltIn,
-        let probe = probes[source.identityKey],
+        let writer = writers[source.identityKey],
         CapabilityProbePolicy.shouldProbe(
-          cached: nil, inFlight: false, hdrEngaged: probe.hdrEngaged)
+          cached: nil, inFlight: false, hdrEngaged: source.hdrEngaged)
       else {
         filled.append(source)
         continue
       }
-      source.capabilities = await probe.writer.readCapabilityString()
+      source.capabilities = await writer.readCapabilityString()
       filled.append(source)
     }
     return filled
@@ -91,15 +97,12 @@ enum CheckupLiveEnvironment {
     let states = model.allControlledStates
     // Uniqued rather than trapping: two identical panels can share an EDID
     // UUID, a documented limit of the persistence key.
-    let probes = Dictionary(
-      states.map {
-        ($0.display.persistenceKey,
-         CapabilityProbe(writer: $0.writer, hdrEngaged: $0.controller.isHDREngaged))
-      },
+    let writers = Dictionary(
+      states.map { ($0.display.persistenceKey, $0.writer) },
       uniquingKeysWith: { first, _ in first })
     let sources = await readingCapabilities(
       into: states.map { source(for: $0, model: model, configurator: configurator) },
-      probes: probes)
+      writers: writers)
     let entries = entries(from: sources)
     let capabilities = Dictionary(
       sources.map { ($0.identityKey, $0.capabilities) }, uniquingKeysWith: { first, _ in first })
@@ -115,7 +118,7 @@ enum CheckupLiveEnvironment {
       runners: { entry in
         runnerSet(
           for: entry,
-          writer: probes[entry.identityKey]?.writer ?? NoopDDCWriter(),
+          writer: writers[entry.identityKey] ?? NoopDDCWriter(),
           capabilities: capabilities[entry.identityKey] ?? nil,
           hdr: hdr,
           configurator: configurator)
@@ -165,14 +168,23 @@ enum CheckupLiveEnvironment {
         friendlyName: prefs.friendlyName, hardwareName: state.display.name),
       isBuiltIn: isBuiltIn,
       isVirtual: isVirtual,
+      // Both halves: CoreGraphics names the mirrored-onto display, and the
+      // absent `NSScreen` is what actually stops a field being drawn. Either
+      // one alone would let a run fabricate a showing.
+      isMirroring: CGDisplayMirrorsDisplay(state.id) != kCGNullDirectDisplay
+        || OverlayWindow.screen(for: state.id) == nil,
       // The D24 probe's string where it has one; `readingCapabilities` above
       // fills the rest in before anything is graded off them.
       capabilities: model.capabilityString[key],
       // Discovery admits only externals with a live DDC service, so membership
       // is the answer; the built-in carries a `NoopDDCWriter`.
       hasDDCService: !isBuiltIn,
+      hdrEngaged: state.controller.isHDREngaged,
       pixelWidth: native?.width ?? Int(CGDisplayPixelsWide(state.id)),
-      pixelHeight: native?.height ?? Int(CGDisplayPixelsHigh(state.id)))
+      pixelHeight: native?.height ?? Int(CGDisplayPixelsHigh(state.id)),
+      // The field view's own height. `CGDisplayBounds` is in points and follows
+      // rotation, matching the rotated native size above.
+      pointHeight: Double(CGDisplayBounds(state.id).height))
   }
 
   // MARK: - Runners

@@ -12,12 +12,26 @@ struct CheckupFieldWindowTests {
   private func entry(only: Bool) -> CheckupDisplayEntry {
     CheckupDisplayEntry(
       id: CGMainDisplayID(), identityKey: "k", name: "Main", isBuiltIn: true, isVirtual: false,
-      panelClass: .noDDC, pixelWidth: 200, pixelHeight: 100, isOnlyDisplay: only)
+      isMirroring: false, panelClass: .noDDC, hdrEngaged: false, pixelWidth: 200,
+      pixelHeight: 100, pointHeight: 100, isOnlyDisplay: only)
+  }
+
+  /// A display with no `NSScreen` is what a mirroring target looks like from
+  /// here, and a Void return let the flow book a field that never reached glass.
+  @Test func showRefusesADisplayWithNoScreen() {
+    var absent = entry(only: false)
+    // No display carries this id, so `OverlayWindow.screen(for:)` answers nil.
+    absent.id = 0xFFFF_FFFE
+    let w = CheckupFieldWindow(orderFront: false)
+    #expect(w.show(kind: .black, plant: nil, on: absent) == false)
+    #expect(w.isShowing == false)
+    #expect(w.windowForTest == nil)
+    #expect(w.show(kind: .black, plant: nil, on: entry(only: false)))
   }
 
   @Test func theWindowIsShieldingLevelBorderlessAndCoversTheScreen() throws {
     let w = CheckupFieldWindow(orderFront: false)
-    w.show(kind: .black, plant: CheckupPlant(x: 10, y: 10, size: 4), on: entry(only: false))
+    _ = w.show(kind: .black, plant: CheckupPlant(x: 10, y: 10, size: 4), on: entry(only: false))
     let window = try #require(w.windowForTest)
     #expect(window.level.rawValue == Int(CGShieldingWindowLevel()))
     #expect(window.styleMask.contains(.borderless))
@@ -40,7 +54,7 @@ struct CheckupFieldWindowTests {
   /// so the field must be painted at that size.
   @Test func theFieldIsPaintedInThePixelSpaceThePlantWasChosenIn() throws {
     let w = CheckupFieldWindow(orderFront: false)
-    w.show(kind: .white, plant: nil, on: entry(only: false))
+    _ = w.show(kind: .white, plant: nil, on: entry(only: false))
     let view = try #require(w.windowForTest?.contentView as? CheckupFieldView)
     let image = try #require(view.image)
     #expect(image.width == 200)
@@ -50,7 +64,7 @@ struct CheckupFieldWindowTests {
 
   @Test func theOnlyDisplayGetsTheInstructionStrip() {
     let w = CheckupFieldWindow(orderFront: false)
-    w.show(kind: .white, plant: nil, on: entry(only: true))
+    _ = w.show(kind: .white, plant: nil, on: entry(only: true))
     #expect(w.instructionStrip != nil)
     w.hide()
   }
@@ -59,14 +73,14 @@ struct CheckupFieldWindowTests {
   /// own answers: the witness card asks about geometry.
   @Test func theOnlyDisplayStripCarriesTheAnswersTheFieldOffers() throws {
     let w = CheckupFieldWindow(orderFront: false)
-    w.show(kind: .black, plant: nil, on: entry(only: true))
+    _ = w.show(kind: .black, plant: nil, on: entry(only: true))
     let plantStrip = try #require(w.instructionStrip)
     #expect(
       Self.buttonTitles(in: plantStrip)
         == [CheckupCopy.answerNothing, CheckupCopy.answerOne, CheckupCopy.answerMore])
     w.hide()
 
-    w.show(kind: .witness, plant: nil, on: entry(only: true))
+    _ = w.show(kind: .witness, plant: nil, on: entry(only: true))
     let witnessStrip = try #require(w.instructionStrip)
     #expect(
       Self.buttonTitles(in: witnessStrip)
@@ -79,7 +93,7 @@ struct CheckupFieldWindowTests {
   @Test func theStripsTimerAndInstructionRenderTheValuesTheFlowPublishes() throws {
     let w = CheckupFieldWindow(orderFront: false)
     w.instructionText = CheckupCopy.instruction(for: .red)
-    w.show(kind: .red, plant: nil, on: entry(only: true))
+    _ = w.show(kind: .red, plant: nil, on: entry(only: true))
     let strip = try #require(w.instructionStrip)
     #expect(Self.labelStrings(in: strip).contains(CheckupCopy.secondsLeft(20)))
     #expect(Self.labelStrings(in: strip).contains(CheckupCopy.instruction(for: .red)))
@@ -97,11 +111,11 @@ struct CheckupFieldWindowTests {
   /// control that is no longer on the panel.
   @Test func aNewShowingForgetsTheTapTheLastOneSaw() {
     let w = CheckupFieldWindow(orderFront: false)
-    w.show(kind: .black, plant: nil, on: entry(only: false))
+    _ = w.show(kind: .black, plant: nil, on: entry(only: false))
     let view = w.windowForTest?.contentView as? CheckupFieldView
     view?.onTap?(11, 12)
     #expect(w.lastTap?.x == 11)
-    w.show(kind: .red, plant: nil, on: entry(only: false))
+    _ = w.show(kind: .red, plant: nil, on: entry(only: false))
     #expect(w.lastTap == nil)
     w.hide()
   }
@@ -113,13 +127,13 @@ struct CheckupFieldWindowTests {
     var received: [CheckupFieldAnswer] = []
     w.onAnswer = { received.append($0) }
 
-    w.show(kind: .black, plant: nil, on: entry(only: true))
+    _ = w.show(kind: .black, plant: nil, on: entry(only: true))
     for button in Self.buttons(in: try #require(w.instructionStrip)) { button.performClick(nil) }
     #expect(received == [.nothing, .oneMark, .moreThanOne])
     w.hide()
 
     received.removeAll()
-    w.show(kind: .witness, plant: nil, on: entry(only: true))
+    _ = w.show(kind: .witness, plant: nil, on: entry(only: true))
     for button in Self.buttons(in: try #require(w.instructionStrip)) { button.performClick(nil) }
     #expect(received == [.roundAndUncut, .notRound])
     w.hide()
@@ -129,7 +143,7 @@ struct CheckupFieldWindowTests {
   /// an answer has to be the answer and not an activation the person repeats.
   @Test func theStripAndItsButtonsAcceptAFirstMouse() throws {
     let w = CheckupFieldWindow(orderFront: false)
-    w.show(kind: .black, plant: nil, on: entry(only: true))
+    _ = w.show(kind: .black, plant: nil, on: entry(only: true))
     let strip = try #require(w.instructionStrip)
     #expect(strip.acceptsFirstMouse(for: nil))
     #expect(Self.buttons(in: strip).allSatisfy { $0.acceptsFirstMouse(for: nil) })

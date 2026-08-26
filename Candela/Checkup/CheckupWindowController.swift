@@ -178,9 +178,9 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
 
     init(window: CheckupFieldWindow) { self.window = window }
 
-    func show(kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry) {
+    func show(kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry) -> Bool {
       window.instructionText = CheckupCopy.instruction(for: kind)
-      window.show(kind: kind, plant: plant, on: display)
+      return window.show(kind: kind, plant: plant, on: display)
     }
 
     func hide() { window.hide() }

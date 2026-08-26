@@ -39,13 +39,30 @@ enum CheckupCopy {
     "One run covers one display. The report is filed under the display's own identity, so a later run on the same panel lands beside this one."
   static let pickEmpty = "No display is attached that a checkup can run on."
 
-  static func panelClassLine(_ c: CheckupPanelClass) -> String {
+  static func panelClassLine(_ c: CheckupPanelClass, hdrEngaged: Bool) -> String {
+    // A display with no DDC path has none in or out of HDR, so its own line is
+    // the true one; for the other two, HDR is why the readback cannot run.
+    guard c == .noDDC || !hdrEngaged else { return hdrEngagedLine }
     switch c {
-    case .readsDDC: "Answers DDC: readback checks will run."
-    case .writeOnlyDDC: "Write-only DDC: readback checks will be recorded as not observed."
-    case .noDDC: "No DDC path: readback checks will be recorded as not observed."
+    case .readsDDC: return "Answers DDC: readback checks will run."
+    case .writeOnlyDDC: return "Write-only DDC: readback checks will be recorded as not observed."
+    case .noDDC: return "No DDC path: readback checks will be recorded as not observed."
     }
   }
+
+  /// DDC is dead while a panel is in HDR, so the readback rows cannot run at
+  /// all. Says what to do about it, since the answer is one toggle away.
+  static let hdrEngagedLine =
+    "This display is in HDR mode, which stops DDC: readback checks will be recorded as not observed. Turn HDR off and run the checkup again to have them run."
+
+  /// Why a mirroring display is not offered. It has no screen of its own, so
+  /// there is nowhere to draw a field; the same fact stops a showing mid-run.
+  static let mirroringReason = "mirroring another display; a field cannot be shown on it"
+
+  /// Published by the flow when a showing never reached the glass. Booking a
+  /// field nobody saw is the shape this replaces.
+  static let fieldNotShown =
+    "This field could not be shown on the display: \(mirroringReason). Nothing was recorded for it."
 
   // MARK: - Plan
 
@@ -324,7 +341,7 @@ enum CheckupCopy {
      completionLine(.complete), completionLine(.incomplete(reason: closedReason)),
      headerSentence, plantMissed(size: 4), planWorstCase(seconds: 600), secondsLeft(1),
      secondsLeft(20), summaryIncomplete(reason: closedReason), closedReason, fieldWindowTitle,
-     detectedAt(pixels: 4),
+     detectedAt(pixels: 4), hdrEngagedLine, mirroringReason, fieldNotShown,
      occlusionLine(fieldIDs: [CheckupCheckID.field(.black), CheckupCheckID.field(.gray7)]) ?? "",
      CheckupScenario.allCases.map(scenarioWords).joined(separator: " ")]
       + CheckupFieldKind.allCases.map(instruction(for:))
@@ -332,7 +349,8 @@ enum CheckupCopy {
       + CheckupFieldKind.allCases.map(shortFieldName)
       + CheckupFieldKind.allCases.map { claimLabel(id: CheckupCheckID.field($0)) }
       + CheckupFamily.allCases.map(familyTitle)
-      + [CheckupPanelClass.readsDDC, .writeOnlyDDC, .noDDC].map(panelClassLine)
+      + [CheckupPanelClass.readsDDC, .writeOnlyDDC, .noDDC]
+        .flatMap { [panelClassLine($0, hdrEngaged: false), panelClassLine($0, hdrEngaged: true)] }
       + CheckupScenario.allCases.map(scenarioLabel)
       + [CheckupCheckID.identity, CheckupCheckID.capabilityBrightness,
          CheckupCheckID.capabilityContrast, CheckupCheckID.capabilityVolume,

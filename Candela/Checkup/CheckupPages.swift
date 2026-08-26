@@ -155,7 +155,7 @@ struct CheckupDisplayPickPage: View {
                 Text("\(entry.pixelWidth) by \(entry.pixelHeight) pixels")
                   .font(.caption)
                   .foregroundStyle(OnboardingStyle.bodyColor)
-                Text(CheckupCopy.panelClassLine(entry.panelClass))
+                Text(CheckupCopy.panelClassLine(entry.panelClass, hdrEngaged: entry.hdrEngaged))
                   .font(.caption)
                   .foregroundStyle(OnboardingStyle.faintColor)
                   .fixedSize(horizontal: false, vertical: true)
@@ -271,6 +271,12 @@ struct CheckupFieldInstructionPage: View {
       title: CheckupCopy.fieldTitle(kind), subtitle: CheckupCopy.instruction(for: kind)
     ) {
       VStack(alignment: .leading, spacing: 12) {
+        if let reason = model.showFailureReason {
+          Text(reason)
+            .font(.callout)
+            .foregroundStyle(OnboardingStyle.bodyColor)
+            .fixedSize(horizontal: false, vertical: true)
+        }
         if let note = plantNote {
           Text(note)
             .font(.callout)
