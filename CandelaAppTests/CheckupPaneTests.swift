@@ -4,10 +4,8 @@ import Foundation
 import SwiftUI
 import Testing
 
-/// The pane's own two derivations: the plain-text document a report renders to,
-/// and the strings the pane says. Both are read here rather than by eye, because
-/// the document is what a person forwards to a seller and the pane is where an
-/// overall verdict would creep in if one ever did (CK8).
+/// The document is what a person forwards to a seller and the pane is where a
+/// verdict would creep in (CK8), so both are read here rather than by eye.
 @Suite("Checkup pane copy and summary text")
 struct CheckupPaneTests {
   @Test func theSummaryTextOpensWithTheHeaderSentenceAndGroupsByFamily() throws {
@@ -32,9 +30,7 @@ struct CheckupPaneTests {
     #expect(text.contains("Identity"))
     #expect(text.contains("Visual fields"))
     #expect(text.contains("self-reported: nothing seen (control detected at 4 px)"))
-    // The three lines a reader of the file needs and a reader of the screen
-    // gets from the room: what the attestations are worth, which fields were
-    // shown under the strip, and how the run ended.
+    // What a reader of the file needs that a reader of the screen gets from the room.
     #expect(text.contains(CheckupCopy.attestationNote))
     #expect(text.contains("instruction strip over their lower edge: black."))
     #expect(lines.last == CheckupCopy.completionLine(.complete))
@@ -42,10 +38,8 @@ struct CheckupPaneTests {
     #expect(!text.contains("—"))
   }
 
-  /// CK30, measured claims only. A run abandoned before the identity leg still
-  /// carries a placeholder identity, and printing it would have the document
-  /// report a serial, a native size and a pair of EDID HDR flags that nothing
-  /// ever read.
+  /// CK30: a run abandoned before the identity leg carries a placeholder
+  /// identity, and printing it would report a serial and flags nothing read.
   @Test func aRunThatDidNotReadTheEDIDClaimsNothingFromIt() {
     let text = CheckupSummaryText.render(
       report(
@@ -72,9 +66,8 @@ struct CheckupPaneTests {
     #expect(!text.contains("0 by 0"))
   }
 
-  /// The built-in leads `allControlledStates`, so opening on the first display
-  /// opens a fresh external's owner on a laptop panel nobody has checked while
-  /// the run they just finished hides behind the picker.
+  /// The built-in leads `allControlledStates`, so "first display" would hide a
+  /// fresh external's run behind the picker.
   @Test func theHistoryOpensOnTheDisplayThatRanMostRecently() {
     let older = Date(timeIntervalSinceReferenceDate: 700_000_000)
     let newer = Date(timeIntervalSinceReferenceDate: 800_000_000)
@@ -132,9 +125,7 @@ struct CheckupPaneTests {
     #expect(!CheckupPaneCopy.emptyHistory.lowercased().contains("pass"))
   }
 
-  /// CK8 over the whole pane rather than over one string: nothing here hands
-  /// the display a result, and the em dash rule is checked where the copy is
-  /// defined.
+  /// CK8 over the whole pane: nothing hands the display a result.
   @Test func noPaneCopyCarriesAnEmDashOrAVerdictOnTheDisplay() {
     for sentence in CheckupPaneCopy.allStringsForTest {
       let lowered = sentence.lowercased()
@@ -146,14 +137,9 @@ struct CheckupPaneTests {
     }
   }
 
-  /// Layer 2 of AT4 for a new composition: build the pane over a store
-  /// directory that does not exist and assert only that pixels came out at a
-  /// plausible size. What it catches is a crash in `body` and a layout that
-  /// collapses to nothing; appearance is a human's job.
-  ///
-  /// The directory is a temporary one, never `CheckupStore.defaultDirectory()`:
-  /// a test that read the real store would report whatever this machine's own
-  /// history happens to hold.
+  /// Layer 2 of AT4: build the pane over a directory that does not exist and
+  /// assert only that pixels came out. Never `CheckupStore.defaultDirectory()`,
+  /// or the test reads this machine's own history.
   @Test @MainActor func thePaneRendersWithNoStoredRuns() {
     let model = TestFixtures.appModel()
     let directory = URL(fileURLWithPath: NSTemporaryDirectory())

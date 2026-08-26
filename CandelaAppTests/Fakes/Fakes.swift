@@ -189,10 +189,8 @@ enum TestFixtures {
   }
 }
 
-/// SplitMix64, the same generator the engine suite uses. A seeded generator is
-/// what makes a planted control's position reproducible: with
-/// `SystemRandomNumberGenerator` every run would plant somewhere else and a
-/// failure could not be re-run.
+/// SplitMix64, as in the engine suite. Seeded so a planted control's position
+/// is reproducible and a failure can be re-run.
 struct SeededGenerator: RandomNumberGenerator {
   private var state: UInt64
 

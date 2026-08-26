@@ -3,14 +3,11 @@ import CandelaKit
 import CoreGraphics
 import SwiftUI
 
-/// The AppKit island that hosts the checkup flow, built on the same shape as
-/// the setup window: an `LSUIElement` app has no ordinary window scene, so this
-/// is a plain `NSWindow` created on demand.
-///
-/// Two things live here rather than in the flow: the one-second tick that runs
-/// a showing's cap down, and the pairing of an answer with the region the field
-/// was tapped at. Both need the field window, and the field window is an AppKit
-/// island the model only ever sees through `CheckupFieldPresenting`.
+/// The AppKit island hosting the checkup flow, shaped like the setup window: an
+/// `LSUIElement` app has no window scene, so this is a plain `NSWindow`. The
+/// one-second cap tick and the pairing of an answer with the tapped region live
+/// here because both need the field window, which the model only sees through
+/// `CheckupFieldPresenting`.
 @MainActor
 final class CheckupWindowController: NSObject, NSWindowDelegate {
   private let environment: () async -> CheckupEnvironment
@@ -20,9 +17,7 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
   /// Held while an environment is being built, so a second click during the
   /// capability read does not install a second flow over the first.
   private var presenting = false
-  /// The presenter the flow drives. Owned here because the tap that reports a
-  /// mark, the strip that carries the answers on a one-display run, and the
-  /// countdown all live on it.
+  /// Owned here because the tap, the one-display strip and the countdown all live on it.
   let fieldWindow = CheckupFieldWindow()
   private var tick: Task<Void, Never>?
 
@@ -38,16 +33,11 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
   func present() {
     let window = window ?? makeWindow()
     self.window = window
-    // A fresh presentation gets a fresh flow over a fresh harvest; a present()
-    // while the window is already up only brings it forward, keeping the user's
-    // place in a run that is already recording claims. Read before the window
-    // is ordered front, which is what makes it visible.
+    // A present() while the window is up only brings it forward, keeping the
+    // user's place in a run. Read before ordering front, which makes it visible.
     let needsFlow = !window.isVisible
-    // Same reason as the setup window: the modern `NSApp.activate()` cannot
-    // activate an accessory app from inside a status-item tracking session, so
-    // this stays the deprecated call and stays inside the click's event
-    // context. The environment build below cannot: it asks a silent display
-    // for its capability string, and the plan is graded off the answer.
+    // Same as the setup window: modern `NSApp.activate()` cannot activate an
+    // accessory app from inside a status-item tracking session.
     NSApp.activate(ignoringOtherApps: true)
     window.makeKeyAndOrderFront(nil)
     guard needsFlow, !presenting else { return }
@@ -71,9 +61,8 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
 
   private func installFlow(in window: NSWindow, environment: CheckupEnvironment) {
     var environment = environment
-    // The flow calls `show` and `hide` on whatever presenter its environment
-    // carries, and everything this controller does around a showing is done on
-    // the window it owns, so that window is the presenter.
+    // Everything this controller does around a showing is on the window it
+    // owns, so that window is the presenter.
     environment.presenter = FieldPresenter(window: fieldWindow)
     let model = CheckupFlowModel(environment: environment)
     model.onSaved = onSaved
@@ -127,9 +116,8 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     fieldWindow.updateTimer(model.secondsRemaining)
   }
 
-  /// The field covers the target, so the flow's own window belongs on another
-  /// display when the setup has one. When it does not, the field's strip is
-  /// what carries the instruction and the answers instead (CK16).
+  /// The field covers the target, so the flow window belongs on another display
+  /// when there is one; otherwise the field's strip carries the controls (CK16).
   private func moveOffTarget(_ entry: CheckupDisplayEntry?) {
     guard let window, let entry else { return }
     guard let host = NSScreen.screens.first(where: { $0.displayID != entry.id }) else { return }
@@ -163,9 +151,8 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     return window
   }
 
-  /// CK27: closing the window abandons the run, and an abandoned run is still
-  /// saved, as incomplete with the page it stopped on. On the summary there is
-  /// nothing left to abandon: the report is already written.
+  /// CK27: closing abandons the run, and an abandoned run is still saved as
+  /// incomplete. On the summary there is nothing left to abandon.
   func windowShouldClose(_: NSWindow) -> Bool {
     if model?.page != .summary {
       model?.abandon(reason: CheckupCopy.closedReason)
@@ -183,9 +170,8 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     model = nil
   }
 
-  /// Sits between the flow and the field window so the strip is built from the
-  /// field's own instruction: the model calls `show` directly, and this is the
-  /// only point that runs before the window lays the strip out.
+  /// Sets the strip's instruction before `show`, the only point that runs
+  /// before the window lays the strip out.
   @MainActor
   private final class FieldPresenter: CheckupFieldPresenting {
     private let window: CheckupFieldWindow

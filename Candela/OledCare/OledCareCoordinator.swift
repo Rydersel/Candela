@@ -1693,24 +1693,12 @@ final class OledCareCoordinator {
 
   // MARK: - The checkup's bookings
 
-  /// CK17: every checkup showing is booked to this display's exposure record
-  /// with its on-time. A field is one flat luminance over the whole panel, so
-  /// the booking is a uniform grid.
-  ///
-  /// Booked as EMISSION, never as a sample: `sampleCount` is a count of 60 s
-  /// readings, and the OLED Care page says so out loud ("N of 30 readings"), so
-  /// a showing that lasted eight seconds must not advance it.
-  ///
-  /// The sampling path's guard shape without its `telemetryEnabled` clause and
-  /// without its dim/mirror qualification: those two ask whether a CAPTURE
-  /// would describe the glass, and a checkup does not capture anything. It knows
-  /// what it put on the panel, and the panel wore it whether or not this display
-  /// is measuring, so declining to book it would leave the wear off the ledger.
-  ///
-  /// The grid is already in panel space and every cell holds the same value, so
-  /// the re-bin is exact under any transform; the live one is preferred anyway,
-  /// and the stand-in below is only reached for a display nothing has resolved
-  /// an ID for.
+  /// CK17: every showing is booked to the display's exposure record with its
+  /// on-time, as a uniform grid. Booked as EMISSION, not a sample: `sampleCount`
+  /// counts 60 s readings and the OLED Care page says so, so an eight-second
+  /// showing must not advance it. The sampling path's telemetry and dim/mirror
+  /// guards are skipped: they ask whether a capture would describe the glass,
+  /// and the panel wore this light whether or not anything is measuring.
   func bookCheckupShowing(identityKey key: String, luminance: Double, seconds: TimeInterval) {
     // A non-finite luminance would not be refused downstream: the grid builder
     // clamps with `min`/`max`, which pass a NaN straight through to full white.
@@ -1723,9 +1711,8 @@ final class OledCareCoordinator {
       elapsed: seconds, at: Date())
     accumulators[key] = accumulator
     unsavedExposureKeys.insert(key)
-    // Written straight through rather than left for the debounced flush: on a
-    // desk where nothing is measuring, or in a safe-mode session, no sampling
-    // pass is coming to carry this key to disk.
+    // Straight through, not the debounced flush: with nothing measuring, or in
+    // safe mode, no sampling pass will carry this key to disk.
     saveExposureHistory(for: key)
     log.info("""
     checkup showing booked: \(key, privacy: .public) \(luminance, privacy: .public) \
@@ -1733,10 +1720,8 @@ final class OledCareCoordinator {
     """)
   }
 
-  /// The enrolled display's own transform where there is one, then the live
-  /// display list, then a stand-in whose size is never read: `panelNativeGrid`
-  /// works in normalized coordinates, so only the rotation can change an answer
-  /// and a uniform grid is invariant under all four.
+  /// The enrolled transform, then the live display list, then a stand-in whose
+  /// size is never read: a uniform grid is invariant under every rotation.
   private func checkupBookingTransform(for key: String) -> PanelSpaceTransform {
     let id = states[key]?.lastDisplayID
       ?? model?.allControlledStates.first { $0.display.persistenceKey == key }?.id

@@ -2,11 +2,9 @@ import CandelaKit
 import Foundation
 import Testing
 
-/// The flow's copy is the surface an anxious buyer reads while a field is on
-/// their panel, so it is pinned rather than left to a reviewer's eye: every
-/// field states its own cap, the planted control is disclosed before it is
-/// planted, a miss is framed as a fact about resolution, and nothing anywhere
-/// hands the display a verdict.
+/// Pinned rather than left to a reviewer's eye: every field states its cap, the
+/// control is disclosed before it is planted, a miss is framed as resolution,
+/// and nothing hands the display a verdict.
 @Suite("Checkup copy")
 struct CheckupCopyTests {
   @Test func everyFieldHasAnInstructionThatNamesTheDefectAndTheCap() {
@@ -30,11 +28,8 @@ struct CheckupCopyTests {
     #expect(CheckupCopy.showAgainCap.contains("three"))
   }
 
-  /// `CheckupPage.name` is read back on the summary, in the copied text and in
-  /// the exported file, so a storage key there is a key a person reads. The
-  /// guard skips a raw value that is also an ordinary word of the field's prose
-  /// name ("black" in "black field"): what it catches is `gray7` and `gray50`,
-  /// the two that read as keys and nothing else.
+  /// `CheckupPage.name` reaches the summary and the exported file. The guard
+  /// skips raw values that are ordinary words ("black"); what it catches is `gray7` and `gray50`.
   @Test func noPageNameCarriesAFieldsStorageKey() {
     var pages: [CheckupPage] = [
       .scenario, .displayPick, .plan, .identity, .capabilities, .nativeMode, .refresh,
@@ -54,9 +49,8 @@ struct CheckupCopyTests {
     #expect(CheckupPage.fieldConfirmSecondDot(.black).name == "the black field")
   }
 
-  /// The document that names a run and the file it is exported into must agree
-  /// on which day it was, or two artifacts of the same run disagree in the one
-  /// field a person would check them by.
+  /// The document and its file name must agree on the day, the one field a
+  /// person would check them by.
   @Test func theSubjectLineNamesTheDisplayTheScenarioAndTheExportsOwnDay() {
     let report = CheckupReport(
       scenario: .usedPurchase,

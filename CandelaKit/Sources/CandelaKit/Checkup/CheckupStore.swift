@@ -39,9 +39,8 @@ public struct CheckupStore: Sendable {
     s.map { $0.isLetter || $0.isNumber || $0 == "-" ? String($0) : "_" }.joined()
   }
 
-  /// The bytes of a stored or exported envelope. One encoder for both, so a
-  /// file written from the pane's history is byte-identical to the one the run
-  /// itself stored, and `load` plus `validate()` answer the same on either.
+  /// One encoder for stored and exported envelopes, so an export is
+  /// byte-identical to the stored file and `validate()` agrees on either.
   public static func encoded(_ envelope: CheckupReportEnvelope) throws -> Data {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

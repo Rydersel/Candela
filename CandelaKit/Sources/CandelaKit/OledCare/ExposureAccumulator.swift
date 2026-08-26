@@ -50,11 +50,9 @@ public struct ExposureMap: Equatable, Sendable, Codable {
     sampleCount += 1
   }
 
-  /// Light the app itself put on the panel, booked without a reading behind it.
-  ///
-  /// `sampleCount`'s unit is one 60 s capture, and both the analysis gate and
-  /// the OLED Care page's "N of 30 readings" stand on that, so emission the app
-  /// caused moves the cells and the window without inflating the count.
+  /// Light the app itself put on the panel. `sampleCount` is one 60 s capture,
+  /// and the analysis gate and "N of 30 readings" stand on it, so emission moves
+  /// the cells without inflating the count.
   mutating func addEmission(panelGrid: [Double], elapsed: TimeInterval, at now: Date) {
     for cell in cells.indices {
       cells[cell] += panelGrid[cell] * elapsed
@@ -146,13 +144,9 @@ public struct ExposureAccumulator: Sendable {
     map.add(panelGrid: panel, elapsed: elapsed, at: now)
   }
 
-  /// Books light the app itself put on the panel: a checkup field, which is one
-  /// flat luminance held for a few seconds. Same validation as `accumulate` and
-  /// the same all-or-nothing rule, and it leaves `sampleCount` alone.
-  ///
-  /// The count is readings, one per 60 s capture, and it is what the analysis
-  /// gate and the "N of 30 readings" line are counting. A showing is emission
-  /// with no reading behind it, so it belongs in the cells and nowhere else.
+  /// Books light the app itself put on the panel (a checkup field: one flat
+  /// luminance for a few seconds). Same validation and all-or-nothing rule as
+  /// `accumulate`; leaves `sampleCount` alone, see `ExposureMap.addEmission`.
   public mutating func bookEmission(
     displayGrid grid: [Double], cols: Int, rows: Int,
     through transform: PanelSpaceTransform,
@@ -164,10 +158,9 @@ public struct ExposureAccumulator: Sendable {
     map.addEmission(panelGrid: panel, elapsed: elapsed, at: now)
   }
 
-  /// Nil for anything the map must refuse whole: a partially applied grid
-  /// biases it permanently, and the map is persisted, so the bias never washes
-  /// out. `PanelSpaceTransform.panelNativeGrid` answers a malformed grid with
-  /// zeros rather than signalling, so the shape is checked before it is asked.
+  /// Nil for anything the map must refuse whole: a partial grid biases a
+  /// persisted map forever. `panelNativeGrid` answers a malformed grid with
+  /// zeros rather than signalling, so the shape is checked first.
   private func panelGrid(
     from grid: [Double], cols: Int, rows: Int,
     through transform: PanelSpaceTransform, elapsed: TimeInterval

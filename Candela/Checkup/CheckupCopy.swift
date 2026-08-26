@@ -1,9 +1,8 @@
 import CandelaKit
 
-/// Every user-visible string in the checkup flow, in one place so the copy
-/// rules can be checked over the whole surface at once: no em dashes, no
-/// internal key names, and no verdict on the display. A checkup records
-/// observations; it never certifies a panel, and no line here may imply it has.
+/// Every user-visible string in the checkup flow, in one place so the copy rules
+/// (no em dashes, no internal key names, no verdict on the display) can be
+/// checked over the whole surface at once.
 enum CheckupCopy {
 
   // MARK: - Scenario
@@ -23,9 +22,8 @@ enum CheckupCopy {
     }
   }
 
-  /// The scenario in a few words, for the line that names the run. The rows on
-  /// the scenario page are sentences, which is right where a person is choosing
-  /// and wrong in the middle of a subject line.
+  /// The scenario in a few words, for the subject line; the scenario page's
+  /// rows are full sentences.
   static func scenarioWords(_ scenario: CheckupScenario) -> String {
     switch scenario {
     case .newMonitor: "a new monitor"
@@ -167,10 +165,8 @@ enum CheckupCopy {
   static let secondDotTitle = "Is the extra mark still there?"
   static let secondDotPrompt = "The same field is showing again with no planted mark. Is the extra mark still there? If so, tap it."
 
-  /// The field strip's resting text, replaced by the field's own instruction
-  /// before every showing. It says why the screen went solid and where the
-  /// answers are, because on a one-display run the flow window is behind the
-  /// field and cannot be reached.
+  /// The strip's resting text. On a one-display run the flow window is behind
+  /// the field, so the strip must say why the screen went solid and where the answers are.
   static let onlyDisplayStrip =
     "This display is showing a \(AppInfo.productName) checkup field. Answer below."
 
@@ -182,17 +178,15 @@ enum CheckupCopy {
 
   static let summaryTitle = "What this run observed"
 
-  /// Names the run: which display, what it was for, and when. The date is the
-  /// UTC day the exported file name carries, so the document and the file it
-  /// arrives in never disagree.
+  /// Names the run. The date is the UTC day the exported file name carries, so
+  /// document and file never disagree.
   static func subjectLine(for report: CheckupReport) -> String {
     let model = report.identity.productName.isEmpty ? "Display" : report.identity.productName
     return "\(model), \(scenarioWords(report.scenario)), \(CheckupStore.day(report.startedAt))"
   }
 
   /// CK16: which fields were shown with the strip over their lower edge. Nil
-  /// when none were, because a heading over an empty list reads as a caveat
-  /// nobody earned.
+  /// when none were, so no caveat sits over an empty list.
   static func occlusionLine(fieldIDs: [String]) -> String? {
     let names = fieldIDs
       .compactMap { id in CheckupFieldKind.allCases.first { CheckupCheckID.field($0) == id } }
@@ -202,8 +196,7 @@ enum CheckupCopy {
       + names.joined(separator: ", ") + "."
   }
 
-  /// The sensitivity a graded attestation was made at, in one place because the
-  /// summary page and the text it copies must say it the same way.
+  /// One place, because the summary page and the copied text must say it the same way.
   static func detectedAt(pixels: Int) -> String {
     "(control detected at \(pixels) px)"
   }
@@ -215,10 +208,8 @@ enum CheckupCopy {
 
   // MARK: - The document
 
-  /// CK30: the document says in its own body that the visual fields are
-  /// attestations rather than measurements. Its own sentence, because the
-  /// summary page can point at the control sensitivity on screen above it and
-  /// a file handed to a stranger cannot.
+  /// CK30: the document itself says the visual fields are attestations: a file
+  /// handed to a stranger cannot point at the control sensitivity on screen.
   static let attestationNote =
     "These are the user's attestations at the recorded control sensitivity."
 
@@ -232,10 +223,8 @@ enum CheckupCopy {
   static let flagPresent = "present"
   static let flagAbsent = "absent"
 
-  /// What stands in for the identity block when the identity leg did not run,
-  /// or ran and read nothing. CK30: a run that never read the display may not
-  /// print a serial, a size or an EDID flag, because every one of those would
-  /// be a claim about a display nobody asked.
+  /// CK30: a run that never read the display may not print a serial, a size or
+  /// an EDID flag.
   static let identityNotRead = "Identity: not read from the display"
 
   static func manufactured(week: Int, year: Int) -> String {
@@ -311,9 +300,8 @@ enum CheckupCopy {
     if id.hasPrefix("refresh."), let hz = id.split(separator: ".", maxSplits: 1).last {
       return "\(hz) Hz"
     }
-    // A check added without copy. The id is shipped schema and reads like the
-    // key it is, so it is never what comes back: a debug build stops on it, and
-    // a release build says as little as it truthfully can.
+    // A check added without copy. The id is shipped schema and must never show,
+    // so debug stops here and release says as little as it truthfully can.
     #if DEBUG
       assertionFailure("checkup check id with no copy: \(id)")
     #endif

@@ -3,9 +3,7 @@ import Foundation
 import CoreGraphics
 import Testing
 
-/// The checkup state machine over fakes (CK25): every page, the planted
-/// control's detect, miss and second-dot paths, the showing cap, and the two
-/// exits that save an incomplete report. No panel, no window, no wire.
+/// The checkup state machine over fakes (CK25): no panel, no window, no wire.
 @MainActor
 @Suite("Checkup flow model")
 struct CheckupFlowModelTests {
@@ -168,10 +166,8 @@ struct CheckupFlowModelTests {
     #expect(saved.last?.report.completion == .incomplete(reason: "closed"))
   }
 
-  /// CK16: on a one-display run the strip sits over the field's lower edge, so
-  /// the report has to name the fields that were not the whole panel. Once per
-  /// field however many times it was shown, and never on a run with somewhere
-  /// else to put the instructions.
+  /// CK16: once per field however many times it was shown, and never on a run
+  /// with somewhere else to put the instructions.
   @Test func aOneDisplayRunRecordsWhichFieldsCarriedTheStrip() async throws {
     let flow = CheckupFlowModel(
       environment: environment(presenter: FakePresenter(), entry: entry(only: true)))
@@ -206,9 +202,8 @@ struct CheckupFlowModelTests {
     #expect(flow.selectableDisplays.isEmpty)
   }
 
-  /// A leg still in flight when the cable goes is the one way a saved report can
-  /// be written to after the fact: the continuation comes back to a run that
-  /// already ended.
+  /// A leg in flight when the cable goes is the one way a saved report could be
+  /// written to after the fact.
   @Test func aRunEndedDuringALegKeepsTheSavedReport() async throws {
     let gate = CheckupLegGate()
     let flow = CheckupFlowModel(environment: environment(

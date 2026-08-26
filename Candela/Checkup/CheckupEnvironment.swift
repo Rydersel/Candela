@@ -2,10 +2,8 @@ import CandelaKit
 import CoreGraphics
 import Foundation
 
-/// One attached display as the checkup flow sees it (CK26). Virtual displays
-/// are filtered out where the entries are built, so a report can never key on
-/// one; the pick page's own guard is belt and braces over a list that never
-/// carries one.
+/// One attached display as the checkup flow sees it (CK26). Virtual displays are
+/// filtered out where entries are built, so a report can never key on one.
 struct CheckupDisplayEntry: Equatable, Sendable, Identifiable {
   var id: CGDirectDisplayID
   /// The EDID-derived key every stored run is filed under; never the display id.
@@ -74,9 +72,8 @@ enum CheckupPage: Equatable {
     case .witness: "the witness card"
     case .plantDisclosure: "the planted control disclosure"
     case .fieldInstruction(let kind), .fieldShowing(let kind), .fieldConfirmSecondDot(let kind):
-      // The prose name, never `kind.rawValue`: this string is read back on the
-      // summary, in the copied text and in the exported file, and `gray7` is a
-      // storage key rather than something to show a person.
+      // The prose name, never `kind.rawValue`: this reaches the summary and the
+      // exported file, and `gray7` is a storage key.
       "the \(CheckupCopy.fieldName(kind))"
     case .hdr: "the HDR checks"
     case .summary: "the summary"

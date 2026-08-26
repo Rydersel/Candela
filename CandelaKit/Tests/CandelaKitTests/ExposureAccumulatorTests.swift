@@ -182,9 +182,8 @@ struct ExposureAccumulatorTests {
 
   // MARK: - Booked emission
 
-  /// A checkup showing is light the app put on the panel with no capture
-  /// behind it. `sampleCount` counts 60 s readings, and the OLED Care page
-  /// renders it as "N of 30 readings", so a booking must not touch it.
+  /// `sampleCount` counts 60 s readings and the OLED Care page renders it as
+  /// "N of 30 readings", so a booking must not touch it.
   @Test func aBookedShowingMovesTheCellsAndNotTheSampleCount() throws {
     var acc = ExposureAccumulator()
     let grid = [Double](repeating: 0.5, count: PanelGrid.cellCount)

@@ -3,16 +3,12 @@ import CoreGraphics
 import Foundation
 import Observation
 
-/// The checkup state machine (CK25). It owns the report under construction and
-/// every verdict in it: the pages render what this says and decide nothing.
-///
-/// Three rules shape the whole type. Nothing but the user aborts a run (CK27),
-/// so a refusal is recorded and the flow moves on, and both exits that are not
-/// the summary still save a report. A run that has ended stays ended: a leg
-/// still in flight when the user leaves must not write into a report already
-/// saved. And the planted control is the only thing that grades a person's
-/// attestations (CK21), so its detect, retry and miss states live here rather
-/// than in any page.
+/// The checkup state machine (CK25): owns the report under construction and
+/// every verdict in it; the pages render and decide nothing. Nothing but the
+/// user aborts a run (CK27), so refusals are recorded and both early exits
+/// still save a report. A run that has ended stays ended, so a leg still in
+/// flight cannot write into a saved report. The planted control alone grades
+/// attestations (CK21), so its states live here.
 @MainActor
 @Observable
 final class CheckupFlowModel {
@@ -26,9 +22,8 @@ final class CheckupFlowModel {
   private(set) var running = false
   private(set) var secondsRemaining = 0
   private(set) var showings: [String: Int] = [:]
-  /// CK16: the fields whose lower edge carried the instruction strip, because
-  /// the target was the only display. Recorded on the report, since a reader
-  /// cannot otherwise tell those fields were not the whole panel.
+  /// CK16: fields whose lower edge carried the instruction strip. Recorded on
+  /// the report, since a reader cannot otherwise tell they were not the whole panel.
   private(set) var partiallyOccludedFields: [String] = []
   private(set) var plantRecord: CheckupPlantRecord?
   private(set) var report: CheckupReport?
@@ -38,9 +33,7 @@ final class CheckupFlowModel {
   /// The save seam: the pane's store in the app, a recorder in the suite.
   var onSaved: (CheckupReportEnvelope) -> Void = { _ in }
 
-  /// The one field the control is planted on, and so the one that calibrates
-  /// the sweep. Optional only because `first(where:)` is; the protocol order
-  /// opens with black.
+  /// The one field the control is planted on. Optional only because `first(where:)` is.
   static let plantedField = CheckupFieldKind.protocolOrder.first { $0.carriesPlant }
   /// CK21's two sizes. The first pass plants 4 px; a miss re-shows once at 8.
   static let firstPlantPixels = 4
@@ -91,9 +84,7 @@ final class CheckupFlowModel {
   var currentPlantSize: Int { plantSize }
 
   #if DEBUG
-    /// The control's origin, for the suite only: a page that read this would
-    /// hand back the position CK20 exists to withhold, so it is not in the
-    /// shipping binary at all.
+    /// Suite only: a page reading this would hand back the position CK20 withholds.
     var plantRegionForTest: (x: Int, y: Int)? {
       plant.map { (x: $0.x, y: $0.y) }
     }
@@ -166,10 +157,8 @@ final class CheckupFlowModel {
       if let first = CheckupFieldKind.protocolOrder.first { page = .fieldInstruction(first) }
 
     case .fieldInstruction(let kind):
-      // Leaving the control field is the last chance to say what became of the
-      // control, and an unresolved one was not detected (CK21). Without this a
-      // timed-out or second-dot-only showing would grade the rest of the sweep
-      // as if the control had been found.
+      // Last chance to resolve the control; unresolved means not detected (CK21),
+      // or a timed-out showing would grade the sweep as if it had been found.
       if kind == Self.plantedField, let record = plantRecord,
         record.detectedAtPixels == nil, !record.missed {
         markControlMissed()
@@ -298,9 +287,8 @@ final class CheckupFlowModel {
     page = instructionPage(for: kind)
   }
 
-  /// CK17's cap, enforced where every showing passes rather than at one button.
-  /// The confirmation re-show is exempt (the protocol asks for it) and is not
-  /// counted against the cap, so a field tops out at four showings.
+  /// CK17's cap, enforced where every showing passes. The confirmation re-show
+  /// is exempt and uncounted, so a field tops out at four showings.
   @discardableResult
   private func show(
     kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry,
@@ -332,10 +320,8 @@ final class CheckupFlowModel {
     return showings[id, default: 0] - (secondDotShown.contains(id) ? 1 : 0)
   }
 
-  /// The control rides the FIRST pixel field alone: CK20 discloses a single
-  /// mark, and one calibration is what the later pixel fields are read at. Once
-  /// it has been found or missed it stops appearing, so a re-show of that field
-  /// never asks a person to report the same control twice.
+  /// The control rides the first pixel field alone (CK20 discloses one mark).
+  /// Once found or missed it stops appearing, so a re-show never asks about it twice.
   private func plantForShowing(_ kind: CheckupFieldKind) -> CheckupPlant? {
     guard kind == Self.plantedField, let display = selectedDisplay,
       plantRecord?.detectedAtPixels == nil, plantRecord?.missed != true
@@ -378,9 +364,8 @@ final class CheckupFlowModel {
     max(1, kind.capSeconds - secondsRemaining)
   }
 
-  /// CK19. "Round and uncut" is the only thing in the whole checkup that
-  /// upgrades a claim past "macOS reports", and it upgrades only what was
-  /// observed: there is nothing on glass to witness about a refusal.
+  /// CK19: "round and uncut" is the only answer that upgrades a claim past
+  /// "macOS reports", and only an observed one; a refusal has nothing on glass.
   private func answerWitness(_ answer: CheckupFieldAnswer) {
     switch answer {
     case .roundAndUncut:
@@ -423,9 +408,8 @@ final class CheckupFlowModel {
     default:
       break
     }
-    // Only an answer that reports a mark can credit the control, and only when
-    // the mark is where the control is. A showing that ended without crediting
-    // it is a miss at the size it was planted at, whatever the answer said (CK21).
+    // Only a mark at the control credits it; anything else is a miss at the
+    // planted size, whatever the answer said (CK21).
     let credited: Bool = {
       guard answer != .nothing, let plant, let tappedRegion else { return false }
       return Self.isInside(tappedRegion, plant)
@@ -577,9 +561,8 @@ final class CheckupFlowModel {
     onSaved(envelope)
   }
 
-  /// A run that ended before the identity leg has no EDID record, and the
-  /// report needs one. Everything here is what the flow already knew about the
-  /// display; nothing in it is presented as something the panel reported.
+  /// For a run that ended before the identity leg. Nothing here is presented as
+  /// something the panel reported.
   private static func unreadIdentity(for display: CheckupDisplayEntry?) -> CheckupDisplayIdentity {
     CheckupDisplayIdentity(
       identityKey: display?.identityKey ?? "", vendorID: 0, modelID: 0, serial: nil,

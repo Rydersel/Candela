@@ -91,10 +91,8 @@ public struct CheckupReport: Codable, Equatable, Sendable {
   /// Showings per field id; the cap is CheckupPlan.maxShowingsPerField.
   public var showings: [String: Int]
   public var exposureBookingID: String?
-  /// CK16: the ids of the fields whose lower edge carried the instruction strip,
-  /// because the target was the only display and the flow had nowhere else to
-  /// put its controls. A reader of the file has to know which fields were not
-  /// the whole panel; silence would present them as if they had been.
+  /// CK16: fields whose lower edge carried the instruction strip because the
+  /// target was the only display. A reader must know which fields were not the whole panel.
   public var partiallyOccludedFields: [String]
 
   public init(scenario: CheckupScenario, identity: CheckupDisplayIdentity,
@@ -118,8 +116,7 @@ public struct CheckupReport: Codable, Equatable, Sendable {
   }
 
   /// Hand-written so a key added after a file was written decodes as its
-  /// default rather than failing the whole report. `encode` stays synthesized:
-  /// what is written is always the current shape.
+  /// default. `encode` stays synthesized.
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     header = try c.decodeIfPresent(String.self, forKey: .header) ?? Self.headerSentence

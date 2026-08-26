@@ -4,9 +4,8 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Every user-visible string on the Checkup pane, in one place so the copy
-/// rules can be read over the surface at once: no verdict on the display
-/// (CK8), no internal key names, no em dashes.
+/// Every user-visible string on the pane, in one place so the copy rules (no
+/// verdict on the display (CK8), no key names, no em dashes) can be checked at once.
 enum CheckupPaneCopy {
   static let title = "Checkup"
   static let subtitle =
@@ -51,16 +50,10 @@ enum CheckupPaneCopy {
   }
 }
 
-/// Which display the history opens on.
-///
-/// The built-in comes first in `allControlledStates`, so "the first display"
-/// opens a fresh external's owner on a laptop panel that has never been checked
-/// while the run they just finished sits behind the picker. The store decides
-/// instead: the display carrying the most recent run, then the first external,
-/// then whatever is left.
-///
-/// Pure, and separated from the pane so the rule can be read without a store or
-/// an `AppModel` behind it.
+/// Which display the history opens on: the one with the most recent run, then
+/// the first external, then whatever is left. Not "the first display": the
+/// built-in leads `allControlledStates`, which would hide a fresh external's
+/// run behind the picker.
 enum CheckupHistoryScope {
   static func defaultKey(_ candidates: [(key: String, isBuiltIn: Bool, latestRun: Date?)])
     -> String? {
@@ -73,18 +66,11 @@ enum CheckupHistoryScope {
 }
 
 /// The Checkup pillar (CK28): the launcher, this display's past runs, and the
-/// one place a report somebody sends you can be checked against its own hash.
-///
-/// The pane never runs a check itself. "Run a checkup" opens the flow window
-/// through `SettingsActions`, the same door the menu bar uses, and the history
-/// below is read from the store that a finished run wrote to.
-///
-/// Per display, like Health's controls: a run is filed under the display's
-/// identity, so the history has to name which display it is showing.
-///
-/// `@MainActor` for `DisplayDetailView`'s reason: a `View`'s stored and computed
-/// properties are nonisolated under complete concurrency checking, and these
-/// read `AppModel` from outside `body`.
+/// place a report somebody sends you is checked against its own hash. The pane
+/// never runs a check; "Run a checkup" opens the flow window through
+/// `SettingsActions`, and the history is read from the store a run wrote to.
+/// `@MainActor` for `DisplayDetailView`'s reason: stored and computed
+/// properties read `AppModel` outside `body`.
 @MainActor
 struct CheckupPane: View {
   @Environment(AppModel.self) private var model
@@ -95,13 +81,11 @@ struct CheckupPane: View {
 
   private let store: CheckupStore
 
-  /// The display whose runs are listed, or nil to follow the connected set.
-  /// Resolved on every render rather than pinned on arrival, so a display that
-  /// departs falls back to a connected one instead of listing nothing.
+  /// Resolved on every render rather than pinned, so a departed display falls
+  /// back to a connected one.
   @State private var scopedKey: String?
-  /// Set the first time the picker is used, and never cleared while the pane
-  /// lives. Until then the scope follows the store, so a run that finishes
-  /// while this pane is open moves the history to the display it ran on.
+  /// Until the picker is used the scope follows the store, so a run finishing
+  /// while the pane is open moves the history to its display.
   @State private var chosenByHand = false
   @State private var runs: [CheckupStoredRun] = []
   @State private var verification: String?
@@ -118,11 +102,8 @@ struct CheckupPane: View {
       verifySection
     }
     .onAppear { refresh() }
-    // Keyed on the RESOLVED display rather than on `scopedKey`: a departure
-    // moves the scope with nothing writing that key, and a switcher change
-    // moves it too, so one observer covers both. The verification line goes
-    // with it: it answered about a file chosen while another display was on
-    // screen, and leaving it there reads as an answer about this one.
+    // Keyed on the RESOLVED display, so a departure and a picker change hit one
+    // observer. The verification line goes too: it answered under another display.
     .onChange(of: scoped?.display.persistenceKey) {
       verification = nil
       reload()
@@ -148,9 +129,8 @@ struct CheckupPane: View {
 
   // MARK: - Scope
 
-  /// The built-in included: a checkup runs on any real display, and the live
-  /// environment files its report under the same persistence key this switcher
-  /// selects by.
+  /// The built-in included: a checkup runs on any real display, filed under the
+  /// same persistence key this switcher selects by.
   private var displays: [AppModel.DisplayState] { model.allControlledStates }
 
   private var scoped: AppModel.DisplayState? {
@@ -188,9 +168,7 @@ struct CheckupPane: View {
       runs = []
       return
     }
-    // A store that cannot be read is an empty history rather than an error
-    // state: this pane shows what was recorded, and a display with no runs has
-    // recorded nothing.
+    // An unreadable store is an empty history, not an error state.
     runs = (try? store.list(identityKey: key)) ?? []
   }
 
@@ -278,10 +256,8 @@ struct CheckupPane: View {
   }
 }
 
-/// One stored run: what it was, what it counted, and the three things a person
-/// does with it. The subject line names the run the way the report itself does,
-/// so a row and the document it exports agree on the display, the reason and
-/// the day.
+/// One stored run. The subject line names it the way the report does, so the
+/// row and the exported document agree.
 @MainActor
 private struct CheckupHistoryRow: View {
   let run: CheckupStoredRun
@@ -347,9 +323,8 @@ private struct CheckupHistoryRow: View {
     }
   }
 
-  /// CK29's name, and the store's own encoder: a file exported from here is the
-  /// same bytes as the one the run wrote, so `validate()` answers the same on
-  /// both, and so does `candela-probe checkup validate`.
+  /// CK29's name and the store's own encoder, so an export is byte-identical to
+  /// the stored file and `validate()` answers the same on both.
   private func export() {
     let panel = NSSavePanel()
     panel.allowedContentTypes = [.json]

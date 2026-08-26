@@ -2,14 +2,10 @@ import AppKit
 import CandelaKit
 import Testing
 
-/// The field covers a user's whole panel at `CGShieldingWindowLevel()` with no
-/// chrome to close it by, so the flags below are the ones whose failure is
-/// silent and expensive: a level under shielding lets the screen saver paint
-/// over the field being graded, and a click-through field makes the tap that
-/// reports a mark land on whatever is underneath.
-///
-/// Host-free: every window here is created and configured but never ordered on
-/// screen, so nothing touches the pointer (`orderFront` is the step that does).
+/// The field covers the whole panel at shielding level with no chrome, so these
+/// flags fail silently and expensively: a lower level lets the screen saver
+/// paint over it, and click-through sends the tap underneath. Host-free:
+/// nothing is ordered on screen, so nothing touches the pointer.
 @MainActor
 @Suite("Checkup field window")
 struct CheckupFieldWindowTests {
@@ -40,10 +36,8 @@ struct CheckupFieldWindowTests {
     #expect(w.isShowing == false)
   }
 
-  /// The plant's coordinates come from the entry's pixel size, and the model
-  /// grades a tap by comparing it against them, so the field has to be painted
-  /// in that same space: an image at any other size puts the drawn control
-  /// somewhere the position rule never promised.
+  /// The plant was chosen in the entry's pixel space and taps are graded there,
+  /// so the field must be painted at that size.
   @Test func theFieldIsPaintedInThePixelSpaceThePlantWasChosenIn() throws {
     let w = CheckupFieldWindow(orderFront: false)
     w.show(kind: .white, plant: nil, on: entry(only: false))
@@ -61,10 +55,8 @@ struct CheckupFieldWindowTests {
     w.hide()
   }
 
-  /// On a one-display run the flow window is behind a shielding-level field,
-  /// so a strip without the answers on it is a run nobody can answer. Each
-  /// field's own answers, not a fixed three: the witness card asks about
-  /// geometry and offers neither "one mark" nor "more than one".
+  /// On a one-display run the strip is the only place to answer. Each field's
+  /// own answers: the witness card asks about geometry.
   @Test func theOnlyDisplayStripCarriesTheAnswersTheFieldOffers() throws {
     let w = CheckupFieldWindow(orderFront: false)
     w.show(kind: .black, plant: nil, on: entry(only: true))
@@ -82,9 +74,8 @@ struct CheckupFieldWindowTests {
     w.hide()
   }
 
-  /// The countdown and the instruction both change while the field stays up:
-  /// the cap runs down every second, and the confirmation re-show asks a
-  /// different question of the same field.
+  /// Both change while the field stays up: the cap runs down, and the
+  /// confirmation re-show asks a different question.
   @Test func theStripsTimerAndInstructionRenderTheValuesTheFlowPublishes() throws {
     let w = CheckupFieldWindow(orderFront: false)
     w.instructionText = CheckupCopy.instruction(for: .red)
@@ -115,9 +106,8 @@ struct CheckupFieldWindowTests {
     w.hide()
   }
 
-  /// Each button has to report its OWN answer. A shared target with a tag is
-  /// exactly the shape where all three can quietly send the same one, and on a
-  /// one-display run these buttons are the only answers that exist.
+  /// A shared target with a tag is exactly the shape where every button
+  /// quietly sends the same answer.
   @Test func eachStripButtonReportsItsOwnAnswer() throws {
     let w = CheckupFieldWindow(orderFront: false)
     var received: [CheckupFieldAnswer] = []
@@ -164,11 +154,8 @@ struct CheckupFieldWindowTests {
     }
   }
 
-  /// The image is top-left origin (the plant's y is the y a user would tap) and
-  /// the view is not flipped, so the two disagree about y and this conversion
-  /// is the only thing reconciling them. Drop the flip and every tap is graded
-  /// against a mark mirrored across the middle of the panel, which reads as a
-  /// user who cannot point at a dot.
+  /// The image is top-left origin and the view is not flipped; drop the flip
+  /// and every tap is graded against a mark mirrored across the panel.
   @Test func aTapAtTheTopLeftCornerNamesThePixelAtTheTopOfTheImage() {
     let size = NSSize(width: 400, height: 200)
     #expect(CheckupFieldView(frame: NSRect(origin: .zero, size: size)).isFlipped == false)

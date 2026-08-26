@@ -1,22 +1,15 @@
 import AppKit
 import CandelaKit
 
-/// The field on the target display and nothing else: borderless, shielding
-/// level, pointer out of the way. The flow window lives on another display;
-/// when the target is the only display, a strip at the bottom carries the
-/// instruction, the countdown and the same answers the flow page offers, and
-/// the flow records those fields on the report as partially occluded (CK16).
-/// The strip has to carry the answers because the flow window is behind a
-/// shielding-level field there: unreachable, so unusable.
-///
-/// The AppKit island behind `CheckupFieldPresenting`, so the flow model can be
-/// driven over a fake with no window anywhere.
+/// The field on the target display: borderless, shielding level, pointer out of
+/// the way. When the target is the only display, a strip at the bottom carries
+/// the instruction, countdown and answers, since the flow window is unreachable
+/// behind a shielding-level field; the report records those fields as partially
+/// occluded (CK16). The AppKit island behind `CheckupFieldPresenting`.
 @MainActor
 final class CheckupFieldWindow: CheckupFieldPresenting {
-  /// The strip's height in points, and the reason the field is only partially
-  /// the panel when the target is the only display. Tall enough for the
-  /// instruction over a row of answers, because on that display this strip is
-  /// the whole of the flow's controls.
+  /// Tall enough for the instruction over a row of answers: on a one-display
+  /// run this strip is the whole of the flow's controls.
   static let stripHeight: CGFloat = 104
 
   private var window: NSWindow?
@@ -29,10 +22,8 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
   private var instructionLabel: NSTextField?
   private var answerTarget: AnswerTarget?
 
-  /// What the strip says when the target is the only display. The flow sets it
-  /// per field; the default is the part that is true of every field. Written
-  /// through to a strip already on screen, because the confirmation re-show
-  /// changes what the strip is asking without taking the field down.
+  /// Written through to a strip already on screen: the confirmation re-show
+  /// changes the question without taking the field down.
   var instructionText = CheckupCopy.onlyDisplayStrip {
     didSet { instructionLabel?.stringValue = instructionText }
   }
@@ -45,13 +36,11 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
   /// answer with `lastTap` before handing both to the flow.
   var onAnswer: ((CheckupFieldAnswer) -> Void)?
 
-  /// The most recent tap on THIS showing, cleared whenever a field goes up: a
-  /// region reported against the previous showing would be graded against a
-  /// control that is no longer there.
+  /// Cleared whenever a field goes up: a tap from the previous showing would be
+  /// graded against a control that is no longer there.
   private(set) var lastTap: (x: Int, y: Int)?
 
-  /// What the strip's countdown reads. The flow owns the clock; this is the
-  /// last value it published.
+  /// The flow owns the clock; this is the last value it published.
   private(set) var secondsRemaining = 0
 
   init(orderFront: Bool = true) { self.orderFront = orderFront }
@@ -66,10 +55,8 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
         contentRect: OverlayWindow.seedRect, styleMask: OverlayWindow.styleMask,
         backing: .buffered, defer: false)
 
-    // Painted at the entry's pixel size, not the backing store's: the plant's
-    // coordinates were chosen in that space and the model grades a tap by
-    // comparing it against them, so any other size moves the drawn control off
-    // the position the margin rule promised.
+    // Painted at the entry's pixel size, not the backing store's: the plant was
+    // chosen in that space and taps are graded against it.
     let view = CheckupFieldView(frame: NSRect(origin: .zero, size: screen.frame.size))
     view.autoresizingMask = [.width, .height]
     view.image = CheckupField.image(
@@ -80,9 +67,7 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
       self?.onTap?(x, y)
     }
     // Before `configure`, which applies the recipe's alpha and black backing to
-    // whatever content view the window is holding. Set after, the field would
-    // be an unconfigured view over a window whose recipe landed on a discarded
-    // one, and a failed image would show through to the desktop.
+    // whatever content view the window holds at the time.
     window.contentView = view
 
     var config = OverlayWindowConfig.dimming
@@ -107,18 +92,14 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
     self.window = window
     isShowing = true
     if orderFront {
-      // Not `NSCursor.hide()`: a hidden pointer cannot be aimed at the mark the
-      // person is being asked to tap, and cannot reach the strip's answers
-      // either. This clears the arrow off a field being judged and brings it
-      // back the moment the mouse moves, so it needs no unhide of its own and
-      // cannot strand the pointer if a run ends somewhere unexpected.
+      // Not `NSCursor.hide()`: the pointer must still reach the mark and the
+      // strip. This needs no unhide, so an unexpected exit cannot strand it.
       NSCursor.setHiddenUntilMouseMoves(true)
       window.orderFrontRegardless()
     }
   }
 
-  /// Re-renders the strip's countdown. Driven by the same one-second tick that
-  /// drives the flow page, so the two never disagree about the time left.
+  /// Driven by the same one-second tick as the flow page, so the two never disagree.
   func updateTimer(_ seconds: Int) {
     secondsRemaining = seconds
     timerLabel?.stringValue = CheckupCopy.secondsLeft(seconds)
@@ -130,10 +111,8 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
     isShowing = false
   }
 
-  /// The whole of the flow's controls when the target is the only display: what
-  /// to look for, how long is left, and the field's own answers. Built by hand
-  /// rather than hosted from SwiftUI so it stays a plain subview of the field,
-  /// which is what keeps it inside the shielding-level window.
+  /// Built by hand rather than hosted from SwiftUI so it stays a plain subview
+  /// of the field, inside the shielding-level window.
   private func makeInstructionStrip(width: CGFloat, kind: CheckupFieldKind) -> NSView {
     let strip = CheckupFieldStripView(
       frame: NSRect(x: 0, y: 0, width: width, height: Self.stripHeight))
@@ -205,17 +184,15 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
   }
 }
 
-/// The strip swallows clicks that miss its controls. Without this they fall
-/// through the responder chain to the field underneath and are graded as a
-/// person pointing at a defect down in the strip.
+/// Swallows clicks that miss its controls; otherwise they fall through to the
+/// field and are graded as a tap on a defect.
 final class CheckupFieldStripView: NSView {
   override func mouseDown(with event: NSEvent) {}
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
-/// The field can be clicked while another app is frontmost, and the first click
-/// on an answer has to BE the answer rather than an activation the person then
-/// repeats. `NSButton` does not accept a first mouse by default.
+/// The first click on an answer has to BE the answer, and `NSButton` does not
+/// accept a first mouse by default.
 final class CheckupStripButton: NSButton {
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
@@ -226,9 +203,7 @@ final class CheckupFieldView: NSView {
   var image: CGImage?
   var onTap: ((_ x: Int, _ y: Int) -> Void)?
 
-  /// The default, stated because `imagePixel` is written against it: the image
-  /// is top-left origin and this view is not, so the conversion flips y. The
-  /// two only make sense as a pair.
+  /// The default, stated because `imagePixel` flips y against it.
   override var isFlipped: Bool { false }
 
   /// The field window can be clicked while another app is active, and the first
@@ -250,11 +225,8 @@ final class CheckupFieldView: NSView {
     onTap?(pixel.x, pixel.y)
   }
 
-  /// The exact inverse of `draw`: the image fills `bounds`, so a point maps by
-  /// the ratio, and y is measured from the other edge because the image's
-  /// origin is top-left and the view's is bottom-left.
-  ///
-  /// Pure and static so the pairing above can be tested without a screen.
+  /// Inverse of `draw`; y flips because the image origin is top-left and the
+  /// view's is bottom-left. Static so it is testable without a screen.
   static func imagePixel(
     forViewPoint point: NSPoint, in viewSize: NSSize, imageWidth: Int, imageHeight: Int
   ) -> (x: Int, y: Int) {

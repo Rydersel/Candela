@@ -112,8 +112,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// Display Health windows (OCR-A1, #185): held like the confirmation
   /// windows above, app-lifetime, one window per display key inside.
   private lazy var displayHealthPresenter = DisplayHealthWindowPresenter(model: model)
-  /// The checkup window (CK28): built on first use and held for the app's
-  /// lifetime, like the Display Health presenter above and for its reason.
+  /// CK28: built on first use, app-lifetime, like the Display Health presenter above.
   private var checkupWindow: CheckupWindowController?
   /// Stored (review M23) so the topology loop can `cleanupDisplay` departed
   /// displays' HUD panels; the executor shares this same instance.
@@ -797,9 +796,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     }
   #endif
 
-  /// Built here rather than in a property initializer because the environment
-  /// closure hands the flow the ONE field window this controller owns, so the
-  /// closure has to be able to name the controller it is being given to.
+  /// Not a property initializer: the environment closure has to name the
+  /// controller it is being handed to.
   private func checkupController() -> CheckupWindowController {
     if let checkupWindow { return checkupWindow }
     let controller = CheckupWindowController(

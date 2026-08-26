@@ -1,15 +1,12 @@
 import CandelaKit
 import SwiftUI
 
-/// The checkup window's root: the backdrop, the current page, and the one piece
-/// of fixed chrome the flow has. There is deliberately no Skip and no Cancel
-/// button: closing the window is the exit, and the controller records it as an
-/// abandoned run rather than losing it (CK27).
+/// The checkup window's root. No Skip and no Cancel, deliberately: closing the
+/// window is the exit, and the controller saves it as an abandoned run (CK27).
 struct CheckupFlowView: View {
   @Bindable var model: CheckupFlowModel
-  /// The last tap the field window saw. The field is on another display and
-  /// the answer buttons are here, so the region a person pointed at has to
-  /// travel from the window that received it to the button that reports it.
+  /// The field's last tap. The field is on another display and the answer
+  /// buttons are here, so the region travels with the answer.
   var tappedRegion: () -> (x: Int, y: Int)? = { nil }
   /// Fires when the target changes, so the controller can move this window off
   /// the display that is about to be covered by a field.
@@ -66,9 +63,8 @@ struct CheckupFlowView: View {
     }
   }
 
-  /// Back exists only where a step back cannot rewrite something already
-  /// recorded: the model refuses everywhere else, and a control the model will
-  /// ignore is worse than no control.
+  /// Back exists only where a step back cannot rewrite a recorded claim; a
+  /// control the model will ignore is worse than none.
   private var chrome: some View {
     VStack {
       HStack {

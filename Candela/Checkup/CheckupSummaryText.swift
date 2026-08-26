@@ -1,21 +1,14 @@
 import CandelaKit
 import Foundation
 
-/// One report as plain text (CK31), in the diagnostics report's shape: a header,
-/// labeled facts, then a section per family.
-///
-/// The ONE renderer. The flow's summary page, its Copy summary, the pane's
-/// history and anything that hands a run to a person all come through here, so
-/// a reader who compares two copies of the same run never finds them saying
-/// different things.
-///
-/// Nothing here grades the display (CK8): the families carry their claims, the
-/// summary counts verdicts, and the completion line says how the run ended.
+/// One report as plain text (CK31), in the diagnostics report's shape. The ONE
+/// renderer: the summary page, Copy summary, the pane's history and every
+/// export come through here, so two copies of a run never disagree. Nothing
+/// here grades the display (CK8).
 enum CheckupSummaryText {
   static func render(_ report: CheckupReport) -> String {
-    // The subject line carries the product name, the scenario and the UTC day
-    // the exported file name uses; deriving any of the three again here is how
-    // a document and its file name start disagreeing.
+    // The subject line owns the product name, scenario and UTC day; deriving
+    // any of them again here is how document and file name drift.
     var lines = [CheckupReport.headerSentence, "", CheckupCopy.subjectLine(for: report), ""]
     lines += identityLines(report)
     if let occlusion = CheckupCopy.occlusionLine(fieldIDs: report.partiallyOccludedFields) {
@@ -32,14 +25,9 @@ enum CheckupSummaryText {
     return lines.joined(separator: "\n")
   }
 
-  /// What the display said about itself, plus what the run ran on.
-  ///
-  /// CK30, measured claims only: every line in the first block is read out of
-  /// the EDID, so the block exists only when the identity leg actually read one.
-  /// A run abandoned before that leg still carries a fully populated
-  /// `CheckupDisplayIdentity` built from placeholders, and printing it would
-  /// have the document report a serial, a native size and a pair of HDR flags
-  /// that nothing observed.
+  /// CK30, measured claims only: the identity block exists only when the leg
+  /// read an EDID. An abandoned run carries a placeholder identity, and
+  /// printing it would report a serial and flags nothing observed.
   private static func identityLines(_ report: CheckupReport) -> [String] {
     var lines: [String] = []
     if identityWasRead(report) {
@@ -66,16 +54,14 @@ enum CheckupSummaryText {
     // they stand either way.
     lines.append("\(CheckupCopy.macOSLabel) \(report.macOSBuild)")
     lines.append("\(AppInfo.productName): \(report.appBuild)")
-    // Its own paragraph rather than a labeled fact: it is the sentence that
-    // explains why a "not observed" below is about the panel's DDC and not
-    // about the panel's picture.
+    // Its own paragraph: this sentence is why a "not observed" below is about
+    // DDC, not the picture.
     lines += ["", CheckupCopy.panelClassLine(report.panelClass)]
     return lines
   }
 
-  /// Only an observed identity claim licenses the block. A refusal, a
-  /// not-observed, or no claim at all all mean the same thing to a reader: the
-  /// display was not read.
+  /// Only an observed identity claim licenses the block; a refusal, a
+  /// not-observed or a missing claim all mean the display was not read.
   private static func identityWasRead(_ report: CheckupReport) -> Bool {
     guard let claim = report.claims.first(where: { $0.id == CheckupCheckID.identity })
     else { return false }

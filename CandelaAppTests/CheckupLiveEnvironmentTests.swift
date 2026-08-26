@@ -1,10 +1,8 @@
 import CandelaKit
 import Testing
 
-/// The decision-bearing half of the live environment builder: virtual displays
-/// out (CK26), the only-display flag, the panel class each source resolves to,
-/// and the capability read that has to land before any of that is graded. What
-/// is left reads the app's own objects and is covered by the hardware pass.
+/// The decision-bearing half of the live builder; what is left reads the app's
+/// own objects and is covered by the hardware pass.
 @Suite("Checkup live environment")
 struct CheckupLiveEnvironmentTests {
   @Test func entriesExcludeVirtualDisplaysAndMarkTheOnlyDisplay() {
@@ -26,10 +24,8 @@ struct CheckupLiveEnvironmentTests {
     #expect(entries[1].panelClass == .readsDDC)
   }
 
-  /// The defect this covers: with no cached string the plan pre-grades the
-  /// three capability rows as "readback cannot be observed", so a Dell whose
-  /// earlier probe missed would carry that claim into a saved report. The read
-  /// has to answer on the build the plan is made from.
+  /// With no cached string the plan pre-grades the capability rows as
+  /// unobservable, so a Dell whose earlier probe missed would carry that into a saved report.
   @Test @MainActor func aDisplayWithNoCachedStringIsAskedBeforeThePlanIsGraded() async {
     let reads = ReadCount()
     let filled = await CheckupLiveEnvironment.readingCapabilities(

@@ -91,9 +91,8 @@ struct CheckupReportTests {
     #expect(report.summary.line.contains("nothing was measured"))
   }
 
-  /// CK16's occlusion list is shipped schema: it round-trips, and a file
-  /// written before the key existed still decodes, with the list empty rather
-  /// than the whole report failing.
+  /// CK16's list is shipped schema: it round-trips, and a file written before
+  /// the key existed still decodes with it empty.
   @Test func theOcclusionListRoundTripsAndAnOlderFileStillDecodes() throws {
     var report = sample()
     report.partiallyOccludedFields = ["field.black", "field.white"]

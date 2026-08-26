@@ -3,17 +3,14 @@ import CandelaKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The checkup flow borrows the setup flow's dark palette, cards and button
-/// styles so the two guided windows are one family; only the accent is its
-/// own, and it is a cool instrument light rather than a welcome.
+/// Borrows the setup flow's palette and buttons so the two guided windows are
+/// one family; only the accent is its own.
 enum CheckupStyle {
   static let accent = Color(red: 0.20, green: 0.78, blue: 0.92)
   static let pageWidth: CGFloat = 560
 }
 
-/// The quiet ground the pages sit on. Deliberately still: a checkup is an
-/// instrument, and a moving backdrop behind a page asking someone to judge
-/// what they saw on glass would compete with the thing being judged.
+/// Deliberately still: a moving backdrop would compete with the glass being judged.
 struct CheckupBackdrop: View {
   var body: some View {
     ZStack {
@@ -26,10 +23,8 @@ struct CheckupBackdrop: View {
   }
 }
 
-/// One claim as the flow shows it: the check in prose, its evidence grade, and
-/// the observable, refusal or attestation behind it. The grade is drawn in
-/// weight and opacity, never in green or red: a checkup records what happened
-/// and hands the display no verdict.
+/// One claim: the check in prose, its evidence grade, and what stands behind
+/// it. Grade is weight and opacity, never green or red: no verdict on the display.
 struct CheckupClaimRow: View {
   let claim: CheckupClaim
 
@@ -60,7 +55,6 @@ struct CheckupClaimRow: View {
   }
 }
 
-/// The claims of one family, or a line saying the family has nothing yet.
 struct CheckupClaimList: View {
   let claims: [CheckupClaim]
 
@@ -215,9 +209,8 @@ struct CheckupPlanPage: View {
 
 // MARK: - The measured legs
 
-/// Identity, capabilities, native mode, refresh and HDR are the same page with
-/// a different title and a different family of claims: a spinner while the leg
-/// is in flight, then what it found.
+/// The measured legs share one page: a spinner while the leg is in flight,
+/// then its claims.
 struct CheckupLegPage: View {
   @Bindable var model: CheckupFlowModel
   let title: String
@@ -423,10 +416,8 @@ struct CheckupSummaryPage: View {
     // The document's own first line is the header sentence, so the scaffold
     // does not print it a second time above it.
     CheckupPageScaffold(title: CheckupCopy.summaryTitle, subtitle: nil) {
-      // CK31: the page shows the document itself, not a second layout of the
-      // same facts. What is read here is what Copy summary puts on the
-      // clipboard and what the exported file carries, so a reader never has to
-      // work out which of two shapes the report really says.
+      // CK31: the page shows the document itself, the same text Copy summary
+      // and the export carry, so there is only one shape of the report to read.
       if let report = model.report {
         Text(verbatim: CheckupSummaryText.render(report))
           .font(.caption.monospaced())
@@ -493,9 +484,8 @@ struct CheckupSummaryPage: View {
 
 // MARK: - Shared actions
 
-/// The one primary action every page ends on. `advance()` is async because some
-/// pages run a leg on the way out, so the button owns the task rather than each
-/// page rewriting it.
+/// `advance()` is async because some pages run a leg on the way out, so the
+/// button owns the task.
 struct CheckupAdvanceButton: View {
   @Bindable var model: CheckupFlowModel
   let title: String

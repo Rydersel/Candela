@@ -65,10 +65,8 @@ public enum CheckupPlan {
   public static let maxShowingsPerField = 3
 
   /// Every field at its cap, three times, plus the one confirmation re-show a
-  /// pixel field can ask for: that showing is exempt from the cap, so a bound
-  /// that left it out would be under the light the panel can actually take.
-  /// What the plan page states as the worst case, and what the exposure ledger
-  /// can expect.
+  /// pixel field can ask for (exempt from the cap). What the plan page states
+  /// and what the exposure ledger can expect.
   public static var worstCaseFieldSeconds: Int {
     let fields = CheckupFieldKind.protocolOrder.map(\.capSeconds).reduce(0, +)
     let confirmations = CheckupFieldKind.protocolOrder.filter(\.carriesPlant)

@@ -3,22 +3,17 @@ import CoreGraphics
 import Foundation
 import os
 
-/// The live half of `CheckupEnvironment`: the app's own objects in, the value
-/// the flow model runs over out.
-///
-/// Split the way `OnboardingLiveEnvironment` is split, and for its reason:
+/// The live half of `CheckupEnvironment`. Split like `OnboardingLiveEnvironment`:
 /// what decides something lives in `entries(from:)` and `readingCapabilities`,
-/// both reachable from a test with no display attached, no catalog enumerated
-/// and no wire. The live side below fills the fields in and decides nothing.
+/// testable with no display attached; the live side fills fields in and decides nothing.
 enum CheckupLiveEnvironment {
   private static let log = Logger(subsystem: "com.rydersel.Candela", category: "checkup")
 
   /// One display as the live layer reads it, before any checkup rule applies.
   struct Source {
     var id: CGDirectDisplayID
-    /// The display's persistence key: an EDID UUID for an external, so every
-    /// stored run is filed under the panel rather than under a display id,
-    /// which macOS reassigns across a replug.
+    /// The persistence key (an EDID UUID for an external), so runs file under
+    /// the panel rather than a display id macOS reassigns across a replug.
     var identityKey: String
     var name: String
     var isBuiltIn: Bool
@@ -31,11 +26,9 @@ enum CheckupLiveEnvironment {
     var pixelHeight: Int
   }
 
-  /// CK26: a virtual display is never a checkup target, so it is dropped here
-  /// rather than carried to every surface that would have to remember to skip
-  /// it. `isOnlyDisplay` counts what survives that filter, because a display
-  /// the flow refuses to target is also a display the flow window cannot be
-  /// sent to (CK16).
+  /// CK26: a virtual display is never a target, so it is dropped here rather
+  /// than at every surface. `isOnlyDisplay` counts what survives the filter: a
+  /// display the flow cannot target is also one the flow window cannot be sent to (CK16).
   static func entries(from sources: [Source]) -> [CheckupDisplayEntry] {
     let real = sources.filter { !$0.isVirtual }
     return real.map { source in
@@ -62,19 +55,11 @@ enum CheckupLiveEnvironment {
   }
 
   /// Reads a capability string for every external the D24 probe has no entry
-  /// for, BEFORE the plan grades anything off it.
-  ///
-  /// The probe misses for a display whose read failed once: a failure caches
-  /// the verdict and not the string, and `CapabilityProbePolicy` then declines
-  /// to ask again that session. Without this the checkup would inherit that
-  /// nil, and a nil classes the panel write-only, so one transient failure
-  /// would put "readback cannot be observed" in a saved report about a Dell.
-  ///
-  /// The policy's own clauses, in its terms: the guard above IS its cached-nil
-  /// case, restated; nothing of this builder's can be outstanding because the
-  /// read is awaited here rather than launched; and HDR skips the read, since
-  /// DDC is dead while HDR is engaged and the write-only text is what a
-  /// silent panel earns.
+  /// for, BEFORE the plan grades anything off it. A failed read caches the
+  /// verdict and not the string, and `CapabilityProbePolicy` then declines to
+  /// ask again that session; inheriting that nil would class a Dell write-only
+  /// and put "readback cannot be observed" in a saved report. HDR still skips
+  /// the read, since DDC is dead while HDR is engaged.
   @MainActor
   static func readingCapabilities(
     into sources: [Source], probes: [String: CapabilityProbe]
@@ -104,9 +89,8 @@ enum CheckupLiveEnvironment {
   ) async -> CheckupEnvironment {
     let configurator = CoreGraphicsDisplayConfigurator()
     let states = model.allControlledStates
-    // Keyed on the same string the entries carry, uniqued rather than trapping:
-    // two identical panels can share an EDID UUID, which is a documented
-    // limitation of the persistence key and not a reason to crash the app.
+    // Uniqued rather than trapping: two identical panels can share an EDID
+    // UUID, a documented limit of the persistence key.
     let probes = Dictionary(
       states.map {
         ($0.display.persistenceKey,
@@ -139,8 +123,7 @@ enum CheckupLiveEnvironment {
       presenter: presenter,
       bookShowing: { [weak coordinator] identityKey, kind, seconds in
         // A zero size makes the witness card's coverage NaN, and the booking's
-        // clamp passes a NaN through as full white, so the ledger would gain a
-        // full-white showing that never happened. Nothing to book is better.
+        // clamp passes NaN through as full white. Nothing to book is better.
         guard let size = pixels[identityKey], size.0 > 0, size.1 > 0 else {
           log.error("""
           checkup showing not booked: no pixel size for \(identityKey, privacy: .public)
@@ -171,10 +154,8 @@ enum CheckupLiveEnvironment {
     // ours by ownership, everyone else's by the optional-returning predicate.
     let isVirtual = model.virtualDisplays.ownedDisplayIDs.contains(state.id)
       || VirtualDisplayDetection.isVirtual(state.id) == true
-    // Native pixels AS MACOS REPORTS THEM, which on the rotated Dell is the
-    // rotated frame. That is the space the field is drawn and tapped in, so it
-    // is also the space the planted control's coordinates live in; panel-native
-    // would put every plant on the wrong axis.
+    // Native pixels as macOS reports them (the rotated frame on the rotated
+    // Dell): the space the field is drawn and tapped in, so the plant's space too.
     let native = configurator.nativePixels(for: state.id)
     let prefs = DisplayPrefs(persistenceKey: key)
     return Source(
@@ -187,9 +168,8 @@ enum CheckupLiveEnvironment {
       // The D24 probe's string where it has one; `readingCapabilities` above
       // fills the rest in before anything is graded off them.
       capabilities: model.capabilityString[key],
-      // Discovery admits externals with a live DDC service and nothing else,
-      // so membership in that list IS the answer; the built-in slot carries a
-      // `NoopDDCWriter` and has no wire at all.
+      // Discovery admits only externals with a live DDC service, so membership
+      // is the answer; the built-in carries a `NoopDDCWriter`.
       hasDDCService: !isBuiltIn,
       pixelWidth: native?.width ?? Int(CGDisplayPixelsWide(state.id)),
       pixelHeight: native?.height ?? Int(CGDisplayPixelsHigh(state.id)))
@@ -205,9 +185,8 @@ enum CheckupLiveEnvironment {
     hdr: any HDRToggling,
     configurator: CoreGraphicsDisplayConfigurator
   ) -> CheckupRunnerSet {
-    // One read, shared by the identity leg and the HDR leg: the EOTF flags the
-    // HDR runner gates on come out of this record, and reading it twice would
-    // let the two legs disagree about the same panel.
+    // One read shared by the identity and HDR legs, so the two cannot disagree
+    // about the same panel.
     let identity = CheckupIdentityFacts.read(
       displayID: entry.id,
       identityKey: entry.identityKey,
@@ -223,9 +202,8 @@ enum CheckupLiveEnvironment {
         hdr: hdr, displayID: entry.id, identity: identity ?? unreadIdentity(for: entry)))
   }
 
-  /// A display with no DDC path had its three capability rows pre-graded by the
-  /// plan, and the flow skips the leg entirely, so this is never asked to run.
-  /// It exists so the runner set has one shape for every panel class.
+  /// Never asked to run: the plan pre-grades a display with no DDC path. Exists
+  /// so the runner set has one shape.
   private struct NoCapabilitiesRunner: CheckupCapabilitiesRunning {
     func run() async -> [CheckupClaim] { [] }
   }
@@ -237,10 +215,8 @@ enum CheckupLiveEnvironment {
     return CheckupLiveCapabilitiesRunner(writer: writer, capabilities: capabilities)
   }
 
-  /// What the HDR runner is handed when the display exposed no parsed EDID
-  /// record. Everything in it is what this builder already knew; nothing is
-  /// presented as something the panel reported, and the absent EOTF flags are
-  /// what the runner reads as "this panel does not advertise HDR".
+  /// For a display with no parsed EDID. Nothing here is presented as reported
+  /// by the panel; the absent EOTF flags read as "does not advertise HDR".
   private static func unreadIdentity(for entry: CheckupDisplayEntry) -> CheckupDisplayIdentity {
     CheckupDisplayIdentity(
       identityKey: entry.identityKey, vendorID: 0, modelID: 0, serial: nil,
