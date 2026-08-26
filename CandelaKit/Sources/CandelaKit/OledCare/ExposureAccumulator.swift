@@ -46,10 +46,17 @@ public struct ExposureMap: Equatable, Sendable, Codable {
 
   /// Caller has already validated the grid; this only records it.
   mutating func add(panelGrid: [Double], elapsed: TimeInterval, at now: Date) {
+    addEmission(panelGrid: panelGrid, elapsed: elapsed, at: now)
+    sampleCount += 1
+  }
+
+  /// Light the app itself put on the panel. `sampleCount` is one 60 s capture,
+  /// and the analysis gate and "N of 30 readings" stand on it, so emission moves
+  /// the cells without inflating the count.
+  mutating func addEmission(panelGrid: [Double], elapsed: TimeInterval, at now: Date) {
     for cell in cells.indices {
       cells[cell] += panelGrid[cell] * elapsed
     }
-    sampleCount += 1
     if firstSample == nil { firstSample = now }
     lastSample = now
   }
@@ -124,22 +131,47 @@ public struct ExposureAccumulator: Sendable {
 
   /// Accumulates one sample. `grid` is in DISPLAY orientation.
   ///
-  /// A sample is taken whole or refused whole: a partially applied one biases
-  /// the map permanently, and the map is persisted, so the bias never washes
-  /// out. `PanelSpaceTransform.panelNativeGrid` answers a malformed grid with
-  /// zeros rather than signalling, so the shape is checked here.
+  /// A sample is taken whole or refused whole; see `panelGrid(from:...)` below
+  /// for what a refusal is protecting.
   public mutating func accumulate(
     displayGrid grid: [Double], cols: Int, rows: Int,
     through transform: PanelSpaceTransform,
     elapsed: TimeInterval, at now: Date
   ) {
-    guard elapsed.isFinite, elapsed > 0 else { return }
-    guard cols > 0, rows > 0, grid.count == cols * rows else { return }
-    guard grid.allSatisfy({ $0.isFinite && $0 >= 0 }) else { return }
+    guard let panel = panelGrid(
+      from: grid, cols: cols, rows: rows, through: transform, elapsed: elapsed)
+    else { return }
+    map.add(panelGrid: panel, elapsed: elapsed, at: now)
+  }
+
+  /// Books light the app itself put on the panel (a checkup field: one flat
+  /// luminance for a few seconds). Same validation and all-or-nothing rule as
+  /// `accumulate`; leaves `sampleCount` alone, see `ExposureMap.addEmission`.
+  public mutating func bookEmission(
+    displayGrid grid: [Double], cols: Int, rows: Int,
+    through transform: PanelSpaceTransform,
+    elapsed: TimeInterval, at now: Date
+  ) {
+    guard let panel = panelGrid(
+      from: grid, cols: cols, rows: rows, through: transform, elapsed: elapsed)
+    else { return }
+    map.addEmission(panelGrid: panel, elapsed: elapsed, at: now)
+  }
+
+  /// Nil for anything the map must refuse whole: a partial grid biases a
+  /// persisted map forever. `panelNativeGrid` answers a malformed grid with
+  /// zeros rather than signalling, so the shape is checked first.
+  private func panelGrid(
+    from grid: [Double], cols: Int, rows: Int,
+    through transform: PanelSpaceTransform, elapsed: TimeInterval
+  ) -> [Double]? {
+    guard elapsed.isFinite, elapsed > 0 else { return nil }
+    guard cols > 0, rows > 0, grid.count == cols * rows else { return nil }
+    guard grid.allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
 
     let panel = transform.panelNativeGrid(fromDisplayGrid: grid, cols: cols, rows: rows)
-    guard panel.count == map.cells.count else { return }
-    map.add(panelGrid: panel, elapsed: elapsed, at: now)
+    guard panel.count == map.cells.count else { return nil }
+    return panel
   }
 
   public mutating func reset() {

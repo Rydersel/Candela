@@ -38,6 +38,9 @@ usage: candela-probe [--display <id>] <subcommand>
   modes                                   merged mode list, marking CGS-revealed entries
   curated                                 what the default size picker shows, after curation
   modeapply <ioModeID> [holdSeconds=5]    apply one mode by id at preview scope, then revert
+  identity                                EDID identity facts as the checkup reads them, as JSON
+  refreshsweep                            apply every rate at the native size at preview scope, then restore
+  checkup validate <file>                 verify an exported checkup report against its own hash
   caps                                    DDC/CI capabilities string (VCP 0xF3) + volume verdict
   audio devices                           default CoreAudio output + native-volume check
   native get                              DisplayServicesGetBrightness per display
@@ -207,8 +210,10 @@ func conformApplyPreview(
       return .init(name: name, outcome: .fail(
         "child apply of id \(revealed.ioModeID) exited \(child.terminationStatus)"))
     }
+    // Not end-anchored: the apply lines end with a rate, and a suffix match on
+    // the id goes silently false.
     guard output.split(separator: "\n").contains(where: {
-      $0.hasPrefix("after:") && $0.hasSuffix("id \(revealed.ioModeID)")
+      $0.hasPrefix("after:") && $0.contains(" id \(revealed.ioModeID) ")
     }) else {
       return .init(name: name, outcome: .fail(
         "child reported success but its achieved mode is not id \(revealed.ioModeID)"))
@@ -476,17 +481,105 @@ case "modeapply":
     exit(3)
   }
   let before = configurator.currentMode(for: target)
-  print("before: \(before.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID)" } ?? "unknown")")
-  print("applying: \(mode.logicalWidth)x\(mode.logicalHeight) fb \(mode.pixelWidth)x\(mode.pixelHeight) id \(mode.ioModeID) provenance \(mode.provenance)")
+  print("before: \(before.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID) \(String(format: "%g", $0.refreshHz)) Hz" } ?? "unknown")")
+  print("applying: \(mode.logicalWidth)x\(mode.logicalHeight) fb \(mode.pixelWidth)x\(mode.pixelHeight) id \(mode.ioModeID) provenance \(mode.provenance) \(String(format: "%g", mode.refreshHz)) Hz")
   do {
     try configurator.apply(mode, to: target, scope: applyScope)
     let after = configurator.currentMode(for: target)
-    print("after:  \(after.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID)" } ?? "unknown")")
+    print("after:  \(after.map { "\($0.logicalWidth)x\($0.logicalHeight) fb \($0.pixelWidth)x\($0.pixelHeight) id \($0.ioModeID) \(String(format: "%g", $0.refreshHz)) Hz" } ?? "unknown")")
     print("scope: \(applyScope); holding \(holdSeconds)s...")
     sleep(holdSeconds)
     print("exiting: preview scope reverts now.")
   } catch {
     print("apply FAILED: \(error)")
+    exit(4)
+  }
+case "identity":
+  // Same inputs the app's live checkup passes. No I2C transaction is involved,
+  // so a write-only panel answers exactly like one that reads.
+  guard let target = displayFilter else {
+    print("identity requires --display <id>")
+    exit(2)
+  }
+  let identityConfigurator = CoreGraphicsDisplayConfigurator()
+  let identityNative = identityConfigurator.nativePixels(for: target).map { ($0.width, $0.height) } ?? (0, 0)
+  // The key the app files runs under, so the probe and a stored report name the
+  // same display. DisplayConfigIdentity's key is a separate namespace for mode
+  // state and would name a directory nothing writes.
+  let identityKey: String
+  if CGDisplayIsBuiltin(target) != 0 {
+    identityKey = "builtIn"
+  } else if let discovered = DisplayDiscovery.discover().first(where: { $0.display.id == target }) {
+    identityKey = discovered.display.persistenceKey
+  } else {
+    print("display \(target) has no DDC service, so the app files no checkup runs under it")
+    exit(5)
+  }
+  guard let identity = CheckupIdentityFacts.read(
+    displayID: target, identityKey: identityKey, vendorID: CGDisplayVendorNumber(target),
+    modelID: CGDisplayModelNumber(target), nativePixels: identityNative,
+    maxRefreshHz: DisplayModeCatalog.distinctRates(identityConfigurator.modes(for: target)).max())
+  else {
+    // The display exposed no parsed EDID record. Distinct from a checkup
+    // failure, and reported as such.
+    print("no DisplayAttributes record for display \(target)")
+    exit(3)
+  }
+  let identityEncoder = JSONEncoder()
+  identityEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+  guard let identityJSON = try? identityEncoder.encode(identity) else {
+    print("the identity record for display \(target) could not be encoded")
+    exit(4)
+  }
+  print(String(decoding: identityJSON, as: UTF8.self))
+case "refreshsweep":
+  // Applies every native-size rate at preview scope and grades on what
+  // currentMode reports afterwards. This RECONFIGURES the display.
+  guard let target = displayFilter else {
+    print("refreshsweep requires --display <id>")
+    exit(2)
+  }
+  let sweepRunner = CheckupLiveModeRunner(
+    configurator: CoreGraphicsDisplayConfigurator(), displayID: target)
+  let sweepClaims = await sweepRunner.runRefreshSweep()
+  for claim in sweepClaims {
+    print("\(claim.id): \(claim.verdict.kind): \(claim.verdict.text)")
+  }
+  if sweepClaims.isEmpty {
+    print("no CoreGraphics modes at the native size on display \(target): nothing was swept")
+  }
+  // Preview scope reverts on exit, but restore explicitly and read the achieved
+  // state back: a restore that reports success is not a restore that happened.
+  let sweepRestored = await sweepRunner.restore()
+  print("restore: \(sweepRestored ? "achieved, the display is back on its pre-run mode" : "NOT ACHIEVED, the display is not on its pre-run mode")")
+  // A sweep that measured nothing is not a pass, and neither is one that left
+  // the display somewhere else.
+  let sweepAllObserved = !sweepClaims.isEmpty && sweepClaims.allSatisfy {
+    if case .observed = $0.verdict { return true }
+    return false
+  }
+  exit(sweepAllObserved && sweepRestored ? 0 : 4)
+case "checkup":
+  guard arguments.count == 3, arguments[1] == "validate" else {
+    print("usage: candela-probe checkup validate <file>")
+    exit(2)
+  }
+  let reportURL = URL(fileURLWithPath: arguments[2])
+  // The directory is irrelevant to `load`, which reads the URL it is handed;
+  // this is the same decoder and the same hash check the app's history uses.
+  let reportEnvelope: CheckupReportEnvelope
+  do {
+    reportEnvelope = try CheckupStore(directory: URL(fileURLWithPath: "/")).load(url: reportURL)
+  } catch {
+    print("could not read \(reportURL.path) as a checkup report: \(error.localizedDescription)")
+    exit(3)
+  }
+  if reportEnvelope.validate() {
+    print("valid")
+    print(reportEnvelope.report.summary.line)
+  } else {
+    print("INVALID: hash does not match the body")
+    print(reportEnvelope.report.summary.line)
     exit(4)
   }
 case "conform":

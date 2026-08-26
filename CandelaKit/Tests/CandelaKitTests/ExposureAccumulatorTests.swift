@@ -180,6 +180,50 @@ struct ExposureAccumulatorTests {
     #expect(acc.map == .empty)
   }
 
+  // MARK: - Booked emission
+
+  /// `sampleCount` counts 60 s readings and the OLED Care page renders it as
+  /// "N of 30 readings", so a booking must not touch it.
+  @Test func aBookedShowingMovesTheCellsAndNotTheSampleCount() throws {
+    var acc = ExposureAccumulator()
+    let grid = [Double](repeating: 0.5, count: PanelGrid.cellCount)
+    let start = Date(timeIntervalSince1970: 1000)
+    acc.bookEmission(
+      displayGrid: grid, cols: PanelGrid.cols, rows: PanelGrid.rows,
+      through: uprightTransform, elapsed: 8, at: start)
+    #expect(acc.map.cells.allSatisfy { $0 > 0 })
+    #expect(acc.map.sampleCount == 0)
+    #expect(acc.hasEnoughSamplesForAnalysis == false)
+    #expect(try #require(acc.map.firstSample) == start)
+    #expect(try #require(acc.map.lastSample) == start)
+  }
+
+  @Test func accumulatingStillCountsAReadingBesideABooking() {
+    var acc = ExposureAccumulator()
+    let grid = [Double](repeating: 0.5, count: PanelGrid.cellCount)
+    let start = Date(timeIntervalSince1970: 0)
+    acc.accumulate(
+      displayGrid: grid, cols: PanelGrid.cols, rows: PanelGrid.rows,
+      through: uprightTransform, elapsed: 60, at: start)
+    #expect(acc.map.sampleCount == 1)
+    acc.bookEmission(
+      displayGrid: grid, cols: PanelGrid.cols, rows: PanelGrid.rows,
+      through: uprightTransform, elapsed: 8, at: start.addingTimeInterval(60))
+    #expect(acc.map.sampleCount == 1)
+    acc.accumulate(
+      displayGrid: grid, cols: PanelGrid.cols, rows: PanelGrid.rows,
+      through: uprightTransform, elapsed: 60, at: start.addingTimeInterval(120))
+    #expect(acc.map.sampleCount == 2)
+  }
+
+  @Test func aBookingWithAMalformedGridIsRefusedWhole() {
+    var acc = ExposureAccumulator()
+    acc.bookEmission(
+      displayGrid: [0.5, 0.5, 0.5], cols: PanelGrid.cols, rows: PanelGrid.rows,
+      through: uprightTransform, elapsed: 8, at: Date(timeIntervalSince1970: 0))
+    #expect(acc.map == .empty)
+  }
+
   // MARK: - Malformed input
 
   @Test func mismatchedGridDimensionsDoNotTrap() {

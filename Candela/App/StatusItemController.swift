@@ -112,6 +112,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// Display Health windows (OCR-A1, #185): held like the confirmation
   /// windows above, app-lifetime, one window per display key inside.
   private lazy var displayHealthPresenter = DisplayHealthWindowPresenter(model: model)
+  /// CK28: built on first use, app-lifetime, like the Display Health presenter above.
+  private var checkupWindow: CheckupWindowController?
   /// Stored (review M23) so the topology loop can `cleanupDisplay` departed
   /// displays' HUD panels; the executor shares this same instance.
   private let hud = BrightnessHUD()
@@ -138,6 +140,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
   /// freeze the store at the launch sample without anything saying so.
   private lazy var mirrorSampler = MirrorTopologySampler(store: model.mirrorTopology)
   private let log = Logger(subsystem: "com.rydersel.Candela", category: "keys")
+  private let checkupLog = Logger(subsystem: "com.rydersel.Candela", category: "checkup")
 
   func applicationDidFinishLaunching(_: Notification) {
     // D11: the notice states exactly what safe mode does and exactly what it
@@ -492,6 +495,9 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         self.interferenceMonitor.resetCounter()
         for id in departed {
           self.hud.cleanupDisplay(id)
+          // CK27: the target leaving ends the run as incomplete, naming the leg
+          // it was in. A no-op for every other display, and for no run at all.
+          self.checkupWindow?.displayDisconnected(id)
         }
         // HDR state may have changed under the 2 s cache (mode switches
         // themselves trigger reconfiguration) — drop it BEFORE the
@@ -728,6 +734,7 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
     settingsActions.openDisplayHealth = { [weak self] key in
       self?.displayHealthPresenter.open(key: key)
     }
+    settingsActions.openCheckup = { [weak self] in self?.checkupController().present() }
     // D12: a full-domain wipe removes prefsSchemaVersion, so the post-reset
     // state IS a first-run state and gets the same window.
     settingsActions.postReset = { [weak self] in self?.presentOnboarding() }
@@ -788,6 +795,29 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       hudDemoTimer = timer
     }
   #endif
+
+  /// Not a property initializer: the environment closure has to name the
+  /// controller it is being handed to.
+  private func checkupController() -> CheckupWindowController {
+    if let checkupWindow { return checkupWindow }
+    let controller = CheckupWindowController(
+      environment: { [unowned self] in
+        await CheckupLiveEnvironment.current(
+          model: self.model,
+          presenter: self.checkupController().fieldWindow,
+          coordinator: self.model.oledCare)
+      },
+      onSaved: { [checkupLog] envelope in
+        do {
+          try CheckupStore(directory: CheckupStore.defaultDirectory()).save(envelope)
+        } catch {
+          checkupLog.error(
+            "checkup report could not be saved: \(String(describing: error), privacy: .public)")
+        }
+      })
+    checkupWindow = controller
+    return controller
+  }
 
   /// The Setup window (user-facing name; "onboarding" is internal only).
   private func presentOnboarding() {

@@ -253,6 +253,53 @@ public class Arm64DDC: NSObject {
     return (Int(horizontal / 10), Int(vertical / 10))
   }
 
+  /// The `DisplayAttributes` record (EDID as macOS parsed it at connection) of
+  /// the framebuffer entry that scores highest for this display.
+  ///
+  /// Not gated on a following `DCPAVServiceProxy` node the way the DDC pool
+  /// walk is: identity does not depend on DDC health, and that gate drops every
+  /// panel with no I2C route, the built-in included. No cross-display
+  /// exclusivity either; ties go to the first entry in walk order.
+  /// Nil when nothing scores above zero: the display exposed no parsed EDID record.
+  static func displayAttributes(displayID: CGDirectDisplayID) -> [String: Any]? {
+    let ioregRoot: io_registry_entry_t = IORegistryGetRootEntry(kIOMainPortDefault)
+    defer { IOObjectRelease(ioregRoot) }
+    var iterator = io_iterator_t()
+    guard IORegistryEntryCreateIterator(ioregRoot, "IOService", IOOptionBits(kIORegistryIterateRecursively), &iterator) == KERN_SUCCESS else {
+      return nil
+    }
+    defer { IOObjectRelease(iterator) }
+    var candidates: [(score: Int, entry: io_service_t)] = []
+    defer { for candidate in candidates { IOObjectRelease(candidate.entry) } }
+    while let objectOfInterest = self.ioregIterateToNextObjectOfInterest(interests: ["AppleCLCD2", "IOMobileFramebufferShim"], iterator: &iterator) {
+      let details = self.getIORegServiceAppleCDC2Properties(entry: objectOfInterest.entry)
+      let score = self.ioregMatchScore(displayID: displayID, ioregEdidUUID: details.edidUUID, ioDisplayLocation: details.ioDisplayLocation, ioregProductName: details.productName, ioregSerialNumber: details.serialNumber)
+      candidates.append((score, objectOfInterest.entry))
+    }
+    return self.bestMatchingRecord(among: candidates.map { candidate in
+      (candidate.score, { Self.displayAttributesRecord(entry: candidate.entry) })
+    })
+  }
+
+  /// Highest score above zero wins, ties to the first in walk order; nil when the
+  /// winner has no readable record. An unreadable record must not disqualify the
+  /// winner: with two panels of the same vendor the loser's record parses fine
+  /// and would report the twin's serial as this display's. One lazy read, winner only.
+  static func bestMatchingRecord(among candidates: [(score: Int, record: () -> [String: Any]?)]) -> [String: Any]? {
+    var winner: (index: Int, score: Int)?
+    for (index, candidate) in candidates.enumerated() where candidate.score > (winner?.score ?? 0) {
+      winner = (index, candidate.score)
+    }
+    return winner.flatMap { candidates[$0.index].record() }
+  }
+
+  static func displayAttributesRecord(entry: io_service_t) -> [String: Any]? {
+    guard let unmanagedAttributes = IORegistryEntryCreateCFProperty(entry, "DisplayAttributes" as CFString, kCFAllocatorDefault, IOOptionBits(kIORegistryIterateRecursively)) else {
+      return nil
+    }
+    return unmanagedAttributes.takeRetainedValue() as? [String: Any]
+  }
+
   static func ioregIterateToNextObjectOfInterest(interests: [String], iterator: inout io_iterator_t) -> (name: String, entry: io_service_t, preceedingEntry: io_service_t)? {
     var entry: io_service_t = IO_OBJECT_NULL
     var preceedingEntry: io_service_t = IO_OBJECT_NULL
