@@ -5,9 +5,9 @@ import Testing
 @Suite("Checkup verdicts")
 struct CheckupVerdictTests {
   @Test func everyVerdictCarriesItsEvidence() {
-    let v = CheckupVerdict.observed("achieved 3840 by 2160 at 120 Hz; macOS reports")
+    let v = CheckupVerdict.observed("achieved 3840 by 2160 at 120 Hz, as macOS reports it")
     #expect(v.kind == "observed")
-    #expect(v.text == "achieved 3840 by 2160 at 120 Hz; macOS reports")
+    #expect(v.text == "achieved 3840 by 2160 at 120 Hz, as macOS reports it")
     #expect(CheckupVerdict.refused("unknown mode id 7").kind == "refused")
     #expect(CheckupVerdict.notObserved("write-only DDC").kind == "notObserved")
     #expect(CheckupVerdict.selfReported("no marks on black").kind == "selfReported")
