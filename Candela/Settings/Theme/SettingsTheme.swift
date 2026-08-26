@@ -14,10 +14,10 @@ enum SettingsTheme {
 
   /// A destination changing, in the sidebar and in the detail column.
   ///
-  /// Halved from 0.25 on 2026-08-25: switching pages is the most repeated act
-  /// in this window, and at the old pair the swap was still finishing when the
-  /// next click arrived. The ratio to `canvasRelight` is what SV8 asks for, so
-  /// both were halved together rather than one of them tuned.
+  /// Half of SV8's stated 0.25: switching pages is the most repeated act in
+  /// this window, and at 0.25 the swap was still finishing when the next click
+  /// arrived. `canvasRelight` is halved with it, because the ratio between the
+  /// two is what SV8 is really asking for.
   static let selectionMotion: Animation = .easeInOut(duration: 0.125)
   /// The canvas re-tinting under a new destination: slower than the selection
   /// itself, so the light lags the click the way stage light does.
@@ -41,8 +41,7 @@ enum SettingsTheme {
   /// then have to agree.
   static let rowVerticalPadding: CGFloat = 6
   /// The card's own inner vertical padding. Named because `SettingsActionRow`
-  /// stands in for it under a row that a divider follows, and a compensation
-  /// that drifted from the thing it compensates for would be worse than none.
+  /// restates it under a row a divider follows, and the two must not drift.
   static let cardVerticalPadding: CGFloat = 10
 
   /// What `.disabled(true)` looks like on anything this theme paints itself.

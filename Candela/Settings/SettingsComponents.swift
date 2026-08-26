@@ -256,17 +256,15 @@ extension View {
 /// A row whose control is an ACTION rather than a setting: the sentence at the
 /// leading edge, the button (or buttons) at the trailing one.
 ///
-/// `SettingRow` cannot draw this shape, and the reason is in its own comment: it
-/// hands the control the card's full width so the control can place its own
-/// label, which is what puts a `Toggle`'s switch at the trailing edge. A
-/// `Button` carries no such label, so it collapses to its natural width at the
-/// leading edge and the rest of the card reads as dead space. One of those is
-/// unremarkable; the About page had three stacked, which is what made it look
-/// like the content had slid off the right of the card.
+/// `SettingRow` cannot draw this shape, for the reason in its own comment: it
+/// hands the control the card's full width so the control places its own label,
+/// which is what puts a `Toggle`'s switch at the trailing edge. A `Button`
+/// carries no such label, so it collapses to its natural width at the leading
+/// edge and the rest of the card reads as dead space.
 ///
 /// The sentence is the row's visible explanation AND the actions'
-/// `accessibilityHint`, the same seam and the same reason as `SettingRow`: a new
-/// row cannot forget it.
+/// `accessibilityHint`, same seam and same reason as `SettingRow`: a new row
+/// cannot forget it.
 struct SettingsActionRow<Actions: View>: View {
   @Environment(\.isEnabled) private var isEnabled
 
@@ -316,25 +314,19 @@ struct SettingsActionRow<Actions: View>: View {
         }
       }
       .opacity(isEnabled ? 1 : SettingsTheme.disabledOpacity)
-      // The sentence keeps its ideal width and this takes the rest, so the
-      // actions sit on the trailing edge whatever the sentence is.
       Spacer(minLength: 12)
       actions
         .accessibilityHint(sentence)
     }
     .frame(maxWidth: .infinity)
     // No vertical padding of its own, unlike `SettingRow`: the trailing button
-    // carries its own, and adding a row's worth on top of that stacked about
-    // twenty points of air over a one-line sentence at the head of a card.
-    //
-    // What is left is the card's own padding, which centres a row that is the
-    // card's only one. A row a divider follows is not centred by it: that row
-    // takes the card's padding above and a bare hairline below, which reads as
-    // a button shoved against the line under a card's worth of air. So it
-    // stands the missing padding in itself, by name so the two cannot drift.
+    // carries its own, and a row's worth on top stacked about twenty points of
+    // air over a one-line sentence at the head of a card.
+    // The card's padding then centres a lone row, but a row a divider follows
+    // gets that padding above and a bare hairline below, so it restates the
+    // card's value here.
     .padding(.bottom, dividerFollows ? SettingsTheme.cardVerticalPadding : 0)
-    // This row's rhythm is supplied here, so a row component nested inside it
-    // adds none of its own and the card keeps one rhythm.
+    // A row component nested inside this one adds no padding of its own.
     .environment(\.settingsRowIsPadded, true)
   }
 }
