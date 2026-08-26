@@ -63,7 +63,8 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     var environment = environment
     // Everything this controller does around a showing is on the window it
     // owns, so that window is the presenter.
-    environment.presenter = FieldPresenter(window: fieldWindow)
+    environment.presenter = FieldPresenter(
+      window: fieldWindow, beforeShow: { [weak self] entry in self?.moveOffTarget(entry) })
     let model = CheckupFlowModel(environment: environment)
     model.onSaved = onSaved
     self.model = model
@@ -81,8 +82,7 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
     window.contentView = NSHostingView(
       rootView: CheckupFlowView(
         model: model,
-        tappedRegion: { [weak self] in self?.fieldWindow.lastTap },
-        onSelectedDisplayChanged: { [weak self] entry in self?.moveOffTarget(entry) }))
+        tappedRegion: { [weak self] in self?.fieldWindow.lastTap }))
     window.setContentSize(NSSize(width: 760, height: 620))
     startTick()
   }
@@ -118,9 +118,18 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
 
   /// The field covers the target, so the flow window belongs on another display
   /// when there is one; otherwise the field's strip carries the controls (CK16).
-  private func moveOffTarget(_ entry: CheckupDisplayEntry?) {
-    guard let window, let entry else { return }
-    guard let host = NSScreen.screens.first(where: { $0.displayID != entry.id }) else { return }
+  /// Called as the field goes up, not at pick time: a window that jumped while
+  /// the person was still choosing read as a random move, since nothing on
+  /// screen yet explained it.
+  private func moveOffTarget(_ entry: CheckupDisplayEntry) {
+    guard let window else { return }
+    let screens = NSScreen.screens.compactMap { screen -> CheckupFlowWindowHost.Screen? in
+      screen.displayID.map { .init(id: $0, frame: screen.frame) }
+    }
+    guard
+      let pick = CheckupFlowWindowHost.host(for: window.frame, target: entry.id, screens: screens),
+      let host = NSScreen.screens.first(where: { $0.displayID == pick.id })
+    else { return }
     let frame = host.visibleFrame
     let size = window.frame.size
     window.setFrameOrigin(
@@ -175,10 +184,15 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
   @MainActor
   private final class FieldPresenter: CheckupFieldPresenting {
     private let window: CheckupFieldWindow
+    private let beforeShow: (CheckupDisplayEntry) -> Void
 
-    init(window: CheckupFieldWindow) { self.window = window }
+    init(window: CheckupFieldWindow, beforeShow: @escaping (CheckupDisplayEntry) -> Void) {
+      self.window = window
+      self.beforeShow = beforeShow
+    }
 
     func show(kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry) -> Bool {
+      beforeShow(display)
       window.instructionText = CheckupCopy.instruction(for: kind)
       return window.show(kind: kind, plant: plant, on: display)
     }
