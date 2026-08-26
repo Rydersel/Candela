@@ -420,47 +420,20 @@ struct CheckupSummaryPage: View {
   @State private var saveError: String?
 
   var body: some View {
-    CheckupPageScaffold(title: CheckupCopy.summaryTitle, subtitle: CheckupCopy.headerSentence) {
-      VStack(alignment: .leading, spacing: 18) {
-        if let report = model.report {
-          Text(CheckupCopy.subjectLine(for: report))
-            .font(.callout.weight(.medium))
-            .foregroundStyle(OnboardingStyle.titleColor)
-            .fixedSize(horizontal: false, vertical: true)
-          Text(report.summary.line)
-            .font(.callout)
-            .foregroundStyle(OnboardingStyle.titleColor)
-            .fixedSize(horizontal: false, vertical: true)
-          Text(completionLine(report))
-            .font(.caption)
-            .foregroundStyle(OnboardingStyle.faintColor)
-            .fixedSize(horizontal: false, vertical: true)
-          if let occlusion = CheckupCopy.occlusionLine(
-            fieldIDs: report.partiallyOccludedFields) {
-            Text(occlusion)
-              .font(.caption)
-              .foregroundStyle(OnboardingStyle.faintColor)
-              .fixedSize(horizontal: false, vertical: true)
-          }
-          ForEach(CheckupFamily.allCases, id: \.self) { family in
-            let claims = report.claims.filter { $0.family == family }
-            if !claims.isEmpty {
-              VStack(alignment: .leading, spacing: 10) {
-                Text(CheckupCopy.familyTitle(family))
-                  .font(.caption.weight(.semibold))
-                  .foregroundStyle(OnboardingStyle.bodyColor)
-                  .textCase(.uppercase)
-                CheckupClaimList(claims: claims)
-                if family == .visualField {
-                  Text(CheckupCopy.selfReportedNote)
-                    .font(.caption)
-                    .foregroundStyle(OnboardingStyle.faintColor)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-              }
-            }
-          }
-        }
+    // The document's own first line is the header sentence, so the scaffold
+    // does not print it a second time above it.
+    CheckupPageScaffold(title: CheckupCopy.summaryTitle, subtitle: nil) {
+      // CK31: the page shows the document itself, not a second layout of the
+      // same facts. What is read here is what Copy summary puts on the
+      // clipboard and what the exported file carries, so a reader never has to
+      // work out which of two shapes the report really says.
+      if let report = model.report {
+        Text(verbatim: CheckupSummaryText.render(report))
+          .font(.caption.monospaced())
+          .foregroundStyle(OnboardingStyle.bodyColor)
+          .textSelection(.enabled)
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity, alignment: .leading)
       }
     } actions: {
       VStack(spacing: 10) {
@@ -484,13 +457,6 @@ struct CheckupSummaryPage: View {
       } message: {
         Text(verbatim: saveError ?? "")
       }
-    }
-  }
-
-  private func completionLine(_ report: CheckupReport) -> String {
-    switch report.completion {
-    case .complete: CheckupCopy.summaryComplete
-    case .incomplete(let reason): CheckupCopy.summaryIncomplete(reason: reason)
     }
   }
 

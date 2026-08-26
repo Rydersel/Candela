@@ -17,8 +17,8 @@ enum CheckupPaneCopy {
   static let run = "Run a checkup"
   static let runNote =
     "One run covers one display: what it reports about itself, what it answers over DDC, "
-    + "its native mode and its refresh rates, then a set of colour fields you look at yourself. "
-    + "The run opens in its own window, and you can stop it at any point."
+    + "its native mode, its refresh rates and its HDR support, then a set of colour fields you "
+    + "look at yourself. The run opens in its own window, and you can stop it at any point."
 
   static let historyTitle = "Past checkups"
   static let emptyHistory = "No checkups recorded for this display yet."
@@ -51,6 +51,27 @@ enum CheckupPaneCopy {
   }
 }
 
+/// Which display the history opens on.
+///
+/// The built-in comes first in `allControlledStates`, so "the first display"
+/// opens a fresh external's owner on a laptop panel that has never been checked
+/// while the run they just finished sits behind the picker. The store decides
+/// instead: the display carrying the most recent run, then the first external,
+/// then whatever is left.
+///
+/// Pure, and separated from the pane so the rule can be read without a store or
+/// an `AppModel` behind it.
+enum CheckupHistoryScope {
+  static func defaultKey(_ candidates: [(key: String, isBuiltIn: Bool, latestRun: Date?)])
+    -> String? {
+    let dated = candidates.compactMap { candidate in
+      candidate.latestRun.map { (key: candidate.key, date: $0) }
+    }
+    if let newest = dated.max(by: { $0.date < $1.date }) { return newest.key }
+    return (candidates.first { !$0.isBuiltIn } ?? candidates.first)?.key
+  }
+}
+
 /// The Checkup pillar (CK28): the launcher, this display's past runs, and the
 /// one place a report somebody sends you can be checked against its own hash.
 ///
@@ -78,6 +99,10 @@ struct CheckupPane: View {
   /// Resolved on every render rather than pinned on arrival, so a display that
   /// departs falls back to a connected one instead of listing nothing.
   @State private var scopedKey: String?
+  /// Set the first time the picker is used, and never cleared while the pane
+  /// lives. Until then the scope follows the store, so a run that finishes
+  /// while this pane is open moves the history to the display it ran on.
+  @State private var chosenByHand = false
   @State private var runs: [CheckupStoredRun] = []
   @State private var verification: String?
 
@@ -92,14 +117,19 @@ struct CheckupPane: View {
       historySection
       verifySection
     }
-    .onAppear { reload() }
+    .onAppear { refresh() }
     // Keyed on the RESOLVED display rather than on `scopedKey`: a departure
     // moves the scope with nothing writing that key, and a switcher change
-    // moves it too, so one observer covers both.
-    .onChange(of: scoped?.display.persistenceKey) { reload() }
+    // moves it too, so one observer covers both. The verification line goes
+    // with it: it answered about a file chosen while another display was on
+    // screen, and leaving it there reads as an answer about this one.
+    .onChange(of: scoped?.display.persistenceKey) {
+      verification = nil
+      reload()
+    }
     .onChange(of: activeState) { _, state in
       guard state != .inactive else { return }
-      reload()
+      refresh()
     }
   }
 
@@ -133,6 +163,26 @@ struct CheckupPane: View {
       hardwareName: state.display.name)
   }
 
+  /// One listing per display: it picks the default scope and fills the history
+  /// from the same read, so arriving on the pane costs one pass over the store.
+  private func refresh() {
+    let listings = displays.map { state in
+      (state: state, runs: (try? store.list(identityKey: state.display.persistenceKey)) ?? [])
+    }
+    var key = scopedKey
+    if !chosenByHand {
+      let builtInID = model.builtIn?.id
+      key = CheckupHistoryScope.defaultKey(
+        listings.map {
+          (key: $0.state.display.persistenceKey, isBuiltIn: $0.state.id == builtInID,
+           latestRun: $0.runs.first?.startedAt)
+        })
+      scopedKey = key
+    }
+    let resolved = listings.first { $0.state.display.persistenceKey == key } ?? listings.first
+    runs = resolved?.runs ?? []
+  }
+
   private func reload() {
     guard let key = scoped?.display.persistenceKey else {
       runs = []
@@ -154,7 +204,12 @@ struct CheckupPane: View {
         if displays.count > 1, let scoped {
           Picker(
             "Display",
-            selection: Binding(get: { scoped.display.persistenceKey }, set: { scopedKey = $0 })
+            selection: Binding(
+              get: { scoped.display.persistenceKey },
+              set: {
+                scopedKey = $0
+                chosenByHand = true
+              })
           ) {
             ForEach(displays, id: \.display.persistenceKey) { candidate in
               // A display's name, never a lookup key.

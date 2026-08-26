@@ -213,8 +213,47 @@ enum CheckupCopy {
     "This run ended early: \(reason). Everything recorded before that point stands."
   }
 
-  static let selfReportedNote =
-    "The visual fields are your own attestations, recorded at the control sensitivity above. Candela did not see your screen."
+  // MARK: - The document
+
+  /// CK30: the document says in its own body that the visual fields are
+  /// attestations rather than measurements. Its own sentence, because the
+  /// summary page can point at the control sensitivity on screen above it and
+  /// a file handed to a stranger cannot.
+  static let attestationNote =
+    "These are the user's attestations at the recorded control sensitivity."
+
+  static let serialLabel = "Serial:"
+  static let manufacturedLabel = "Manufactured:"
+  static let nativeResolutionLabel = "Native resolution:"
+  static let maximumRefreshLabel = "Maximum refresh:"
+  static let hdrFlagsLabel = "HDR flags in the display's EDID:"
+  static let macOSLabel = "macOS:"
+  static let notReported = "not reported"
+  static let flagPresent = "present"
+  static let flagAbsent = "absent"
+
+  /// What stands in for the identity block when the identity leg did not run,
+  /// or ran and read nothing. CK30: a run that never read the display may not
+  /// print a serial, a size or an EDID flag, because every one of those would
+  /// be a claim about a display nobody asked.
+  static let identityNotRead = "Identity: not read from the display"
+
+  static func manufactured(week: Int, year: Int) -> String {
+    "\(manufacturedLabel) week \(week) of \(year)"
+  }
+
+  static func hdrFlagsLine(pq: Bool, hdrGamma: Bool) -> String {
+    "\(hdrFlagsLabel) PQ \(pq ? flagPresent : flagAbsent), "
+      + "HDR gamma \(hdrGamma ? flagPresent : flagAbsent)"
+  }
+
+  /// How the run ended, as the document's last line.
+  static func completionLine(_ completion: CheckupCompletion) -> String {
+    switch completion {
+    case .complete: "Completion: complete. \(summaryComplete)"
+    case .incomplete(let reason): "Completion: incomplete. \(summaryIncomplete(reason: reason))"
+    }
+  }
 
   static let export = "Export report"
   static let copySummary = "Copy summary"
@@ -290,7 +329,11 @@ enum CheckupCopy {
      plantDisclosure, plantMissedTwice, showAgain, showAgainCap, start, continueLabel, back,
      answerPrompt, recordedPrefix, answerNothing, answerOne, answerMore, answerRound,
      answerNotRound, tapHint, secondDotTitle, secondDotPrompt, onlyDisplayStrip, summaryTitle,
-     summaryComplete, selfReportedNote, export, copySummary, copied, exportFailed, acknowledge,
+     summaryComplete, export, copySummary, copied, exportFailed, acknowledge,
+     attestationNote, serialLabel, manufacturedLabel, nativeResolutionLabel,
+     maximumRefreshLabel, hdrFlagsLabel, macOSLabel, notReported, flagPresent, flagAbsent,
+     identityNotRead, manufactured(week: 51, year: 2025), hdrFlagsLine(pq: true, hdrGamma: false),
+     completionLine(.complete), completionLine(.incomplete(reason: closedReason)),
      headerSentence, plantMissed(size: 4), planWorstCase(seconds: 600), secondsLeft(1),
      secondsLeft(20), summaryIncomplete(reason: closedReason), closedReason, fieldWindowTitle,
      detectedAt(pixels: 4),
