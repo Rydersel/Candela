@@ -58,19 +58,31 @@ enum CheckupLiveEnvironment {
     }
   }
 
-  /// Reads a capability string for every external the D24 probe has no entry
-  /// for, BEFORE the plan grades anything off it. A failed read caches the
-  /// verdict and not the string, and `CapabilityProbePolicy` then declines to
-  /// ask again that session; inheriting that nil would class a Dell write-only
-  /// and put "readback cannot be observed" in a saved report. HDR still skips
-  /// the read, since DDC is dead while HDR is engaged.
+  /// One pass over the live state the plan grades off: the panel's HDR state
+  /// read now, then a capability string for every external the D24 probe has no
+  /// entry for, all BEFORE the plan grades anything.
+  ///
+  /// HDR comes from the display itself, not from the controller's cached
+  /// mirror: that mirror goes stale the moment HDR is toggled outside the app,
+  /// and a stale `false` pre-grades the capability rows "write-only over DDC"
+  /// when the honest answer is that readback cannot be observed in HDR at all.
+  /// A nil seam leaves the caller's value alone; the built-in is never measured.
+  ///
+  /// A failed capability read caches the verdict and not the string, and
+  /// `CapabilityProbePolicy` then declines to ask again that session; inheriting
+  /// that nil would class a Dell write-only and put "readback cannot be
+  /// observed" in a saved report. HDR still skips the read, since DDC is dead
+  /// while HDR is engaged.
   @MainActor
-  static func readingCapabilities(
-    into sources: [Source], writers: [String: any DDCWriting]
+  static func readingLiveState(
+    into sources: [Source], writers: [String: any DDCWriting], hdr: (any HDRToggling)?
   ) async -> [Source] {
     var filled: [Source] = []
     filled.reserveCapacity(sources.count)
     for var source in sources {
+      if let hdr, !source.isBuiltIn {
+        source.hdrEngaged = await hdr.measuredHDREnabled(displayID: source.id)
+      }
       guard source.capabilities == nil, !source.isBuiltIn,
         let writer = writers[source.identityKey],
         CapabilityProbePolicy.shouldProbe(
@@ -98,16 +110,17 @@ enum CheckupLiveEnvironment {
     let writers = Dictionary(
       states.map { ($0.display.persistenceKey, $0.writer) },
       uniquingKeysWith: { first, _ in first })
-    let sources = await readingCapabilities(
+    let hdr = model.hdrToggling
+    let sources = await readingLiveState(
       into: states.map { source(for: $0, model: model, configurator: configurator) },
-      writers: writers)
+      writers: writers,
+      hdr: hdr)
     let entries = entries(from: sources)
     let capabilities = Dictionary(
       sources.map { ($0.identityKey, $0.capabilities) }, uniquingKeysWith: { first, _ in first })
     let pixels = Dictionary(
       entries.map { ($0.identityKey, ($0.pixelWidth, $0.pixelHeight)) },
       uniquingKeysWith: { first, _ in first })
-    let hdr = model.hdrToggling
 
     return CheckupEnvironment(
       displays: entries,
@@ -176,7 +189,11 @@ enum CheckupLiveEnvironment {
       // Discovery admits only externals with a live DDC service, so membership
       // is the answer; the built-in carries a `NoopDDCWriter`.
       hasDDCService: !isBuiltIn,
-      hdrEngaged: state.controller.isHDREngaged,
+      // A starting value only: `readingLiveState` replaces it for every
+      // external with a read of the panel itself, because this is the app's
+      // cached mirror and anything toggled outside the app leaves it stale.
+      // The built-in has no DDC path for HDR to gate.
+      hdrEngaged: !isBuiltIn && state.controller.isHDREngaged,
       pixelWidth: native?.width ?? Int(CGDisplayPixelsWide(state.id)),
       pixelHeight: native?.height ?? Int(CGDisplayPixelsHigh(state.id)),
       // The field view's own height. `CGDisplayBounds` is in points and follows

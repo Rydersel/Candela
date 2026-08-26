@@ -29,9 +29,10 @@ struct CheckupLiveEnvironmentTests {
   /// unobservable, so a Dell whose earlier probe missed would carry that into a saved report.
   @Test @MainActor func aDisplayWithNoCachedStringIsAskedBeforeThePlanIsGraded() async {
     let reads = ReadCount()
-    let filled = await CheckupLiveEnvironment.readingCapabilities(
+    let filled = await CheckupLiveEnvironment.readingLiveState(
       into: [dell(capabilities: nil)],
-      writers: ["d": CountingWriter(answer: "(vcp(10 12 62))", reads: reads)])
+      writers: ["d": CountingWriter(answer: "(vcp(10 12 62))", reads: reads)],
+      hdr: nil)
     #expect(CheckupLiveEnvironment.entries(from: filled)[0].panelClass == .readsDDC)
     #expect(await reads.count == 1)
   }
@@ -42,9 +43,10 @@ struct CheckupLiveEnvironmentTests {
     let reads = ReadCount()
     var hdr = dell(capabilities: nil)
     hdr.hdrEngaged = true
-    let filled = await CheckupLiveEnvironment.readingCapabilities(
+    let filled = await CheckupLiveEnvironment.readingLiveState(
       into: [hdr],
-      writers: ["d": CountingWriter(answer: "(vcp(10 12 62))", reads: reads)])
+      writers: ["d": CountingWriter(answer: "(vcp(10 12 62))", reads: reads)],
+      hdr: nil)
     #expect(CheckupLiveEnvironment.entries(from: filled)[0].panelClass == .writeOnlyDDC)
     #expect(await reads.count == 0)
     // The classing is untrustworthy in that state, which is why the plan grades
@@ -54,9 +56,10 @@ struct CheckupLiveEnvironmentTests {
 
   @Test @MainActor func aCachedStringIsNotReReadOverTheWire() async {
     let reads = ReadCount()
-    let filled = await CheckupLiveEnvironment.readingCapabilities(
+    let filled = await CheckupLiveEnvironment.readingLiveState(
       into: [dell(capabilities: "(vcp(10 12))")],
-      writers: ["d": CountingWriter(answer: nil, reads: reads)])
+      writers: ["d": CountingWriter(answer: nil, reads: reads)],
+      hdr: nil)
     #expect(filled[0].capabilities == "(vcp(10 12))")
     #expect(await reads.count == 0)
   }
@@ -85,6 +88,37 @@ struct CheckupLiveEnvironmentTests {
     // The class is still what the string says; HDR is a run condition, not a
     // property of the panel.
     #expect(entries[0].panelClass == .readsDDC)
+  }
+
+  /// The app's cached HDR mirror is not a true mirror of the panel: HDR
+  /// engaged from outside the app leaves it reading `false`, which pre-grades
+  /// the capability rows write-only when readback cannot be observed at all.
+  @Test @MainActor func hdrIsMeasuredFromTheDisplayRatherThanTheCachedMirror() async {
+    let filled = await CheckupLiveEnvironment.readingLiveState(
+      into: [dell(capabilities: "(vcp(10 12))")],
+      writers: [:],
+      hdr: MeasuredHDR(measured: true))
+    let entry = CheckupLiveEnvironment.entries(from: filled)[0]
+    #expect(entry.hdrEngaged)
+    let caps = CheckupPlan.make(panelClass: entry.panelClass, hdrEngaged: entry.hdrEngaged)
+      .filter { $0.family == .capabilities }
+    #expect(caps.count == 3)
+    #expect(caps.allSatisfy { $0.pregraded == .notObserved(CheckupPlan.hdrEngagedCapabilityText) })
+  }
+
+  /// The inverse, so the measurement is the answer in both directions: a mirror
+  /// left reading engaged after HDR was turned off outside the app does not
+  /// cost a Dell its capability rows.
+  @Test @MainActor func aMeasuredReadClearsAStaleEngagedMirror() async {
+    var stale = dell(capabilities: "(vcp(10 12))")
+    stale.hdrEngaged = true
+    let filled = await CheckupLiveEnvironment.readingLiveState(
+      into: [stale], writers: [:], hdr: MeasuredHDR(measured: false))
+    let entry = CheckupLiveEnvironment.entries(from: filled)[0]
+    #expect(!entry.hdrEngaged)
+    let caps = CheckupPlan.make(panelClass: entry.panelClass, hdrEngaged: entry.hdrEngaged)
+      .filter { $0.family == .capabilities }
+    #expect(caps.allSatisfy { $0.pregraded == nil })
   }
 
   private func dell(capabilities: String?) -> CheckupLiveEnvironment.Source {
@@ -122,4 +156,17 @@ private struct CountingWriter: DDCWriting {
     await reads.note()
     return answer
   }
+}
+
+/// Answers the read-through with a fixed value while the cached question says
+/// the opposite, which is the split the checkup has to get right.
+private struct MeasuredHDR: HDRToggling {
+  let measured: Bool
+
+  func supportsHDR(displayID _: CGDirectDisplayID) async -> Bool { true }
+  func isHDREnabled(displayID _: CGDirectDisplayID) async -> Bool { !measured }
+  func measuredHDREnabled(displayID _: CGDirectDisplayID) async -> Bool { measured }
+  @discardableResult
+  func setHDR(displayID _: CGDirectDisplayID, enabled _: Bool) async -> Bool { false }
+  func displaysReconfigured() async {}
 }
