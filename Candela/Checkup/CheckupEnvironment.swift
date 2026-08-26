@@ -11,8 +11,7 @@ struct CheckupDisplayEntry: Equatable, Sendable, Identifiable {
   var name: String
   var isBuiltIn: Bool
   var isVirtual: Bool
-  /// A display mirroring another has no `NSScreen` of its own, so no field can
-  /// be drawn on it; it is dropped where entries are built, like a virtual one.
+  /// No `NSScreen` of its own, so no field can be drawn on it; filtered out with virtual displays.
   var isMirroring: Bool
   var panelClass: CheckupPanelClass
   /// True when the panel was in HDR as the run began. DDC is dead in that state,
@@ -20,8 +19,7 @@ struct CheckupDisplayEntry: Equatable, Sendable, Identifiable {
   var hdrEngaged: Bool
   var pixelWidth: Int
   var pixelHeight: Int
-  /// The display's height in points, which is the field view's height: the
-  /// instruction strip is sized in points and the plant is placed in pixels.
+  /// Points, the field view's unit: the strip is sized in points, the plant placed in pixels.
   var pointHeight: Double
   /// CK16: with nowhere else to put the instructions, they sit on the field
   /// itself and the report records the field as partially occluded.
@@ -32,8 +30,7 @@ struct CheckupDisplayEntry: Equatable, Sendable, Identifiable {
 /// because the live implementation is an AppKit window on the target panel.
 @MainActor
 protocol CheckupFieldPresenting: AnyObject {
-  /// False when the field never reached the glass, which is a display with no
-  /// `NSScreen`. A Void return let the flow book light nothing emitted.
+  /// False when the display has no `NSScreen` to draw on; the flow must not book a showing then.
   func show(kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry) -> Bool
   func hide()
 }

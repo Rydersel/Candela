@@ -100,8 +100,7 @@ final class CheckupFlowModel {
     // A leg already in flight owns the page it will move to; a second advance
     // would run the next one over it and record both against the wrong step.
     guard !finished, legInFlight == nil else { return }
-    // Read on the page it happened on; continuing past that page is the user
-    // acknowledging it.
+    // Advancing past the page it appeared on dismisses it.
     showFailureReason = nil
     switch page {
     case .scenario:
@@ -306,9 +305,8 @@ final class CheckupFlowModel {
     guard confirmation || cappedShowings(of: kind) < CheckupPlan.maxShowingsPerField else {
       return false
     }
-    // The presenter goes first and nothing is recorded until it says the field
-    // reached the glass: a counted showing books emission and grades an
-    // attestation, and neither may stand for a field nobody saw.
+    // Nothing is recorded until the presenter confirms the field is on screen:
+    // a counted showing books emission and grades an attestation.
     guard environment.presenter.show(kind: kind, plant: plant, on: display) else {
       showFailureReason = CheckupCopy.fieldNotShown
       return false
@@ -522,10 +520,8 @@ final class CheckupFlowModel {
     recordField(planted, verdict: .inconclusive(Self.ungradedText))
   }
 
-  /// The instruction strip's height in the field image's pixels, and zero on any
-  /// run that has somewhere else to put its instructions. A plant under the
-  /// strip is a miss the person could not have avoided, which lands as a double
-  /// miss and the copy that says a mark of that size would not be visible.
+  /// The instruction strip's height in field pixels; zero when the instructions
+  /// live elsewhere. A plant under the strip is a miss the person could not have avoided.
   static func stripBandPixels(on display: CheckupDisplayEntry) -> Int {
     guard display.isOnlyDisplay, display.pointHeight > 0 else { return 0 }
     return Int(

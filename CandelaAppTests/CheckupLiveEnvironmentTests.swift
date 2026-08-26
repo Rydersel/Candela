@@ -74,8 +74,7 @@ struct CheckupLiveEnvironmentTests {
     #expect(entries[0].isOnlyDisplay)
   }
 
-  /// HDR rides through to the entry, since the plan grades the capability rows
-  /// off it and the pick page says why.
+  /// The plan and the pick page both read this off the entry.
   @Test func hdrEngagedRidesThroughToTheEntry() {
     let entries = CheckupLiveEnvironment.entries(from: [
       source(id: 2, key: "d", name: "DELL", capabilities: "(vcp(10 12))", hasDDCService: true,

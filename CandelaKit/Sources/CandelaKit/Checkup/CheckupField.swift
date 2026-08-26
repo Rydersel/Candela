@@ -56,9 +56,8 @@ public enum CheckupField {
       let c = Double(v) / 255
       return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
     }
-    // A surface with no pixels emits nothing. Stated rather than left to the
-    // arithmetic: the witness card's coverage divides by the area, and the NaN
-    // that falls out of a zero one clamps to full white in the exposure booking.
+    // Stated rather than left to the arithmetic: coverage divides by the area,
+    // and the NaN from a zero one clamps to full white in the exposure booking.
     guard pixelWidth > 0, pixelHeight > 0 else { return 0 }
     switch kind {
     case .ramp:
@@ -77,10 +76,8 @@ public enum CheckupField {
   /// Never in the outer 5% of either axis: bezels and rounded corners hide
   /// a plant there, which would grade the user for the panel's geometry.
   ///
-  /// `bottomExclusion` is a band of pixels along the bottom edge, measured in the
-  /// same top-left-origin space, that the plant must clear entirely: on a
-  /// one-display run the instruction strip sits there, and a plant underneath it
-  /// is a miss the user could not have avoided.
+  /// `bottomExclusion`: pixels along the bottom edge, same top-left-origin space,
+  /// that the plant clears entirely; on a one-display run the instruction strip sits there.
   public static func plantPosition<G: RandomNumberGenerator>(
     width: Int, height: Int, size: Int, bottomExclusion: Int = 0, using rng: inout G
   ) -> CheckupPlant {

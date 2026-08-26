@@ -190,10 +190,8 @@ struct CheckupFlowModelTests {
     #expect(unpicked.report?.identity.identityKey == "")
   }
 
-  /// A display in HDR cannot answer a DDC read at all, so the three capability
-  /// rows say that and the runner is never asked. Left to the panel class, a
-  /// Dell whose cached string never arrived is pre-graded write-only, which is
-  /// false about the panel and lands in a saved report.
+  /// Left to the panel class, a Dell whose cached string never arrived would be
+  /// pre-graded write-only, which is false about the panel and lands in a saved report.
   @Test func anHDREngagedRunPregradesTheCapabilityRowsAndNeverRunsTheLeg() async {
     let runs = CheckupRunCount()
     let flow = CheckupFlowModel(environment: environment(
@@ -432,12 +430,10 @@ struct CheckupFlowModelTests {
 /// while the leg is still in flight.
 actor CheckupLegGate {
   private(set) var entered = false
-  /// How many times a leg reached the gate, which is how a second advance
-  /// running the same leg again becomes visible.
+  /// A second advance into the same leg shows up here as a count above one.
   private(set) var entries = 0
-  /// Every waiter, not one: a defect that lets a second advance into the same
-  /// leg would otherwise strand the first here and hang the suite instead of
-  /// failing it.
+  /// Every waiter, not one: a defect that lets a second advance in would
+  /// otherwise strand the first and hang the suite instead of failing it.
   private var waiting: [CheckedContinuation<Void, Never>] = []
   private var opened = false
 
@@ -457,8 +453,7 @@ actor CheckupLegGate {
   }
 }
 
-/// Counts what the flow actually asked for, so "the leg never ran" is an
-/// assertion rather than an absence.
+/// So "the leg never ran" is an assertion, not an absence.
 actor CheckupRunCount {
   private(set) var count = 0
   func note() { count += 1 }

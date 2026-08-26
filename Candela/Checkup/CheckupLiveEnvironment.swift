@@ -19,8 +19,7 @@ enum CheckupLiveEnvironment {
     var name: String
     var isBuiltIn: Bool
     var isVirtual: Bool
-    /// Mirroring another display, so it has no `NSScreen` and no field can be
-    /// drawn on it.
+    /// No `NSScreen` of its own, so no field can be drawn on it.
     var isMirroring: Bool
     /// The cached MCCS capabilities string. nil is "nobody has a string for
     /// this display", never "this display advertises nothing" (D24).
@@ -33,11 +32,10 @@ enum CheckupLiveEnvironment {
     var pointHeight: Double
   }
 
-  /// CK26: a virtual display is never a target, so it is dropped here rather
-  /// than at every surface. A mirroring display goes the same way, for the
-  /// reason in `CheckupCopy.mirroringReason`. `isOnlyDisplay` counts what
-  /// survives the filter: a display the flow cannot target is also one the flow
-  /// window cannot be sent to (CK16).
+  /// CK26: a virtual display is never a target, and neither is a mirroring one
+  /// (`CheckupCopy.mirroringReason`), so both drop here rather than at every
+  /// surface. `isOnlyDisplay` counts what survives: a display the flow cannot
+  /// target is also one the flow window cannot be sent to (CK16).
   static func entries(from sources: [Source]) -> [CheckupDisplayEntry] {
     let real = sources.filter { !$0.isVirtual && !$0.isMirroring }
     return real.map { source in
@@ -168,9 +166,8 @@ enum CheckupLiveEnvironment {
         friendlyName: prefs.friendlyName, hardwareName: state.display.name),
       isBuiltIn: isBuiltIn,
       isVirtual: isVirtual,
-      // Both halves: CoreGraphics names the mirrored-onto display, and the
-      // absent `NSScreen` is what actually stops a field being drawn. Either
-      // one alone would let a run fabricate a showing.
+      // Both halves: CoreGraphics names the mirrored-onto display, the missing
+      // `NSScreen` is what actually stops the draw. Either alone lets a run fabricate a showing.
       isMirroring: CGDisplayMirrorsDisplay(state.id) != kCGNullDirectDisplay
         || OverlayWindow.screen(for: state.id) == nil,
       // The D24 probe's string where it has one; `readingCapabilities` above

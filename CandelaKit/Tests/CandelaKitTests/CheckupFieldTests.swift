@@ -83,9 +83,8 @@ struct CheckupFieldTests {
     #expect(p.y == 1)
   }
 
-  /// The 104 pt strip on a one-display run covers the bottom of the panel, and a
-  /// plant under it is a miss the user could not have avoided. 3024x1964 in a
-  /// 982 pt view is the built-in, the panel the only-display run actually happens on.
+  /// 3024x1964 in a 982 pt view is the built-in, the panel a one-display run
+  /// actually happens on; the 104 pt strip covers its bottom edge.
   @Test func aBottomExclusionKeepsEveryPlantOutOfTheStripBand() {
     let height = 1964
     let band = Int(104.0 * Double(height) / 982.0)

@@ -503,10 +503,8 @@ case "identity":
   }
   let identityConfigurator = CoreGraphicsDisplayConfigurator()
   let identityNative = identityConfigurator.nativePixels(for: target).map { ($0.width, $0.height) } ?? (0, 0)
-  // The key the APP files a run under, so a probe reading and a stored report
-  // name the same display: DisplayDiscovery's persistence key (the EDID UUID,
-  // or name-manufacturer-serial) for an external, and the built-in's fixed
-  // spelling. DisplayConfigIdentity's key is a separate namespace for mode
+  // The key the app files runs under, so the probe and a stored report name the
+  // same display. DisplayConfigIdentity's key is a separate namespace for mode
   // state and would name a directory nothing writes.
   let identityKey: String
   if CGDisplayIsBuiltin(target) != 0 {

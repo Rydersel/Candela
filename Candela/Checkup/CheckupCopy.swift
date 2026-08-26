@@ -40,8 +40,7 @@ enum CheckupCopy {
   static let pickEmpty = "No display is attached that a checkup can run on."
 
   static func panelClassLine(_ c: CheckupPanelClass, hdrEngaged: Bool) -> String {
-    // A display with no DDC path has none in or out of HDR, so its own line is
-    // the true one; for the other two, HDR is why the readback cannot run.
+    // No-DDC keeps its own line: HDR changes nothing for a panel with no DDC path.
     guard c == .noDDC || !hdrEngaged else { return hdrEngagedLine }
     switch c {
     case .readsDDC: return "Answers DDC: readback checks will run."
@@ -50,17 +49,13 @@ enum CheckupCopy {
     }
   }
 
-  /// DDC is dead while a panel is in HDR, so the readback rows cannot run at
-  /// all. Says what to do about it, since the answer is one toggle away.
+  /// DDC is dead in HDR, so the line also says how to get the readback rows to run.
   static let hdrEngagedLine =
     "This display is in HDR mode, which stops DDC: readback checks will be recorded as not observed. Turn HDR off and run the checkup again to have them run."
 
-  /// Why a mirroring display is not offered. It has no screen of its own, so
-  /// there is nowhere to draw a field; the same fact stops a showing mid-run.
+  /// Quoted on the pick page and in the mid-run failure; both come from the missing NSScreen.
   static let mirroringReason = "mirroring another display; a field cannot be shown on it"
 
-  /// Published by the flow when a showing never reached the glass. Booking a
-  /// field nobody saw is the shape this replaces.
   static let fieldNotShown =
     "This field could not be shown on the display: \(mirroringReason). Nothing was recorded for it."
 

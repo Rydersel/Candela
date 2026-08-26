@@ -50,9 +50,7 @@ struct CheckupPlanTests {
     #expect(CheckupCheckID.refresh(hz: 119.88) == "refresh.119.9")
   }
 
-  /// A run started with the panel in HDR cannot read DDC at all, so the three
-  /// capability rows say so instead of blaming the panel. The write-only text is
-  /// the one that would be false on a Dell whose cached string never arrived.
+  /// The write-only text is the one that would be false on a Dell whose cached string never arrived.
   @Test func anHDREngagedRunPregradesTheCapabilityRowsWithTheHDRReason() {
     for panelClass in [CheckupPanelClass.readsDDC, .writeOnlyDDC] {
       let caps = CheckupPlan.make(panelClass: panelClass, hdrEngaged: true)

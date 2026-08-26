@@ -44,12 +44,9 @@ public enum CheckupPlan {
   public static let hdrEngagedCapabilityText =
     "DDC readback cannot be observed while this display is in HDR mode"
 
-  /// `hdrEngaged` is a property of the RUN, not of the panel, so it stays out of
-  /// `CheckupPanelClass`: that value is stored on every report as the panel's own
-  /// classification, and a raw value added to it would fail an older decoder.
-  /// While HDR is engaged the DDC classing is not trustworthy either, so the HDR
-  /// text outranks the write-only one; only a display with no DDC path at all
-  /// keeps its own reason.
+  /// `hdrEngaged` stays out of `CheckupPanelClass`: that enum is stored on every
+  /// report, and a new raw value would fail an older decoder. HDR outranks the
+  /// write-only reason (DDC classing is not trustworthy in HDR); no-DDC keeps its own.
   public static func make(panelClass: CheckupPanelClass, hdrEngaged: Bool) -> [Step] {
     let capabilityVerdict: CheckupVerdict? = switch (panelClass, hdrEngaged) {
     case (.noDDC, _): .notObserved("this display has no DDC path; readback cannot be observed")

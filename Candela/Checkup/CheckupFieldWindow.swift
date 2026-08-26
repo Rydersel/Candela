@@ -47,9 +47,7 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
 
   var windowForTest: NSWindow? { window }
 
-  /// False when the display has no `NSScreen`, which is what a display mirroring
-  /// another looks like from here: there is no glass of our own to draw on, and
-  /// the previous field would otherwise stay up while the flow counted a showing.
+  /// False when the display has no `NSScreen`, which is how a mirroring display looks from here.
   func show(kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry) -> Bool {
     guard let screen = OverlayWindow.screen(for: display.id) else { return false }
     let window =

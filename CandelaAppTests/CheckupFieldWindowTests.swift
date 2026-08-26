@@ -16,8 +16,7 @@ struct CheckupFieldWindowTests {
       pixelHeight: 100, pointHeight: 100, isOnlyDisplay: only)
   }
 
-  /// A display with no `NSScreen` is what a mirroring target looks like from
-  /// here, and a Void return let the flow book a field that never reached glass.
+  /// The mirroring case: no `NSScreen`, and the flow must not book a showing on it.
   @Test func showRefusesADisplayWithNoScreen() {
     var absent = entry(only: false)
     // No display carries this id, so `OverlayWindow.screen(for:)` answers nil.

@@ -168,9 +168,8 @@ public actor CheckupLiveModeRunner: CheckupModeRunning {
     rememberCurrentMode()
     let modes = configurator.modes(for: displayID)
     guard let native = modes.first(where: \.isNative) else {
-      // Silence would leave the plan's sweep row with no claim at all, which
-      // reads as a check that never happened rather than one that had nothing
-      // to sweep.
+      // An empty return leaves the sweep row with no claim, which reads as a
+      // check that never ran rather than one with nothing to sweep.
       return [
         CheckupClaim(
           family: .refresh, id: CheckupCheckID.refreshSweep,
