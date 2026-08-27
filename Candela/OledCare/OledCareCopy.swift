@@ -2,6 +2,17 @@ import CandelaKit
 import Foundation
 import SwiftUI
 
+/// Why OLED care is paused on a display. One engine state (`.suspended`) with
+/// several causes, and every surface that reports it has to name which: a
+/// person who never mirrored anything must not be told they did.
+enum OledCareSuspensionReason: Equatable, CaseIterable {
+  /// Mirroring the user set up.
+  case mirrored
+  /// The mirror Candela engages to render a synthesized size (SS8).
+  case synthesizedSize
+  case checkup
+}
+
 /// The words for the care states whose reason is not visible in the state
 /// itself: a lock dim that did not happen, and a pause whose cause the user may
 /// never have asked for.
@@ -28,38 +39,46 @@ enum OledCareCopy {
     }
   }
 
-  /// The OLED Care pane's status row for OC13's pause, which has two reasons
-  /// since SS8: mirroring the user set up, and the mirror Candela engages to
-  /// render a synthesized size. v1 pauses under both, so the row has to name
-  /// which one rather than telling a user they mirrored something they did not.
+  /// The OLED Care pane's status row for OC13's pause. One state under every
+  /// reason, so the row names which rather than telling a user they mirrored
+  /// something they did not. A reason and not a pair of bools, which could
+  /// express four states with words for two.
   ///
-  /// Neither arm ends in a period, ruled 2026-08-18: it now matches every
-  /// neighbouring status string, which is what a status row reads as.
-  static func suspendedStatus(synthesized: Bool) -> LocalizedStringKey {
-    synthesized
-      ? "Paused while a synthesized size is active"
-      : "Paused while this display is mirrored"
+  /// No arm ends in a period, ruled 2026-08-18: it matches every neighbouring
+  /// status string, which is what a status row reads as.
+  static func suspendedStatus(reason: OledCareSuspensionReason) -> LocalizedStringKey {
+    switch reason {
+    case .mirrored: "Paused while this display is mirrored"
+    case .synthesizedSize: "Paused while a synthesized size is active"
+    case .checkup: "Paused while a checkup field is showing"
+    }
   }
 
   /// The summary tile's short form of the same pause. Shorter than the status
   /// row and, unlike the lock-dim preview, still carrying its reason: the tile
   /// has room for four words, and "Paused" alone would leave the only surface
   /// on the overview page saying nothing about a mirror the user never made.
-  static func suspendedPreview(synthesized: Bool) -> String {
-    synthesized ? "Paused for a synthesized size" : "Paused while mirrored"
+  static func suspendedPreview(reason: OledCareSuspensionReason) -> String {
+    switch reason {
+    case .mirrored: "Paused while mirrored"
+    case .synthesizedSize: "Paused for a synthesized size"
+    case .checkup: "Paused for a checkup"
+    }
   }
 
   /// The hub's spoken preview of the pause, which carries the reason its
   /// two-word sighted neighbour leaves to the pane.
   ///
-  /// It now reads word for word like the status row above, and the two stay
+  /// It reads word for word like the status row above, and the two stay
   /// SEPARATE builders anyway: one is a sentence on a pane and the other is an
   /// accessibility label on a hub row, and deriving either from the other would
   /// make the next edit to one silently an edit to both.
-  static func suspendedSpokenPreview(synthesized: Bool) -> String {
-    synthesized
-      ? "Paused while a synthesized size is active"
-      : "Paused while this display is mirrored"
+  static func suspendedSpokenPreview(reason: OledCareSuspensionReason) -> String {
+    switch reason {
+    case .mirrored: "Paused while this display is mirrored"
+    case .synthesizedSize: "Paused while a synthesized size is active"
+    case .checkup: "Paused while a checkup field is showing"
+    }
   }
 
   /// What the two halves of the usage histogram actually count, said out loud

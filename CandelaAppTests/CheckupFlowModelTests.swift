@@ -12,12 +12,35 @@ struct CheckupFlowModelTests {
     var hides = 0
     /// The mirroring case: the window found no screen, so nothing reached glass.
     var refuses = false
+    /// The hold the real window takes for the life of a showing. `hide()` runs
+    /// on paths with nothing on screen, so a hide count cannot answer whether
+    /// care was left paused.
+    private(set) var holds: [String] = []
+    var isHolding: Bool { holds.last == "begin" }
     func show(kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry) -> Bool {
       guard !refuses else { return false }
       shown.append((kind, plant))
+      if !isHolding { holds.append("begin") }
       return true
     }
-    func hide() { hides += 1 }
+    func hide() {
+      hides += 1
+      if isHolding { holds.append("end") }
+    }
+  }
+
+  /// Balanced: opens with a begin, alternates, ends released. Anything else
+  /// leaves a panel's care paused with no field on it.
+  private func isBalanced(_ holds: [String]) -> Bool {
+    var open = false
+    for event in holds {
+      switch event {
+      case "begin" where !open: open = true
+      case "end" where open: open = false
+      default: return false
+      }
+    }
+    return !open
   }
 
   struct FakeCaps: CheckupCapabilitiesRunning {
@@ -98,6 +121,58 @@ struct CheckupFlowModelTests {
     #expect(envelope.report.claims.contains { $0.id == "field.black" && $0.verdict.kind == "selfReported" && $0.detectedAt == 4 })
     #expect(envelope.report.claims.contains { $0.id == "field.gray7" && $0.verdict == .selfReported("nothing seen; ungraded, no control on this field") })
     #expect(presenter.hides == presenter.shown.count)
+  }
+
+  /// A run that ends normally leaves nothing held: care resumes when the last
+  /// field comes down, with no resume step for a later edit to forget.
+  @Test func everyFieldReleasesItsCareHoldOnTheWayOut() async {
+    let presenter = FakePresenter()
+    let flow = CheckupFlowModel(environment: environment(presenter: presenter, entry: entry()))
+    await toFirstField(flow)
+    flow.startShowing()
+    flow.answer(.roundAndUncut, tappedRegion: nil)
+    await flow.advance()
+    for kind in CheckupFieldKind.protocolOrder {
+      flow.startShowing()
+      flow.answer(kind == .black ? .oneMark : .nothing,
+                  tappedRegion: kind == .black ? flow.plantRegionForTest : nil)
+      await flow.advance()
+    }
+    await flow.advance()
+    #expect(flow.page == .summary)
+    #expect(presenter.isHolding == false)
+    #expect(isBalanced(presenter.holds))
+    // The control: a presenter that never held anything cannot pass by doing
+    // nothing.
+    #expect(presenter.holds.count == CheckupFieldKind.protocolOrder.count * 2 + 2)
+  }
+
+  /// CK27's abandon runs mid-field, and the field's hold has to come down with
+  /// it: nothing else is left to release it.
+  @Test func abandoningMidFieldReleasesTheCareHold() async {
+    let presenter = FakePresenter()
+    let flow = CheckupFlowModel(environment: environment(presenter: presenter, entry: entry()))
+    await toFirstField(flow)
+    flow.startShowing()
+    #expect(presenter.isHolding)
+    flow.abandon(reason: "closed")
+    #expect(presenter.isHolding == false)
+    #expect(isBalanced(presenter.holds))
+  }
+
+  /// Closing the window abandons the run AND hides the field, so one hold takes
+  /// two releases. The second must be a no-op, not a stray end nothing opened.
+  @Test func closingTheWindowMidFieldReleasesTheHoldExactlyOnce() async {
+    let presenter = FakePresenter()
+    let flow = CheckupFlowModel(environment: environment(presenter: presenter, entry: entry()))
+    await toFirstField(flow)
+    flow.startShowing()
+    // What `CheckupWindowController` does on a close: `windowShouldClose`
+    // abandons, then `windowWillClose` hides the field window itself.
+    flow.abandon(reason: "closed")
+    presenter.hide()
+    #expect(presenter.holds == ["begin", "end"])
+    #expect(presenter.isHolding == false)
   }
 
   @Test func aWriteOnlyPlanRecordsPregradedRowsWithoutRunningThem() async {

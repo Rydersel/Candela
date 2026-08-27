@@ -642,16 +642,13 @@ struct DisplayHubView: View {
       return OledCareCopy.lockDimSpokenPreview(model.oledCare.lockDimSkips[persistenceKey])
     case .unfocusedDim: return "Dimmed, no window in focus on this display"
     case .blackout: return "Screen off, the display has been idle"
-    // SS8: v1 pauses care under a synthesized size too, and the reason is not
-    // mirroring the user set up. `synthesisSuspensions` is the same tick's
-    // verdict as `dimStates`, so the two cannot disagree about why this display
-    // is paused; the sighted preview above says "Paused" and leaves the reason
-    // to the pane, which is why only this one has to tell them apart. The words
-    // are `OledCareCopy`'s, like the lock-dim previews above: written for this
-    // site, and shared so the pane and this preview cannot drift.
+    // The pause is not always mirroring the user set up. `suspensionReason`
+    // reads the same tick's verdict as `dimStates`, so the two cannot disagree
+    // about the reason; the sighted preview says "Paused" and leaves the reason
+    // to the pane, which is why only this one has to tell them apart.
     case .suspended:
       return OledCareCopy.suspendedSpokenPreview(
-        synthesized: model.oledCare.synthesisSuspensions.contains(persistenceKey))
+        reason: model.oledCare.suspensionReason(for: persistenceKey))
     case nil: return "Starting"
     }
   }

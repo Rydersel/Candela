@@ -18,15 +18,19 @@ final class CheckupWindowController: NSObject, NSWindowDelegate {
   /// capability read does not install a second flow over the first.
   private var presenting = false
   /// Owned here because the tap, the one-display strip and the countdown all live on it.
-  let fieldWindow = CheckupFieldWindow()
+  let fieldWindow: CheckupFieldWindow
   private var tick: Task<Void, Never>?
 
   init(
     environment: @escaping () async -> CheckupEnvironment,
-    onSaved: @escaping (CheckupReportEnvelope) -> Void
+    onSaved: @escaping (CheckupReportEnvelope) -> Void,
+    care: (any CheckupCareHolding)? = nil
   ) {
     self.environment = environment
     self.onSaved = onSaved
+    // The window takes the hold, not this controller: `windowWillClose` hides
+    // it directly, so a hold owned a layer up would outlive a close mid-field.
+    self.fieldWindow = CheckupFieldWindow(care: care)
     super.init()
   }
 
