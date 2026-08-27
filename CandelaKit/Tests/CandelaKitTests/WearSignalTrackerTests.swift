@@ -271,6 +271,7 @@ struct WearSignalTrackerTests {
   /// silently drop a row out of one of the two tables.
   @Test func stateNamesTrackStateOrder() {
     #expect(WearSignalTracker.stateNames.count == WearSignalTracker.stateOrder.count)
+    #expect(zip(WearSignalTracker.stateNames, WearSignalTracker.stateOrder).allSatisfy { $0 == String(describing: $1) })
   }
 
   @Test func aHistogramSumsItsOwnSeconds() {

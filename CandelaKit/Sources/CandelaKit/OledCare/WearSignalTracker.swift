@@ -46,7 +46,7 @@ public final class WearSignalTracker {
   /// Spelled out, not derived from the enum: these strings travel in exported
   /// files, so a case rename must not rename them. Same positions as
   /// `stateOrder`.
-  public static let stateNames = [
+  public static let stateNames: [String] = [
     "active", "idleDim", "blackout", "lockDim", "unfocusedDim", "suspended",
   ]
 
