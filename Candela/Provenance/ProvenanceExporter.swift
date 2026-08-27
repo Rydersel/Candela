@@ -7,6 +7,9 @@ import Foundation
 /// doors: a second tracker over a key double-books every tick.
 @MainActor
 enum ProvenanceExporter {
+  /// Call from an action, never from a view body: `hoursTracker(for:)` and
+  /// `wearTracker(for:)` memoise into observation-tracked state, so a body that
+  /// reads them writes to what it is observing.
   static func record(for state: AppModel.DisplayState, model: AppModel, now: Date = .now) -> ProvenanceRecord {
     let key = state.display.persistenceKey
     let prefs = DisplayPrefs(persistenceKey: key)
