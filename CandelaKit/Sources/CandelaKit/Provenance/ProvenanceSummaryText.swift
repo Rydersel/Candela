@@ -36,7 +36,7 @@ public enum ProvenanceSummaryText {
       lines.append("Connection: \(transport)")
     }
     if let w = identity.hardware?.physicalWidthCm, let h = identity.hardware?.physicalHeightCm {
-      lines.append("Panel size: \(w) x \(h) cm")
+      lines.append("Screen size: \(w) x \(h) cm")
     }
     return lines
   }
@@ -51,11 +51,13 @@ public enum ProvenanceSummaryText {
       ?? CheckupDisplayIdentity.noSerial
   }
 
+  /// "Hours of use", never "panel hours": SO14 keeps "panel" out of every
+  /// string a person can read, type names and comments excepted.
   private static func hoursLines(_ section: ProvenanceSection<ProvenanceHours>) -> [String] {
     switch section {
     case .notCollected(let reason): return [reason.sentence]
     case .collected(let h):
-      return ["Panel-on time: \(duration(h.lifetimeSeconds))",
+      return ["Hours of use: \(duration(h.lifetimeSeconds))",
               "Since last standby: \(duration(h.secondsSinceStandby))"]
     }
   }

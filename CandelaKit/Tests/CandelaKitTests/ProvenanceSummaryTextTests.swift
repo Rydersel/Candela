@@ -12,7 +12,7 @@ struct ProvenanceSummaryTextTests {
     #expect(lines.contains("Identity key: 10AC-A0B2-0000-0000"))
     #expect(lines.contains("Serial: 1CHB884"))
     #expect(lines.contains("Connection: DisplayPort"))
-    #expect(lines.contains("Panel-on time: 2 h 0 min"))
+    #expect(lines.contains("Hours of use: 2 h 0 min"))
     #expect(lines.contains("Since last standby: 1 min"))
     #expect(lines.contains(ProvenanceAbsence.notEnrolled.sentence))
     #expect(lines.contains(ProvenanceAbsence.noRuns.sentence))
@@ -118,10 +118,10 @@ struct ProvenanceSummaryTextTests {
       Manufactured: week 51 of 2025
       Native size: 3840 x 2160 pixels
       Connection: DisplayPort
-      Panel size: 60 x 34 cm
+      Screen size: 60 x 34 cm
 
       Hours
-      Panel-on time: 2 h 0 min
+      Hours of use: 2 h 0 min
       Since last standby: 1 min
 
       Exposure

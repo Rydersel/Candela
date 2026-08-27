@@ -24,8 +24,8 @@ enum ProvenanceExporter {
       hours = .notCollected(.trackingOff)
     } else {
       let tracker = care.hoursTracker(for: key)
-      hours = .collected(.init(lifetimeSeconds: tracker.totalHours * 3600,
-                               secondsSinceStandby: tracker.hoursSinceStandby * 3600))
+      hours = .collected(.init(lifetimeSeconds: tracker.totalSeconds,
+                               secondsSinceStandby: tracker.secondsSinceStandby))
     }
 
     let exposure: ProvenanceSection<ProvenanceAssembler.ExposureInput>

@@ -90,6 +90,34 @@ struct ProvenanceEnvelopeTests {
     #expect(try decodeStoredEnvelope(edited).validate() == false)
   }
 
+  /// The seam between the two envelopes: a record carries stored checkup runs
+  /// whole, so a run lifted back out of an exported file is still a checkup
+  /// file that the checkup store can read and validate on its own. Nesting must
+  /// not re-encode the run, which would move its bytes and break its digest.
+  @Test func aRunLiftedOutOfAnExportedRecordIsStillAValidCheckupFile() throws {
+    let base = ProvenanceRecordTests.sampleRecord()
+    let run = try CheckupReportEnvelope(
+      report: ProvenanceSummaryTextTests.checkupReport(
+        startedAt: Date(timeIntervalSinceReferenceDate: 800_000_000)))
+    let record = ProvenanceRecord(
+      exportedAt: base.exportedAt, appBuild: base.appBuild, macOSBuild: base.macOSBuild,
+      identity: base.identity, hours: base.hours, exposure: base.exposure,
+      checkups: .collected(ProvenanceCheckups(runs: [run], countsByVerdict: ["observed": 1])))
+
+    let outer = try decodeStoredEnvelope(
+      try ProvenanceEnvelope.encoded(try ProvenanceEnvelope(record: record)))
+    #expect(outer.validate())
+    let lifted = try #require(outer.record.checkups.value?.runs.first)
+    #expect(lifted.validate())
+
+    let dir = FileManager.default.temporaryDirectory
+      .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let url = dir.appendingPathComponent("run.json")
+    try CheckupStore.encoded(lifted).write(to: url)
+    #expect(try CheckupStore(directory: dir).load(url: url).validate())
+  }
+
   @Test func exportFileNameCarriesModelAndDay() throws {
     let e = try envelope()
     #expect(ProvenanceEnvelope.exportFileName(for: e.record)

@@ -9,9 +9,13 @@ struct ProvenanceAssemblerTests {
   private let now = Date(timeIntervalSinceReferenceDate: 800_000_000)
 
   private func map(samples: Int, cellPeakAt index: Int) -> ExposureMap {
+    map(samples: samples, cellPeaksAt: [index])
+  }
+
+  private func map(samples: Int, cellPeaksAt indices: [Int]) -> ExposureMap {
     var m = ExposureMap.empty
     var grid = [Double](repeating: 0.5, count: PanelGrid.cellCount)
-    grid[index] = 1.0
+    for index in indices { grid[index] = 1.0 }
     for _ in 0..<samples { m.add(panelGrid: grid, elapsed: 60, at: now) }
     return m
   }
@@ -67,6 +71,22 @@ struct ProvenanceAssemblerTests {
     #expect(e.wearHistogram?.stateOrder == WearSignalTracker.stateNames)
     #expect(e.firstSample == now)
     #expect(e.lastSample == now)
+  }
+
+  /// A person can read the summary and the Health card in the same session, so
+  /// the renderer's 1-based cell number and `ExposureMap.hottestCell` have to
+  /// name the same cell. A plateau is where two independent scans drift apart:
+  /// only a matching strict `>` keeps both on the first of the equal peaks.
+  @Test func theRenderedHottestCellNamesTheCellTheMapNames() throws {
+    let m = map(samples: 40, cellPeaksAt: [7, 100])
+    let r = ProvenanceAssembler.assemble(
+      identity: identity, hours: .notCollected(.trackingOff),
+      exposure: .collected(.init(map: m, confidence: .measured, histogram: nil)),
+      checkups: [], appBuild: "1", macOSBuild: "26", now: now)
+    let hottest = try #require(m.hottestCell)
+    #expect(r.exposure.value?.cells[hottest] == 1.0)
+    #expect(ProvenanceSummaryText.render(r)
+      .contains("Hottest cell: \(hottest + 1) of \(PanelGrid.cellCount)"))
   }
 
   @Test func tooFewSamplesAndAnEmptyHistogramBecomeANamedAbsence() {

@@ -29,6 +29,21 @@ struct PanelHoursTrackerTests {
     #expect(t.totalHours == 1.0)
   }
 
+  @Test func secondsReadDirectlyRatherThanThroughHours() {
+    let t = PanelHoursTracker(defaults: InMemoryDefaults(), persistenceKey: "pk")
+    t.noteTick(displayAwake: true, secondsSinceLastTick: 61)
+    #expect(t.totalSeconds == 61)
+    #expect(t.secondsSinceStandby == 61)
+
+    // 115 is the smallest whole second that comes back short of itself through
+    // hours (114.99999999999999). The provenance record floors, so an export
+    // routed through `totalHours` would file 114 s for a panel that ran 115.
+    let u = PanelHoursTracker(defaults: InMemoryDefaults(), persistenceKey: "pk2")
+    u.noteTick(displayAwake: true, secondsSinceLastTick: 115)
+    #expect(u.totalSeconds == 115)
+    #expect(u.totalHours * 3600 < 115)
+  }
+
   @Test func standbyResetsTheSinceCounterNotTheTotal() {
     let defaults = InMemoryDefaults()
     let t = PanelHoursTracker(defaults: defaults, persistenceKey: "pk")
