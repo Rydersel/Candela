@@ -478,6 +478,12 @@ final class OledCareCoordinator: CheckupCareHolding {
       observationEnabled: observing)
   }
 
+  /// The raw map, live accumulator first. The health summary normalizes and drops
+  /// `firstSample`, both of which the provenance record needs.
+  func exposureMap(for persistenceKey: String) -> ExposureMap {
+    accumulators[persistenceKey]?.map ?? loadExposureMap(for: persistenceKey)
+  }
+
   /// The OLED Care pane's comparison section. Non-memoising, `healthSummary`'s
   /// rule and reason: called from a SwiftUI body, where populating an
   /// observation-tracked dictionary is a state mutation during view update.

@@ -1,6 +1,8 @@
+import AppKit
 import CandelaKit
 import CoreGraphics
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The Health pillar's settings-side front door (SC4): what each display's
 /// record says, and every control that decides what goes into it.
@@ -143,6 +145,10 @@ struct HealthPane: View {
   private var displaysSection: some View {
     VStack(alignment: .leading, spacing: 8) {
       SettingsSectionTitle(text: "Displays")
+
+      // Once for the page, not once per card: repeating it under each would read
+      // as a different file per display.
+      SettingsRowNote(verbatim: ProvenanceCopy.note)
 
       // Keyed by `persistenceKey`, never `DisplayState.id`: IDs reassign
       // across a replug (measured, the MAG and the Dell swapped across one
@@ -291,8 +297,15 @@ struct HealthPane: View {
 private struct HealthDisplayCard: View {
   let state: AppModel.DisplayState
 
+  @State private var justCopied = false
+  /// Cancelled and replaced on every copy, so a second click restarts the two
+  /// seconds instead of letting the first click's timer clear the label early.
+  @State private var confirmationTask: Task<Void, Never>?
+  @State private var saveError: String?
+
   @Environment(AppModel.self) private var model
   @Environment(SettingsActions.self) private var actions
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private var persistenceKey: String { state.display.persistenceKey }
   private var prefs: DisplayPrefs { DisplayPrefs(persistenceKey: persistenceKey) }
@@ -305,36 +318,94 @@ private struct HealthDisplayCard: View {
     let summary = model.oledCare.healthSummary(for: persistenceKey)
     let recording = prefs.oledCareEnrolled
     SettingsCard {
-      HStack(alignment: .center, spacing: 14) {
-        PanelExposureMiniSurface(
-          cells: summary.cells,
-          displayID: state.display.id,
-          showsMap: recording && summary.confidence == .measured)
-        VStack(alignment: .leading, spacing: 3) {
-          Text(verbatim: name)
-            .font(.system(size: 15, weight: .semibold, design: .rounded))
-            .foregroundStyle(SettingsTheme.titleColor)
-            .lineLimit(1)
-            .truncationMode(.middle)
-          Text(verbatim: statusLine(summary: summary, recording: recording))
-            .font(.callout)
-            .foregroundStyle(SettingsTheme.bodyColor)
-            .fixedSize(horizontal: false, vertical: true)
+      VStack(alignment: .leading, spacing: 0) {
+        HStack(alignment: .center, spacing: 14) {
+          PanelExposureMiniSurface(
+            cells: summary.cells,
+            displayID: state.display.id,
+            showsMap: recording && summary.confidence == .measured)
+          VStack(alignment: .leading, spacing: 3) {
+            Text(verbatim: name)
+              .font(.system(size: 15, weight: .semibold, design: .rounded))
+              .foregroundStyle(SettingsTheme.titleColor)
+              .lineLimit(1)
+              .truncationMode(.middle)
+            Text(verbatim: statusLine(summary: summary, recording: recording))
+              .font(.callout)
+              .foregroundStyle(SettingsTheme.bodyColor)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          Spacer(minLength: 12)
+          if recording {
+            Button("Open Heat Map") { actions.openDisplayHealth(persistenceKey) }
+              .buttonStyle(SettingsSecondaryButtonStyle())
+              // Repeated verbatim on every card otherwise, which tells a
+              // VoiceOver user which button but not which display.
+              .accessibilityLabel(Text(verbatim: "Open Heat Map for \(name)"))
+          } else {
+            Button("Open OLED Care") { actions.reveal(.pane(.oledCare)) }
+              .buttonStyle(SettingsSecondaryButtonStyle())
+              .accessibilityLabel(Text(verbatim: "Open OLED Care for \(name)"))
+          }
         }
-        Spacer(minLength: 12)
-        if recording {
-          Button("Open Heat Map") { actions.openDisplayHealth(persistenceKey) }
+        .padding(.vertical, 2)
+
+        // On every card, enrolled or not: an un-enrolled display still has an
+        // identity and a checkup history to hand on.
+        SettingsCardDivider()
+        HStack(spacing: 10) {
+          Button(ProvenanceCopy.export) { exportProvenance() }
             .buttonStyle(SettingsSecondaryButtonStyle())
-            // Repeated verbatim on every card otherwise, which tells a
-            // VoiceOver user which button but not which display.
-            .accessibilityLabel(Text(verbatim: "Open Heat Map for \(name)"))
-        } else {
-          Button("Open OLED Care") { actions.reveal(.pane(.oledCare)) }
+            .accessibilityLabel(Text(verbatim: "Export provenance for \(name)"))
+          Button(justCopied ? ProvenanceCopy.copied : ProvenanceCopy.copySummary) { copySummary() }
             .buttonStyle(SettingsSecondaryButtonStyle())
-            .accessibilityLabel(Text(verbatim: "Open OLED Care for \(name)"))
+            // The visible title flips to "Copied", so the label flips with it or
+            // VoiceOver never hears the confirmation.
+            .accessibilityLabel(
+              Text(verbatim: justCopied
+                ? "Copied provenance summary for \(name)"
+                : "Copy provenance summary for \(name)"))
+          Spacer(minLength: 0)
         }
+        .padding(.vertical, 8)
       }
-      .padding(.vertical, 2)
+    }
+    .alert(
+      ProvenanceCopy.exportFailed,
+      isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })
+    ) {
+      Button(ProvenanceCopy.acknowledge) { saveError = nil }
+    } message: {
+      Text(verbatim: saveError ?? "")
+    }
+  }
+
+  /// The kit's own encoder, so an exported file is byte-identical to any other
+  /// copy of the same record and the verifier answers the same on all of them.
+  private func exportProvenance() {
+    let record = ProvenanceExporter.record(for: state, model: model)
+    let panel = NSSavePanel()
+    panel.allowedContentTypes = [.json]
+    panel.nameFieldStringValue = ProvenanceEnvelope.exportFileName(for: record)
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    do {
+      try ProvenanceEnvelope.encoded(try ProvenanceEnvelope(record: record)).write(to: url, options: .atomic)
+    } catch {
+      // A save that did not happen has to say so; silence looks like a file.
+      saveError = error.localizedDescription
+    }
+  }
+
+  private func copySummary() {
+    let record = ProvenanceExporter.record(for: state, model: model)
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(ProvenanceSummaryText.render(record), forType: .string)
+    withAnimation(Motion.notice(reduceMotion: reduceMotion)) { justCopied = true }
+    confirmationTask?.cancel()
+    confirmationTask = Task {
+      try? await Task.sleep(for: .seconds(2))
+      guard !Task.isCancelled else { return }
+      withAnimation(Motion.notice(reduceMotion: reduceMotion)) { justCopied = false }
     }
   }
 

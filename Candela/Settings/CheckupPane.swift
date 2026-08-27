@@ -89,6 +89,9 @@ struct CheckupPane: View {
   @State private var chosenByHand = false
   @State private var runs: [CheckupStoredRun] = []
   @State private var verification: String?
+  /// Held apart from the summary: the verdict is a sentence, the summary a document.
+  @State private var provenanceVerdict: String?
+  @State private var provenanceSummary: String?
 
   init(directory: URL = CheckupStore.defaultDirectory()) {
     store = CheckupStore(directory: directory)
@@ -106,6 +109,8 @@ struct CheckupPane: View {
     // observer. The verification line goes too: it answered under another display.
     .onChange(of: scoped?.display.persistenceKey) {
       verification = nil
+      provenanceVerdict = nil
+      provenanceSummary = nil
       reload()
     }
     .onChange(of: activeState) { _, state in
@@ -237,22 +242,62 @@ struct CheckupPane: View {
             .foregroundStyle(SettingsTheme.bodyColor)
             .fixedSize(horizontal: false, vertical: true)
         }
+
+        SettingsCardDivider()
+        SettingsRowNote(verbatim: ProvenanceCopy.checkNote)
+        Button(ProvenanceCopy.check) { checkProvenance() }
+          .buttonStyle(SettingsSecondaryButtonStyle())
+        if let provenanceVerdict {
+          // Styled like the verify answer above it: both are a sentence about a file.
+          Text(verbatim: provenanceVerdict)
+            .font(.callout)
+            .foregroundStyle(SettingsTheme.bodyColor)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        if let provenanceSummary {
+          // Show details' treatment: the one surface showing a record somebody else
+          // sent, so the serial and the hours have to be selectable out of it.
+          Text(verbatim: provenanceSummary)
+            .font(.caption.monospaced())
+            .foregroundStyle(SettingsTheme.bodyColor)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
       }
       .padding(.vertical, 2)
     }
   }
 
-  private func verify() {
+  /// Both verifiers open the same kind of file, so the panel is set up once.
+  private func pickJSONFile() -> URL? {
     let panel = NSOpenPanel()
     panel.allowedContentTypes = [.json]
     panel.allowsMultipleSelection = false
     panel.canChooseDirectories = false
-    guard panel.runModal() == .OK, let url = panel.url else { return }
+    guard panel.runModal() == .OK else { return nil }
+    return panel.url
+  }
+
+  private func verify() {
+    guard let url = pickJSONFile() else { return }
     guard let envelope = try? store.load(url: url) else {
       verification = CheckupPaneCopy.unreadable
       return
     }
     verification = envelope.validate() ? CheckupPaneCopy.valid : CheckupPaneCopy.invalid
+  }
+
+  private func checkProvenance() {
+    guard let url = pickJSONFile() else { return }
+    guard let envelope = try? ProvenanceEnvelope.load(url: url) else {
+      provenanceVerdict = ProvenanceCopy.unreadable
+      // Otherwise the summary left over from the last check outlives its file.
+      provenanceSummary = nil
+      return
+    }
+    provenanceVerdict = envelope.validate() ? ProvenanceCopy.intact : ProvenanceCopy.altered
+    provenanceSummary = ProvenanceSummaryText.render(envelope.record)
   }
 }
 

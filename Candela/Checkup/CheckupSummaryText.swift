@@ -67,8 +67,9 @@ enum CheckupSummaryText {
   }
 
   /// Only an observed identity claim licenses the block; a refusal, a
-  /// not-observed or a missing claim all mean the display was not read.
-  private static func identityWasRead(_ report: CheckupReport) -> Bool {
+  /// not-observed or a missing claim all mean the display was not read. The
+  /// provenance exporter picks a stored run by the same rule.
+  static func identityWasRead(_ report: CheckupReport) -> Bool {
     guard let claim = report.claims.first(where: { $0.id == CheckupCheckID.identity })
     else { return false }
     if case .observed = claim.verdict { return true }
