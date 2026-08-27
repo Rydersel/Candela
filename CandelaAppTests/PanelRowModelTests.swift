@@ -348,4 +348,53 @@ struct PanelRowModelTests {
     #expect(copy.contains(AppInfo.productName))
     #expect(!copy.contains("—"))
   }
+
+  // MARK: - Brightness row reason (WD5)
+
+  /// Drives the wire until the display is demoted, or gives up: a bounded wait
+  /// rather than a sleep, because the verdict lands on a task the demoting write
+  /// wakes and there is nothing to poll for otherwise.
+  private static func demote(_ state: AppModel.DisplayState) async {
+    (state.writer as? FakeDDCWriter)?.writesSucceed = false
+    for step in 0 ..< 3 {
+      state.controller.setBrightness(0.9 - Double(step) * 0.05)
+      await state.controller.waitForPendingWrites()
+    }
+    for _ in 0 ..< 200 where !state.controller.isWireUnresponsive {
+      await Task.yield()
+    }
+  }
+
+  @Test func aWorkingWireLeavesTheBrightnessRowWithNothingToSay() async {
+    let model = TestFixtures.appModel()
+    let state = Self.state(id: 1, name: "MAG 341C", key: "mag")
+    state.controller.setBrightness(0.8)
+    await state.controller.waitForPendingWrites()
+    #expect(!state.controller.isWireUnresponsive)
+    #expect(model.brightnessSliderCompactReason(state) == nil)
+  }
+
+  /// The panel says why, in the words the policy chose, and the row stays LIVE:
+  /// the display still dims in software, so the caption is an explanation rather
+  /// than an apology for a dead control.
+  @Test func aWireThatStoppedAnsweringPutsItsReasonOnTheBrightnessRow() async {
+    let model = TestFixtures.appModel()
+    let state = Self.state(id: 1, name: "MAG 341C", key: "mag")
+    await Self.demote(state)
+    #expect(state.controller.isWireUnresponsive)
+    #expect(model.brightnessSliderCompactReason(state)
+      == BrightnessSliderPolicy.wireUnresponsiveReason)
+  }
+
+  /// And it goes when the wire recovers, on a route that is neither a replug nor
+  /// a relaunch. Reading the caption through the model is the point: a stale
+  /// sentence outliving its cause is the failure this row is specified against.
+  @Test func theReasonGoesWhenTheWireAnswersAgain() async {
+    let model = TestFixtures.appModel()
+    let state = Self.state(id: 1, name: "MAG 341C", key: "mag")
+    await Self.demote(state)
+    (state.writer as? FakeDDCWriter)?.writesSucceed = true
+    state.controller.noteWake()
+    #expect(model.brightnessSliderCompactReason(state) == nil)
+  }
 }

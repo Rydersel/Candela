@@ -103,7 +103,10 @@ struct CommandTuningGrid: View {
   /// Advanced page's DDC toggle, which is the other way out, is gated only by
   /// live HDR for the same reason.
   private var trafficBlock: DDCTrafficBlock? {
-    DisplayCardPolicy.ddcTrafficBlock(for: state.controller.brightnessPath)
+    DisplayCardPolicy.ddcTrafficBlock(
+      for: state.controller.brightnessPath,
+      isWireUnresponsive: state.controller.isWireUnresponsive
+    )
   }
 
   private var isInert: Bool { trafficBlock != nil }
@@ -321,6 +324,12 @@ struct CommandTuningGrid: View {
       SettingsCaption("With brightness off, this display dims in software only below \(SliderSnap.percentText(dimsBelow)). Above that, nothing moves.")
     case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
       SettingsCaption("With brightness off, nothing is moving this display's brightness.")
+    // The wire's own two states say nothing HERE, deliberately. This caption
+    // explains what the Off switch above it did, and a display that stopped
+    // answering did not get there from this control; the panel's brightness row
+    // and the Diagnostics page are where that is said.
+    case .softwareOnly(_, .ddcUnresponsive, _), .unavailable(.ddcUnresponsiveWithNoSoftwareLeg):
+      EmptyView()
     case .native, .software, .hardware, .combined:
       EmptyView()
     }

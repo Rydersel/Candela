@@ -121,6 +121,13 @@
         ("hdrEngaged", yesNo(controller.isHDREngaged)),
         ("hdrSupported", yesNo(controller.supportsHDR)),
         ("hdrMode", controller.hdrMode == .off ? "off" : "alwaysOn"),
+        // The wire's verdict and the caption the panel draws from it (WD5). The
+        // panel is the least observable surface in the app, and this pair is the
+        // only way a rig leg can assert that a degraded display SAYS so: both
+        // come from the same accessors the row's body calls, so they cannot
+        // describe a panel other than the one on screen.
+        ("wireUnresponsive", yesNo(controller.isWireUnresponsive)),
+        ("brightnessReason", quoted(model.brightnessSliderCompactReason(state) ?? "none")),
       ]
       guard !isBuiltIn else {
         // The built-in section is a name and a brightness slider, full stop:

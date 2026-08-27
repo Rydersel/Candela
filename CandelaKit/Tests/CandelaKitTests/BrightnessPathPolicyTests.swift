@@ -11,13 +11,15 @@ struct BrightnessPathPolicyTests {
     avoidGamma: Bool = false,
     disableCombinedBrightness: Bool = false,
     unavailableDDC: Bool = false,
-    switchingValue: Double = 0.47
+    switchingValue: Double = 0.47,
+    wireUnresponsive: Bool = false
   ) -> BrightnessPathPolicy.Inputs {
     BrightnessPathPolicy.Inputs(
       role: role, isHDRActive: isHDRActive,
       forceSoftware: forceSoftware, avoidGamma: avoidGamma,
       disableCombinedBrightness: disableCombinedBrightness,
-      unavailableDDC: unavailableDDC, switchingValue: switchingValue
+      unavailableDDC: unavailableDDC, switchingValue: switchingValue,
+      wireUnresponsive: wireUnresponsive
     )
   }
 
@@ -214,6 +216,101 @@ struct BrightnessPathPolicyTests {
                 case .native, .software, .softwareOnly, .unavailable: false
                 }
                 #expect(path.drivesDDCBrightness == writesRegister)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // MARK: - The wire stopped answering (WD2)
+
+  /// The demotion's ordinary shape. Combined dimming is on and the wire has
+  /// stopped carrying writes, so the software leg is the only thing left
+  /// dimming and it dims over `[0, s)` only, exactly as it does when the user
+  /// turns the command off. `.combined` would caption a dead wire as hardware
+  /// control, which is ruling R-A's whole subject.
+  @Test func anUnresponsiveWireInCombinedModeIsSoftwareOnly() {
+    #expect(BrightnessPathPolicy.path(inputs(wireUnresponsive: true))
+      == .softwareOnly(backend: .gamma, reason: .ddcUnresponsive, dimsBelow: 0.47))
+    #expect(BrightnessPathPolicy.path(
+      inputs(avoidGamma: true, switchingValue: 0.3, wireUnresponsive: true)
+    ) == .softwareOnly(backend: .overlay, reason: .ddcUnresponsive, dimsBelow: 0.3))
+  }
+
+  /// The zero-width corner (pref point −8, "pure hardware"): the software band
+  /// is empty and the register write goes nowhere, so nothing moves. Its own
+  /// block reason, because the sentence a person needs here is about the wire,
+  /// not about a switch they could put back.
+  @Test func anUnresponsiveWireWithAZeroWidthSoftwareBandMovesNothingAtAll() {
+    #expect(BrightnessPathPolicy.path(inputs(switchingValue: 0, wireUnresponsive: true))
+      == .unavailable(.ddcUnresponsiveWithNoSoftwareLeg))
+  }
+
+  /// In pure-DDC configuration the demotion has no split to respect: the whole
+  /// range moves to the software leg, because a display that keeps a slider
+  /// moving nothing is the state this feature exists to end.
+  @Test func anUnresponsiveWireInPureDDCModeDimsInSoftwareOverTheFullRange() {
+    #expect(BrightnessPathPolicy.path(
+      inputs(disableCombinedBrightness: true, wireUnresponsive: true)
+    ) == .software(.gamma))
+    #expect(BrightnessPathPolicy.path(
+      inputs(avoidGamma: true, disableCombinedBrightness: true, wireUnresponsive: true)
+    ) == .software(.overlay))
+  }
+
+  /// The user's own switch keeps precedence over the wire, in both branches. A
+  /// display whose brightness command the user turned off is reported as turned
+  /// off: the wire's verdict is about a command nothing is sending.
+  @Test func theUsersOwnSwitchOutranksTheWire() {
+    #expect(BrightnessPathPolicy.path(inputs(unavailableDDC: true, wireUnresponsive: true))
+      == .softwareOnly(backend: .gamma, reason: .ddcTurnedOff, dimsBelow: 0.47))
+    #expect(BrightnessPathPolicy.path(
+      inputs(disableCombinedBrightness: true, unavailableDDC: true, wireUnresponsive: true)
+    ) == .unavailable(.ddcTurnedOffWithNoSoftwareLeg))
+    #expect(BrightnessPathPolicy.path(
+      inputs(unavailableDDC: true, switchingValue: 0, wireUnresponsive: true)
+    ) == .unavailable(.ddcTurnedOffWithNoSoftwareLeg))
+  }
+
+  /// Native and force-software still win, and both directions matter. A display
+  /// under live HDR routes native and its DDC failures are not evidence about
+  /// the wire at all; a display the user put on the software leg is already
+  /// where the demotion would send it, so there is nothing to say about it.
+  @Test func nativeAndForceSoftwareStillOutrankTheWire() {
+    #expect(BrightnessPathPolicy.path(inputs(isHDRActive: true, wireUnresponsive: true))
+      == .native)
+    #expect(BrightnessPathPolicy.path(inputs(role: .builtIn, wireUnresponsive: true))
+      == .native)
+    #expect(BrightnessPathPolicy.path(inputs(forceSoftware: true, wireUnresponsive: true))
+      == .software(.gamma))
+  }
+
+  /// The demotion is a PATH, so nothing that reads the table can be told the
+  /// register is still being driven: walked over the whole input space for the
+  /// same reason ruling R-A is, since a caption claiming hardware control of a
+  /// dead wire is exactly the defect either route would produce.
+  @Test func noInputWhateverKeepsTheRegisterWhileTheWireIsUnresponsive() {
+    let bools = [false, true]
+    for role in [DisplayRole.external, .builtIn] {
+      for isHDRActive in bools {
+        for forceSoftware in bools {
+          for avoidGamma in bools {
+            for disableCombined in bools {
+              for switchingValue in [0, 0.47, 0.9375] {
+                let candidate = inputs(
+                  role: role, isHDRActive: isHDRActive,
+                  forceSoftware: forceSoftware, avoidGamma: avoidGamma,
+                  disableCombinedBrightness: disableCombined,
+                  switchingValue: switchingValue, wireUnresponsive: true
+                )
+                let path = BrightnessPathPolicy.path(candidate)
+                // Native is the exception and the reason it is one is measured:
+                // under live HDR the DDC register is locked and macOS carries
+                // brightness, so the wire's verdict says nothing about it.
+                guard path != .native else { continue }
+                #expect(!path.drivesDDCBrightness, "register kept on a dead wire: \(candidate)")
               }
             }
           }

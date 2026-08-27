@@ -14,6 +14,10 @@ final class FakeDDCWriter: DDCWriting, @unchecked Sendable {
   // confines each instance to one test's structured tasks.
   var capabilities: String?
   var readAnswer: (current: UInt16, max: UInt16)?
+  /// A panel that stops accepting commands mid-session. The write is still
+  /// RECORDED when it fails: the transaction was attempted, which is the whole
+  /// distinction the wire's health counts.
+  var writesSucceed = true
   private(set) var writes: [(command: UInt8, value: UInt16)] = []
 
   init(capabilities: String? = nil) {
@@ -22,7 +26,7 @@ final class FakeDDCWriter: DDCWriting, @unchecked Sendable {
 
   func write(command: UInt8, value: UInt16) async -> Bool {
     writes.append((command, value))
-    return true
+    return writesSucceed
   }
 
   func read(command: UInt8) async -> (current: UInt16, max: UInt16)? {

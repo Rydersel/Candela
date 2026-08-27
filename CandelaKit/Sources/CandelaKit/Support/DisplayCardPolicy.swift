@@ -84,14 +84,29 @@ public enum DisplayCardPolicy {
   /// about volume or contrast: they are reached from the brightness command's
   /// own `unavailableDDC`, and that display's volume slider still writes over
   /// the same wire.
-  public static func ddcTrafficBlock(for path: BrightnessPath) -> DDCTrafficBlock? {
+  ///
+  /// `isWireUnresponsive` is the one fact the path cannot carry (WD2). In
+  /// pure-DDC configuration a display whose wire stopped answering routes
+  /// `.software`, the same path force-software selects, and the two are opposite
+  /// stories: one is a switch a person flipped, the other is a display that went
+  /// quiet. Blocking on it would grey the whole grid and caption it "hardware
+  /// control is off" about a control nobody touched, so it answers nil for the
+  /// reason `.softwareOnly` does: the brightness command is not landing, and
+  /// volume and contrast still write over the same wire.
+  ///
+  /// Defaulted to false, so a caller with no controller in hand keeps the
+  /// pre-WD2 reading. Every call site that HAS one passes it.
+  public static func ddcTrafficBlock(
+    for path: BrightnessPath, isWireUnresponsive: Bool = false
+  ) -> DDCTrafficBlock? {
     switch path {
     case .native:
       .macOSDrivesBrightness
-    // The ONLY path reachable from `forceSoftware`, which is the display-level
-    // opt-out `DDCValueController.isAvailable` also reads.
+    // Reachable from `forceSoftware`, which is the display-level opt-out
+    // `DDCValueController.isAvailable` also reads, and from the wire's own
+    // demotion, which is not an opt-out at all.
     case .software:
-      .hardwareControlOff
+      isWireUnresponsive ? nil : .hardwareControlOff
     case .hardware, .combined, .softwareOnly, .unavailable:
       nil
     }

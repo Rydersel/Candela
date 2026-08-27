@@ -270,7 +270,13 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       sleepWakeObservers.append(workspaceCenter.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
         displayManager.noteWake()
         // The observer closure runs off-main; the coordinator is MainActor.
-        Task { @MainActor in self?.restoreCoordinator.noteWake() }
+        Task { @MainActor in
+          self?.restoreCoordinator.noteWake()
+          // WD3's wake route: a wire that stopped answering before the Mac slept
+          // is asked again rather than staying demoted across a link the sleep
+          // rebuilt.
+          self?.model.noteWakeForBrightnessWires()
+        }
       })
     }
 

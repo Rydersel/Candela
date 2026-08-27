@@ -99,24 +99,40 @@ extension View {
   /// Left readable to VoiceOver at zero opacity on purpose: hover is a pointer
   /// affordance, and the reason is the one thing a keyboard user cannot
   /// otherwise get from this surface.
-  func panelHoverReason(_ reason: String?) -> some View {
-    modifier(PanelHoverReason(reason: reason))
+  ///
+  /// `staysLive` is for a row that carries a reason WITHOUT being greyed, which
+  /// is the degraded brightness slider: the wire stopped answering and the
+  /// slider still dims the display in software. The hover overlay the greyed
+  /// case uses would swallow that row's drags, so a live row is watched through
+  /// the content itself, which a working control reports hover from anyway.
+  func panelHoverReason(_ reason: String?, staysLive: Bool = false) -> some View {
+    modifier(PanelHoverReason(reason: reason, staysLive: staysLive))
   }
 }
 
 private struct PanelHoverReason: ViewModifier {
   let reason: String?
+  let staysLive: Bool
   @State private var hovering = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   func body(content: Content) -> some View {
     VStack(alignment: .leading, spacing: 3) {
       content
+        .onHover { isHovering in
+          // A live row with nothing to say must stay exactly what it was before
+          // this modifier existed, so the state write is gated rather than the
+          // tracking: `hovering` never leaves false without a reason to reveal.
+          guard staysLive, reason != nil else { return }
+          hovering = isHovering
+        }
         .overlay {
-          if reason != nil {
+          if reason != nil, !staysLive {
             // Applied after the caller's `.disabled`, so it is outside that
             // subtree and still hit-tests. Swallowing the hover costs nothing:
-            // the control underneath is inert whenever a reason exists.
+            // the control underneath is inert whenever a reason exists. A live
+            // row takes the branch above instead, because there the swallowing
+            // would cost the drag.
             Color.clear.contentShape(Rectangle()).onHover { hovering = $0 }
           }
         }
