@@ -41,6 +41,7 @@ usage: candela-probe [--display <id>] <subcommand>
   identity                                EDID identity facts as the checkup reads them, as JSON
   refreshsweep                            apply every rate at the native size at preview scope, then restore
   checkup validate <file>                 verify an exported checkup report against its own hash
+  provenance validate <file>              verify an exported provenance record against its own hash
   caps                                    DDC/CI capabilities string (VCP 0xF3) + volume verdict
   audio devices                           default CoreAudio output + native-volume check
   native get                              DisplayServicesGetBrightness per display
@@ -580,6 +581,28 @@ case "checkup":
   } else {
     print("INVALID: hash does not match the body")
     print(reportEnvelope.report.summary.line)
+    exit(4)
+  }
+case "provenance":
+  guard arguments.count == 3, arguments[1] == "validate" else {
+    print("usage: candela-probe provenance validate <file>")
+    exit(2)
+  }
+  let recordURL = URL(fileURLWithPath: arguments[2])
+  let provenanceEnvelope: ProvenanceEnvelope
+  do {
+    provenanceEnvelope = try ProvenanceEnvelope.load(url: recordURL)
+  } catch {
+    print("could not read \(recordURL.path) as a provenance record: \(error.localizedDescription)")
+    exit(3)
+  }
+  // `load` decodes only; the hash check is a separate call.
+  if provenanceEnvelope.validate() {
+    print("valid: unchanged since export")
+    print(ProvenanceSummaryText.render(provenanceEnvelope.record))
+  } else {
+    print("INVALID: hash does not match the record")
+    print(ProvenanceSummaryText.render(provenanceEnvelope.record))
     exit(4)
   }
 case "conform":
