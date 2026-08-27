@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 
 public struct CheckupDisplayIdentity: Codable, Equatable, Sendable {
@@ -260,15 +259,11 @@ public struct CheckupReportEnvelope: Codable, Equatable, Sendable {
   public static func canonicalData(
     _ report: CheckupReport, keys: Set<String> = CheckupReport.knownBodyKeys
   ) throws -> Data {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-    encoder.dateEncodingStrategy = .iso8601
-    return try encoder.encode(Body(report: report, keys: keys))
+    try CanonicalDigest.canonicalData(Body(report: report, keys: keys))
   }
 
   static func digest(_ report: CheckupReport,
                      keys: Set<String> = CheckupReport.knownBodyKeys) throws -> String {
-    SHA256.hash(data: try canonicalData(report, keys: keys))
-      .map { String(format: "%02x", $0) }.joined()
+    try CanonicalDigest.sha256Hex(Body(report: report, keys: keys))
   }
 }
