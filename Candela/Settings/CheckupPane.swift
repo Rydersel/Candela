@@ -89,6 +89,7 @@ struct CheckupPane: View {
   @State private var chosenByHand = false
   @State private var runs: [CheckupStoredRun] = []
   @State private var verification: String?
+  @State private var provenanceVerification: String?
 
   init(directory: URL = CheckupStore.defaultDirectory()) {
     store = CheckupStore(directory: directory)
@@ -106,6 +107,7 @@ struct CheckupPane: View {
     // observer. The verification line goes too: it answered under another display.
     .onChange(of: scoped?.display.persistenceKey) {
       verification = nil
+      provenanceVerification = nil
       reload()
     }
     .onChange(of: activeState) { _, state in
@@ -237,6 +239,19 @@ struct CheckupPane: View {
             .foregroundStyle(SettingsTheme.bodyColor)
             .fixedSize(horizontal: false, vertical: true)
         }
+
+        SettingsCardDivider()
+        SettingsRowNote(verbatim: ProvenanceCopy.checkNote)
+        Button(ProvenanceCopy.check) { checkProvenance() }
+          .buttonStyle(SettingsSecondaryButtonStyle())
+        if let provenanceVerification {
+          // Verdict first, then the record itself, so the reader sees what the
+          // hash covered rather than taking the one line on trust.
+          Text(verbatim: provenanceVerification)
+            .font(.callout)
+            .foregroundStyle(SettingsTheme.bodyColor)
+            .fixedSize(horizontal: false, vertical: true)
+        }
       }
       .padding(.vertical, 2)
     }
@@ -253,6 +268,20 @@ struct CheckupPane: View {
       return
     }
     verification = envelope.validate() ? CheckupPaneCopy.valid : CheckupPaneCopy.invalid
+  }
+
+  private func checkProvenance() {
+    let panel = NSOpenPanel()
+    panel.allowedContentTypes = [.json]
+    panel.allowsMultipleSelection = false
+    panel.canChooseDirectories = false
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    guard let envelope = try? ProvenanceEnvelope.load(url: url) else {
+      provenanceVerification = ProvenanceCopy.unreadable
+      return
+    }
+    let verdict = envelope.validate() ? ProvenanceCopy.intact : ProvenanceCopy.altered
+    provenanceVerification = verdict + "\n\n" + ProvenanceSummaryText.render(envelope.record)
   }
 }
 

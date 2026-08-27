@@ -361,7 +361,12 @@ private struct HealthDisplayCard: View {
             .accessibilityLabel(Text(verbatim: "Export provenance for \(name)"))
           Button(justCopied ? ProvenanceCopy.copied : ProvenanceCopy.copySummary) { copySummary() }
             .buttonStyle(SettingsSecondaryButtonStyle())
-            .accessibilityLabel(Text(verbatim: "Copy provenance summary for \(name)"))
+            // The visible title flips to "Copied", so the label flips with it or
+            // VoiceOver never hears the confirmation.
+            .accessibilityLabel(
+              Text(verbatim: justCopied
+                ? "Copied provenance summary for \(name)"
+                : "Copy provenance summary for \(name)"))
           Spacer(minLength: 0)
         }
         .padding(.vertical, 8)
