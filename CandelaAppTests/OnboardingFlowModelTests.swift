@@ -661,6 +661,73 @@ struct OnboardingFlowModelTests {
     #expect(model.committed == [.unenrollFromCare(displayKey: "dell")])
   }
 
+  /// A guess-only designation has nothing on disk to restore it, so the
+  /// re-harvest re-runs the guess for displays new to the snapshot.
+  @Test func aNameGuessDesignationSurvivesADepartureAndReturn() {
+    let both = [
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      entry(key: "dell"),
+    ]
+    let model = OnboardingFlowModel(environment: environment(both))
+    walk(model, to: .oledSelect)
+    #expect(model.designatedOleds == ["mag"])
+    model.update(environment: environment([both[1]]))
+    #expect(model.designatedOleds.isEmpty)
+    model.update(environment: environment(both))
+    #expect(model.designatedOleds == ["mag"])
+    // Untouched by the user, so protection comes back on with it.
+    #expect(model.careEnabled.contains("mag"))
+    #expect(model.pages.contains(.oledCare))
+    // Nothing was enrolled on disk, so the round trip writes nothing.
+    model.advance()
+    #expect(model.committed.isEmpty)
+  }
+
+  @Test func aDeselectedNameGuessStaysDeselectedAcrossAReplug() {
+    let both = [
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      entry(key: "dell"),
+    ]
+    let model = OnboardingFlowModel(environment: environment(both))
+    walk(model, to: .oledSelect)
+    model.designatedOleds.remove("mag")
+    model.careEnabled.remove("mag")
+    model.update(environment: environment([both[1]]))
+    model.update(environment: environment(both))
+    #expect(model.designatedOleds.isEmpty)
+    #expect(!model.careEnabled.contains("mag"))
+    #expect(!model.pages.contains(.oledCare))
+    model.advance()
+    #expect(model.committed.isEmpty)
+  }
+
+  @Test func aReplugNeverDesignatesANonOledUnenrolledDisplay() {
+    let both = [
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      entry(key: "dell"),
+    ]
+    let model = OnboardingFlowModel(environment: environment(both))
+    walk(model, to: .oledSelect)
+    model.update(environment: environment([both[0]]))
+    model.update(environment: environment(both))
+    #expect(model.designatedOleds == ["mag"])
+    #expect(!model.careEnabled.contains("dell"))
+  }
+
+  /// A first-time arrival lands preselected, same as if it had been attached
+  /// when the window opened.
+  @Test func anOledNamedDisplayArrivingMidFlowIsDesignated() {
+    let model = OnboardingFlowModel(environment: environment([entry(key: "dell")]))
+    walk(model, to: .oledSelect)
+    #expect(model.designatedOleds.isEmpty)
+    model.update(environment: environment([
+      entry(key: "dell"),
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+    ]))
+    #expect(model.designatedOleds == ["mag"])
+    #expect(model.careEnabled.contains("mag"))
+  }
+
   /// The enrollment-family commit leads the telemetry-family commit for a
   /// display, whichever direction each is going.
   @Test func enrollmentPrecedesTheMeasurementCommitPerDisplay() {
