@@ -661,6 +661,83 @@ struct OnboardingFlowModelTests {
     #expect(model.committed == [.unenrollFromCare(displayKey: "dell")])
   }
 
+  /// The name guess is the only thing designating a display that was never
+  /// enrolled, and nothing on disk can restore it, so the re-harvest has to
+  /// re-run the guess for a display that was not in the previous snapshot.
+  /// Without that, a cable blip mid-setup silently drops the display off the
+  /// care page and the user's checkmark vanishes.
+  @Test func aNameGuessDesignationSurvivesADepartureAndReturn() {
+    let both = [
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      entry(key: "dell"),
+    ]
+    let model = OnboardingFlowModel(environment: environment(both))
+    walk(model, to: .oledSelect)
+    #expect(model.designatedOleds == ["mag"])
+    model.update(environment: environment([both[1]]))
+    #expect(model.designatedOleds.isEmpty)
+    model.update(environment: environment(both))
+    #expect(model.designatedOleds == ["mag"])
+    // Untouched by the user, so protection comes back on with it.
+    #expect(model.careEnabled.contains("mag"))
+    #expect(model.pages.contains(.oledCare))
+    // Nothing was enrolled on disk, so the round trip writes nothing.
+    model.advance()
+    #expect(model.committed.isEmpty)
+  }
+
+  /// The deselection record guards the name-guess half exactly as it guards
+  /// the enrolled half: a checkmark the user cleared by hand stays cleared
+  /// through a replug.
+  @Test func aDeselectedNameGuessStaysDeselectedAcrossAReplug() {
+    let both = [
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      entry(key: "dell"),
+    ]
+    let model = OnboardingFlowModel(environment: environment(both))
+    walk(model, to: .oledSelect)
+    model.designatedOleds.remove("mag")
+    model.careEnabled.remove("mag")
+    model.update(environment: environment([both[1]]))
+    model.update(environment: environment(both))
+    #expect(model.designatedOleds.isEmpty)
+    #expect(!model.careEnabled.contains("mag"))
+    #expect(!model.pages.contains(.oledCare))
+    model.advance()
+    #expect(model.committed.isEmpty)
+  }
+
+  /// The negative control: the guess reads the product name and nothing else,
+  /// so a display that is neither OLED-named nor enrolled must never pick up a
+  /// designation from a replug.
+  @Test func aReplugNeverDesignatesANonOledUnenrolledDisplay() {
+    let both = [
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+      entry(key: "dell"),
+    ]
+    let model = OnboardingFlowModel(environment: environment(both))
+    walk(model, to: .oledSelect)
+    model.update(environment: environment([both[0]]))
+    model.update(environment: environment(both))
+    #expect(model.designatedOleds == ["mag"])
+    #expect(!model.careEnabled.contains("dell"))
+  }
+
+  /// The same re-seed covers a genuinely new arrival: an OLED-named display
+  /// plugged in mid-flow arrives preselected, the way it would have if it had
+  /// been attached when the window opened.
+  @Test func anOledNamedDisplayArrivingMidFlowIsDesignated() {
+    let model = OnboardingFlowModel(environment: environment([entry(key: "dell")]))
+    walk(model, to: .oledSelect)
+    #expect(model.designatedOleds.isEmpty)
+    model.update(environment: environment([
+      entry(key: "dell"),
+      entry(key: "mag", productName: "MAG 341CQPX QD-OLED"),
+    ]))
+    #expect(model.designatedOleds == ["mag"])
+    #expect(model.careEnabled.contains("mag"))
+  }
+
   /// The enrollment-family commit leads the telemetry-family commit for a
   /// display, whichever direction each is going.
   @Test func enrollmentPrecedesTheMeasurementCommitPerDisplay() {
