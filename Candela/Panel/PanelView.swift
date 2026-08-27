@@ -91,10 +91,9 @@ struct PanelView: View {
               controller: state.controller, displayName: name,
               snapsToStops: snapsToStops, showsPercent: showsPercent
             )
-            // WD5: the wire stopped answering, so the row says so. Unlike the
-            // volume denial below it the control is NOT greyed, because the
-            // slider still dims the display in software, and `staysLive` is what
-            // keeps the caption's hover watcher out of the way of its drags.
+            // WD5: not greyed, unlike the volume denial below, because the
+            // slider still dims in software. `staysLive` keeps the caption's
+            // hover watcher out of the way of the drags.
             .panelHoverReason(model.brightnessSliderCompactReason(state), staysLive: true)
             if Self.showsVolumeSlider(for: state, prefs: rowPrefs) {
               let volumeEnabled = model.volumeSliderEnabled(state)

@@ -18,24 +18,22 @@ struct BrightnessSliderPolicyTests {
       == BrightnessSliderPolicy.wireUnresponsiveReason)
   }
 
-  /// Pure-DDC configuration demotes to the same full-range software leg
-  /// force-software selects, so the path cannot tell them apart and the wire's
-  /// verdict has to.
+  /// Pure-DDC demotes to the same full-range software leg force-software
+  /// selects, so only the wire's verdict can tell them apart.
   @Test func theFullRangeSoftwareLegNeedsTheWiresVerdictToBeReadable() {
     #expect(reason(.software(.gamma)) == BrightnessSliderPolicy.wireUnresponsiveReason)
     #expect(reason(.software(.gamma), wireUnresponsive: false) == nil)
   }
 
-  /// The user's own switch outranks the wire (WD2), so the caption must not
-  /// blame the display for a control a person turned off.
+  /// WD2: the caption must not blame the display for a control a person turned
+  /// off.
   @Test func aCommandTheUserTurnedOffIsNeverBlamedOnTheDisplay() {
     #expect(reason(.softwareOnly(backend: .gamma, reason: .ddcTurnedOff, dimsBelow: 0.5)) == nil)
     #expect(reason(.unavailable(.ddcTurnedOffWithNoSoftwareLeg)) == nil)
   }
 
-  /// Nothing is said about a display that is working, and nothing is said under
-  /// live HDR either: macOS carries brightness there and the locked register is
-  /// normal life, not a fault.
+  /// Nothing said about a working display, and nothing under live HDR: macOS
+  /// carries brightness there and the locked register is not a fault.
   @Test func aWorkingDisplaySaysNothing() {
     #expect(reason(.hardware, wireUnresponsive: false) == nil)
     #expect(reason(.combined(switchingValue: 0.5, backend: .gamma), wireUnresponsive: false) == nil)

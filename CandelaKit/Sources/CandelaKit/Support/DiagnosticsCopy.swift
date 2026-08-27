@@ -196,8 +196,7 @@ public enum DiagnosticsCopy {
     case let .softwareOnly(.overlay, .ddcTurnedOff, dimsBelow):
       "Software only below \(SliderSnap.percentText(dimsBelow)), through a dark overlay"
     // The wire's two arms name the CAUSE in the value, unlike the pair above:
-    // the user did not do this and would otherwise be reading a control method
-    // with no explanation of how the display arrived at it.
+    // the user did not do this and has no other explanation for it.
     case let .softwareOnly(.gamma, .ddcUnresponsive, dimsBelow):
       "Software only below \(SliderSnap.percentText(dimsBelow)), through the display's color profile: this display stopped answering brightness commands"
     case let .softwareOnly(.overlay, .ddcUnresponsive, dimsBelow):

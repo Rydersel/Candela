@@ -14,9 +14,8 @@ final class FakeDDCWriter: DDCWriting, @unchecked Sendable {
   // confines each instance to one test's structured tasks.
   var capabilities: String?
   var readAnswer: (current: UInt16, max: UInt16)?
-  /// A panel that stops accepting commands mid-session. The write is still
-  /// RECORDED when it fails: the transaction was attempted, which is the whole
-  /// distinction the wire's health counts.
+  /// A panel that stops accepting commands mid-session. A failed write is still
+  /// RECORDED: the transaction was attempted, which is what the health counts.
   var writesSucceed = true
   private(set) var writes: [(command: UInt8, value: UInt16)] = []
 

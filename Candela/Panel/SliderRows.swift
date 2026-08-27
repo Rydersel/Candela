@@ -100,11 +100,9 @@ extension View {
   /// affordance, and the reason is the one thing a keyboard user cannot
   /// otherwise get from this surface.
   ///
-  /// `staysLive` is for a row that carries a reason WITHOUT being greyed, which
-  /// is the degraded brightness slider: the wire stopped answering and the
-  /// slider still dims the display in software. The hover overlay the greyed
-  /// case uses would swallow that row's drags, so a live row is watched through
-  /// the content itself, which a working control reports hover from anyway.
+  /// `staysLive` is for a row that carries a reason WITHOUT being greyed (the
+  /// degraded brightness slider). The overlay the greyed case uses would
+  /// swallow that row's drags, so a live row is watched through the content.
   func panelHoverReason(_ reason: String?, staysLive: Bool = false) -> some View {
     modifier(PanelHoverReason(reason: reason, staysLive: staysLive))
   }
@@ -120,9 +118,8 @@ private struct PanelHoverReason: ViewModifier {
     VStack(alignment: .leading, spacing: 3) {
       content
         .onHover { isHovering in
-          // A live row with nothing to say must stay exactly what it was before
-          // this modifier existed, so the state write is gated rather than the
-          // tracking: `hovering` never leaves false without a reason to reveal.
+          // Gated on the write rather than the tracking, so a live row with
+          // nothing to say behaves exactly as it did before this modifier.
           guard staysLive, reason != nil else { return }
           hovering = isHovering
         }
@@ -131,8 +128,7 @@ private struct PanelHoverReason: ViewModifier {
             // Applied after the caller's `.disabled`, so it is outside that
             // subtree and still hit-tests. Swallowing the hover costs nothing:
             // the control underneath is inert whenever a reason exists. A live
-            // row takes the branch above instead, because there the swallowing
-            // would cost the drag.
+            // row takes the branch above, where swallowing would cost the drag.
             Color.clear.contentShape(Rectangle()).onHover { hovering = $0 }
           }
         }

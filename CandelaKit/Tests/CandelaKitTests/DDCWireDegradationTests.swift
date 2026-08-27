@@ -6,17 +6,14 @@ import Testing
 /// The engine half of the wire degradation: what the controller does with
 /// `DDCWireHealth`, which applies reach it, and every route back.
 ///
-/// `DDCWireHealthTests` pins the counting rule on its own. These are about the
-/// WIRING, which is where the two anti-patterns live: a demotion that no route
-/// undoes, and a demotion that fires on an HDR window.
+/// `DDCWireHealthTests` pins the counting rule itself. The two defects these
+/// guard are a demotion no route undoes, and one that fires on an HDR window.
 @Suite("DDC wire degradation (WD1, WD3, WD4)")
 @MainActor
 struct DDCWireDegradationTests {
-  /// Drives the wire until it has failed `count` applies, and waits for the
-  /// verdict the last one produces.
-  ///
-  /// Distinct values on purpose: a repeat of the target already on the wire is
-  /// duplicate-skipped, and a skip asks the panel nothing.
+  /// Drives the wire until it has failed `count` applies, then waits for the
+  /// verdict. Distinct values on purpose: a repeat of the target already on the
+  /// wire is duplicate-skipped, and a skip asks the panel nothing.
   private func failWrites(_ harness: Harness, count: Int, from start: Double = 0.9) async {
     for step in 0 ..< count {
       harness.controller.setBrightness(start - Double(step) * 0.05)
@@ -36,10 +33,9 @@ struct DDCWireDegradationTests {
     #expect(!harness.controller.isWireUnresponsive)
   }
 
-  /// The MAG341C's whole shape, and the reason WD1 keys on writes: it answers
-  /// every read with zeros and honours every write. A rule keyed on read
-  /// evidence would demote the panel it looks worst on, so the read verdict is
-  /// asserted here beside the health to show they are separate facts.
+  /// The MAG341C's shape, and why WD1 keys on writes: it answers every read with
+  /// zeros and honours every write. The read verdict is asserted beside the
+  /// health to show they are separate facts.
   @Test func aWriteOnlyPanelWhoseWritesLandIsNeverDemoted() async {
     let harness = Harness(ddcRead: (current: 0, max: 0), withHDR: false)
     await harness.prime()
@@ -63,8 +59,8 @@ struct DDCWireDegradationTests {
     #expect(harness.controller.brightnessPath == .combined(switchingValue: 0.5, backend: .gamma))
   }
 
-  /// The demotion itself: the slider stops claiming a hardware leg and the
-  /// software leg carries what it can.
+  /// The slider stops claiming a hardware leg; the software leg carries what it
+  /// can.
   @Test func threeFailedWritesDemoteTheDisplayToTheSoftwareLeg() async {
     let harness = Harness(withHDR: false)
     await harness.prime()
@@ -75,9 +71,8 @@ struct DDCWireDegradationTests {
       == .softwareOnly(backend: .gamma, reason: .ddcUnresponsive, dimsBelow: 0.5))
   }
 
-  /// A success between the failures means the wire is carrying commands, so the
-  /// count starts again: this is the anti-pattern of a bare failure counter,
-  /// pinned through the engine rather than only through the value type.
+  /// A success in between means the wire is carrying commands, so the count
+  /// starts again. Pinned through the engine, not only the value type.
   @Test func aSuccessBetweenFailuresKeepsTheDisplayOnItsHardwareLeg() async {
     let harness = Harness(withHDR: false)
     await harness.prime()
@@ -91,11 +86,9 @@ struct DDCWireDegradationTests {
     #expect(!harness.controller.isWireUnresponsive)
   }
 
-  /// WD4 and D28. The re-evaluation has to be the one `reapplyAfterPrefChange`
-  /// performs, and pure-DDC configuration is where the difference shows: a
-  /// `handleReconfigure` here returns before applying anything, so a display
-  /// demoted through that door would keep a slider that moves nothing while the
-  /// app reported software dimming.
+  /// WD4 and D28. Pure-DDC configuration is where the shortcut shows: a
+  /// `handleReconfigure` returns before applying anything, so a display demoted
+  /// through that door keeps a slider that moves nothing.
   @Test func theTransitionRunsTheFullReEvaluationEvenInPureDDCMode() async {
     let harness = Harness(withHDR: false) { prefs, _ in
       prefs.disableCombinedBrightness = true
@@ -116,9 +109,8 @@ struct DDCWireDegradationTests {
     #expect(harness.gamma.scales.last != 1.0)
   }
 
-  /// WD3, route one. A reconfiguration rebuilt the display's state, so the wire
-  /// is asked again rather than staying demoted on the strength of writes made
-  /// before it.
+  /// WD3, route one: a reconfiguration rebuilt the display's state, so the wire
+  /// is asked again rather than staying demoted on writes made before it.
   @Test func aReconfigurationGivesTheWireAFreshHearing() async {
     let harness = Harness(withHDR: false)
     await harness.prime()
@@ -148,8 +140,8 @@ struct DDCWireDegradationTests {
   }
 
   /// WD3, route three, through the door somebody else opens: HDR switched on in
-  /// System Settings and switched off again. A DDC failure inside that window is
-  /// expected and temporary, and a display must not be left demoted by one.
+  /// System Settings and off again. A display must not be left demoted by a
+  /// failure inside that window.
   @Test func anHDRRoundTripInSystemSettingsGivesTheWireAFreshHearing() async {
     let harness = Harness(settle: .milliseconds(5))
     await harness.prime()
@@ -157,8 +149,8 @@ struct DDCWireDegradationTests {
     await failWrites(harness, count: 3)
     #expect(harness.controller.isWireUnresponsive)
 
-    // The measured read is how the backend's own cache catches up with a toggle
-    // it did not make; without it the mirror is stale by design.
+    // The measured read is how the backend's cache catches up with a toggle it
+    // did not make; without it the mirror is stale by design.
     await harness.hdr?.stubEnabled(true)
     _ = await harness.hdr?.measuredHDREnabled(displayID: Harness.displayID)
     await harness.controller.noteHDRStateMayHaveChanged()
@@ -172,9 +164,8 @@ struct DDCWireDegradationTests {
     #expect(harness.controller.brightnessPath == .combined(switchingValue: 0.5, backend: .gamma))
   }
 
-  /// The same round trip through Candela's own HDR door, where the observer
-  /// above sees no edge at all: the mirror moves with the call, so the reset has
-  /// to be made by the transition itself.
+  /// The same round trip through Candela's own HDR door, where the observer sees
+  /// no edge: the mirror moves with the call, so the transition resets.
   @Test func ourOwnHDRRoundTripGivesTheWireAFreshHearing() async {
     let harness = Harness(settle: .milliseconds(5))
     await harness.prime()
@@ -191,9 +182,8 @@ struct DDCWireDegradationTests {
     #expect(harness.controller.brightnessPath == .combined(switchingValue: 0.5, backend: .gamma))
   }
 
-  /// The count does not survive an HDR window either: two failures before it and
-  /// two after are four failures with a locked register in the middle, which is
-  /// not three in a row on a wire anybody could have written to.
+  /// Two failures before an HDR window and two after are not a run: the register
+  /// was locked in the middle, so nobody could write to the wire.
   @Test func anHDRWindowClearsWhatTheWireHadEarnedBeforeIt() async {
     let harness = Harness(settle: .milliseconds(5))
     await harness.prime()
@@ -207,8 +197,8 @@ struct DDCWireDegradationTests {
     #expect(!harness.controller.isWireUnresponsive)
   }
 
-  /// The built-in panel has no DDC wire at all: it routes native, so nothing it
-  /// does can be evidence about a cable it does not have.
+  /// The built-in routes native, so nothing it does is evidence about a cable it
+  /// does not have.
   @Test func theBuiltInPanelIsNeverDemoted() async {
     let harness = Harness(withHDR: false, role: .builtIn)
     await harness.prime()
@@ -218,9 +208,8 @@ struct DDCWireDegradationTests {
     #expect(harness.controller.brightnessPath == .native)
   }
 
-  /// A display the user turned the brightness command off for is reported as
-  /// turned off, whatever the wire is doing behind the switch (WD2's ordering,
-  /// asserted through the engine so the pane cannot be told the other story).
+  /// WD2's ordering, asserted through the engine so the pane cannot be told the
+  /// other story: a command the user turned off is reported as turned off.
   @Test func theUsersOwnSwitchStillOutranksTheWireInTheEngine() async {
     let harness = Harness(withHDR: false)
     await harness.prime()
@@ -240,9 +229,8 @@ struct DDCWireDegradationTests {
   }
 }
 
-/// The coalescer's half: which applies reach the health at all. Kept here rather
-/// than in the coalescer suite because the rule being pinned is WD1's, not the
-/// queue's.
+/// The coalescer's half: which applies reach the health at all. Here rather than
+/// in the coalescer suite because the rule being pinned is WD1's, not the queue's.
 @Suite("What counts against the wire (WD1)")
 struct WireHealthEvidenceTests {
   @Test func aFailedDDCApplyCountsAgainstTheWire() async {
@@ -259,8 +247,8 @@ struct WireHealthEvidenceTests {
     coalescer.finishSubmissions()
   }
 
-  /// The HDR stamp drops the attempt entirely. Crisp's version of this feature
-  /// fires here, on a register that is locked by design and unlocks itself.
+  /// The HDR stamp drops the attempt. Crisp fires here, on a register that is
+  /// locked by design and unlocks itself.
   @Test func aFailedApplyStampedHDRExcludedNeverReachesTheHealth() async {
     let applier = RecordingApplier(scriptedResults: [false, false, false, false, false])
     let coalescer = BrightnessWriteCoalescer()
@@ -278,8 +266,7 @@ struct WireHealthEvidenceTests {
   /// A native apply says nothing about a wire the native path does not use.
   @Test func failedNativeAppliesAreNotEvidenceAboutTheWire() async {
     // A real native applier over a closure that refuses: `RecordingApplier`
-    // only accepts DDC, and a mismatched pairing would be rejected for the
-    // wrong reason.
+    // only accepts DDC, so a mismatched pairing fails for the wrong reason.
     let applier = NativeBrightnessApplier(displayID: 1) { _, _ in false }
     let coalescer = BrightnessWriteCoalescer()
     for generation in UInt64(1) ... 3 {
@@ -293,8 +280,8 @@ struct WireHealthEvidenceTests {
     coalescer.finishSubmissions()
   }
 
-  /// A duplicate skip asks the panel nothing, so it is not a success: a run of
-  /// them must not clear a count the wire earned.
+  /// A duplicate skip asks the panel nothing, so a run of them must not clear a
+  /// count the wire earned.
   @Test func aDuplicateSkipIsNotASuccess() async {
     let applier = RecordingApplier(scriptedResults: [true, false, false])
     let coalescer = BrightnessWriteCoalescer()
@@ -305,15 +292,13 @@ struct WireHealthEvidenceTests {
     coalescer.submit(.init(target: .ddc(raw: 4), applier: applier, epoch: 0, generation: 3))
     await coalescer.waitUntilCompleted(through: 3)
     // Raw 9 landed, raw 4 failed twice; the third submit repeats a target that
-    // never landed, so it is applied rather than skipped. What is pinned is that
-    // no skip ever cleared the count.
+    // never landed, so it is applied rather than skipped. No skip cleared the count.
     #expect(coalescer.wireHealth().consecutiveFailures == 2)
     coalescer.finishSubmissions()
   }
 
-  /// The duplicate memo is reset on every re-apply and every dim step, where the
-  /// hardware state is unknown but the wire's record is not. Clearing the health
-  /// there would promote a dead cable back on the strength of a memo reset.
+  /// The duplicate memo resets on every re-apply and dim step, where the hardware
+  /// state is unknown but the wire's record is not.
   @Test func aDuplicateMemoResetLeavesTheWiresRecordAlone() async {
     let applier = RecordingApplier(scriptedResults: [false, false, false])
     let coalescer = BrightnessWriteCoalescer()

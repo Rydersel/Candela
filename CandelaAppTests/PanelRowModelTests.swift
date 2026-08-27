@@ -351,9 +351,8 @@ struct PanelRowModelTests {
 
   // MARK: - Brightness row reason (WD5)
 
-  /// Drives the wire until the display is demoted, or gives up: a bounded wait
-  /// rather than a sleep, because the verdict lands on a task the demoting write
-  /// wakes and there is nothing to poll for otherwise.
+  /// Drives the wire until the display is demoted, or gives up. A bounded wait
+  /// rather than a sleep: the verdict lands on a task the last write wakes.
   private static func demote(_ state: AppModel.DisplayState) async {
     (state.writer as? FakeDDCWriter)?.writesSucceed = false
     for step in 0 ..< 3 {
@@ -374,9 +373,8 @@ struct PanelRowModelTests {
     #expect(model.brightnessSliderCompactReason(state) == nil)
   }
 
-  /// The panel says why, in the words the policy chose, and the row stays LIVE:
-  /// the display still dims in software, so the caption is an explanation rather
-  /// than an apology for a dead control.
+  /// The words come from the policy, not from the row: the display still dims in
+  /// software, so the caption explains rather than apologizes.
   @Test func aWireThatStoppedAnsweringPutsItsReasonOnTheBrightnessRow() async {
     let model = TestFixtures.appModel()
     let state = Self.state(id: 1, name: "MAG 341C", key: "mag")
@@ -386,8 +384,7 @@ struct PanelRowModelTests {
       == BrightnessSliderPolicy.wireUnresponsiveReason)
   }
 
-  /// And it goes when the wire recovers, on a route that is neither a replug nor
-  /// a relaunch. Reading the caption through the model is the point: a stale
+  /// Recovery on a route that is neither a replug nor a relaunch. A stale
   /// sentence outliving its cause is the failure this row is specified against.
   @Test func theReasonGoesWhenTheWireAnswersAgain() async {
     let model = TestFixtures.appModel()

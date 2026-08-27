@@ -1129,13 +1129,10 @@ final class AppModel {
     )
   }
 
-  /// The brightness row's caption, worded for the menu bar's panel: nil while
-  /// the wire is carrying commands, and the wire's own sentence once it has
-  /// stopped (WD5).
-  ///
-  /// Both inputs come from the controller that made the decision, the way the
-  /// volume denial's do: the path AND the verdict, because in pure-DDC
-  /// configuration the demotion answers the same path force-software does.
+  /// The brightness row's caption for the menu bar's panel, nil while the wire
+  /// is still carrying commands (WD5). Needs the verdict as well as the path:
+  /// in pure-DDC configuration the demotion answers the same path
+  /// force-software does.
   func brightnessSliderCompactReason(_ state: DisplayState) -> String? {
     BrightnessSliderPolicy.compactDegradedReason(
       path: state.controller.brightnessPath,
@@ -1143,11 +1140,9 @@ final class AppModel {
     )
   }
 
-  /// Hands every external display's brightness controller the wake it cannot
-  /// observe for itself: the engine has no AppKit, and a link rebuilt while the
-  /// Mac slept has told the wire nothing yet (WD3).
-  ///
-  /// Externals only. The built-in has no DDC wire to have an opinion about.
+  /// Hands every external brightness controller the wake the engine cannot see
+  /// for itself: no AppKit there, and a link rebuilt while the Mac slept has
+  /// told the wire nothing yet (WD3).
   func noteWakeForBrightnessWires() {
     for state in displays {
       state.controller.noteWake()

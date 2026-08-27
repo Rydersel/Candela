@@ -324,10 +324,9 @@ struct CommandTuningGrid: View {
       SettingsCaption("With brightness off, this display dims in software only below \(SliderSnap.percentText(dimsBelow)). Above that, nothing moves.")
     case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
       SettingsCaption("With brightness off, nothing is moving this display's brightness.")
-    // The wire's own two states say nothing HERE, deliberately. This caption
-    // explains what the Off switch above it did, and a display that stopped
-    // answering did not get there from this control; the panel's brightness row
-    // and the Diagnostics page are where that is said.
+    // Silent about the wire on purpose: this caption explains the Off switch
+    // above it, and a display that stopped answering did not get there from
+    // this control. The panel row and the Diagnostics page say that instead.
     case .softwareOnly(_, .ddcUnresponsive, _), .unavailable(.ddcUnresponsiveWithNoSoftwareLeg):
       EmptyView()
     case .native, .software, .hardware, .combined:

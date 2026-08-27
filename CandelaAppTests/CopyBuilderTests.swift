@@ -234,9 +234,8 @@ struct CopyBuilderTests {
       render(DiagnosticsPageCopy.brightnessPath(.unavailable(.ddcTurnedOffWithNoSoftwareLeg)))
         .contains("nothing is left to carry the value"))
 
-    // The wire's two arms name the display's own silence, never a setting: a
-    // sentence that read like the two above would send someone looking for a
-    // switch they never touched.
+    // The wire's two arms name the display's own silence, never a setting:
+    // otherwise someone goes looking for a switch they never touched.
     let deadWire = render(
       DiagnosticsPageCopy.brightnessPath(
         .softwareOnly(backend: .gamma, reason: .ddcUnresponsive, dimsBelow: 0.25)))
@@ -247,7 +246,7 @@ struct CopyBuilderTests {
       render(DiagnosticsPageCopy.brightnessPath(.unavailable(.ddcUnresponsiveWithNoSoftwareLeg)))
         .contains("stopped answering brightness commands"))
 
-    // One representative per switch arm, eight distinct sentences. Both software
+    // One representative per switch arm, each with its own sentence. Both software
     // backends are deliberately not in this list: they share one sentence,
     // because the user is told the backlight is untouched, not which trick does
     // the darkening.

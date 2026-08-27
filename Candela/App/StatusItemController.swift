@@ -272,9 +272,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
         // The observer closure runs off-main; the coordinator is MainActor.
         Task { @MainActor in
           self?.restoreCoordinator.noteWake()
-          // WD3's wake route: a wire that stopped answering before the Mac slept
-          // is asked again rather than staying demoted across a link the sleep
-          // rebuilt.
+          // WD3: a wire that stopped answering before the Mac slept is asked
+          // again rather than staying demoted across a link the sleep rebuilt.
           self?.model.noteWakeForBrightnessWires()
         }
       })

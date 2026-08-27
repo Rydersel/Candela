@@ -182,12 +182,8 @@ struct DisplayCardPolicyTests {
     #expect(DisplayCardPolicy.normalizedFriendlyName("Desk") == "Desk")
   }
 
-  /// WD2's ambiguity, and the one place it bites. In pure-DDC configuration a
-  /// wire that stopped answering routes the same `.software` path force-software
-  /// does, and greying the DDC grid there would caption a display nobody touched
-  /// with "hardware control is off". It answers nil for `.softwareOnly`'s reason:
-  /// the brightness command is not landing, and volume and contrast still write
-  /// over the same wire.
+  /// WD2's ambiguity, and the one place it bites: greying the DDC grid here
+  /// would caption a display nobody touched with "hardware control is off".
   @Test func aWireThatStoppedAnsweringDoesNotClaimHardwareControlWasTurnedOff() {
     #expect(DisplayCardPolicy.ddcTrafficBlock(
       for: .software(.gamma), isWireUnresponsive: true
@@ -201,8 +197,8 @@ struct DisplayCardPolicyTests {
     ) == .hardwareControlOff)
   }
 
-  /// Live HDR outranks the wire in this projection too: macOS is driving the
-  /// display, which is a different sentence and the only one that is true there.
+  /// Live HDR outranks the wire here too: macOS is driving the display, which is
+  /// the only true sentence there.
   @Test func liveHDRStillNamesMacOSEvenWithAnUnresponsiveWire() {
     #expect(DisplayCardPolicy.ddcTrafficBlock(
       for: .native, isWireUnresponsive: true
