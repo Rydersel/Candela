@@ -45,25 +45,49 @@ struct ProvenanceEnvelopeTests {
     #expect(!e.validate())
   }
 
-  @Test func aFileWrittenWithoutALaterKeyStillValidates() throws {
-    // Simulates a file from before `macOSBuild` existed: digest without it,
-    // then decode. The digest must cover only the keys the file carried.
-    let record = ProvenanceRecordTests.sampleRecord()
+  /// The file an older Candela would have written, from before `macOSBuild`
+  /// existed: the digest covers only the keys that file carried.
+  private func fileWrittenBeforeMacOSBuild() throws -> Data {
     let keys = ProvenanceRecord.knownBodyKeys.subtracting(["macOSBuild"])
-    let body = ProvenanceEnvelope.Body(record: record, keys: keys)
+    let body = ProvenanceEnvelope.Body(record: ProvenanceRecordTests.sampleRecord(), keys: keys)
     let sha = try CanonicalDigest.sha256Hex(body)
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
     encoder.outputFormatting = [.sortedKeys]
-    let recordData = try encoder.encode(body)
-    let recordObject = try JSONSerialization.jsonObject(with: recordData)
+    let recordObject = try JSONSerialization.jsonObject(with: try encoder.encode(body))
     let fileObject: [String: Any] = ["schemaVersion": 1, "record": recordObject, "sha256": sha]
-    let data = try JSONSerialization.data(withJSONObject: fileObject)
+    return try JSONSerialization.data(withJSONObject: fileObject)
+  }
+
+  private func decodeStoredEnvelope(_ data: Data) throws -> ProvenanceEnvelope {
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
-    let e = try decoder.decode(ProvenanceEnvelope.self, from: data)
+    return try decoder.decode(ProvenanceEnvelope.self, from: data)
+  }
+
+  @Test func aFileWrittenWithoutALaterKeyStillValidates() throws {
+    let e = try decodeStoredEnvelope(try fileWrittenBeforeMacOSBuild())
     #expect(e.record.macOSBuild == "")
     #expect(e.validate())
+  }
+
+  @Test func writingAnOlderFileAgainKeepsTheShapeItWasWrittenWith() throws {
+    let written = try ProvenanceEnvelope.encoded(
+      try decodeStoredEnvelope(try fileWrittenBeforeMacOSBuild()))
+    #expect(!String(decoding: written, as: UTF8.self).contains("macOSBuild"))
+    #expect(try decodeStoredEnvelope(written).validate())
+  }
+
+  @Test func aKnownKeyAddedToAnOlderBodyFails() throws {
+    var object = try #require(
+      try JSONSerialization.jsonObject(with: try fileWrittenBeforeMacOSBuild()) as? [String: Any])
+    var record = try #require(object["record"] as? [String: Any])
+    record["macOSBuild"] = "x"
+    object["record"] = record
+    let edited = try JSONSerialization.data(withJSONObject: object)
+    // The key is one Candela writes, so the subset guard lets it through; the
+    // digest over the keys the file actually carried is what catches it.
+    #expect(try decodeStoredEnvelope(edited).validate() == false)
   }
 
   @Test func exportFileNameCarriesModelAndDay() throws {

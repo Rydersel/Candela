@@ -281,4 +281,14 @@ struct WearSignalTrackerTests {
     t.noteTick(dimState: .suspended, effectiveLevel: 0.5, secondsSinceLastTick: 7)
     #expect(t.histogram().totalSeconds == 27)
   }
+
+  /// The histogram travels inside exported records, so it has to survive a
+  /// coding round trip whole.
+  @Test func aHistogramRoundTripsThroughCoding() throws {
+    let defaults = InMemoryDefaults()
+    let t = WearSignalTracker(defaults: defaults, persistenceKey: "pk")
+    t.noteTick(dimState: .idleDim, effectiveLevel: 0.2, secondsSinceLastTick: 12)
+    let h = t.histogram()
+    #expect(try JSONDecoder().decode(WearHistogram.self, from: JSONEncoder().encode(h)) == h)
+  }
 }

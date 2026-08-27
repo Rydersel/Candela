@@ -228,7 +228,7 @@ public final class WearSignalTracker {
 
 /// One tracker's accumulation with both axes intact and its states named, for
 /// a reader outside the engine that has no `OledDimState` to index by.
-public struct WearHistogram: Equatable, Sendable {
+public struct WearHistogram: Codable, Equatable, Sendable {
   public let stateNames: [String]
   public let levelBuckets: Int
   public let seconds: [[Double]]
