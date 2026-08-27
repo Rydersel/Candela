@@ -478,9 +478,8 @@ final class OledCareCoordinator: CheckupCareHolding {
       observationEnabled: observing)
   }
 
-  /// The map as it stands, live accumulator first. The health summary
-  /// normalizes and drops `firstSample`; the provenance record wants the raw
-  /// map, so it reads through here rather than re-deriving from the summary.
+  /// The raw map, live accumulator first. The health summary normalizes and drops
+  /// `firstSample`, both of which the provenance record needs.
   func exposureMap(for persistenceKey: String) -> ExposureMap {
     accumulators[persistenceKey]?.map ?? loadExposureMap(for: persistenceKey)
   }

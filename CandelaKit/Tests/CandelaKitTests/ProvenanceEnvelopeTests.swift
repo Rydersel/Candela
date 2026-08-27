@@ -90,10 +90,8 @@ struct ProvenanceEnvelopeTests {
     #expect(try decodeStoredEnvelope(edited).validate() == false)
   }
 
-  /// The seam between the two envelopes: a record carries stored checkup runs
-  /// whole, so a run lifted back out of an exported file is still a checkup
-  /// file that the checkup store can read and validate on its own. Nesting must
-  /// not re-encode the run, which would move its bytes and break its digest.
+  /// A run lifted back out of an exported record still validates as a checkup file.
+  /// Nesting must not re-encode it, which would move its bytes and break its digest.
   @Test func aRunLiftedOutOfAnExportedRecordIsStillAValidCheckupFile() throws {
     let base = ProvenanceRecordTests.sampleRecord()
     let run = try CheckupReportEnvelope(

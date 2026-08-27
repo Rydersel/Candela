@@ -73,10 +73,8 @@ struct ProvenanceAssemblerTests {
     #expect(e.lastSample == now)
   }
 
-  /// A person can read the summary and the Health card in the same session, so
-  /// the renderer's 1-based cell number and `ExposureMap.hottestCell` have to
-  /// name the same cell. A plateau is where two independent scans drift apart:
-  /// only a matching strict `>` keeps both on the first of the equal peaks.
+  /// The renderer's 1-based cell number and `ExposureMap.hottestCell` must name the
+  /// same cell. A plateau is where two independent scans drift apart.
   @Test func theRenderedHottestCellNamesTheCellTheMapNames() throws {
     let m = map(samples: 40, cellPeaksAt: [7, 100])
     let r = ProvenanceAssembler.assemble(
@@ -158,9 +156,8 @@ struct ProvenanceAssemblerTests {
     }
   }
 
-  /// The positive control for the check above: `secondsByOwner` is the key the
-  /// owner table really writes, and its values are app bundle IDs. Without this,
-  /// an absence assertion against a key nothing ever wrote would pass forever.
+  /// Positive control for the check above: an absence assertion against a key
+  /// nothing ever writes would pass forever.
   @Test func theForbiddenOwnerKeyIsTheOneTheOwnerTableWrites() throws {
     let json = String(
       decoding: try CanonicalDigest.canonicalData(

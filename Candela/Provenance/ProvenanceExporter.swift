@@ -2,14 +2,12 @@ import CandelaKit
 import CoreGraphics
 import Foundation
 
-/// Gathers one attached display's values from the stores and hands them to
-/// the assembler. Every read goes through the coordinator's single-instance
-/// doors: a second tracker over a key double-books every tick.
+/// Every read goes through the coordinator's single-instance doors: a second
+/// tracker over a key double-books every tick.
 @MainActor
 enum ProvenanceExporter {
-  /// Call from an action, never from a view body: `hoursTracker(for:)` and
-  /// `wearTracker(for:)` memoise into observation-tracked state, so a body that
-  /// reads them writes to what it is observing.
+  /// Call from an action, never a view body: `hoursTracker(for:)` and `wearTracker(for:)`
+  /// memoise into observation-tracked state, so a body reading them mutates what it observes.
   static func record(for state: AppModel.DisplayState, model: AppModel, now: Date = .now) -> ProvenanceRecord {
     let key = state.display.persistenceKey
     let prefs = DisplayPrefs(persistenceKey: key)
@@ -51,13 +49,10 @@ enum ProvenanceExporter {
       now: now)
   }
 
-  /// Only a run that actually read the display, `CheckupSummaryText`'s rule and
-  /// its reason: an abandoned run stores a placeholder identity, which would be
-  /// carried here as a serial and a native size nothing ever observed.
-  ///
-  /// The tie-break is the assembler's total order, not time alone: two runs
-  /// booked in the same instant would otherwise pick unstably, and the same
-  /// stores would export under two different identities.
+  /// Only a run that read the display: an abandoned run stores a placeholder
+  /// identity, which would travel as a serial nothing ever observed. The tie-break
+  /// is the assembler's total order, so two runs booked in the same instant cannot
+  /// export under two identities.
   private static func latestReadIdentityRun(_ runs: [CheckupReportEnvelope]) -> CheckupReportEnvelope? {
     runs.filter { CheckupSummaryText.identityWasRead($0.report) }.max {
       $0.report.startedAt == $1.report.startedAt
@@ -66,10 +61,9 @@ enum ProvenanceExporter {
     }
   }
 
-  /// The same read the checkup leg performs, with the same sources: native
-  /// pixels off the native-flagged mode, never `CGDisplayPixelsWide`, which
-  /// answers with the CURRENT mode's logical width and would file a scaled size
-  /// under "native resolution" in a document that travels with the display.
+  /// Native pixels come off the native-flagged mode, never `CGDisplayPixelsWide`,
+  /// which answers with the CURRENT mode's logical width: a scaled size filed as
+  /// native in a document that travels with the display.
   private static func liveIdentity(for state: AppModel.DisplayState) -> CheckupDisplayIdentity? {
     let configurator = CoreGraphicsDisplayConfigurator()
     let modes = configurator.modes(for: state.display.id)
@@ -82,9 +76,8 @@ enum ProvenanceExporter {
       maxRefreshHz: DisplayModeCatalog.distinctRates(modes).max())
   }
 
-  /// The checkup's own identity read first, because a run measured native
-  /// pixels and refresh the way the checkup defines them; the live read is the
-  /// fallback for a display that has never been checked.
+  /// The checkup's own identity first, since a run measured native pixels the way
+  /// the checkup defines them. The live read is the fallback for an unchecked display.
   private static func identity(for state: AppModel.DisplayState, model: AppModel,
                                identityRun: CheckupReportEnvelope?) -> ProvenanceIdentity {
     let key = state.display.persistenceKey

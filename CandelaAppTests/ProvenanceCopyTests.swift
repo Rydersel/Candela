@@ -1,10 +1,8 @@
 import Foundation
 import Testing
 
-/// A provenance record is written to be forwarded to a stranger, so the same
-/// gate the checkup pane's copy carries runs over this enum: it is the one
-/// place a verdict on the display, or an em dash, could reach a document
-/// somebody else reads.
+/// A provenance record gets forwarded to a stranger, so the checkup pane's copy gate
+/// runs over this enum too: no verdict on the display, no em dash.
 @Suite("Provenance copy")
 struct ProvenanceCopyTests {
   @Test func noProvenanceCopyCarriesAnEmDashOrAVerdictOnTheDisplay() {
@@ -19,9 +17,8 @@ struct ProvenanceCopyTests {
     }
   }
 
-  /// The verifier's two answers are about the FILE, and only about the file:
-  /// an altered record says its contents no longer match, never that the
-  /// display is at fault.
+  /// Both verifier answers are about the FILE only: an altered record says its
+  /// contents no longer match, never that the display is at fault.
   @Test func theVerifierAnswersAboutTheRecordRatherThanTheDisplay() {
     #expect(ProvenanceCopy.intact.contains("record"))
     #expect(ProvenanceCopy.altered.contains("record"))

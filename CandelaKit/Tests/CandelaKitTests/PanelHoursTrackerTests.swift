@@ -35,9 +35,9 @@ struct PanelHoursTrackerTests {
     #expect(t.totalSeconds == 61)
     #expect(t.secondsSinceStandby == 61)
 
-    // 115 is the smallest whole second that comes back short of itself through
-    // hours (114.99999999999999). The provenance record floors, so an export
-    // routed through `totalHours` would file 114 s for a panel that ran 115.
+    // 115 is the smallest whole second that comes back short through hours
+    // (114.99999999999999). The record floors, so routing through `totalHours`
+    // would file 114 s for a panel that ran 115.
     let u = PanelHoursTracker(defaults: InMemoryDefaults(), persistenceKey: "pk2")
     u.noteTick(displayAwake: true, secondsSinceLastTick: 115)
     #expect(u.totalSeconds == 115)

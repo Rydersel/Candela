@@ -146,9 +146,8 @@ struct HealthPane: View {
     VStack(alignment: .leading, spacing: 8) {
       SettingsSectionTitle(text: "Displays")
 
-      // Once for the page, not once per card: the sentence explains what the
-      // button on every card below does, and repeating it under each would
-      // read as a different file per display.
+      // Once for the page, not once per card: repeating it under each would read
+      // as a different file per display.
       SettingsRowNote(verbatim: ProvenanceCopy.note)
 
       // Keyed by `persistenceKey`, never `DisplayState.id`: IDs reassign
@@ -351,9 +350,8 @@ private struct HealthDisplayCard: View {
         }
         .padding(.vertical, 2)
 
-        // Offered on every card, enrolled or not: an un-enrolled display still
-        // has an identity and a checkup history to hand on, and the record says
-        // for itself which sections were not collected.
+        // On every card, enrolled or not: an un-enrolled display still has an
+        // identity and a checkup history to hand on.
         SettingsCardDivider()
         HStack(spacing: 10) {
           Button(ProvenanceCopy.export) { exportProvenance() }

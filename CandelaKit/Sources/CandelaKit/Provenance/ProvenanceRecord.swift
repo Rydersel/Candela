@@ -15,8 +15,7 @@ public enum ProvenanceAbsence: String, Codable, Equatable, Sendable, CaseIterabl
 }
 
 /// A section is present or it says why it is not. A missing key would read as
-/// "Candela never looked", which is a different claim from "looked, nothing to
-/// report".
+/// "Candela never looked", a different claim from "looked, nothing to report".
 public enum ProvenanceSection<Value: Codable & Equatable & Sendable>: Codable, Equatable, Sendable {
   case collected(Value)
   case notCollected(ProvenanceAbsence)
@@ -25,10 +24,8 @@ public enum ProvenanceSection<Value: Codable & Equatable & Sendable>: Codable, E
   /// used it as a property name would decode as an absence instead of itself.
   private enum Keys: String, CodingKey { case notCollected }
 
-  /// An unrecognized reason fails the whole decode rather than folding into an
-  /// "unknown" case. A fallback case would re-encode to a different raw value
-  /// and break the record's hash, and "this build cannot read this file" is the
-  /// honest verdict when an older Candela meets a newer record.
+  /// An unrecognized reason fails the whole decode. A fallback "unknown" case
+  /// would re-encode to a different raw value and break the record's hash.
   public init(from decoder: Decoder) throws {
     if let keyed = try? decoder.container(keyedBy: Keys.self),
       let reason = try keyed.decodeIfPresent(ProvenanceAbsence.self, forKey: .notCollected) {

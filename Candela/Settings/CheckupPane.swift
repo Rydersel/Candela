@@ -89,8 +89,7 @@ struct CheckupPane: View {
   @State private var chosenByHand = false
   @State private var runs: [CheckupStoredRun] = []
   @State private var verification: String?
-  /// Held apart from its summary because the two are rendered differently:
-  /// the verdict is a sentence, the summary is a document.
+  /// Held apart from the summary: the verdict is a sentence, the summary a document.
   @State private var provenanceVerdict: String?
   @State private var provenanceSummary: String?
 
@@ -249,17 +248,15 @@ struct CheckupPane: View {
         Button(ProvenanceCopy.check) { checkProvenance() }
           .buttonStyle(SettingsSecondaryButtonStyle())
         if let provenanceVerdict {
-          // The verdict is a sentence about the file, so it reads like the
-          // verify answer above it.
+          // Styled like the verify answer above it: both are a sentence about a file.
           Text(verbatim: provenanceVerdict)
             .font(.callout)
             .foregroundStyle(SettingsTheme.bodyColor)
             .fixedSize(horizontal: false, vertical: true)
         }
         if let provenanceSummary {
-          // The record itself, in Show details' treatment: this is the one
-          // surface showing a record somebody else sent, and a person has to be
-          // able to select the serial or the hours out of it.
+          // Show details' treatment: the one surface showing a record somebody else
+          // sent, so the serial and the hours have to be selectable out of it.
           Text(verbatim: provenanceSummary)
             .font(.caption.monospaced())
             .foregroundStyle(SettingsTheme.bodyColor)
@@ -295,8 +292,7 @@ struct CheckupPane: View {
     guard let url = pickJSONFile() else { return }
     guard let envelope = try? ProvenanceEnvelope.load(url: url) else {
       provenanceVerdict = ProvenanceCopy.unreadable
-      // A file that would not read has no record to print, so a summary left
-      // over from the last check would belong to a different file.
+      // Otherwise the summary left over from the last check outlives its file.
       provenanceSummary = nil
       return
     }

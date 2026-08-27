@@ -1,9 +1,8 @@
 import Foundation
 
-/// The exported file. The hash covers the canonical record, so a hand edit
-/// anywhere in it fails `validate()`. Built in the checkup envelope's image;
-/// the two share the digest recipe and nothing else, so the shipped checkup
-/// format cannot move when this one does.
+/// The hash covers the canonical record, so a hand edit anywhere fails `validate()`.
+/// Only the digest recipe is shared with the checkup envelope, so that shipped format
+/// cannot move when this one does.
 public struct ProvenanceEnvelope: Codable, Equatable, Sendable {
   public static let schemaVersion = 1
   public let schemaVersion: Int

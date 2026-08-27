@@ -125,8 +125,7 @@ struct CheckupPaneTests {
     #expect(!CheckupPaneCopy.emptyHistory.lowercased().contains("pass"))
   }
 
-  /// Two verifiers now share the one section, so their titles have to be
-  /// tellable apart: one takes a checkup report, the other a provenance record.
+  /// Two verifiers share one section, so their titles have to be tellable apart.
   @Test func theVerifySectionNamesItsTwoFilesApart() {
     #expect(CheckupPaneCopy.verify != ProvenanceCopy.check)
     #expect(ProvenanceCopy.check.lowercased().contains("provenance"))

@@ -1,8 +1,7 @@
 import Foundation
 
-/// One record as plain text, in the diagnostics report's shape. The one
-/// renderer: Copy summary and the verifier both come through here. Nothing
-/// here grades the display.
+/// One record as plain text, in the diagnostics report's shape. Copy summary and
+/// the verifier both render through here. Nothing here grades the display.
 public enum ProvenanceSummaryText {
   public static func render(_ record: ProvenanceRecord) -> String {
     var lines = record.header
@@ -16,9 +15,8 @@ public enum ProvenanceSummaryText {
     return lines.joined(separator: "\n")
   }
 
-  /// A file written before the builds were recorded carries an empty
-  /// `appBuild`, which means "not recorded". Naming it anyway would read as a
-  /// claim about a build nobody knows.
+  /// An empty `appBuild` means "not recorded", from a file written before builds
+  /// were. Naming it anyway would claim a build nobody knows.
   private static func exportedLine(_ record: ProvenanceRecord) -> String {
     let day = CheckupStore.day(record.exportedAt)
     return record.appBuild.isEmpty ? "Exported: \(day)" : "Exported: \(day) by Candela \(record.appBuild)"
@@ -70,9 +68,8 @@ public enum ProvenanceSummaryText {
       if let first = e.firstSample, let last = e.lastSample {
         lines.append("Recorded from \(CheckupStore.day(first)) to \(CheckupStore.day(last))")
       }
-      // Only a measured map has a hottest cell to name: under `.estimated` the
-      // peak is window geometry, not exposure, and naming it would read as a
-      // reading nobody took.
+      // Under `.estimated` the peak is window geometry, not exposure, so naming a
+      // hottest cell would read as a reading nobody took.
       if e.confidence == .measured, let hottest = hottestCell(e.cells) {
         lines.append("Hottest cell: \(hottest + 1) of \(e.cells.count)")
       }
@@ -93,9 +90,8 @@ public enum ProvenanceSummaryText {
     }
   }
 
-  /// The same scan as `ExposureMap.hottestCell`, on a record's own cells: a
-  /// strict `>` so a plateau names its first cell, and the two must agree
-  /// because a person can read both in the same session.
+  /// The same scan as `ExposureMap.hottestCell`: strict `>` so a plateau names its
+  /// first cell. A person reads both in one session, so the two must agree.
   private static func hottestCell(_ cells: [Double]) -> Int? {
     var hottest: Int?
     var peak = 0.0
@@ -121,9 +117,8 @@ public enum ProvenanceSummaryText {
     }
   }
 
-  /// Stored verdict names are file schema, not English. An unmapped key is
-  /// shown as it is: a newer file can carry a verdict this build never heard
-  /// of, and dropping it would hide a count.
+  /// Stored verdict names are file schema, not English. An unmapped key shows as
+  /// it is; a newer file can carry a verdict this build never heard of.
   private static func verdictWord(_ key: String) -> String {
     switch key {
     case "observed": "Observed"

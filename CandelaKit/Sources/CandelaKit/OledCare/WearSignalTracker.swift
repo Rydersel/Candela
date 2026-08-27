@@ -43,9 +43,8 @@ public final class WearSignalTracker {
     .active, .idleDim, .blackout, .lockDim, .unfocusedDim, .suspended,
   ]
 
-  /// Spelled out, not derived from the enum: these strings travel in exported
-  /// files, so a case rename must not rename them. Same positions as
-  /// `stateOrder`.
+  /// Spelled out, not derived from the enum: these travel in exported files, so a
+  /// case rename must not rename them. Same positions as `stateOrder`.
   public static let stateNames: [String] = [
     "active", "idleDim", "blackout", "lockDim", "unfocusedDim", "suspended",
   ]
@@ -165,8 +164,7 @@ public final class WearSignalTracker {
     Self.stateOrder.map { ($0, seconds(inState: $0)) }
   }
 
-  /// The whole histogram, state-major, for a reader that wants both axes
-  /// rather than one marginal. Seconds are copied, not exposed.
+  /// Both axes where `secondsByState` gives one marginal. Seconds are copied.
   public func histogram() -> WearHistogram {
     let rows = Self.stateOrder.indices.map { index -> [Double] in
       let start = index * Self.bucketCount
@@ -226,12 +224,9 @@ public final class WearSignalTracker {
   }
 }
 
-/// One tracker's accumulation with both axes intact and its states named, for
-/// a reader outside the engine that has no `OledDimState` to index by.
-///
-/// `Codable` is for handing it to an exporter: this is a derived view, never
-/// persisted, so it needs no declared keys. The file carries
-/// `ProvenanceWearHistogram`, whose keys are hand-declared schema.
+/// States named as strings for readers with no `OledDimState` to index by. Derived
+/// and never persisted, so `Codable` needs no declared keys here, unlike the exported
+/// `ProvenanceWearHistogram`.
 public struct WearHistogram: Codable, Equatable, Sendable {
   public let stateNames: [String]
   public let levelBuckets: Int
