@@ -3365,13 +3365,21 @@ final class RegressInstruments {
   /// return as evidence of arrival.
   func axPress(describedAs description: String) -> Bool {
     guard isAddressable(description), let window = settingsWindow() else { return false }
-    var matches: [AXUIElement] = []
+    // Sidebar rows append their state to the description ("<name>, enrolled in
+    // OLED care"), so fall back to a "<name>, " prefix match when nothing matches exactly.
+    var exact: [AXUIElement] = []
+    var withState: [AXUIElement] = []
     walk(window, depth: 0) { element in
-      if read(element, kAXDescriptionAttribute as String).presentText == description,
-         canPress(element) {
-        matches.append(element)
+      guard canPress(element),
+            let published = read(element, kAXDescriptionAttribute as String).presentText
+      else { return }
+      if published == description {
+        exact.append(element)
+      } else if published.hasPrefix(description + ", ") {
+        withState.append(element)
       }
     }
+    let matches = exact.isEmpty ? withState : exact
     guard matches.count == 1 else {
       lastAXError = matches.isEmpty
         ? "no pressable element publishes the accessibility description \(description)"
