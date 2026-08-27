@@ -280,8 +280,8 @@ final class OnboardingFlowModel {
   /// the position on a still-valid page.
   func update(environment: OnboardingEnvironment) {
     var environment = environment
-    // Captured before `self.environment` is replaced below: the name-guess
-    // re-seed needs to know which displays are new to this harvest.
+    // Snapshot before `self.environment` is replaced below; the re-seed
+    // needs to know which displays are new to this harvest.
     let priorKeys = Set(self.environment.displays.map(\.persistenceKey))
     // An in-flight apply changes the display's mode, and the re-harvest that
     // follows sees the previewed size as current, so the fresh entry arrives
@@ -319,13 +319,9 @@ final class OnboardingFlowModel {
     // not deselected are re-designated, so a deliberate deselect is never
     // resurrected by a replug.
     //
-    // The name guess is re-run alongside it, for arrivals only. A designation
-    // that rests on the guess alone has nothing on disk to restore it, so
-    // without this a display whose cable blinks mid-setup comes back
-    // undesignated and drops off the care page under the user. Restricting it
-    // to displays absent from the previous harvest is what keeps it from
-    // fighting the page: a display that is already here keeps whatever the
-    // user has made of it, and the deselection record below covers the rest.
+    // The name guess is re-run for arrivals only. A guess-only designation has
+    // nothing on disk to restore it, so a replug would drop the display off the
+    // care page; a display already here keeps what the user made of it.
     let seeded = environment.displays
       .filter { entry in
         guard !deselectedOleds.contains(entry.persistenceKey) else { return false }
@@ -334,10 +330,8 @@ final class OnboardingFlowModel {
             && OnboardingPlan.suggestsOled(productName: entry.productName))
       }
       .map(\.persistenceKey)
-    // Protection is seeded on only for a key the user has not declined. Both
-    // decisions outlive a departure, so a display that leaves and comes back
-    // returns the way the user left it: designated with protection on if they
-    // never touched it, still off if they turned it off.
+    // Both decisions outlive a departure, so a display that leaves and comes
+    // back returns the way the user left it, protection included.
     careEnabled.formUnion(seeded.filter { !declinedCare.contains($0) })
     // A departure is not a decision, so the keys dropped here are subtracted
     // from `deselectedOleds` afterwards; without that the didSet would record
