@@ -128,6 +128,12 @@ public final class BrightnessController: PendingWireDraining {
   /// which retries, has to spell the fold out.
   public private(set) var readEvidence: DDCReadEvidence = .notAttempted
 
+  /// Whether this display's DDC wire has stopped carrying writes
+  /// (`DDCWireHealth`, WD1). An observable mirror of the health the coalescer
+  /// folds, because SwiftUI cannot re-render on a lock. `noteWireHealthChanged()`
+  /// is the only writer, and it copies rather than decides.
+  public private(set) var isWireUnresponsive = false
+
   /// Whether `maxDDCValue` came from the PANEL or is the assumed default
   /// (B5). `maxDDCValue` defaults to 100, which is indistinguishable from a
   /// real read of 100 — and on a write-only panel the assumption is always the
@@ -196,7 +202,8 @@ public final class BrightnessController: PendingWireDraining {
       avoidGamma: prefs.avoidGamma,
       disableCombinedBrightness: prefs.disableCombinedBrightness,
       unavailableDDC: tuning.unavailableDDC,
-      switchingValue: switchingValue
+      switchingValue: switchingValue,
+      wireUnresponsive: isWireUnresponsive
     )
   }
 
@@ -295,6 +302,11 @@ public final class BrightnessController: PendingWireDraining {
   /// comparison: portion 1 is the brightest the panel is configured to go,
   /// whatever register value that lands on.
   @ObservationIgnored private var submittedDDCPortion: Double?
+
+  /// The single armed watch on the wire's verdict, or nil while none is armed.
+  /// Internal so a test can await the outcome instead of polling for it, the
+  /// way `heldSoftwareLeg` is.
+  @ObservationIgnored private(set) var wireHealthWatch: Task<Void, Never>?
 
   /// The software side of a pref re-apply that is waiting for its register write
   /// to land (#146), or nil when nothing is held. Exposed (internal) so a test
@@ -681,12 +693,15 @@ public final class BrightnessController: PendingWireDraining {
       if delivery.writesSoftware { applySoftware(split.sw) }
       return submitted
 
-    case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
-      // Combined mode with its DDC brightness command turned off: the register
-      // write is skipped and the software leg still runs — but on the COMBINED
-      // SPLIT value, never on the raw value. `applySoftware(value)` here would
-      // silently convert this display to full-range software dimming, which is a
-      // different feature. `PathSelectionTests` pins it under the name
+    case let .softwareOnly(_, _, dimsBelow):
+      // Combined mode with no live hardware half: the command is off, or the
+      // wire stopped answering. Both submit the same legs, so the reason is not
+      // matched on here; it exists for the surfaces that have to SAY which one
+      // happened. The register write is skipped and the software leg still runs,
+      // but on the COMBINED SPLIT value, never on the raw value.
+      // `applySoftware(value)` here would silently convert this display to
+      // full-range software dimming, which is a different feature.
+      // `PathSelectionTests` pins it under the name
       // `aDisabledBrightnessCommandWritesNoDDCButStillFixesTheSoftwareLeg`.
       if delivery.writesSoftware {
         applySoftware(DimmingMath.combinedSplit(value: value, switching: dimsBelow).sw)
@@ -748,7 +763,15 @@ public final class BrightnessController: PendingWireDraining {
   }
 
   private func brightnessApplier(tuning: CommandTuning) -> any BrightnessApplying {
-    DDCCommandApplier(writer: writer, command: VCP.brightness, remapCodes: tuning.remapCodes)
+    #if DEBUG
+      // Nothing on the rig can make a live display's wire fail on demand (WD6).
+      // Wraps the real applier rather than the writer, so only BRIGHTNESS fails
+      // and a rig leg can tell a dead command from a dead cable.
+      if DebugDDCFailure.isFailing(persistenceKey: boundPanelIdentity) {
+        return FailingDDCApplier()
+      }
+    #endif
+    return DDCCommandApplier(writer: writer, command: VCP.brightness, remapCodes: tuning.remapCodes)
   }
 
   private func submitHardware(_ target: HardwareTarget, applier: any BrightnessApplying) {
@@ -760,8 +783,79 @@ public final class BrightnessController: PendingWireDraining {
     // the value the panel should end up at.
     lastSubmittedTarget = target
     coalescer.submit(
-      .init(target: target, applier: applier, epoch: epochProvider(), generation: issuedGeneration)
+      .init(
+        target: target, applier: applier, epoch: epochProvider(),
+        generation: issuedGeneration,
+        // Stamped on the main actor, where the HDR state lives; the drain that
+        // reads it runs off the actor. Why one transaction early is safe:
+        // `PendingWrite.hdrExcluded`.
+        hdrExcluded: cachedHDRActive || settleInProgress
+      )
     )
+    if case .ddc = target { armWireHealthWatch() }
+  }
+
+  /// Watches for the wire's verdict changing while nobody is touching the app.
+  /// Path selection reads `isWireUnresponsive` synchronously, so without this a
+  /// display sits at the value of the write that killed it until the next event
+  /// arrives to notice, and that write is usually the last one anybody makes.
+  ///
+  /// One watch at a time: during a drag every submit finds one already running,
+  /// so a 60 Hz stream costs one task rather than one per event.
+  private func armWireHealthWatch() {
+    guard wireHealthWatch == nil else { return }
+    wireHealthWatch = Task { @MainActor [weak self] in
+      while true {
+        guard let generation = self?.issuedGeneration, let coalescer = self?.coalescer else {
+          return
+        }
+        await coalescer.waitUntilCompleted(through: generation)
+        guard let self else { return }
+        self.noteWireHealthChanged()
+        // Anything submitted while this was suspended, including a write
+        // `noteWireHealthChanged` just made, has an outcome nobody is waiting
+        // on, so the loop goes round rather than leaving it unread.
+        if self.issuedGeneration == generation {
+          self.wireHealthWatch = nil
+          return
+        }
+      }
+    }
+  }
+
+  /// The ONE door for "this display's wire changed its verdict" (WD4).
+  ///
+  /// A transition changes which legs carry the value, so it is a
+  /// dimming-affecting change under D28 and re-evaluates through
+  /// `reapplyAfterPrefChange`. A bare `handleReconfigure` or a same-value
+  /// `setBrightness` would leave the display at its DDC floor with a scaled
+  /// table over it until something replugged it.
+  private func noteWireHealthChanged() {
+    let unresponsive = coalescer.wireHealth().isUnresponsive
+    guard unresponsive != isWireUnresponsive else { return }
+    isWireUnresponsive = unresponsive
+    pathLog.log(
+      "DDC brightness wire on display=\(self.displayID) is now \(unresponsive ? "unresponsive" : "answering", privacy: .public)"
+    )
+    // Native answers `.native` whatever the wire does, so no leg moved. The
+    // mirror above is still updated: the panel says what it knows either way.
+    guard !usesNative else { return }
+    reapplyAfterPrefChange()
+  }
+
+  /// WD3's reset, from every route that means the wire deserves a fresh
+  /// hearing. A successful apply is the fourth route and needs no call here:
+  /// the health clears itself on the outcome.
+  private func resetWireHealth() {
+    coalescer.resetWireHealth()
+    noteWireHealthChanged()
+  }
+
+  /// The app's wake handler calls this: the engine has no AppKit to observe
+  /// `didWakeNotification` with, and a link rebuilt while the Mac slept has
+  /// told us nothing yet (WD3).
+  public func noteWake() {
+    resetWireHealth()
   }
 
   /// Where this display's pixels actually are: itself, or its mirror master.
@@ -1558,6 +1652,16 @@ public final class BrightnessController: PendingWireDraining {
     }
     backends.shade?.repinFrames()
     lastAppliedSw = nil
+    // WD3: the WindowServer rebuilt this display's state, which is exactly the
+    // moment a wire that stopped answering deserves to be asked again.
+    let wasUnresponsive = isWireUnresponsive
+    resetWireHealth()
+    if wasUnresponsive, !usesNative {
+      // The transition already ran the full D28 re-evaluation, which covers the
+      // software leg below AND the register hand-back it cannot do. Re-running
+      // the tail would write the same leg a second time, undimmed.
+      return
+    }
     guard !usesNative else { return }
     // `effectiveBrightness`, never raw `brightness`: a reconfiguration during a
     // temporary dim (a replug, a sibling display's HDR flip, a bus drop) would
@@ -1628,6 +1732,13 @@ public final class BrightnessController: PendingWireDraining {
     // edge.
     let wasObservedActive = observedHDRActive
     observedHDRActive = cachedHDRActive
+    // WD3's HDR route, on BOTH edges and in the one place that sees every one:
+    // most routes through an HDR window (System Settings, the display's own
+    // controls) make no call of ours. Entering counts too, because a write
+    // submitted just before the engage is stamped countable and then fails on
+    // the lock.
+    let hdrEdge = wasObservedActive != cachedHDRActive
+    defer { if hdrEdge { resetWireHealth() } }
     if wasObservedActive, !cachedHDRActive {
       // Logged because on a write-only panel this is the only observable that
       // separates the fix from the bug: the swallowed write and the skip that
@@ -1817,6 +1928,9 @@ public final class BrightnessController: PendingWireDraining {
       // Sync's held movement is about the panel that was moving, not the one
       // now on the wire.
       syncDeadband.reset()
+      // Same rule as the read evidence directly above: a verdict earned by the
+      // panel that was here is not a fact about the one that replaced it.
+      resetWireHealth()
     }
     coalescer.resetDuplicateState()
     // Dropped with the memo and for the memo's own reason: it names a write
@@ -2297,6 +2411,15 @@ actor BrightnessWriteCoalescer {
     /// targets whose epoch is no longer current.
     let epoch: UInt64
     let generation: UInt64
+    /// Whether live HDR was engaged, or its settle window open, when this write
+    /// was submitted (WD1). Such a failure is not counted against the wire: the
+    /// register is locked there, so it is expected and temporary.
+    ///
+    /// Stamped at SUBMIT because HDR state is main-actor cached and the drain
+    /// runs off the actor. That is one wire transaction early, but every HDR
+    /// transition resets the health (WD3), so the gap cannot leave a failure
+    /// counted.
+    var hdrExcluded = false
   }
 
   private struct SubmissionState {
@@ -2346,9 +2469,14 @@ actor BrightnessWriteCoalescer {
   /// a second piece of state needing a second lock — it is a second field of
   /// the fact this lock already guards, written in the same critical section
   /// under the same `resets` guard.
+  ///
+  /// `wireHealth` rides here for the reason `lastFailed` does: a lock of its
+  /// own would let a reset that raced an apply update one fact and not the other.
   private nonisolated let lastApplied =
-    OSAllocatedUnfairLock<(target: HardwareTarget?, resets: UInt64, lastFailed: Bool)>(
-      initialState: (nil, 0, false)
+    OSAllocatedUnfairLock<(
+      target: HardwareTarget?, resets: UInt64, lastFailed: Bool, wireHealth: DDCWireHealth
+    )>(
+      initialState: (nil, 0, false, DDCWireHealth())
     )
 
   private var completedGeneration: UInt64 = 0
@@ -2384,7 +2512,24 @@ actor BrightnessWriteCoalescer {
     // hardware is in a state we did not write, so a failure recorded against
     // the OLD wire is not a fact about the new one, and reporting it would
     // accuse a freshly plugged panel of a fault the previous one had.
-    lastApplied.withLock { $0 = (nil, $0.resets + 1, false) }
+    // The health is deliberately NOT cleared here: this runs on every re-apply
+    // and every dim step, where the hardware state is unknown but the WIRE's
+    // record is untouched. Its own routes are WD3's `resetWireHealth`.
+    lastApplied.withLock { $0 = (nil, $0.resets + 1, false, $0.wireHealth) }
+  }
+
+  /// WD3's reset: the next writes decide again. Nonisolated over the lock the
+  /// health lives in, so the main-actor doors that own the reversibility routes
+  /// can call it synchronously.
+  nonisolated func resetWireHealth() {
+    lastApplied.withLock { $0.wireHealth.reset() }
+  }
+
+  /// The wire's current verdict (WD1). Nonisolated over the lock for the reason
+  /// `lastApplyFailed()` is: path selection reads it on the drag path and must
+  /// not hop onto the drain's actor to do it.
+  nonisolated func wireHealth() -> DDCWireHealth {
+    lastApplied.withLock { $0.wireHealth }
   }
 
   /// Test seam: the `resets` version counter (bumps once per
@@ -2492,6 +2637,11 @@ actor BrightnessWriteCoalescer {
           lastApplied.withLock { state in
             guard state.resets == memo.resets else { return }
             state.lastFailed = !didApply
+            // DDC only: a native apply says nothing about a wire, and counting
+            // one would demote the built-in panel, which has none.
+            if write.target.kind == .ddc {
+              state.wireHealth.noteApply(succeeded: didApply, hdrExcluded: write.hdrExcluded)
+            }
             if didApply {
               state.target = write.target
             }
@@ -2499,6 +2649,7 @@ actor BrightnessWriteCoalescer {
         } else {
           // Skipped because this exact target is already on the wire, which is
           // the state the caller wanted: landed, without a redundant write.
+          // The health hears nothing: a run of skips is not a run of successes.
           landed = true
         }
       }

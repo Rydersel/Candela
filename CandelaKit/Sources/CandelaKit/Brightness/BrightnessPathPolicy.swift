@@ -23,6 +23,10 @@ public enum BrightnessPathBlock: Sendable, Equatable {
   /// because combined dimming is on with the switching point at 0, which gives
   /// the software leg a band of zero width.
   case ddcTurnedOffWithNoSoftwareLeg
+  /// The same zero-width corner, reached because the WIRE stopped answering.
+  /// Its own case because the two are different sentences to the person reading
+  /// them: only one names a switch that can be put back.
+  case ddcUnresponsiveWithNoSoftwareLeg
 }
 
 /// Why a display CONFIGURED for a hardware leg is nevertheless running on the
@@ -38,6 +42,11 @@ public enum SoftwareOnlyReason: Sendable, Equatable {
   /// brightness command), so combined mode's hardware submit is skipped and
   /// only its software half runs.
   case ddcTurnedOff
+  /// The display's DDC writes have been failing in a row (`DDCWireHealth`), so
+  /// combined mode's hardware half submits into a wire that is not carrying it.
+  /// Apart from `ddcTurnedOff` because the two look identical on the slider and
+  /// only one of them is something the user did.
+  case ddcUnresponsive
 }
 
 /// What is ACTUALLY moving this display's brightness right now.
@@ -108,6 +117,8 @@ public enum BrightnessPathPolicy {
     public let disableCombinedBrightness: Bool
     /// `prefs.tuning(for: .brightness).unavailableDDC`.
     public let unavailableDDC: Bool
+    /// `DDCWireHealth.isUnresponsive` for this display's wire.
+    public let wireUnresponsive: Bool
     /// `DimmingMath.switchingValue(fromPoint: prefs.combinedSwitchingPoint)`.
     public let switchingValue: Double
 
@@ -118,7 +129,10 @@ public enum BrightnessPathPolicy {
       avoidGamma: Bool,
       disableCombinedBrightness: Bool,
       unavailableDDC: Bool,
-      switchingValue: Double
+      switchingValue: Double,
+      // Defaulted for the call sites with no wire to speak of: the standalone
+      // predicate's callers and the pane-side projections. The engine passes it.
+      wireUnresponsive: Bool = false
     ) {
       self.role = role
       self.isHDRActive = isHDRActive
@@ -127,6 +141,7 @@ public enum BrightnessPathPolicy {
       self.disableCombinedBrightness = disableCombinedBrightness
       self.unavailableDDC = unavailableDDC
       self.switchingValue = switchingValue
+      self.wireUnresponsive = wireUnresponsive
     }
   }
 
@@ -150,6 +165,11 @@ public enum BrightnessPathPolicy {
   ///   its own case, so no consumer switching over `BrightnessPath` can receive
   ///   a `.combined` whose hardware half is not running.
   ///
+  /// `wireUnresponsive` sits BELOW `unavailableDDC` in both branches, and the
+  /// order is the ruling, not an accident: a control the user turned off is
+  /// reported as turned off, whatever the wire is doing behind it. Native and
+  /// force-software outrank both.
+  ///
   /// `switchingValue == 0` (pref point −8, "pure hardware") is the corner of
   /// that same state where the software band has zero width — `combinedSplit`'s
   /// hardware branch always wins — so nothing moves at all and the honest
@@ -171,10 +191,23 @@ public enum BrightnessPathPolicy {
           backend: backend, reason: .ddcTurnedOff, dimsBelow: inputs.switchingValue
         )
       }
+      guard !inputs.wireUnresponsive else {
+        guard inputs.switchingValue > 0 else {
+          return .unavailable(.ddcUnresponsiveWithNoSoftwareLeg)
+        }
+        return .softwareOnly(
+          backend: backend, reason: .ddcUnresponsive, dimsBelow: inputs.switchingValue
+        )
+      }
       return .combined(switchingValue: inputs.switchingValue, backend: backend)
     }
     guard !inputs.unavailableDDC else {
       return .unavailable(.ddcTurnedOffWithNoSoftwareLeg)
+    }
+    // FULL-RANGE software leg, not a partial one: there is no combined split to
+    // respect here, and the point of the demotion is that the display dims.
+    if inputs.wireUnresponsive {
+      return .software(backend)
     }
     return .hardware
   }

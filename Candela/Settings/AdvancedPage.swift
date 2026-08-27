@@ -101,7 +101,10 @@ struct AdvancedPage: View {
   /// ENGINE'S OWN path, so this page cannot disagree with Diagnostics or with
   /// the tuning grid's captions.
   private var trafficBlock: DDCTrafficBlock? {
-    DisplayCardPolicy.ddcTrafficBlock(for: state.controller.brightnessPath)
+    DisplayCardPolicy.ddcTrafficBlock(
+      for: state.controller.brightnessPath,
+      isWireUnresponsive: state.controller.isWireUnresponsive
+    )
   }
 
   private var isBlocked: Bool { trafficBlock != nil }

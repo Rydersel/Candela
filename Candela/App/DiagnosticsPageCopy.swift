@@ -62,8 +62,12 @@ enum DiagnosticsPageCopy {
       "Below \(SliderSnap.percentText(switching)) this display dims in software while the cable holds at its lowest level; above it, the cable carries the whole range."
     case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
       "The hardware brightness command is turned off for this display, so only the part of the slider below \(SliderSnap.percentText(dimsBelow)) dims. Above that, nothing moves."
+    case let .softwareOnly(_, .ddcUnresponsive, dimsBelow):
+      "This display stopped answering brightness commands, so \(AppInfo.productName) dims it in software instead. Only the part of the slider below \(SliderSnap.percentText(dimsBelow)) moves anything. It goes back to hardware commands when the display answers again, which is rechecked when your displays are reconfigured, when the Mac wakes, and when HDR is switched off."
     case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
       "Combined dimming is off for this display and its hardware brightness command is turned off, so nothing is left to carry the value."
+    case .unavailable(.ddcUnresponsiveWithNoSoftwareLeg):
+      "This display stopped answering brightness commands, and dimming is set to hand off to software at a point with no software range below it, so nothing is left to carry the value."
     }
   }
 

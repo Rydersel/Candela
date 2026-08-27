@@ -99,24 +99,36 @@ extension View {
   /// Left readable to VoiceOver at zero opacity on purpose: hover is a pointer
   /// affordance, and the reason is the one thing a keyboard user cannot
   /// otherwise get from this surface.
-  func panelHoverReason(_ reason: String?) -> some View {
-    modifier(PanelHoverReason(reason: reason))
+  ///
+  /// `staysLive` is for a row that carries a reason WITHOUT being greyed (the
+  /// degraded brightness slider). The overlay the greyed case uses would
+  /// swallow that row's drags, so a live row is watched through the content.
+  func panelHoverReason(_ reason: String?, staysLive: Bool = false) -> some View {
+    modifier(PanelHoverReason(reason: reason, staysLive: staysLive))
   }
 }
 
 private struct PanelHoverReason: ViewModifier {
   let reason: String?
+  let staysLive: Bool
   @State private var hovering = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   func body(content: Content) -> some View {
     VStack(alignment: .leading, spacing: 3) {
       content
+        .onHover { isHovering in
+          // Gated on the write rather than the tracking, so a live row with
+          // nothing to say behaves exactly as it did before this modifier.
+          guard staysLive, reason != nil else { return }
+          hovering = isHovering
+        }
         .overlay {
-          if reason != nil {
+          if reason != nil, !staysLive {
             // Applied after the caller's `.disabled`, so it is outside that
             // subtree and still hit-tests. Swallowing the hover costs nothing:
-            // the control underneath is inert whenever a reason exists.
+            // the control underneath is inert whenever a reason exists. A live
+            // row takes the branch above, where swallowing would cost the drag.
             Color.clear.contentShape(Rectangle()).onHover { hovering = $0 }
           }
         }
