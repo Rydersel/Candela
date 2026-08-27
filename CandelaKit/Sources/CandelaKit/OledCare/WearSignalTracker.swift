@@ -43,6 +43,13 @@ public final class WearSignalTracker {
     .active, .idleDim, .blackout, .lockDim, .unfocusedDim, .suspended,
   ]
 
+  /// Spelled out, not derived from the enum: these strings travel in exported
+  /// files, so a case rename must not rename them. Same positions as
+  /// `stateOrder`.
+  public static let stateNames = [
+    "active", "idleDim", "blackout", "lockDim", "unfocusedDim", "suspended",
+  ]
+
   /// The states OC17's mask would apply to. Blackout is excluded because there
   /// is no luminance left to redistribute; `active` and `suspended` because
   /// nothing is dimming.
@@ -158,6 +165,16 @@ public final class WearSignalTracker {
     Self.stateOrder.map { ($0, seconds(inState: $0)) }
   }
 
+  /// The whole histogram, state-major, for a reader that wants both axes
+  /// rather than one marginal. Seconds are copied, not exposed.
+  public func histogram() -> WearHistogram {
+    let rows = Self.stateOrder.indices.map { index -> [Double] in
+      let start = index * Self.bucketCount
+      return Array(slots[start..<(start + Self.bucketCount)])
+    }
+    return WearHistogram(stateNames: Self.stateNames, levelBuckets: Self.bucketCount, seconds: rows)
+  }
+
   /// **OC17's effect-size gate, as one number.** The share of
   /// MASK-COULD-APPLY time spent in a state the wear mask would apply to.
   ///
@@ -207,4 +224,20 @@ public final class WearSignalTracker {
     defaults.set(OledStoreSchema.currentVersion, forKey: versionKey)
     unwrittenSeconds = 0
   }
+}
+
+/// One tracker's accumulation with both axes intact and its states named, for
+/// a reader outside the engine that has no `OledDimState` to index by.
+public struct WearHistogram: Equatable, Sendable {
+  public let stateNames: [String]
+  public let levelBuckets: Int
+  public let seconds: [[Double]]
+
+  public init(stateNames: [String], levelBuckets: Int, seconds: [[Double]]) {
+    self.stateNames = stateNames
+    self.levelBuckets = levelBuckets
+    self.seconds = seconds
+  }
+
+  public var totalSeconds: Double { seconds.flatMap { $0 }.reduce(0, +) }
 }

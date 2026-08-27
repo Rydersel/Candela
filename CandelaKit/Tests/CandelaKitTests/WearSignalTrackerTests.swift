@@ -248,4 +248,36 @@ struct WearSignalTrackerTests {
       #expect(WearSignalTracker.slot(for: state, level: 0.5) != nil)
     }
   }
+
+  // MARK: - The whole histogram
+
+  @Test func histogramIsStateMajorAndNamesItsStates() {
+    let defaults = InMemoryDefaults()
+    let t = WearSignalTracker(defaults: defaults, persistenceKey: "pk")
+    t.noteTick(dimState: .active, effectiveLevel: 0.95, secondsSinceLastTick: 10)
+    t.noteTick(dimState: .idleDim, effectiveLevel: 0.05, secondsSinceLastTick: 5)
+    let h = t.histogram()
+    #expect(
+      h.stateNames == ["active", "idleDim", "blackout", "lockDim", "unfocusedDim", "suspended"])
+    #expect(h.levelBuckets == 10)
+    #expect(h.seconds.count == 6)
+    #expect(h.seconds.allSatisfy { $0.count == 10 })
+    #expect(h.seconds[0][9] == 10)
+    #expect(h.seconds[1][0] == 5)
+    #expect(h.seconds.flatMap { $0 }.reduce(0, +) == t.totalSeconds)
+  }
+
+  /// The names travel in exported files, so a renamed enum case must not
+  /// silently drop a row out of one of the two tables.
+  @Test func stateNamesTrackStateOrder() {
+    #expect(WearSignalTracker.stateNames.count == WearSignalTracker.stateOrder.count)
+  }
+
+  @Test func aHistogramSumsItsOwnSeconds() {
+    let defaults = InMemoryDefaults()
+    let t = WearSignalTracker(defaults: defaults, persistenceKey: "pk")
+    t.noteTick(dimState: .lockDim, effectiveLevel: 0.35, secondsSinceLastTick: 20)
+    t.noteTick(dimState: .suspended, effectiveLevel: 0.5, secondsSinceLastTick: 7)
+    #expect(t.histogram().totalSeconds == 27)
+  }
 }
