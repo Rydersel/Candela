@@ -37,6 +37,24 @@ struct RenderSmokeTests {
     return data as Data
   }
 
+  /// Largest per-channel difference between two same-size renders; nil when
+  /// either is missing or the sizes differ. The scheme comparisons use this
+  /// instead of byte equality because `ImageRenderer` is not bitwise
+  /// deterministic [MEASURED 2026-08-27]: one unchanged view re-renders a unit
+  /// or two off per channel, in a single glyph pixel once the process is warm
+  /// (full bundle only, never in isolation) or across the whole wallpaper
+  /// gradient under a light system appearance. Byte equality read both as a
+  /// scheme leak. A real scheme flip moves tens of units, which the positive
+  /// control pins.
+  private func maxChannelDelta(_ lhs: CGImage?, _ rhs: CGImage?) -> Int? {
+    guard let a = pixels(lhs), let b = pixels(rhs), a.count == b.count, !a.isEmpty else { return nil }
+    return zip(a, b).reduce(0) { max($0, abs(Int($1.0) - Int($1.1))) }
+  }
+
+  /// What rasterization noise stays under, and what any real scheme flip clears.
+  private static let noiseTolerance = 4
+  private static let schemeFlipFloor = 64
+
   private func expectPixels(
     _ image: CGImage?, _ label: Comment, sourceLocation: SourceLocation = #_sourceLocation
   ) {
@@ -277,8 +295,8 @@ struct RenderSmokeTests {
   /// pill's display name, "Settings…", "Quit", the percent readouts) resolved
   /// `.primary` and `.secondary` against the WINDOW, so a light-mode system got
   /// white text on the light panel and pills the preview had correctly drawn.
-  /// Byte-identical renders under the two window schemes is exactly the property
-  /// that was missing.
+  /// Renders under the two window schemes that differ by no more than
+  /// rasterization noise is exactly the property that was missing.
   ///
   /// Not a color assertion: nothing here says which scheme the widgets drew in,
   /// only that the window's did not decide it. Whether the depiction MATCHES the
@@ -296,16 +314,18 @@ struct RenderSmokeTests {
     let inLightWindow = shot(.light)
     expectPixels(inDarkWindow, "MenuBarPreviewView in a dark window")
     expectPixels(inLightWindow, "MenuBarPreviewView in a light window")
+    let delta = maxChannelDelta(inDarkWindow, inLightWindow)
     #expect(
-      pixels(inDarkWindow) == pixels(inLightWindow),
-      "the window's scheme must not reach the depicted widgets (SV13)")
+      delta.map { $0 <= Self.noiseTolerance } == true,
+      "the window's scheme must not reach the depicted widgets (SV13); max channel delta \(String(describing: delta))")
   }
 
   /// The positive control the case above is worth nothing without: two renders
-  /// of a view that DOES follow the ambient scheme must differ by these same
-  /// bytes. Without it, a preview that rendered nothing, a renderer that
-  /// ignores the scheme override, or a comparison that cannot see a color
-  /// change would all report the equality above as a pass.
+  /// of a view that DOES follow the ambient scheme must differ by far more than
+  /// the noise tolerance above. Without it, a preview that rendered nothing, a
+  /// renderer that ignores the scheme override, a comparison that cannot see a
+  /// color change, or a tolerance wide enough to swallow a scheme flip would
+  /// all report the case above as a pass.
   @Test func theSchemeComparisonCanSeeAScheme() {
     func shot(_ scheme: ColorScheme) -> CGImage? {
       render(
@@ -320,9 +340,10 @@ struct RenderSmokeTests {
     let light = shot(.light)
     expectPixels(dark, "scheme control, dark")
     expectPixels(light, "scheme control, light")
+    let delta = maxChannelDelta(dark, light)
     #expect(
-      pixels(dark) != pixels(light),
-      "an ambient scheme flip must be visible to this comparison")
+      delta.map { $0 >= Self.schemeFlipFloor } == true,
+      "an ambient scheme flip must be visible to this comparison; max channel delta \(String(describing: delta))")
   }
 
   // MARK: - The guided setup flow
