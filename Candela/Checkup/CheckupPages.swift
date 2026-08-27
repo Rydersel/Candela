@@ -103,16 +103,14 @@ struct CheckupScenarioPage: View {
     CheckupPageScaffold(title: CheckupCopy.scenarioTitle, subtitle: CheckupCopy.scenarioSubtitle) {
       VStack(spacing: 10) {
         ForEach(CheckupScenario.allCases, id: \.self) { scenario in
+          let isSelected = model.scenario == scenario
           Button {
             model.scenario = scenario
           } label: {
-            OnboardingCard(isSelected: model.scenario == scenario, accent: CheckupStyle.accent) {
+            OnboardingCard(isSelected: isSelected, accent: CheckupStyle.accent) {
               HStack(spacing: 12) {
-                Image(
-                  systemName: model.scenario == scenario
-                    ? "largecircle.fill.circle" : "circle")
-                  .foregroundStyle(
-                    model.scenario == scenario ? CheckupStyle.accent : OnboardingStyle.faintColor)
+                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                  .foregroundStyle(isSelected ? CheckupStyle.accent : OnboardingStyle.faintColor)
                 Text(CheckupCopy.scenarioLabel(scenario))
                   .foregroundStyle(OnboardingStyle.titleColor)
                 Spacer(minLength: 0)
@@ -120,6 +118,10 @@ struct CheckupScenarioPage: View {
             }
           }
           .buttonStyle(.plain)
+          // Not `.accessibilityElement(children:)` here: it takes the button's
+          // `AXPress` and `AXFocused` with it.
+          .accessibilityLabel(Text(verbatim: CheckupCopy.scenarioLabel(scenario)))
+          .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         }
       }
     } actions: {
@@ -142,19 +144,21 @@ struct CheckupDisplayPickPage: View {
             .foregroundStyle(OnboardingStyle.bodyColor)
         }
         ForEach(model.selectableDisplays) { entry in
+          let isSelected = model.selectedDisplay?.id == entry.id
           Button {
             model.selectedDisplay = entry
           } label: {
-            OnboardingCard(
-              isSelected: model.selectedDisplay?.id == entry.id, accent: CheckupStyle.accent
-            ) {
+            OnboardingCard(isSelected: isSelected, accent: CheckupStyle.accent) {
               VStack(alignment: .leading, spacing: 4) {
-                Text(entry.name)
+                Text(verbatim: entry.name)  // a display's name, never a lookup key
                   .font(.callout.weight(.medium))
                   .foregroundStyle(OnboardingStyle.titleColor)
-                Text("\(entry.pixelWidth) by \(entry.pixelHeight) pixels")
-                  .font(.caption)
-                  .foregroundStyle(OnboardingStyle.bodyColor)
+                Text(
+                  verbatim: CheckupCopy.pixelSizeLine(
+                    width: entry.pixelWidth, height: entry.pixelHeight)
+                )
+                .font(.caption)
+                .foregroundStyle(OnboardingStyle.bodyColor)
                 Text(CheckupCopy.panelClassLine(entry.panelClass, hdrEngaged: entry.hdrEngaged))
                   .font(.caption)
                   .foregroundStyle(OnboardingStyle.faintColor)
@@ -163,6 +167,8 @@ struct CheckupDisplayPickPage: View {
             }
           }
           .buttonStyle(.plain)
+          .accessibilityLabel(Text(verbatim: CheckupCopy.displayRowLabel(entry)))
+          .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         }
       }
     } actions: {
@@ -297,12 +303,14 @@ struct CheckupFieldInstructionPage: View {
           if model.canShowAgain {
             Button(CheckupCopy.showAgain) { model.showAgain() }
               .buttonStyle(OnboardingSecondaryButtonStyle())
+              .accessibilityLabel(Text(verbatim: CheckupCopy.showAgain))
           }
           CheckupAdvanceButton(model: model, title: CheckupCopy.continueLabel)
         } else {
           Button(CheckupCopy.start) { model.startShowing() }
             .buttonStyle(OnboardingPrimaryButtonStyle(accent: CheckupStyle.accent))
             .keyboardShortcut(.defaultAction)
+            .accessibilityLabel(Text(verbatim: CheckupCopy.start))
         }
         // Gone once the cap is spent: a rule about what you may still do reads
         // as an offer, and the button it describes is no longer there.
@@ -404,6 +412,7 @@ struct CheckupAnswerButtons: View {
       ForEach(Array(CheckupCopy.answers(for: kind).enumerated()), id: \.offset) { pair in
         Button(CheckupCopy.answerLabel(pair.element)) { answer(pair.element) }
           .buttonStyle(OnboardingSecondaryButtonStyle())
+          .accessibilityLabel(Text(verbatim: CheckupCopy.answerLabel(pair.element)))
       }
     }
   }
@@ -437,8 +446,10 @@ struct CheckupSummaryPage: View {
         HStack(spacing: 10) {
           Button(CheckupCopy.export) { export() }
             .buttonStyle(OnboardingPrimaryButtonStyle(accent: CheckupStyle.accent))
+            .accessibilityLabel(Text(verbatim: CheckupCopy.export))
           Button(CheckupCopy.copySummary) { copySummary() }
             .buttonStyle(OnboardingSecondaryButtonStyle())
+            .accessibilityLabel(Text(verbatim: CheckupCopy.copySummary))
         }
         if justCopied {
           Text(CheckupCopy.copied)
@@ -451,6 +462,7 @@ struct CheckupSummaryPage: View {
         isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })
       ) {
         Button(CheckupCopy.acknowledge) { saveError = nil }
+          .accessibilityLabel(Text(verbatim: CheckupCopy.acknowledge))
       } message: {
         Text(verbatim: saveError ?? "")
       }
@@ -503,5 +515,6 @@ struct CheckupAdvanceButton: View {
       .keyboardShortcut(.defaultAction)
       .disabled(!enabled)
       .opacity(enabled ? 1 : 0.4)
+      .accessibilityLabel(Text(verbatim: title))
   }
 }

@@ -155,6 +155,8 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
         title: CheckupCopy.answerLabel(answer), target: target, action: #selector(AnswerTarget.fire))
       button.bezelStyle = .rounded
       button.tag = index
+      // An NSButton title is not the description an assistive client reads.
+      button.setAccessibilityLabel(CheckupCopy.answerLabel(answer))
       return button
     })
     row.orientation = .horizontal
