@@ -16,7 +16,7 @@ struct ProvenanceAssemblerTests {
     return m
   }
 
-  private func run(observed: Int) throws -> CheckupReportEnvelope {
+  private func run(observed: Int, startedAt: Date? = nil) throws -> CheckupReportEnvelope {
     var claims: [CheckupClaim] = []
     for i in 0..<observed {
       claims.append(CheckupClaim(family: .identity, id: "id.\(i)", verdict: .observed("seen")))
@@ -29,7 +29,8 @@ struct ProvenanceAssemblerTests {
         manufactureWeek: 29, manufactureYear: 2023, nativePixelWidth: 3440, nativePixelHeight: 1440,
         maxRefreshHz: 175, supportsPQEOTF: true, supportsHDRGammaEOTF: true, productName: "MAG 341C"),
       panelClass: .writeOnlyDDC, macOSBuild: "26", appBuild: "1",
-      startedAt: now.addingTimeInterval(Double(-observed) * 1000), endedAt: now, completion: .complete,
+      startedAt: startedAt ?? now.addingTimeInterval(Double(-observed) * 1000),
+      endedAt: now, completion: .complete,
       claims: claims, plant: nil, showings: [:], exposureBookingID: nil)
     return try CheckupReportEnvelope(report: report)
   }
@@ -42,9 +43,12 @@ struct ProvenanceAssemblerTests {
       appBuild: "1", macOSBuild: "26", now: now)
     #expect(r.hours.value == ProvenanceHours(lifetimeSeconds: 7200, secondsSinceStandby: 59))
     #expect(r.exportedAt == now)
+    #expect(r.appBuild == "1")
+    #expect(r.macOSBuild == "26")
+    #expect(r.identity == identity)
   }
 
-  @Test func exposureCellsAreNormalizedToThePeakAndHistogramSecondsAreWhole() {
+  @Test func exposureCellsAreNormalizedToThePeakAndHistogramSecondsAreWhole() throws {
     let histogram = WearHistogram(
       stateNames: WearSignalTracker.stateNames, levelBuckets: 10,
       seconds: (0..<6).map { row in (0..<10).map { row == 0 && $0 == 9 ? 100.7 : 0 } })
@@ -53,7 +57,7 @@ struct ProvenanceAssemblerTests {
       exposure: .collected(.init(map: map(samples: 40, cellPeakAt: 7), confidence: .measured,
                                  histogram: histogram)),
       checkups: [], appBuild: "1", macOSBuild: "26", now: now)
-    let e = try! #require(r.exposure.value)
+    let e = try #require(r.exposure.value)
     #expect(e.cells.count == 240)
     #expect(e.cells[7] == 1.0)
     #expect(e.cells[0] == 0.5)
@@ -61,6 +65,8 @@ struct ProvenanceAssemblerTests {
     #expect(e.confidence == .measured)
     #expect(e.wearHistogram?.seconds[0][9] == 100)
     #expect(e.wearHistogram?.stateOrder == WearSignalTracker.stateNames)
+    #expect(e.firstSample == now)
+    #expect(e.lastSample == now)
   }
 
   @Test func tooFewSamplesAndAnEmptyHistogramBecomeANamedAbsence() {
@@ -82,6 +88,7 @@ struct ProvenanceAssemblerTests {
       checkups: [], appBuild: "1", macOSBuild: "26", now: now)
     #expect(r.exposure.value?.confidence == .insufficient)
     #expect(r.exposure.value?.wearHistogram != nil)
+    #expect(r.exposure.value?.cells == ExposureMap.empty.cells)
   }
 
   @Test func checkupsAreOldestFirstWithCountsByVerdict() throws {
@@ -103,6 +110,20 @@ struct ProvenanceAssemblerTests {
     #expect(r.checkups.absence == .noRuns)
   }
 
+  @Test func runsSharingAStartInstantStillSortTotally() throws {
+    let a = try run(observed: 1, startedAt: now)
+    let b = try run(observed: 2, startedAt: now)
+    func order(_ runs: [CheckupReportEnvelope]) -> [String] {
+      ProvenanceAssembler.assemble(
+        identity: identity, hours: .notCollected(.trackingOff),
+        exposure: .notCollected(.notEnrolled), checkups: runs,
+        appBuild: "1", macOSBuild: "26", now: now
+      ).checkups.value?.runs.map(\.sha256) ?? []
+    }
+    #expect(order([a, b]) == order([b, a]))
+    #expect(order([a, b]) == [a, b].map(\.sha256).sorted())
+  }
+
   @Test func theFileCarriesNothingAboutThePerson() throws {
     let r = ProvenanceAssembler.assemble(
       identity: identity, hours: .collected(.init(lifetimeSeconds: 1, secondsSinceStandby: 1)),
@@ -111,9 +132,21 @@ struct ProvenanceAssemblerTests {
       checkups: [try run(observed: 1)], appBuild: "1", macOSBuild: "26", now: now)
     let json = String(decoding: try ProvenanceEnvelope.encoded(try ProvenanceEnvelope(record: r)),
                       as: UTF8.self)
-    for forbidden in ["ownerHours", "topOwners", "hostName", "IOService", "ioDisplayLocation",
-                      "dominantOwner", "modelComparison"] {
+    for forbidden in ["secondsByOwner", "ownerHours", "topOwners", "hostName", "IOService",
+                      "ioDisplayLocation", "dominantOwner", "modelComparison"] {
       #expect(!json.contains(forbidden), "found \(forbidden)")
     }
+  }
+
+  /// The positive control for the check above: `secondsByOwner` is the key the
+  /// owner table really writes, and its values are app bundle IDs. Without this,
+  /// an absence assertion against a key nothing ever wrote would pass forever.
+  @Test func theForbiddenOwnerKeyIsTheOneTheOwnerTableWrites() throws {
+    let json = String(
+      decoding: try CanonicalDigest.canonicalData(
+        OwnerHours(secondsByOwner: ["com.example.editor": 60], totalSeconds: 60)),
+      as: UTF8.self)
+    #expect(json.contains("secondsByOwner"))
+    #expect(json.contains("com.example.editor"))
   }
 }

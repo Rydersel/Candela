@@ -228,6 +228,10 @@ public final class WearSignalTracker {
 
 /// One tracker's accumulation with both axes intact and its states named, for
 /// a reader outside the engine that has no `OledDimState` to index by.
+///
+/// `Codable` is for handing it to an exporter: this is a derived view, never
+/// persisted, so it needs no declared keys. The file carries
+/// `ProvenanceWearHistogram`, whose keys are hand-declared schema.
 public struct WearHistogram: Codable, Equatable, Sendable {
   public let stateNames: [String]
   public let levelBuckets: Int

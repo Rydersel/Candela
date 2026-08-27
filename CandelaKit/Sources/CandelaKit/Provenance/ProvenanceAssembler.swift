@@ -73,7 +73,13 @@ public enum ProvenanceAssembler {
 
   private static func checkupsSection(_ runs: [CheckupReportEnvelope]) -> ProvenanceSection<ProvenanceCheckups> {
     guard !runs.isEmpty else { return .notCollected(.noRuns) }
-    let ordered = runs.sorted { $0.report.startedAt < $1.report.startedAt }
+    // A total order, not time alone: two runs booked in the same instant would
+    // otherwise sort unstably, and the same data would export under two hashes.
+    let ordered = runs.sorted {
+      $0.report.startedAt == $1.report.startedAt
+        ? $0.sha256 < $1.sha256
+        : $0.report.startedAt < $1.report.startedAt
+    }
     var counts: [String: Int] = [:]
     for run in ordered {
       let s = run.report.summary
