@@ -25,16 +25,11 @@ public enum ProvenanceSummaryText {
   }
 
   private static func identityLines(_ identity: ProvenanceIdentity) -> [String] {
-    var lines: [String] = []
-    let serial = identity.edid?.serial
-      ?? identity.hardware?.alphanumericSerial
-      ?? identity.hardware?.numericSerial.map(String.init)
-      ?? CheckupDisplayIdentity.noSerial
-    lines.append("Serial: \(serial)")
-    if let edid = identity.edid, let week = edid.manufactureWeek, let year = edid.manufactureYear {
-      lines.append("Manufactured: week \(week) of \(year)")
-    }
+    var lines = ["Serial: \(serial(identity))"]
     if let edid = identity.edid {
+      if let week = edid.manufactureWeek, let year = edid.manufactureYear {
+        lines.append("Manufactured: week \(week) of \(year)")
+      }
       lines.append("Native size: \(edid.nativePixelWidth) x \(edid.nativePixelHeight) pixels")
     }
     if let transport = identity.hardware?.transport {
@@ -44,6 +39,16 @@ public enum ProvenanceSummaryText {
       lines.append("Panel size: \(w) x \(h) cm")
     }
     return lines
+  }
+
+  /// An EDID that reports no serial already reads as the fixed phrase, so it
+  /// must not shadow a serial the connection layer did learn.
+  private static func serial(_ identity: ProvenanceIdentity) -> String {
+    let fromEDID = identity.edid?.serial
+    return fromEDID.flatMap { $0 == CheckupDisplayIdentity.noSerial ? nil : $0 }
+      ?? identity.hardware?.alphanumericSerial
+      ?? identity.hardware?.numericSerial.map(String.init)
+      ?? CheckupDisplayIdentity.noSerial
   }
 
   private static func hoursLines(_ section: ProvenanceSection<ProvenanceHours>) -> [String] {
@@ -59,20 +64,44 @@ public enum ProvenanceSummaryText {
     switch section {
     case .notCollected(let reason): return [reason.sentence]
     case .collected(let e):
-      var lines = ["Readings: \(e.sampleCount) (\(confidenceWord(e.confidence)))"]
+      var lines = [readingsLine(e)]
       if let first = e.firstSample, let last = e.lastSample {
         lines.append("Recorded from \(CheckupStore.day(first)) to \(CheckupStore.day(last))")
       }
-      if let hottest = e.cells.indices.max(by: { e.cells[$0] < e.cells[$1] }), e.cells[hottest] > 0 {
-        lines.append("Hottest cell: \(hottest) of \(e.cells.count)")
+      // Only a measured map has a hottest cell to name: under `.estimated` the
+      // peak is window geometry, not exposure, and naming it would read as a
+      // reading nobody took.
+      if e.confidence == .measured, let hottest = hottestCell(e.cells) {
+        lines.append("Hottest cell: \(hottest + 1) of \(e.cells.count)")
       }
       if let h = e.wearHistogram {
         for (name, row) in zip(h.stateOrder, h.seconds) where row.reduce(0, +) > 0 {
-          lines.append("Time in \(name): \(duration(row.reduce(0, +)))")
+          lines.append("Time in \(stateWord(name)): \(duration(row.reduce(0, +)))")
         }
       }
       return lines
     }
+  }
+
+  private static func readingsLine(_ e: ProvenanceExposure) -> String {
+    switch e.confidence {
+    case .measured: "Readings: \(e.sampleCount) (measured)"
+    case .insufficient: "Readings: \(e.sampleCount) (too few to analyse)"
+    case .estimated: "Readings: \(e.sampleCount) recorded earlier; exposure measurement is off"
+    }
+  }
+
+  /// The same scan as `ExposureMap.hottestCell`, on a record's own cells: a
+  /// strict `>` so a plateau names its first cell, and the two must agree
+  /// because a person can read both in the same session.
+  private static func hottestCell(_ cells: [Double]) -> Int? {
+    var hottest: Int?
+    var peak = 0.0
+    for (index, value) in cells.enumerated() where value > peak {
+      peak = value
+      hottest = index
+    }
+    return hottest
   }
 
   private static func checkupLines(_ section: ProvenanceSection<ProvenanceCheckups>) -> [String] {
@@ -81,7 +110,7 @@ public enum ProvenanceSummaryText {
     case .collected(let c):
       var lines = ["Runs: \(c.runs.count)"]
       for (name, n) in c.countsByVerdict.sorted(by: { $0.key < $1.key }) {
-        lines.append("\(name): \(n)")
+        lines.append("\(verdictWord(name)): \(n)")
       }
       for run in c.runs {
         lines.append("\(CheckupStore.day(run.report.startedAt)): \(run.report.summary.line)")
@@ -90,11 +119,28 @@ public enum ProvenanceSummaryText {
     }
   }
 
-  private static func confidenceWord(_ c: ProvenanceExposure.Confidence) -> String {
-    switch c {
-    case .measured: "measured"
-    case .estimated: "window geometry only, no exposure readings"
-    case .insufficient: "too few readings to analyse"
+  /// Stored verdict names are file schema, not English. An unmapped key is
+  /// shown as it is: a newer file can carry a verdict this build never heard
+  /// of, and dropping it would hide a count.
+  private static func verdictWord(_ key: String) -> String {
+    switch key {
+    case "observed": "Observed"
+    case "refused": "Refused"
+    case "notObserved": "Not observed"
+    case "selfReported": "Self-reported"
+    case "inconclusive": "Inconclusive"
+    default: key
+    }
+  }
+
+  /// Same reasoning as `verdictWord`, for the wear histogram's stored state
+  /// names. Lower case: these read inside a sentence.
+  private static func stateWord(_ key: String) -> String {
+    switch key {
+    case "idleDim": "idle dim"
+    case "lockDim": "lock dim"
+    case "unfocusedDim": "unfocused dim"
+    default: key
     }
   }
 
