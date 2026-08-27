@@ -234,7 +234,19 @@ struct CopyBuilderTests {
       render(DiagnosticsPageCopy.brightnessPath(.unavailable(.ddcTurnedOffWithNoSoftwareLeg)))
         .contains("nothing is left to carry the value"))
 
-    // One representative per switch arm, six distinct sentences. Both software
+    // The wire's two arms name the display's own silence, never a setting:
+    // otherwise someone goes looking for a switch they never touched.
+    let deadWire = render(
+      DiagnosticsPageCopy.brightnessPath(
+        .softwareOnly(backend: .gamma, reason: .ddcUnresponsive, dimsBelow: 0.25)))
+    #expect(deadWire.contains("stopped answering brightness commands"))
+    #expect(deadWire.contains("25%"))
+    #expect(!deadWire.contains("turned off"))
+    #expect(
+      render(DiagnosticsPageCopy.brightnessPath(.unavailable(.ddcUnresponsiveWithNoSoftwareLeg)))
+        .contains("stopped answering brightness commands"))
+
+    // One representative per switch arm, each with its own sentence. Both software
     // backends are deliberately not in this list: they share one sentence,
     // because the user is told the backlight is untouched, not which trick does
     // the darkening.
@@ -243,8 +255,10 @@ struct CopyBuilderTests {
       .combined(switchingValue: 0.4, backend: .gamma),
       .softwareOnly(backend: .gamma, reason: .ddcTurnedOff, dimsBelow: 0.25),
       .unavailable(.ddcTurnedOffWithNoSoftwareLeg),
+      .softwareOnly(backend: .gamma, reason: .ddcUnresponsive, dimsBelow: 0.25),
+      .unavailable(.ddcUnresponsiveWithNoSoftwareLeg),
     ]
-    #expect(Set(perArm.map { render(DiagnosticsPageCopy.brightnessPath($0)) }).count == 6)
+    #expect(Set(perArm.map { render(DiagnosticsPageCopy.brightnessPath($0)) }).count == 8)
     #expect(
       render(DiagnosticsPageCopy.brightnessPath(.software(.gamma)))
         == render(DiagnosticsPageCopy.brightnessPath(.software(.overlay))))
@@ -1076,6 +1090,8 @@ struct CopyBuilderTests {
     .combined(switchingValue: 0, backend: .overlay),
     .softwareOnly(backend: .gamma, reason: .ddcTurnedOff, dimsBelow: 0.25),
     .unavailable(.ddcTurnedOffWithNoSoftwareLeg),
+    .softwareOnly(backend: .gamma, reason: .ddcUnresponsive, dimsBelow: 0.25),
+    .unavailable(.ddcUnresponsiveWithNoSoftwareLeg),
   ]
 
   private static func guardBrightnessPath(_ path: BrightnessPath) -> Int {
@@ -1086,6 +1102,8 @@ struct CopyBuilderTests {
     case .combined: 3
     case .softwareOnly(_, .ddcTurnedOff, _): 4
     case .unavailable(.ddcTurnedOffWithNoSoftwareLeg): 5
+    case .softwareOnly(_, .ddcUnresponsive, _): 6
+    case .unavailable(.ddcUnresponsiveWithNoSoftwareLeg): 7
     }
   }
 
@@ -1246,7 +1264,7 @@ struct CopyBuilderTests {
     #expect(Set(Self.allReapplyNotices.map(Self.guardReapplyNotice)).count == 5)
     #expect(Set(Self.allApplyNotices.map(Self.guardApplyNotice)).count == 2)
     #expect(Set(Self.allProblemShapes.flatMap { $0 }.map(Self.guardProblem)).count == 2)
-    #expect(Set(Self.allBrightnessPaths.map(Self.guardBrightnessPath)).count == 6)
+    #expect(Set(Self.allBrightnessPaths.map(Self.guardBrightnessPath)).count == 8)
     #expect(Set(Self.allReadEvidence.map(Self.guardReadEvidence)).count == 4)
     #expect(Set(Self.allMirrorRefusals.map(Self.guardMirrorRefusal)).count == 8)
     #expect(Set(Self.allRotationRefusals.map(Self.guardRotationRefusal)).count == 4)

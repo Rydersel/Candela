@@ -121,6 +121,10 @@
         ("hdrEngaged", yesNo(controller.isHDREngaged)),
         ("hdrSupported", yesNo(controller.supportsHDR)),
         ("hdrMode", controller.hdrMode == .off ? "off" : "alwaysOn"),
+        // The verdict and the caption, from the same accessors the row's body
+        // calls (WD5): the only way a rig leg can assert a degraded panel says so.
+        ("wireUnresponsive", yesNo(controller.isWireUnresponsive)),
+        ("brightnessReason", quoted(model.brightnessSliderCompactReason(state) ?? "none")),
       ]
       guard !isBuiltIn else {
         // The built-in section is a name and a brightness slider, full stop:

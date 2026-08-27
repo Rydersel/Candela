@@ -443,8 +443,11 @@ struct DisplayHeroView: View {
     // diagnostics page gate on, so one page cannot give two answers about one
     // display. On an EXTERNAL display `.macOSDrivesBrightness` is reachable
     // only through live HDR.
-    if DisplayCardPolicy.ddcTrafficBlock(for: state.controller.brightnessPath)
-      == .macOSDrivesBrightness {
+    let block = DisplayCardPolicy.ddcTrafficBlock(
+      for: state.controller.brightnessPath,
+      isWireUnresponsive: state.controller.isWireUnresponsive
+    )
+    if block == .macOSDrivesBrightness {
       return .hdrEngaged
     }
     // The brightness controller's OWN evidence, not the folded worst-of-three

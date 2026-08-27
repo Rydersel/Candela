@@ -181,4 +181,27 @@ struct DisplayCardPolicyTests {
     #expect(DisplayCardPolicy.normalizedFriendlyName("  Desk \n") == "Desk")
     #expect(DisplayCardPolicy.normalizedFriendlyName("Desk") == "Desk")
   }
+
+  /// WD2's ambiguity, and the one place it bites: greying the DDC grid here
+  /// would caption a display nobody touched with "hardware control is off".
+  @Test func aWireThatStoppedAnsweringDoesNotClaimHardwareControlWasTurnedOff() {
+    #expect(DisplayCardPolicy.ddcTrafficBlock(
+      for: .software(.gamma), isWireUnresponsive: true
+    ) == nil)
+    #expect(DisplayCardPolicy.ddcTrafficBlock(
+      for: .software(.overlay), isWireUnresponsive: true
+    ) == nil)
+    // The switch still blocks, which is the fact the nil above must not erase.
+    #expect(DisplayCardPolicy.ddcTrafficBlock(
+      for: .software(.gamma), isWireUnresponsive: false
+    ) == .hardwareControlOff)
+  }
+
+  /// Live HDR outranks the wire here too: macOS is driving the display, which is
+  /// the only true sentence there.
+  @Test func liveHDRStillNamesMacOSEvenWithAnUnresponsiveWire() {
+    #expect(DisplayCardPolicy.ddcTrafficBlock(
+      for: .native, isWireUnresponsive: true
+    ) == .macOSDrivesBrightness)
+  }
 }

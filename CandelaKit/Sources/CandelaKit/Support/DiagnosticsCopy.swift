@@ -195,8 +195,16 @@ public enum DiagnosticsCopy {
       "Software only below \(SliderSnap.percentText(dimsBelow)), through the display's color profile"
     case let .softwareOnly(.overlay, .ddcTurnedOff, dimsBelow):
       "Software only below \(SliderSnap.percentText(dimsBelow)), through a dark overlay"
+    // The wire's two arms name the CAUSE in the value, unlike the pair above:
+    // the user did not do this and has no other explanation for it.
+    case let .softwareOnly(.gamma, .ddcUnresponsive, dimsBelow):
+      "Software only below \(SliderSnap.percentText(dimsBelow)), through the display's color profile: this display stopped answering brightness commands"
+    case let .softwareOnly(.overlay, .ddcUnresponsive, dimsBelow):
+      "Software only below \(SliderSnap.percentText(dimsBelow)), through a dark overlay: this display stopped answering brightness commands"
     case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
       "Nothing is moving this display's brightness"
+    case .unavailable(.ddcUnresponsiveWithNoSoftwareLeg):
+      "Nothing is moving this display's brightness: it stopped answering brightness commands"
     }
   }
 
@@ -336,8 +344,12 @@ public enum DiagnosticsCopy {
     switch path {
     case .unavailable(.ddcTurnedOffWithNoSoftwareLeg):
       "Unavailable: combined dimming is off for this display and its hardware brightness command is turned off"
+    case .unavailable(.ddcUnresponsiveWithNoSoftwareLeg):
+      "Unavailable: this display stopped answering brightness commands, and dimming hands off to software at a point with no software range below it"
     case let .softwareOnly(_, .ddcTurnedOff, dimsBelow):
       "Partly available: the hardware brightness command is turned off, so only the part of the slider below \(SliderSnap.percentText(dimsBelow)) moves anything"
+    case let .softwareOnly(_, .ddcUnresponsive, dimsBelow):
+      "Partly available: this display stopped answering brightness commands, so only the part of the slider below \(SliderSnap.percentText(dimsBelow)) moves anything"
     case .native, .software, .hardware, .combined:
       "Available"
     }
