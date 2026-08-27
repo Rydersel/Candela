@@ -89,7 +89,10 @@ struct CheckupPane: View {
   @State private var chosenByHand = false
   @State private var runs: [CheckupStoredRun] = []
   @State private var verification: String?
-  @State private var provenanceVerification: String?
+  /// Held apart from its summary because the two are rendered differently:
+  /// the verdict is a sentence, the summary is a document.
+  @State private var provenanceVerdict: String?
+  @State private var provenanceSummary: String?
 
   init(directory: URL = CheckupStore.defaultDirectory()) {
     store = CheckupStore(directory: directory)
@@ -107,7 +110,8 @@ struct CheckupPane: View {
     // observer. The verification line goes too: it answered under another display.
     .onChange(of: scoped?.display.persistenceKey) {
       verification = nil
-      provenanceVerification = nil
+      provenanceVerdict = nil
+      provenanceSummary = nil
       reload()
     }
     .onChange(of: activeState) { _, state in
@@ -244,25 +248,42 @@ struct CheckupPane: View {
         SettingsRowNote(verbatim: ProvenanceCopy.checkNote)
         Button(ProvenanceCopy.check) { checkProvenance() }
           .buttonStyle(SettingsSecondaryButtonStyle())
-        if let provenanceVerification {
-          // Verdict first, then the record itself, so the reader sees what the
-          // hash covered rather than taking the one line on trust.
-          Text(verbatim: provenanceVerification)
+        if let provenanceVerdict {
+          // The verdict is a sentence about the file, so it reads like the
+          // verify answer above it.
+          Text(verbatim: provenanceVerdict)
             .font(.callout)
             .foregroundStyle(SettingsTheme.bodyColor)
             .fixedSize(horizontal: false, vertical: true)
+        }
+        if let provenanceSummary {
+          // The record itself, in Show details' treatment: this is the one
+          // surface showing a record somebody else sent, and a person has to be
+          // able to select the serial or the hours out of it.
+          Text(verbatim: provenanceSummary)
+            .font(.caption.monospaced())
+            .foregroundStyle(SettingsTheme.bodyColor)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
       }
       .padding(.vertical, 2)
     }
   }
 
-  private func verify() {
+  /// Both verifiers open the same kind of file, so the panel is set up once.
+  private func pickJSONFile() -> URL? {
     let panel = NSOpenPanel()
     panel.allowedContentTypes = [.json]
     panel.allowsMultipleSelection = false
     panel.canChooseDirectories = false
-    guard panel.runModal() == .OK, let url = panel.url else { return }
+    guard panel.runModal() == .OK else { return nil }
+    return panel.url
+  }
+
+  private func verify() {
+    guard let url = pickJSONFile() else { return }
     guard let envelope = try? store.load(url: url) else {
       verification = CheckupPaneCopy.unreadable
       return
@@ -271,17 +292,16 @@ struct CheckupPane: View {
   }
 
   private func checkProvenance() {
-    let panel = NSOpenPanel()
-    panel.allowedContentTypes = [.json]
-    panel.allowsMultipleSelection = false
-    panel.canChooseDirectories = false
-    guard panel.runModal() == .OK, let url = panel.url else { return }
+    guard let url = pickJSONFile() else { return }
     guard let envelope = try? ProvenanceEnvelope.load(url: url) else {
-      provenanceVerification = ProvenanceCopy.unreadable
+      provenanceVerdict = ProvenanceCopy.unreadable
+      // A file that would not read has no record to print, so a summary left
+      // over from the last check would belong to a different file.
+      provenanceSummary = nil
       return
     }
-    let verdict = envelope.validate() ? ProvenanceCopy.intact : ProvenanceCopy.altered
-    provenanceVerification = verdict + "\n\n" + ProvenanceSummaryText.render(envelope.record)
+    provenanceVerdict = envelope.validate() ? ProvenanceCopy.intact : ProvenanceCopy.altered
+    provenanceSummary = ProvenanceSummaryText.render(envelope.record)
   }
 }
 
