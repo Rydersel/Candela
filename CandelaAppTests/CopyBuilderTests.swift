@@ -634,25 +634,46 @@ struct CopyBuilderTests {
 
   // MARK: - OledCareCopy
 
-  /// OC13's pause has two reasons since SS8, and the whole point of the
-  /// parameter is that the sentences differ: a person who never mirrored
-  /// anything must not be told they did. The three synthesis strings reached
-  /// only the scans below, which would pass just as happily if all three fell
-  /// back to their mirrored neighbours' words.
-  @Test func theSynthesisPauseSaysWhichMirrorItIsAbout() {
-    // No terminal period on either arm (ruled 2026-08-18): a status row reads
+  /// The whole point of the parameter is that the sentences differ: a person
+  /// who never mirrored anything must not be told they did. The scans below
+  /// reach every arm but would pass with all of them saying the mirrored words.
+  @Test func theSuspendedCopySaysWhichPauseItIsAbout() {
+    // No terminal period on any arm (ruled 2026-08-18): a status row reads
     // like its neighbours, and every one of those is period-free.
-    #expect(render(OledCareCopy.suspendedStatus(synthesized: true))
+    #expect(render(OledCareCopy.suspendedStatus(reason: .synthesizedSize))
       .contains("\"Paused while a synthesized size is active\""))
-    #expect(OledCareCopy.suspendedPreview(synthesized: true) == "Paused for a synthesized size")
-    #expect(OledCareCopy.suspendedSpokenPreview(synthesized: true)
+    #expect(OledCareCopy.suspendedPreview(reason: .synthesizedSize)
+      == "Paused for a synthesized size")
+    #expect(OledCareCopy.suspendedSpokenPreview(reason: .synthesizedSize)
       == "Paused while a synthesized size is active")
 
-    #expect(render(OledCareCopy.suspendedStatus(synthesized: false))
+    #expect(render(OledCareCopy.suspendedStatus(reason: .mirrored))
       .contains("\"Paused while this display is mirrored\""))
-    #expect(OledCareCopy.suspendedPreview(synthesized: false) == "Paused while mirrored")
-    #expect(OledCareCopy.suspendedSpokenPreview(synthesized: false)
+    #expect(OledCareCopy.suspendedPreview(reason: .mirrored) == "Paused while mirrored")
+    #expect(OledCareCopy.suspendedSpokenPreview(reason: .mirrored)
       == "Paused while this display is mirrored")
+
+    #expect(render(OledCareCopy.suspendedStatus(reason: .checkup))
+      .contains("\"Paused while a checkup field is showing\""))
+    #expect(OledCareCopy.suspendedPreview(reason: .checkup) == "Paused for a checkup")
+    #expect(OledCareCopy.suspendedSpokenPreview(reason: .checkup)
+      == "Paused while a checkup field is showing")
+  }
+
+  /// A switch arm that fell through to its neighbour cannot pass. `allCases` is
+  /// what makes a new reason arrive as a failure rather than a duplicated
+  /// sentence.
+  @Test func noTwoSuspensionReasonsShareTheirWords() {
+    let statuses = OledCareSuspensionReason.allCases.map {
+      render(OledCareCopy.suspendedStatus(reason: $0))
+    }
+    let previews = OledCareSuspensionReason.allCases.map { OledCareCopy.suspendedPreview(reason: $0) }
+    let spoken = OledCareSuspensionReason.allCases.map {
+      OledCareCopy.suspendedSpokenPreview(reason: $0)
+    }
+    #expect(Set(statuses).count == OledCareSuspensionReason.allCases.count)
+    #expect(Set(previews).count == OledCareSuspensionReason.allCases.count)
+    #expect(Set(spoken).count == OledCareSuspensionReason.allCases.count)
   }
 
   /// OC17's denominator is MASK-COULD-APPLY time (ruled 2026-08-18) and the
@@ -916,16 +937,13 @@ struct CopyBuilderTests {
       add("OledCareCopy.lockDimPreview(\(name))", OledCareCopy.lockDimPreview(skip))
       add("OledCareCopy.lockDimSpokenPreview(\(name))", OledCareCopy.lockDimSpokenPreview(skip))
     }
-    for synthesized in [true, false] {
+    for reason in OledCareSuspensionReason.allCases {
+      let name = String(describing: reason)
+      add("OledCareCopy.suspendedStatus(\(name))", OledCareCopy.suspendedStatus(reason: reason))
+      add("OledCareCopy.suspendedPreview(\(name))", OledCareCopy.suspendedPreview(reason: reason))
       add(
-        "OledCareCopy.suspendedStatus(\(synthesized))",
-        OledCareCopy.suspendedStatus(synthesized: synthesized))
-      add(
-        "OledCareCopy.suspendedPreview(\(synthesized))",
-        OledCareCopy.suspendedPreview(synthesized: synthesized))
-      add(
-        "OledCareCopy.suspendedSpokenPreview(\(synthesized))",
-        OledCareCopy.suspendedSpokenPreview(synthesized: synthesized))
+        "OledCareCopy.suspendedSpokenPreview(\(name))",
+        OledCareCopy.suspendedSpokenPreview(reason: reason))
     }
     add("OledCareCopy.wearFractionScope", OledCareCopy.wearFractionScope)
 

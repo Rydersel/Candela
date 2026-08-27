@@ -108,15 +108,21 @@ public struct OledDimSignals: Equatable, Sendable {
   public var isMirrored: Bool
   public var isHDRSettling: Bool
   public var unfocusedSeconds: Double?
+  /// A checkup field is on this panel. The field and every care overlay sit at
+  /// the same `CGShieldingWindowLevel()`, so a dim that won the ordering would
+  /// be graded as part of the panel.
+  public var isCheckupFieldShowing: Bool
 
   public init(idleSeconds: Double, assertionHeld: Bool, isLocked: Bool,
-              isMirrored: Bool, isHDRSettling: Bool, unfocusedSeconds: Double?) {
+              isMirrored: Bool, isHDRSettling: Bool, unfocusedSeconds: Double?,
+              isCheckupFieldShowing: Bool = false) {
     self.idleSeconds = idleSeconds
     self.assertionHeld = assertionHeld
     self.isLocked = isLocked
     self.isMirrored = isMirrored
     self.isHDRSettling = isHDRSettling
     self.unfocusedSeconds = unfocusedSeconds
+    self.isCheckupFieldShowing = isCheckupFieldShowing
   }
 }
 
@@ -174,7 +180,10 @@ public struct IdleDimmingEngine: Sendable {
     if inputOccurred { idleFloor = 0 }  // a real event: the counter is honest again
     let idleSinceWake = max(0, signals.idleSeconds - idleFloor)
 
-    if signals.isMirrored { state = .suspended; return state }
+    // Ahead of the lock branch on purpose: the lock dim goes on the WIRE, so a
+    // field on a locked panel would be dimmed by a route no window ordering
+    // could save.
+    if signals.isMirrored || signals.isCheckupFieldShowing { state = .suspended; return state }
 
     if signals.isLocked && config.lockDim {
       if inputOccurred { lockDimArmed = false }

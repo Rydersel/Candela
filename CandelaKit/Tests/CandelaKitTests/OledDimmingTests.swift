@@ -15,10 +15,12 @@ struct OledDimmingTests {
   }
   private func signals(
     idle: Double, assertion: Bool = false, locked: Bool = false,
-    mirrored: Bool = false, settling: Bool = false, unfocused: Double? = nil
+    mirrored: Bool = false, settling: Bool = false, unfocused: Double? = nil,
+    checkupField: Bool = false
   ) -> OledDimSignals {
     OledDimSignals(idleSeconds: idle, assertionHeld: assertion, isLocked: locked,
-                   isMirrored: mirrored, isHDRSettling: settling, unfocusedSeconds: unfocused)
+                   isMirrored: mirrored, isHDRSettling: settling, unfocusedSeconds: unfocused,
+                   isCheckupFieldShowing: checkupField)
   }
 
   @Test func idleThresholdDims() {
@@ -143,6 +145,41 @@ struct OledDimmingTests {
     var e = IdleDimmingEngine(config: config())
     e.noteLock(idleSeconds: 5)
     #expect(e.tick(signals(idle: 5, locked: true, mirrored: true)) == .suspended)
+  }
+
+  /// Every overlay dim sits at the field's own window level, so the signal
+  /// lands at mirroring's precedence: no dim reaches the panel by any route
+  /// while a field is up.
+  @Test func aCheckupFieldSuspendsFromEveryDimmedState() {
+    var fromActive = IdleDimmingEngine(config: config())
+    #expect(fromActive.tick(signals(idle: 10)) == .active)
+    #expect(fromActive.tick(signals(idle: 11, checkupField: true)) == .suspended)
+
+    var fromIdleDim = IdleDimmingEngine(config: config())
+    #expect(fromIdleDim.tick(signals(idle: 400)) == .idleDim)
+    #expect(fromIdleDim.tick(signals(idle: 401, checkupField: true)) == .suspended)
+
+    var fromBlackout = IdleDimmingEngine(config: config(blackout: true, blackoutAt: 1200))
+    #expect(fromBlackout.tick(signals(idle: 1200)) == .blackout)
+    #expect(fromBlackout.tick(signals(idle: 1201, checkupField: true)) == .suspended)
+  }
+
+  /// The lock dim is delivered on the wire rather than by an overlay, so it is
+  /// the one dim a field could not simply cover: it has to be refused outright.
+  @Test func aCheckupFieldOutranksTheLockDim() {
+    var e = IdleDimmingEngine(config: config(lock: true))
+    e.noteLock(idleSeconds: 5)
+    #expect(e.tick(signals(idle: 5, locked: true)) == .lockDim)
+    #expect(e.tick(signals(idle: 6, locked: true, checkupField: true)) == .suspended)
+  }
+
+  /// The hold is a signal, not a latch: the tick after the field comes down
+  /// answers from the other signals again, with no resume step to forget.
+  @Test func clearingTheCheckupFieldResumesOnTheNextTick() {
+    var e = IdleDimmingEngine(config: config())
+    #expect(e.tick(signals(idle: 400)) == .idleDim)
+    #expect(e.tick(signals(idle: 401, checkupField: true)) == .suspended)
+    #expect(e.tick(signals(idle: 402)) == .idleDim)
   }
 
   @Test func hdrSettleDefersEntryButNotExit() {

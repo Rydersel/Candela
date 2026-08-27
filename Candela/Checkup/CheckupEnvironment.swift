@@ -35,6 +35,15 @@ protocol CheckupFieldPresenting: AnyObject {
   func hide()
 }
 
+/// The care hold a field takes on the panel it covers, for the life of the
+/// showing. A protocol so the field window can be exercised with nothing behind
+/// it, and so the checkup reaches OLED care through these two calls only.
+@MainActor
+protocol CheckupCareHolding: AnyObject {
+  func beginCheckupField(identityKey: String)
+  func endCheckupField(identityKey: String)
+}
+
 /// Everything the flow reaches past itself (CK25): live in the app, fakes in
 /// the suite. The model never touches a display, a clock or a store directly.
 struct CheckupEnvironment {
