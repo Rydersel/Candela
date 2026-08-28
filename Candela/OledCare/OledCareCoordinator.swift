@@ -278,6 +278,11 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// re-enrolled underneath it.
   @ObservationIgnored private var checkupFieldHolds: Set<String> = []
   @ObservationIgnored private var driver: Task<Void, Never>?
+  /// Armed only while a dim is up, disarmed by its own first event. Restoring
+  /// off the 100 ms poll alone took 102 to 118 ms against a 100 ms gate
+  /// [MEASURED 2026-08-28], so the event runs the tick. The poll stays as the
+  /// fallback: keyboard events skip a global monitor without an Accessibility grant.
+  @ObservationIgnored private var inputMonitors: [Any] = []
   @ObservationIgnored private var sleepWakeObservers: [any NSObjectProtocol] = []
   /// C1 latch. `runSettingsReset` suspends several times between
   /// `prepareForReset()` and the domain wipe, and an HDR-off IS a display
@@ -396,6 +401,11 @@ final class OledCareCoordinator: CheckupCareHolding {
           guard let self else { return }
           self.tick()
           interval = self.cadence()
+          if self.anyDimUp() {
+            self.armInputMonitor()
+          } else {
+            self.disarmInputMonitor()
+          }
         }
         try? await Task.sleep(for: interval)
       }
@@ -1008,17 +1018,20 @@ final class OledCareCoordinator: CheckupCareHolding {
       // dropped with ONE summary log — a mismatch that survives ~500 ms of
       // retries is structural, and the next state change re-arms the check.
       if state.needsVerify {
-        if verifyLastRender(of: state, on: id) {
+        switch verifyLastRender(of: state, on: id) {
+        case .agreed:
           state.needsVerify = false
           state.verifyAttempts = 0
-        } else if state.verifyAttempts + 1 >= Self.maxVerifyAttempts {
+        case .settling:
+          break
+        case .mismatched where state.verifyAttempts + 1 >= Self.maxVerifyAttempts:
           state.needsVerify = false
           state.verifyAttempts = 0
           log.error("""
           OLED care overlay for display \(id, privacy: .public) still mismatched after \
           \(Self.maxVerifyAttempts, privacy: .public) reconcile attempts; giving up until the next state change
           """)
-        } else {
+        case .mismatched:
           state.verifyAttempts += 1
         }
       }
@@ -1044,6 +1057,49 @@ final class OledCareCoordinator: CheckupCareHolding {
       verificationPending: states.values.contains(where: \.needsVerify)
         || !pendingRemovalVerifications.isEmpty
     )
+  }
+
+  /// Dims that input can lift. A pending verification also runs the fast
+  /// cadence but gives an input event nothing to do.
+  private func anyDimUp() -> Bool {
+    states.values.contains { $0.lastAppliedAlpha != nil || $0.lockDimEngaged }
+  }
+
+  // MARK: - Event-driven restore
+
+  private static let inputEvents: NSEvent.EventTypeMask = [
+    .mouseMoved, .leftMouseDown, .rightMouseDown, .otherMouseDown,
+    .leftMouseDragged, .rightMouseDragged, .otherMouseDragged,
+    .scrollWheel, .keyDown, .flagsChanged,
+  ]
+
+  /// Global monitor for input outside the app, local one for input delivered
+  /// to it: the blackout overlay accepts clicks (OC15), which never reach a global monitor.
+  private func armInputMonitor() {
+    guard inputMonitors.isEmpty else { return }
+    if let global = NSEvent.addGlobalMonitorForEvents(matching: Self.inputEvents, handler: { [weak self] _ in
+      MainActor.assumeIsolated { self?.inputArrived() }
+    }) {
+      inputMonitors.append(global)
+    }
+    if let local = NSEvent.addLocalMonitorForEvents(matching: Self.inputEvents, handler: { [weak self] event in
+      MainActor.assumeIsolated { self?.inputArrived() }
+      return event
+    }) {
+      inputMonitors.append(local)
+    }
+  }
+
+  private func disarmInputMonitor() {
+    for monitor in inputMonitors { NSEvent.removeMonitor(monitor) }
+    inputMonitors.removeAll()
+  }
+
+  /// Single-shot: a pointer move is a stream of events and a tick per event would
+  /// run the loop at the input rate. The driver re-arms next turn if a dim is still up.
+  private func inputArrived() {
+    disarmInputMonitor()
+    tick()
   }
 
   // MARK: - Lock dim (delivered on the wire, not by an overlay)
@@ -1292,25 +1348,35 @@ final class OledCareCoordinator: CheckupCareHolding {
       recentGrid: panelGrid, observation: observation, thresholds: .default)
   }
 
-  /// OC12 reconcile, one tick after a mutation. True when the window server
-  /// agrees with the last render. On a missing wanted overlay the lever is
-  /// `reassert(on:)` — NEVER a repeat apply, which is a no-op by construction
-  /// against the overlay's memo — and re-verification waits for the NEXT
-  /// tick: one nudge per detected mismatch, log, don't loop.
-  private func verifyLastRender(of state: PerDisplay, on id: CGDirectDisplayID) -> Bool {
+  private enum VerifyOutcome {
+    case agreed
+    case mismatched
+    /// A close the server has not finished reporting; neither an attempt nor a
+    /// mismatch. Bounded by `OledOverlay.closeGrace`.
+    case settling
+  }
+
+  /// OC12 reconcile, one tick after a mutation. `.agreed` when the window
+  /// server agrees with the last render. On a missing wanted overlay the lever
+  /// is `reassert(on:)` (NEVER a repeat apply, which is a no-op by construction
+  /// against the overlay's memo) and re-verification waits for the NEXT tick:
+  /// one nudge per detected mismatch, log, don't loop.
+  private func verifyLastRender(of state: PerDisplay, on id: CGDirectDisplayID) -> VerifyOutcome {
     let wanted = state.lastAppliedAlpha != nil
-    let present = overlay.verifyPresence(on: id)
-    if wanted, !present {
+    switch (wanted, overlay.verifyPresence(on: id)) {
+    case (true, .absent):
       log.error("OLED care overlay for display \(id, privacy: .public) not on screen after apply; reasserting")
       overlay.reassert(on: id)
-      return false
-    }
-    if !wanted, present {
+      return .mismatched
+    case (false, .present):
       // A removal the server has not honoured: verifyPresence already
       // re-closed the strand and logged. Check again next tick.
-      return false
+      return .mismatched
+    case (_, .closing):
+      return .settling
+    case (true, .present), (false, .absent):
+      return .agreed
     }
-    return true
   }
 
   /// Wholesale teardown (reconfiguration, system sleep, reset). `verifyRemoval`
@@ -1333,15 +1399,18 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// attempt bound the in-state check has.
   private func drainPendingRemovalVerifications() {
     for (id, attempts) in pendingRemovalVerifications {
-      if !overlay.verifyPresence(on: id) {
+      switch overlay.verifyPresence(on: id) {
+      case .absent:
         pendingRemovalVerifications.removeValue(forKey: id)
-      } else if attempts + 1 >= Self.maxVerifyAttempts {
+      case .closing:
+        break
+      case .present where attempts + 1 >= Self.maxVerifyAttempts:
         pendingRemovalVerifications.removeValue(forKey: id)
         log.error("""
         OLED care overlay for display \(id, privacy: .public) still on screen after \
         \(Self.maxVerifyAttempts, privacy: .public) removal checks; giving up
         """)
-      } else {
+      case .present:
         pendingRemovalVerifications[id] = attempts + 1
       }
     }

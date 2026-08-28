@@ -41,9 +41,28 @@ final class OledOverlay {
   private struct ClosedOverlay {
     let panel: NSPanel
     let number: CGWindowID
+    let closedAt: ContinuousClock.Instant
   }
 
   private var lastRemoved: [CGDirectDisplayID: ClosedOverlay] = [:]
+
+  /// How long after `close()` the window server may still list the window before
+  /// the reading counts as a strand. It keeps reporting a closing overlay for
+  /// 200 to 250 ms on the MAG and 400 to 750 ms on the Dell [MEASURED 2026-08-28],
+  /// long after the pixels are back; without the grace every healthy restore logged
+  /// a strand. One second clears both and still catches a real strand within the fast cadence.
+  static let closeGrace: Duration = .seconds(1)
+
+  /// What the window server says about a display's overlay right now.
+  enum Presence: Equatable {
+    case absent
+    /// An overlay is on screen: a live one, or a closed one past `closeGrace`
+    /// (a strand, already re-closed and logged).
+    case present
+    /// A closed overlay still listed inside `closeGrace`: check again rather
+    /// than counting an attempt or logging.
+    case closing
+  }
 
   /// The state each display's overlay is currently carrying, so an unchanged
   /// `apply` can be a no-op. At the overlay-up cadence an unconditional
@@ -237,7 +256,8 @@ final class OledOverlay {
     // `kCGNullWindowID`, which would make the query meaningless rather than
     // negative), and nothing to strand.
     if window.windowNumber > 0 {
-      self.lastRemoved[displayID] = ClosedOverlay(panel: window, number: CGWindowID(window.windowNumber))
+      self.lastRemoved[displayID] = ClosedOverlay(
+        panel: window, number: CGWindowID(window.windowNumber), closedAt: .now)
     }
     // Safe for the same reason `ShadeOverlay.removeShade` is: the window is
     // borderless and `isReleasedWhenClosed` is false at creation, so ARC owns
@@ -276,29 +296,37 @@ final class OledOverlay {
   /// did not take) are answered by the same call.
   ///
   /// No TCC grant needed: only `kCGWindowName` is gated by Screen Recording.
-  func verifyPresence(on displayID: CGDirectDisplayID) -> Bool {
+  func verifyPresence(on displayID: CGDirectDisplayID) -> Presence {
     if let window = self.windows[displayID] {
       // Same reason `remove(for:)` screens the number: `windowNumber` is <= 0
       // for a window with no device, and `CGWindowID(_:)` TRAPS on a negative
       // Int. A window that never reached the screen is not on screen.
-      guard window.windowNumber > 0 else { return false }
-      return Self.isOnScreen(CGWindowID(window.windowNumber))
+      guard window.windowNumber > 0 else { return .absent }
+      return Self.isOnScreen(CGWindowID(window.windowNumber)) ? .present : .absent
     }
     guard let closed = self.lastRemoved[displayID] else {
-      return false
+      return .absent
     }
     guard Self.isOnScreen(closed.number) else {
       self.lastRemoved.removeValue(forKey: displayID)
-      return false
+      return .absent
+    }
+    // A second close on a still-closing window is what produced the false
+    // strands; inside the grace, wait.
+    if ContinuousClock.now - closed.closedAt < Self.closeGrace {
+      return .closing
     }
     // Detecting a strand is only half of it: this window is black over the
-    // user's screen and nothing else can close it. Ask again — the entry stays
+    // user's screen and nothing else can close it. Ask again; the entry stays
     // until a later check sees it gone, so a close that keeps failing keeps
     // being retried rather than reported forever.
     Self.log.error("OLED care overlay still on screen after close on display \(displayID, privacy: .public); closing again")
     closed.panel.orderOut(nil)
     closed.panel.close()
-    return true
+    // The retry is a close too, with the same report lag; without a fresh grace
+    // a real strand logged three times per retry. With it, once per grace.
+    self.lastRemoved[displayID] = ClosedOverlay(panel: closed.panel, number: closed.number, closedAt: .now)
+    return .present
   }
 
   private static func isOnScreen(_ number: CGWindowID) -> Bool {
