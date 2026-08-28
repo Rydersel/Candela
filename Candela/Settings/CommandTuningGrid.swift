@@ -25,6 +25,15 @@ enum DDCCommandCopy {
     case .contrast: "Contrast"
     }
   }
+
+  /// Split out so a test can pin the exact wording.
+  static func enabledSwitchLabel(_ command: DDCCommand) -> String {
+    "\(name(command)) enabled"
+  }
+
+  static func invertSwitchLabel(_ command: DDCCommand) -> String {
+    "Invert \(name(command))"
+  }
 }
 
 /// Per-command DDC tuning for one display: Enabled / Min / Max / Invert, for
@@ -141,27 +150,16 @@ struct CommandTuningGrid: View {
             // that style draws the label at the leading edge and spreads the
             // row, and here the label is the grid's own first column and the
             // cell has to BE the switch for the header to sit above it.
-            Toggle("", isOn: enabledBinding(command))
-              .labelsHidden()
-              .toggleStyle(.switch)
-              .controlSize(.small)
-              .tint(lighting.accent)
-              // Without it the toggle takes the column's full width and draws
-              // its switch at the trailing edge, which no header placement can
-              // sit above. Fixed size makes the cell the switch.
-              .fixedSize()
-              .accessibilityLabel(Text("\(rowName(command)) enabled"))
-              .prefIdentifier(.unavailableDDC, command: command, persistenceKey: writer.persistenceKey)
+            switchCell(
+              DDCCommandCopy.enabledSwitchLabel(command), isOn: enabledBinding(command)
+            )
+            .prefIdentifier(.unavailableDDC, command: command, persistenceKey: writer.persistenceKey)
             overrideField(.minimum(command))
             overrideField(.maximum(command))
-            Toggle("", isOn: invertBinding(command))
-              .labelsHidden()
-              .toggleStyle(.switch)
-              .controlSize(.small)
-              .tint(lighting.accent)
-              .fixedSize()
-              .accessibilityLabel(Text("Invert \(rowName(command))"))
-              .prefIdentifier(.invertDDC, command: command, persistenceKey: writer.persistenceKey)
+            switchCell(
+              DDCCommandCopy.invertSwitchLabel(command), isOn: invertBinding(command)
+            )
+            .prefIdentifier(.invertDDC, command: command, persistenceKey: writer.persistenceKey)
           }
         }
       }
@@ -175,6 +173,23 @@ struct CommandTuningGrid: View {
   }
 
   // MARK: - Cells
+
+  /// The label is the control's own, not an `.accessibilityLabel` over an empty
+  /// one; `.labelsHidden()` hides it because the row's first column draws the name.
+  ///
+  /// This is not what fixes a refused press. Measured 2026-08-27, the old shape
+  /// published `AXPress` too and the switches were `AXEnabled=0` under the MAG's
+  /// live HDR, so a refused press means the traffic block below.
+  private func switchCell(_ label: String, isOn: Binding<Bool>) -> some View {
+    Toggle(isOn: isOn) { Text(verbatim: label) }
+      .labelsHidden()
+      .toggleStyle(.switch)
+      .controlSize(.small)
+      .tint(lighting.accent)
+      // Without this the toggle spans the column and draws its switch at the
+      // trailing edge, where no header can sit above it.
+      .fixedSize()
+  }
 
   /// The `Grid` is built `.leading`, which put every header at the left edge of
   /// a column wider than the header itself: "On" sat left of its switch and
