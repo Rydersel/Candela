@@ -46,24 +46,21 @@ final class OledOverlay {
 
   private var lastRemoved: [CGDirectDisplayID: ClosedOverlay] = [:]
 
-  /// How long after `close()` the window server may still list the window as
-  /// on screen before that reading counts as a strand. The server keeps
-  /// reporting a closing overlay for 200 to 250 ms on the MAG and 400 to 750 ms
-  /// on the Dell [MEASURED 2026-08-28], well after the pixels are restored, so
-  /// every fast tick inside that lag read a healthy restore as a strand and
-  /// logged an error twice per restore. One second clears both panels' lag
-  /// and still reports a real strand within the fast cadence's first ten ticks.
+  /// How long after `close()` the window server may still list the window before
+  /// the reading counts as a strand. It keeps reporting a closing overlay for
+  /// 200 to 250 ms on the MAG and 400 to 750 ms on the Dell [MEASURED 2026-08-28],
+  /// long after the pixels are back; without the grace every healthy restore logged
+  /// a strand. One second clears both and still catches a real strand within the fast cadence.
   static let closeGrace: Duration = .seconds(1)
 
   /// What the window server says about a display's overlay right now.
   enum Presence: Equatable {
-    /// No overlay of ours on screen.
     case absent
     /// An overlay is on screen: a live one, or a closed one past `closeGrace`
     /// (a strand, already re-closed and logged).
     case present
-    /// A closed overlay still listed inside `closeGrace`: the close is in
-    /// flight, so check again rather than counting an attempt or logging.
+    /// A closed overlay still listed inside `closeGrace`: check again rather
+    /// than counting an attempt or logging.
     case closing
   }
 
@@ -314,8 +311,8 @@ final class OledOverlay {
       self.lastRemoved.removeValue(forKey: displayID)
       return .absent
     }
-    // A second close on a window that is still closing is what produced the
-    // false strands; inside the grace the only correct move is to wait.
+    // A second close on a still-closing window is what produced the false
+    // strands; inside the grace, wait.
     if ContinuousClock.now - closed.closedAt < Self.closeGrace {
       return .closing
     }
@@ -326,9 +323,8 @@ final class OledOverlay {
     Self.log.error("OLED care overlay still on screen after close on display \(displayID, privacy: .public); closing again")
     closed.panel.orderOut(nil)
     closed.panel.close()
-    // The retry is a close too, with the same report lag behind it: without a
-    // fresh grace a real strand logged three times in the 250 ms after each
-    // retry. With it, once per grace until the server agrees.
+    // The retry is a close too, with the same report lag; without a fresh grace
+    // a real strand logged three times per retry. With it, once per grace.
     self.lastRemoved[displayID] = ClosedOverlay(panel: closed.panel, number: closed.number, closedAt: .now)
     return .present
   }

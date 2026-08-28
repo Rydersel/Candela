@@ -278,13 +278,10 @@ final class OledCareCoordinator: CheckupCareHolding {
   /// re-enrolled underneath it.
   @ObservationIgnored private var checkupFieldHolds: Set<String> = []
   @ObservationIgnored private var driver: Task<Void, Never>?
-  /// Armed only while a dim is up, disarmed by its own first event: the input
-  /// leg of the restore ran on the 100 ms poll and measured 102 to 118 ms to
-  /// removal against a 100 ms gate [2026-08-28]. The event itself now runs the
-  /// tick, and the poll stays as the fallback (keyboard events do not reach a
-  /// global monitor without an Accessibility grant; the poll still lifts on
-  /// them within one tick). Nothing is installed while nothing is dimmed, so
-  /// the standing cost is unchanged.
+  /// Armed only while a dim is up, disarmed by its own first event. Restoring
+  /// off the 100 ms poll alone took 102 to 118 ms against a 100 ms gate
+  /// [MEASURED 2026-08-28], so the event runs the tick. The poll stays as the
+  /// fallback: keyboard events skip a global monitor without an Accessibility grant.
   @ObservationIgnored private var inputMonitors: [Any] = []
   @ObservationIgnored private var sleepWakeObservers: [any NSObjectProtocol] = []
   /// C1 latch. `runSettingsReset` suspends several times between
@@ -1062,8 +1059,8 @@ final class OledCareCoordinator: CheckupCareHolding {
     )
   }
 
-  /// The dims input can lift, by either delivery. A pending verification also
-  /// runs the fast cadence but has nothing for an input event to do.
+  /// Dims that input can lift. A pending verification also runs the fast
+  /// cadence but gives an input event nothing to do.
   private func anyDimUp() -> Bool {
     states.values.contains { $0.lastAppliedAlpha != nil || $0.lockDimEngaged }
   }
@@ -1076,9 +1073,8 @@ final class OledCareCoordinator: CheckupCareHolding {
     .scrollWheel, .keyDown, .flagsChanged,
   ]
 
-  /// One global monitor for input outside the app and one local monitor for
-  /// input delivered to it: the blackout overlay accepts clicks (OC15), and
-  /// those never reach a global monitor.
+  /// Global monitor for input outside the app, local one for input delivered
+  /// to it: the blackout overlay accepts clicks (OC15), which never reach a global monitor.
   private func armInputMonitor() {
     guard inputMonitors.isEmpty else { return }
     if let global = NSEvent.addGlobalMonitorForEvents(matching: Self.inputEvents, handler: { [weak self] _ in
@@ -1099,9 +1095,8 @@ final class OledCareCoordinator: CheckupCareHolding {
     inputMonitors.removeAll()
   }
 
-  /// Single-shot: a pointer move is a stream of events, and a tick per event
-  /// would run the whole loop at the input rate. The driver re-arms on its
-  /// next turn if a dim is still up.
+  /// Single-shot: a pointer move is a stream of events and a tick per event would
+  /// run the loop at the input rate. The driver re-arms next turn if a dim is still up.
   private func inputArrived() {
     disarmInputMonitor()
     tick()
@@ -1356,8 +1351,8 @@ final class OledCareCoordinator: CheckupCareHolding {
   private enum VerifyOutcome {
     case agreed
     case mismatched
-    /// A close the server has not finished reporting: not an attempt, not a
-    /// mismatch, just not settled yet. Bounded by `OledOverlay.closeGrace`.
+    /// A close the server has not finished reporting; neither an attempt nor a
+    /// mismatch. Bounded by `OledOverlay.closeGrace`.
     case settling
   }
 
