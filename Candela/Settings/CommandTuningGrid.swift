@@ -179,11 +179,10 @@ struct CommandTuningGrid: View {
   /// keeps it out of the layout because the row's first column already draws
   /// the name.
   ///
-  /// Not a proven fix for the empty accessibility action list read off the
-  /// rig: an isolated harness of the old shape published `AXPress` every time,
-  /// in and out of a `Grid`, in-process and cross-process, on macOS 26. This
-  /// drops the one variable the report named; the hardware check still answers
-  /// whether the switch publishes AXPress.
+  /// Not the cure for the failed press read off the rig: measured 2026-08-27,
+  /// the old shape published `AXPress` too, and the switches were simply
+  /// `AXEnabled=0` under the MAG's live HDR (the traffic block below). This
+  /// is the idiomatic shape; the block is what a refused press means.
   private func switchCell(_ label: String, isOn: Binding<Bool>) -> some View {
     Toggle(isOn: isOn) { Text(verbatim: label) }
       .labelsHidden()
