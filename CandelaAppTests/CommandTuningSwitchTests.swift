@@ -2,13 +2,9 @@ import CandelaKit
 import Foundation
 import Testing
 
-/// The tuning grid's two switch columns: their names, and the shape they are
-/// written in.
-///
-/// A host-free bundle cannot read an accessibility action list, so only the
-/// copy and the shape are pinned here. Without them, a revert to the old
-/// empty-label-plus-annotation shape stays invisible until someone next runs
-/// the rig. `CommandTuningGrid` carries the reasoning behind the shape.
+/// A host-free bundle cannot read an accessibility action list, so these pin the
+/// switch copy and the shape instead. Without them, a revert to the old
+/// empty-label-plus-annotation shape only shows up on the rig.
 @Suite("Command tuning switches")
 struct CommandTuningSwitchTests {
   @Test func bothSwitchesAreNamedForTheirCommand() {
@@ -47,16 +43,15 @@ struct CommandTuningSwitchTests {
   @Test func theScanCanSeeAnEmptyLabelledToggle() {
     #expect(Self.hasEmptyLabelledToggle(in: #"Toggle("", isOn: $flag)"#))
     #expect(Self.hasEmptyLabelledToggle(in: #"  Toggle( "" , isOn: $flag)"#))
-    // A ToggleStyle's inner switch takes its label from the outer toggle, so
-    // it stays legal.
+    // A ToggleStyle's inner switch takes the outer toggle's label, so it is legal.
     #expect(!Self.hasEmptyLabelledToggle(in: "Toggle(isOn: configuration.$isOn) { EmptyView() }"))
     #expect(!Self.hasEmptyLabelledToggle(in: #"Toggle("Dim past the minimum", isOn: $flag)"#))
     // Comment lines are skipped, so a comment may name the shape it warns about.
     #expect(!Self.hasEmptyLabelledToggle(in: #"/// `Toggle("", isOn:)` is an unlabeled control."#))
   }
 
-  /// Comment lines are skipped whole, not stripped from the tail: trimming a
-  /// tail would mean reasoning about `//` inside string literals.
+  /// Comment lines are skipped whole. Trimming a trailing comment would mean
+  /// reasoning about `//` inside string literals.
   private static func hasEmptyLabelledToggle(in source: String) -> Bool {
     source.split(separator: "\n")
       .filter { !$0.drop(while: \.isWhitespace).hasPrefix("//") }

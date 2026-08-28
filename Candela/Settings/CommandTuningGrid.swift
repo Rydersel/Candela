@@ -26,7 +26,7 @@ enum DDCCommandCopy {
     }
   }
 
-  /// The On switch's label, kept here so a test can pin the spelling.
+  /// Split out so a test can pin the exact wording.
   static func enabledSwitchLabel(_ command: DDCCommand) -> String {
     "\(name(command)) enabled"
   }
@@ -174,15 +174,12 @@ struct CommandTuningGrid: View {
 
   // MARK: - Cells
 
-  /// One column's switch. The label is the control's own, not an
-  /// `.accessibilityLabel` written over an empty one, and `.labelsHidden()`
-  /// keeps it out of the layout because the row's first column already draws
-  /// the name.
+  /// The label is the control's own, not an `.accessibilityLabel` over an empty
+  /// one; `.labelsHidden()` hides it because the row's first column draws the name.
   ///
-  /// Not the cure for the failed press read off the rig: measured 2026-08-27,
-  /// the old shape published `AXPress` too, and the switches were simply
-  /// `AXEnabled=0` under the MAG's live HDR (the traffic block below). This
-  /// is the idiomatic shape; the block is what a refused press means.
+  /// This is not what fixes a refused press. Measured 2026-08-27, the old shape
+  /// published `AXPress` too and the switches were `AXEnabled=0` under the MAG's
+  /// live HDR, so a refused press means the traffic block below.
   private func switchCell(_ label: String, isOn: Binding<Bool>) -> some View {
     Toggle(isOn: isOn) { Text(verbatim: label) }
       .labelsHidden()
