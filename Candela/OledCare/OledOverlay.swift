@@ -326,6 +326,10 @@ final class OledOverlay {
     Self.log.error("OLED care overlay still on screen after close on display \(displayID, privacy: .public); closing again")
     closed.panel.orderOut(nil)
     closed.panel.close()
+    // The retry is a close too, with the same report lag behind it: without a
+    // fresh grace a real strand logged three times in the 250 ms after each
+    // retry. With it, once per grace until the server agrees.
+    self.lastRemoved[displayID] = ClosedOverlay(panel: closed.panel, number: closed.number, closedAt: .now)
     return .present
   }
 
