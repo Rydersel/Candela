@@ -38,6 +38,33 @@ struct DisplaySliderRow: View {
   }
 }
 
+/// The "All displays" row. Reads the participants' mean and writes the dragged
+/// value to each of them; `setBrightness` coalesces per display, so a drag
+/// stream fanned out to N controllers is N coalesced streams, not N times the
+/// bus traffic.
+struct CombinedSliderRow: View {
+  let participants: [AppModel.DisplayState]
+  let snapsToStops: Bool
+  let showsPercent: Bool
+
+  var value: Double {
+    CombinedBrightness.mean(participants.map(\.controller.brightness))
+  }
+
+  func setValue(_ value: Double) {
+    for state in participants { state.controller.setBrightness(value) }
+  }
+
+  var body: some View {
+    CandelaSlider(
+      value: Binding(get: { value }, set: { setValue($0) }),
+      accessibilityLabel: "All displays brightness",
+      snapsToStops: snapsToStops,
+      showsPercent: showsPercent
+    )
+  }
+}
+
 /// Volume/contrast row: the same capsule slider as brightness, one visual
 /// language for every value in the section.
 ///

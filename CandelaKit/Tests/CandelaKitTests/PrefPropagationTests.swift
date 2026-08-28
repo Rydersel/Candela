@@ -109,7 +109,9 @@ struct PrefPropagationTests {
     // Keep awake's panel-row visibility: 68 -> 69. Hide-shaped like
     // `hideBuiltInDisplay`, so an absent key means the row is shown.
     #expect(PrefName.hideKeepAwake.rawValue == "hideKeepAwake")
-    #expect(PrefName.allCases.count == 69)
+    // The combined brightness row's visibility, same hide shape: 69 -> 70.
+    #expect(PrefName.hideCombinedBrightness.rawValue == "hideCombinedBrightness")
+    #expect(PrefName.allCases.count == 70)
   }
 
   // MARK: - Rows
