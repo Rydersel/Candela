@@ -243,6 +243,20 @@ struct MenuBarPreviewView: View {
           .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity)
       }
+      // Same participant set and floor as the panel, so the miniature shows
+      // the row exactly when the panel does.
+      let combined = CombinedBrightness.participants(
+        builtIn: showsBuiltIn ? model.builtIn : nil, externals: externals,
+        prefs: PanelView.standardPrefs)
+      if CombinedBrightness.shows(
+        participantCount: combined.count, appPrefs: DisplayPrefs(persistenceKey: "app")) {
+        displaySection(
+          name: "All displays",
+          rows: [miniRow(
+            glyph: "sun.max.fill",
+            value: CombinedBrightness.mean(combined.map(\.controller.brightness)))]
+        )
+      }
       if showsBuiltIn, let builtIn = model.builtIn {
         displaySection(
           name: PanelView.title(for: builtIn.display),
