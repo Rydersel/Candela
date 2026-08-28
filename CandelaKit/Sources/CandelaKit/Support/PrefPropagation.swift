@@ -26,6 +26,8 @@ public enum PrefName: String, Sendable, CaseIterable {
   // App-level: the panel's Keep Display Awake row, for a more minimal panel.
   // Hide-shaped like `hideBuiltInDisplay`, so an absent key means shown.
   case hideKeepAwake
+  // App-level: the panel's "All displays" brightness row, same hide shape.
+  case hideCombinedBrightness
   case enableSliderSnap, enableSliderPercent
   // App-level: where the on-screen indicator pills sit. Two keys rather than
   // one, decided up front because the choice is permanent: each KIND gets a
@@ -135,7 +137,7 @@ public enum PrefPropagation {
 
     case .showContrast, .enableSliderSnap, .enableSliderPercent,
          .hideVolumeSlider, .friendlyName, .isDisabled, .hideOsd,
-         .enableBrightnessSync, .hideKeepAwake:
+         .enableBrightnessSync, .hideKeepAwake, .hideCombinedBrightness:
       // `hideKeepAwake` is presentation alone: it takes a row out of the panel
       // and never touches the assertion. A session that hid the row while keep
       // awake was ON keeps the display awake, which is why the Menu Bar pane's

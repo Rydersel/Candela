@@ -9,7 +9,7 @@ import SwiftUI
 /// decides which display a press acts on; this decides where the answer is
 /// drawn.
 ///
-/// Deliberately five slider and menu-bar controls. D26 cut the fork's "General menu items style"
+/// The set of slider and menu-bar controls is deliberate. D26 cut the fork's "General menu items style"
 /// popup and "Show slider tick marks" toggle, and D32 files both prefs as
 /// reserved-and-inert: `menuItemStyle` and `showTickMarks` keep their keys so
 /// the schema slots can never be reused, but nothing in Candela reads them,
@@ -59,6 +59,8 @@ struct AppMenuPane: View {
         builtInDisplayRow
         SettingsCardDivider()
         keepAwakeRow
+        SettingsCardDivider()
+        combinedBrightnessRow
         SettingsCardDivider()
         contrastRow
       }
@@ -167,6 +169,22 @@ struct AppMenuPane: View {
       ))
       .themedSwitch()
       .prefIdentifier(.hideKeepAwake)
+    }
+  }
+
+  /// The row only exists with two or more displays it can command, so the
+  /// caption says what it is rather than promising it is on screen.
+  private var combinedBrightnessRow: some View {
+    SettingRow("One slider that sets every display to the same brightness. Shown with two or more displays; a display with keyboard control off is left out.") {
+      Toggle("Show an All Displays brightness slider", isOn: Binding(
+        get: { !prefs.hideCombinedBrightness },
+        set: { shown in
+          prefs.hideCombinedBrightness = !shown
+          actions.prefDidChange(.hideCombinedBrightness)
+        }
+      ))
+      .themedSwitch()
+      .prefIdentifier(.hideCombinedBrightness)
     }
   }
 

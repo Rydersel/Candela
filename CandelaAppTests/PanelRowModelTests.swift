@@ -395,3 +395,66 @@ struct PanelRowModelTests {
     #expect(model.brightnessSliderCompactReason(state) == nil)
   }
 }
+
+// MARK: - Combined brightness row
+
+@Suite("Combined brightness row")
+@MainActor
+struct CombinedBrightnessRowTests {
+  private static func state(
+    id: CGDirectDisplayID, name: String, key: String
+  ) -> AppModel.DisplayState {
+    TestFixtures.displayState(id: id, name: name, persistenceKey: key)
+  }
+
+  @Test func participantsAreTheBuiltInThenTheExternals() {
+    let domain = PrefsDomain()
+    let builtIn = Self.state(id: 1, name: "Built-in", key: "builtin")
+    let externals = [
+      Self.state(id: 2, name: "MAG", key: "mag"),
+      Self.state(id: 3, name: "Dell", key: "dell"),
+    ]
+    let picked = CombinedBrightness.participants(
+      builtIn: builtIn, externals: externals, prefs: domain.prefs)
+    #expect(picked.map(\.display.persistenceKey) == ["builtin", "mag", "dell"])
+  }
+
+  @Test func aDisplayWithKeyboardControlOffIsNotCommanded() {
+    let domain = PrefsDomain()
+    domain.edit("mag") { $0.isDisabled = true }
+    let externals = [
+      Self.state(id: 2, name: "MAG", key: "mag"),
+      Self.state(id: 3, name: "Dell", key: "dell"),
+    ]
+    let picked = CombinedBrightness.participants(
+      builtIn: nil, externals: externals, prefs: domain.prefs)
+    #expect(picked.map(\.display.persistenceKey) == ["dell"])
+  }
+
+  @Test func theRowNeedsTwoParticipantsAndTheAppPref() {
+    let domain = PrefsDomain()
+    #expect(CombinedBrightness.shows(participantCount: 1, appPrefs: domain.prefs("app")) == false)
+    #expect(CombinedBrightness.shows(participantCount: 2, appPrefs: domain.prefs("app")))
+    domain.edit("app") { $0.hideCombinedBrightness = true }
+    #expect(CombinedBrightness.shows(participantCount: 2, appPrefs: domain.prefs("app")) == false)
+  }
+
+  @Test func theHandleRestsAtTheMeanAndAnEmptySetReadsZero() {
+    #expect(CombinedBrightness.mean([0.2, 0.8]) == 0.5)
+    #expect(CombinedBrightness.mean([1.0]) == 1.0)
+    #expect(CombinedBrightness.mean([]) == 0)
+  }
+
+  @Test func aDragWritesOneValueToEveryParticipant() {
+    let a = Self.state(id: 2, name: "MAG", key: "cb-mag")
+    let b = Self.state(id: 3, name: "Dell", key: "cb-dell")
+    a.controller.setBrightness(0.2)
+    b.controller.setBrightness(0.9)
+    let row = CombinedSliderRow(participants: [a, b], snapsToStops: false, showsPercent: false)
+    #expect(row.value == 0.55)
+    row.setValue(0.4)
+    #expect(a.controller.brightness == 0.4)
+    #expect(b.controller.brightness == 0.4)
+    #expect(row.value == 0.4)
+  }
+}

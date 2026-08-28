@@ -56,6 +56,21 @@ struct PanelView: View {
         if externals.isEmpty, !showsBuiltIn {
           emptyState
         }
+        // Sits above the per-display sections so it never competes with a
+        // disclosure below for the footer's space.
+        let combined = CombinedBrightness.participants(
+          builtIn: showsBuiltIn ? model.builtIn : nil, externals: externals,
+          prefs: Self.standardPrefs)
+        if CombinedBrightness.shows(participantCount: combined.count, appPrefs: appPrefs) {
+          VStack(alignment: .leading, spacing: 8) {
+            Text("All displays")
+              .font(.system(size: 13, weight: .semibold))
+              .foregroundStyle(.secondary)
+              .accessibilityHidden(true) // the slider carries the name
+            CombinedSliderRow(
+              participants: combined, snapsToStops: snapsToStops, showsPercent: showsPercent)
+          }
+        }
         if showsBuiltIn, let builtIn = model.builtIn {
           // Name header only — no HDR badge/menu chrome: the built-in never
           // routes HDR (role .builtIn), and the section stays as quiet as

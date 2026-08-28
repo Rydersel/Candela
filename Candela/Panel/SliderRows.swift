@@ -38,6 +38,31 @@ struct DisplaySliderRow: View {
   }
 }
 
+/// Writes the dragged value to every participant. `setBrightness` coalesces per
+/// display, so the fan-out costs N coalesced streams, not N times the bus traffic.
+struct CombinedSliderRow: View {
+  let participants: [AppModel.DisplayState]
+  let snapsToStops: Bool
+  let showsPercent: Bool
+
+  var value: Double {
+    CombinedBrightness.mean(participants.map(\.controller.brightness))
+  }
+
+  func setValue(_ value: Double) {
+    for state in participants { state.controller.setBrightness(value) }
+  }
+
+  var body: some View {
+    CandelaSlider(
+      value: Binding(get: { value }, set: { setValue($0) }),
+      accessibilityLabel: "All displays brightness",
+      snapsToStops: snapsToStops,
+      showsPercent: showsPercent
+    )
+  }
+}
+
 /// Volume/contrast row: the same capsule slider as brightness, one visual
 /// language for every value in the section.
 ///
