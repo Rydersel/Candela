@@ -38,10 +38,8 @@ struct DisplaySliderRow: View {
   }
 }
 
-/// The "All displays" row. Reads the participants' mean and writes the dragged
-/// value to each of them; `setBrightness` coalesces per display, so a drag
-/// stream fanned out to N controllers is N coalesced streams, not N times the
-/// bus traffic.
+/// Writes the dragged value to every participant. `setBrightness` coalesces per
+/// display, so the fan-out costs N coalesced streams, not N times the bus traffic.
 struct CombinedSliderRow: View {
   let participants: [AppModel.DisplayState]
   let snapsToStops: Bool

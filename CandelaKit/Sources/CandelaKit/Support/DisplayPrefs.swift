@@ -651,9 +651,8 @@ public final class DisplayPrefs: @unchecked Sendable {
     set { defaults.set(newValue, forKey: "hideKeepAwake") }
   }
 
-  /// Hide the panel's "All displays" brightness row. Presentation only, like
-  /// `hideKeepAwake`: the row is absent anyway with fewer than two displays
-  /// that would answer it, so this key only matters on a multi-display rig.
+  /// Presentation only, like `hideKeepAwake`. The row is already absent below
+  /// two commandable displays, so this key only matters on a multi-display rig.
   public var hideCombinedBrightness: Bool {
     get { defaults.bool(forKey: "hideCombinedBrightness") }
     set { defaults.set(newValue, forKey: "hideCombinedBrightness") }

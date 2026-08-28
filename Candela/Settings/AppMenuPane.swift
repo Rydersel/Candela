@@ -9,7 +9,7 @@ import SwiftUI
 /// decides which display a press acts on; this decides where the answer is
 /// drawn.
 ///
-/// Deliberately six slider and menu-bar controls. D26 cut the fork's "General menu items style"
+/// The set of slider and menu-bar controls is deliberate. D26 cut the fork's "General menu items style"
 /// popup and "Show slider tick marks" toggle, and D32 files both prefs as
 /// reserved-and-inert: `menuItemStyle` and `showTickMarks` keep their keys so
 /// the schema slots can never be reused, but nothing in Candela reads them,

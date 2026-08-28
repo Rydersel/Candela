@@ -56,9 +56,8 @@ struct PanelView: View {
         if externals.isEmpty, !showsBuiltIn {
           emptyState
         }
-        // Above the per-display sections: it speaks for all of them, and a
-        // one-slider row at the top never competes with a disclosure below
-        // for the footer's space.
+        // Sits above the per-display sections so it never competes with a
+        // disclosure below for the footer's space.
         let combined = CombinedBrightness.participants(
           builtIn: showsBuiltIn ? model.builtIn : nil, externals: externals,
           prefs: Self.standardPrefs)
