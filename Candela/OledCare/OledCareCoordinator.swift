@@ -56,7 +56,7 @@ import os
 ///   surface's space. Identity stays the panel's throughout.
 @MainActor
 @Observable
-final class OledCareCoordinator {
+final class OledCareCoordinator: CheckupCareHolding {
   /// The latest engine state per enrolled display, by persistenceKey. The
   /// pane's per-display section reads this ("paused while mirrored", etc.).
   private(set) var dimStates: [String: OledDimState] = [:]
@@ -85,6 +85,11 @@ final class OledCareCoordinator {
   /// "paused"; this is what lets it name the right mirror instead of telling a
   /// user they mirrored something they never asked for.
   private(set) var synthesisSuspensions: Set<String> = []
+
+  /// The enrolled displays paused because a checkup field is on them, by
+  /// persistenceKey. Rebuilt every tick from the same verdict as `dimStates`,
+  /// like `synthesisSuspensions`, so the pane cannot disagree about the reason.
+  private(set) var checkupSuspensions: Set<String> = []
 
   private struct PerDisplay {
     var engine: IdleDimmingEngine
@@ -267,6 +272,11 @@ final class OledCareCoordinator {
   @ObservationIgnored private var exposureEpoch = 0
   /// Per enrolled-and-connected display, by persistenceKey.
   @ObservationIgnored private var states: [String: PerDisplay] = [:]
+  /// Displays with a checkup field on them, by persistenceKey. Not enrollment
+  /// state, so `reconcileEnrollment` leaves it alone: only the window that
+  /// raised a field takes it down, and a display can be un-enrolled and
+  /// re-enrolled underneath it.
+  @ObservationIgnored private var checkupFieldHolds: Set<String> = []
   @ObservationIgnored private var driver: Task<Void, Never>?
   @ObservationIgnored private var sleepWakeObservers: [any NSObjectProtocol] = []
   /// C1 latch. `runSettingsReset` suspends several times between
@@ -468,6 +478,12 @@ final class OledCareCoordinator {
       observationEnabled: observing)
   }
 
+  /// The raw map, live accumulator first. The health summary normalizes and drops
+  /// `firstSample`, both of which the provenance record needs.
+  func exposureMap(for persistenceKey: String) -> ExposureMap {
+    accumulators[persistenceKey]?.map ?? loadExposureMap(for: persistenceKey)
+  }
+
   /// The OLED Care pane's comparison section. Non-memoising, `healthSummary`'s
   /// rule and reason: called from a SwiftUI body, where populating an
   /// observation-tracked dictionary is a state mutation during view update.
@@ -599,6 +615,7 @@ final class OledCareCoordinator {
     states = [:]
     dimStates = [:]
     synthesisSuspensions = []
+    checkupSuspensions = []
     for tracker in trackers.values { tracker.reset() }
     // Same reason, same moment: a live wear tracker's debounced write-through
     // would re-persist the histogram the wipe just removed.
@@ -793,6 +810,11 @@ final class OledCareCoordinator {
     // the pause. The tick rebuilds this set only while some display is
     // enrolled, so un-enrolling the last one would otherwise leave it standing.
     synthesisSuspensions.remove(key)
+    checkupSuspensions.remove(key)
+    // The hold goes with the state that would have honoured it: one nothing
+    // ever releases would suspend care for the rest of the session if this
+    // panel came back and enrolled again.
+    checkupFieldHolds.remove(key)
     // Window ages describe how long a rect has been where it is ON THIS PANEL,
     // so a departure or an un-enrollment invalidates them for the same reason
     // mirroring does. Both ACCUMULATORS stay — the exposure map and the
@@ -836,6 +858,9 @@ final class OledCareCoordinator {
     // stopped being a synthesis slave simply does not get re-added, so a
     // disengage clears the sentence with no removal pass.
     var synthesisPaused: Set<String> = []
+    // Built empty for the same reason: a field coming down clears the pause
+    // with no removal pass.
+    var checkupPaused: Set<String> = []
 
     for key in Array(states.keys) {
       guard var state = states[key] else { continue }
@@ -896,15 +921,18 @@ final class OledCareCoordinator {
       // which runs in `.active` and so never passes through the engine's own.
       state.assertionHeld = assertionHeld
 
+      let showingCheckupField = checkupFieldHolds.contains(key)
       let newState = state.engine.tick(OledDimSignals(
         idleSeconds: idleSeconds,
         assertionHeld: assertionHeld,
         isLocked: isLocked,
         isMirrored: isMirrored,
         isHDRSettling: hdrSettling,
-        unfocusedSeconds: unfocusedSeconds
+        unfocusedSeconds: unfocusedSeconds,
+        isCheckupFieldShowing: showingCheckupField
       ))
       if isSynthesis, newState == .suspended { synthesisPaused.insert(key) }
+      if showingCheckupField, newState == .suspended { checkupPaused.insert(key) }
 
       // Hours. SuspendingClock, not ContinuousClock: the delta must not book
       // a system-sleep span as awake panel time, and SuspendingClock does not
@@ -1004,6 +1032,7 @@ final class OledCareCoordinator {
     // runs at up to 10 Hz.
     if published != dimStates { dimStates = published }
     if synthesisPaused != synthesisSuspensions { synthesisSuspensions = synthesisPaused }
+    if checkupPaused != checkupSuspensions { checkupSuspensions = checkupPaused }
   }
 
   /// A given-up verify drops the fast cadence only when nothing is wanted (the
@@ -1689,6 +1718,41 @@ final class OledCareCoordinator {
     }
     comparisons[key] = comparison
     unsavedExposureKeys.insert(key)
+  }
+
+  // MARK: - The checkup's field hold
+
+  /// A checkup field is on this display: pause its care until the field comes
+  /// down (`endCheckupField`). Idempotent, so a re-show over a field already up
+  /// is not a second hold to release.
+  ///
+  /// Ticks straight away because the field is drawn the instant the caller
+  /// returns and the loop is at its 2 s cadence whenever nothing is dimmed:
+  /// without this an overlay stays on the panel for the first two seconds.
+  func beginCheckupField(identityKey key: String) {
+    guard checkupFieldHolds.insert(key).inserted else { return }
+    guard let model, !model.isSafeMode, !resetting, driver != nil else { return }
+    tick()
+  }
+
+  /// The field is down: care resumes from whatever the other signals say.
+  ///
+  /// No tick here, unlike `beginCheckupField`. The confirmation re-show hides
+  /// the field and puts it straight back up inside one main-actor turn, so a
+  /// tick between the two would flash an overlay for nothing.
+  func endCheckupField(identityKey key: String) {
+    checkupFieldHolds.remove(key)
+  }
+
+  /// Why this display's care is paused. One reader over both sets, so the
+  /// surfaces that report the pause cannot answer differently.
+  ///
+  /// The checkup wins the tie, though the two cannot co-occur: a mirroring
+  /// display is filtered out of the checkup's targets before it can be picked.
+  func suspensionReason(for persistenceKey: String) -> OledCareSuspensionReason {
+    if checkupSuspensions.contains(persistenceKey) { return .checkup }
+    if synthesisSuspensions.contains(persistenceKey) { return .synthesizedSize }
+    return .mirrored
   }
 
   // MARK: - The checkup's bookings

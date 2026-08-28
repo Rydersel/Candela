@@ -19,8 +19,10 @@ public final class PanelHoursTracker {
   private let totalKey: String
   private let standbyKey: String
   private let dismissedKey: String
-  private var totalSeconds: Double
-  private var sinceStandbySeconds: Double
+  /// Read publicly as whole seconds by the provenance record: going out through
+  /// the hours accessors and back multiplies a rounding error into the file.
+  public private(set) var totalSeconds: Double
+  public private(set) var secondsSinceStandby: Double
   private var unwrittenSeconds: Double = 0
   private var noteDismissed: Bool
 
@@ -30,12 +32,12 @@ public final class PanelHoursTracker {
     self.standbyKey = "oledStandbySeconds.\(persistenceKey)"
     self.dismissedKey = "oledStandbyNoteDismissed.\(persistenceKey)"
     self.totalSeconds = defaults.double(forKey: totalKey)
-    self.sinceStandbySeconds = defaults.double(forKey: standbyKey)
+    self.secondsSinceStandby = defaults.double(forKey: standbyKey)
     self.noteDismissed = defaults.bool(forKey: dismissedKey)
   }
 
   public var totalHours: Double { totalSeconds / 3600 }
-  public var hoursSinceStandby: Double { sinceStandbySeconds / 3600 }
+  public var hoursSinceStandby: Double { secondsSinceStandby / 3600 }
   public var shouldShowStandbyNote: Bool {
     !noteDismissed && hoursSinceStandby >= Self.standbyNoteThresholdHours
   }
@@ -53,7 +55,7 @@ public final class PanelHoursTracker {
     // reads false and the counter silently stops meaning anything.
     guard displayAwake, secondsSinceLastTick.isFinite, secondsSinceLastTick > 0 else { return }
     totalSeconds += secondsSinceLastTick
-    sinceStandbySeconds += secondsSinceLastTick
+    secondsSinceStandby += secondsSinceLastTick
     unwrittenSeconds += secondsSinceLastTick
     if unwrittenSeconds > Self.debounceSeconds { writeThrough() }
   }
@@ -64,7 +66,7 @@ public final class PanelHoursTracker {
   /// standby is invisible here. If the button instead deasserts hot-plug detect
   /// the display departs and this IS called — untested, per monitor (#23).
   public func noteStandby() {
-    sinceStandbySeconds = 0
+    secondsSinceStandby = 0
     // The panel got its rest, so the next crossing has earned a fresh note.
     setDismissed(false)
     writeThrough()
@@ -72,7 +74,7 @@ public final class PanelHoursTracker {
 
   public func reset() {
     totalSeconds = 0
-    sinceStandbySeconds = 0
+    secondsSinceStandby = 0
     unwrittenSeconds = 0
     // A wiped counter that can never speak again is worse than one that never
     // counted: without this, a dismissal taken before the reset outlives it.
@@ -95,7 +97,7 @@ public final class PanelHoursTracker {
 
   private func writeThrough() {
     defaults.set(totalSeconds, forKey: totalKey)
-    defaults.set(sinceStandbySeconds, forKey: standbyKey)
+    defaults.set(secondsSinceStandby, forKey: standbyKey)
     unwrittenSeconds = 0
   }
 }

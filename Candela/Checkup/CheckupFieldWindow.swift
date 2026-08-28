@@ -16,6 +16,11 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
   /// False in tests: ordering front is the one step with a visible consequence,
   /// and it is the step that puts the pointer away.
   private let orderFront: Bool
+  /// OLED care, held off the target while a field is on it.
+  private let care: (any CheckupCareHolding)?
+  /// The key the hold was taken under, so the release names the display that
+  /// was held rather than whatever is current when it comes down.
+  private var heldKey: String?
   private(set) var isShowing = false
   private(set) var instructionStrip: NSView?
   private var timerLabel: NSTextField?
@@ -43,13 +48,20 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
   /// The flow owns the clock; this is the last value it published.
   private(set) var secondsRemaining = 0
 
-  init(orderFront: Bool = true) { self.orderFront = orderFront }
+  init(orderFront: Bool = true, care: (any CheckupCareHolding)? = nil) {
+    self.orderFront = orderFront
+    self.care = care
+  }
 
   var windowForTest: NSWindow? { window }
 
   /// False when the display has no `NSScreen`, which is how a mirroring display looks from here.
   func show(kind: CheckupFieldKind, plant: CheckupPlant?, on display: CheckupDisplayEntry) -> Bool {
     guard let screen = OverlayWindow.screen(for: display.id) else { return false }
+    // Before the window is built, never after it is on screen: care draws its
+    // dims at this same `CGShieldingWindowLevel()`, so a field up first could
+    // be judged through one.
+    hold(display.identityKey)
     let window =
       self.window
       ?? NSWindow(
@@ -108,9 +120,24 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
   }
 
   func hide() {
+    // Ahead of the `isShowing` guard: exit paths call hide twice, and a hold
+    // left standing pauses the display's care for the rest of the session.
+    if let heldKey {
+      self.heldKey = nil
+      care?.endCheckupField(identityKey: heldKey)
+    }
     guard isShowing else { return }
     window?.orderOut(nil)
     isShowing = false
+  }
+
+  /// One hold at a time. A showing that moves to another display releases the
+  /// first panel's care rather than leaving it paused with nothing on it.
+  private func hold(_ key: String) {
+    guard heldKey != key else { return }
+    if let heldKey { care?.endCheckupField(identityKey: heldKey) }
+    heldKey = key
+    care?.beginCheckupField(identityKey: key)
   }
 
   /// Built by hand rather than hosted from SwiftUI so it stays a plain subview
@@ -155,6 +182,8 @@ final class CheckupFieldWindow: CheckupFieldPresenting {
         title: CheckupCopy.answerLabel(answer), target: target, action: #selector(AnswerTarget.fire))
       button.bezelStyle = .rounded
       button.tag = index
+      // An NSButton title is not the description an assistive client reads.
+      button.setAccessibilityLabel(CheckupCopy.answerLabel(answer))
       return button
     })
     row.orientation = .horizontal

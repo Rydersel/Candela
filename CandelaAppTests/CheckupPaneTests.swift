@@ -125,6 +125,17 @@ struct CheckupPaneTests {
     #expect(!CheckupPaneCopy.emptyHistory.lowercased().contains("pass"))
   }
 
+  /// Two verifiers share one section, so their titles have to be tellable apart.
+  @Test func theVerifySectionNamesItsTwoFilesApart() {
+    #expect(CheckupPaneCopy.verify != ProvenanceCopy.check)
+    #expect(ProvenanceCopy.check.lowercased().contains("provenance"))
+    #expect(!CheckupPaneCopy.verify.lowercased().contains("provenance"))
+    // Each answer names the kind of file it is about, so a reader who ran the
+    // wrong button can see which one answered.
+    #expect(CheckupPaneCopy.valid.contains("report"))
+    #expect(ProvenanceCopy.intact.contains("record"))
+  }
+
   /// CK8 over the whole pane: nothing hands the display a result.
   @Test func noPaneCopyCarriesAnEmDashOrAVerdictOnTheDisplay() {
     for sentence in CheckupPaneCopy.allStringsForTest {

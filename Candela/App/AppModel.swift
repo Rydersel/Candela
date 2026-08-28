@@ -1129,6 +1129,26 @@ final class AppModel {
     )
   }
 
+  /// The brightness row's caption for the menu bar's panel, nil while the wire
+  /// is still carrying commands (WD5). Needs the verdict as well as the path:
+  /// in pure-DDC configuration the demotion answers the same path
+  /// force-software does.
+  func brightnessSliderCompactReason(_ state: DisplayState) -> String? {
+    BrightnessSliderPolicy.compactDegradedReason(
+      path: state.controller.brightnessPath,
+      isWireUnresponsive: state.controller.isWireUnresponsive
+    )
+  }
+
+  /// Hands every external brightness controller the wake the engine cannot see
+  /// for itself: no AppKit there, and a link rebuilt while the Mac slept has
+  /// told the wire nothing yet (WD3).
+  func noteWakeForBrightnessWires() {
+    for state in displays {
+      state.controller.noteWake()
+    }
+  }
+
   /// The same reason worded for the menu bar's panel, which renders it under the
   /// display's own name header and so must not repeat that name (#130).
   func volumeSliderCompactReason(_ state: DisplayState) -> String? {

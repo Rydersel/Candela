@@ -270,7 +270,12 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
       sleepWakeObservers.append(workspaceCenter.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
         displayManager.noteWake()
         // The observer closure runs off-main; the coordinator is MainActor.
-        Task { @MainActor in self?.restoreCoordinator.noteWake() }
+        Task { @MainActor in
+          self?.restoreCoordinator.noteWake()
+          // WD3: a wire that stopped answering before the Mac slept is asked
+          // again rather than staying demoted across a link the sleep rebuilt.
+          self?.model.noteWakeForBrightnessWires()
+        }
       })
     }
 
@@ -814,7 +819,8 @@ final class StatusItemController: NSObject, NSApplicationDelegate, NSMenuDelegat
           checkupLog.error(
             "checkup report could not be saved: \(String(describing: error), privacy: .public)")
         }
-      })
+      },
+      care: model.oledCare)
     checkupWindow = controller
     return controller
   }

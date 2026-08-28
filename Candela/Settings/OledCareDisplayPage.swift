@@ -418,12 +418,11 @@ struct OledCareDisplayPage: View {
     // reading it here cannot outlive the state it describes.
     case .lockDim: return OledCareCopy.lockDimStatus(model.oledCare.lockDimSkips[persistenceKey])
     case .unfocusedDim: return "Dimmed: no window in focus on this display"
-    // SS8: the pause survives under a synthesized size in v1, but the reason
-    // does not. `synthesisSuspensions` is the same tick's verdict as
-    // `dimStates`, so the two cannot disagree about why this display is paused.
+    // One pause state, several reasons. `suspensionReason` reads the same
+    // tick's verdict as `dimStates`, so the two cannot disagree about which.
     case .suspended:
       return OledCareCopy.suspendedStatus(
-        synthesized: model.oledCare.synthesisSuspensions.contains(persistenceKey))
+        reason: model.oledCare.suspensionReason(for: persistenceKey))
     // Between enrolling and the first tick, and for a display the coordinator
     // has not reconciled yet. Says what is true rather than guessing.
     case nil: return "Starting"

@@ -39,6 +39,19 @@ enum CheckupCopy {
     "One run covers one display. The report is filed under the display's own identity, so a later run on the same panel lands beside this one."
   static let pickEmpty = "No display is attached that a checkup can run on."
 
+  /// Grouped digits: VoiceOver reads an ungrouped 3840 digit by digit. The row
+  /// draws this same string, so what is seen and what is spoken cannot drift.
+  static func pixelSizeLine(width: Int, height: Int) -> String {
+    ModeSpeech.spoken(logicalWidth: width, logicalHeight: height, refreshHz: nil) + " pixels"
+  }
+
+  /// A button publishes no label of its own, so without this a display row
+  /// announces as a bare "button". Speaks every line the row draws.
+  static func displayRowLabel(_ entry: CheckupDisplayEntry) -> String {
+    "\(entry.name), \(pixelSizeLine(width: entry.pixelWidth, height: entry.pixelHeight)). "
+      + panelClassLine(entry.panelClass, hdrEngaged: entry.hdrEngaged)
+  }
+
   static func panelClassLine(_ c: CheckupPanelClass, hdrEngaged: Bool) -> String {
     // No-DDC keeps its own line: HDR changes nothing for a panel with no DDC path.
     guard c == .noDDC || !hdrEngaged else { return hdrEngagedLine }
@@ -337,6 +350,7 @@ enum CheckupCopy {
      headerSentence, plantMissed(size: 4), planWorstCase(seconds: 600), secondsLeft(1),
      secondsLeft(20), summaryIncomplete(reason: closedReason), closedReason, fieldWindowTitle,
      detectedAt(pixels: 4), hdrEngagedLine, mirroringReason, fieldNotShown,
+     pixelSizeLine(width: 3840, height: 2160),
      occlusionLine(fieldIDs: [CheckupCheckID.field(.black), CheckupCheckID.field(.gray7)]) ?? "",
      CheckupScenario.allCases.map(scenarioWords).joined(separator: " ")]
       + CheckupFieldKind.allCases.map(instruction(for:))

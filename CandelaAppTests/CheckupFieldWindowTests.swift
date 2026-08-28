@@ -167,6 +167,71 @@ struct CheckupFieldWindowTests {
     }
   }
 
+  /// Records holds in order, so a begin without its end shows up as a sequence
+  /// rather than as a count that happens to match.
+  @MainActor
+  final class FakeCare: CheckupCareHolding {
+    private(set) var events: [String] = []
+    var held: Set<String> = []
+    func beginCheckupField(identityKey: String) {
+      events.append("begin \(identityKey)")
+      held.insert(identityKey)
+    }
+    func endCheckupField(identityKey: String) {
+      events.append("end \(identityKey)")
+      held.remove(identityKey)
+    }
+  }
+
+  /// The field and every care overlay sit at the same shielding level, so a dim
+  /// that won the ordering would be judged as part of the panel.
+  @Test func aShowingHoldsCareOffTheTargetAndTheHideReleasesIt() {
+    let care = FakeCare()
+    let w = CheckupFieldWindow(orderFront: false, care: care)
+    #expect(w.show(kind: .white, plant: nil, on: entry(only: false)))
+    #expect(care.held == ["k"])
+    w.hide()
+    #expect(care.held.isEmpty)
+    #expect(care.events == ["begin k", "end k"])
+  }
+
+  /// `windowWillClose` hides the field on top of the abandon that already did,
+  /// so the second hide must not release a hold the first one gave up.
+  @Test func hidingTwiceReleasesTheHoldExactlyOnce() {
+    let care = FakeCare()
+    let w = CheckupFieldWindow(orderFront: false, care: care)
+    w.hide()
+    #expect(care.events.isEmpty)
+    #expect(w.show(kind: .black, plant: nil, on: entry(only: false)))
+    w.hide()
+    w.hide()
+    #expect(care.events == ["begin k", "end k"])
+    #expect(care.held.isEmpty)
+  }
+
+  /// A hold on a refused showing would pause a display's care with no field on
+  /// it and no hide coming to release it.
+  @Test func aRefusedShowingTakesNoHold() {
+    var absent = entry(only: false)
+    absent.id = 0xFFFF_FFFE
+    let care = FakeCare()
+    let w = CheckupFieldWindow(orderFront: false, care: care)
+    #expect(w.show(kind: .black, plant: nil, on: absent) == false)
+    #expect(care.events.isEmpty)
+  }
+
+  /// A re-show without an intervening hide is how the confirmation field goes
+  /// up: one hold stands throughout, and one release ends it.
+  @Test func aReShowOnTheSameDisplayKeepsTheOneHold() {
+    let care = FakeCare()
+    let w = CheckupFieldWindow(orderFront: false, care: care)
+    #expect(w.show(kind: .black, plant: nil, on: entry(only: false)))
+    #expect(w.show(kind: .black, plant: nil, on: entry(only: false)))
+    #expect(care.events == ["begin k"])
+    w.hide()
+    #expect(care.events == ["begin k", "end k"])
+  }
+
   /// The image is top-left origin and the view is not flipped; drop the flip
   /// and every tap is graded against a mark mirrored across the panel.
   @Test func aTapAtTheTopLeftCornerNamesThePixelAtTheTopOfTheImage() {

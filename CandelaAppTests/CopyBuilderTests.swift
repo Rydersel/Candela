@@ -234,7 +234,19 @@ struct CopyBuilderTests {
       render(DiagnosticsPageCopy.brightnessPath(.unavailable(.ddcTurnedOffWithNoSoftwareLeg)))
         .contains("nothing is left to carry the value"))
 
-    // One representative per switch arm, six distinct sentences. Both software
+    // The wire's two arms name the display's own silence, never a setting:
+    // otherwise someone goes looking for a switch they never touched.
+    let deadWire = render(
+      DiagnosticsPageCopy.brightnessPath(
+        .softwareOnly(backend: .gamma, reason: .ddcUnresponsive, dimsBelow: 0.25)))
+    #expect(deadWire.contains("stopped answering brightness commands"))
+    #expect(deadWire.contains("25%"))
+    #expect(!deadWire.contains("turned off"))
+    #expect(
+      render(DiagnosticsPageCopy.brightnessPath(.unavailable(.ddcUnresponsiveWithNoSoftwareLeg)))
+        .contains("stopped answering brightness commands"))
+
+    // One representative per switch arm, each with its own sentence. Both software
     // backends are deliberately not in this list: they share one sentence,
     // because the user is told the backlight is untouched, not which trick does
     // the darkening.
@@ -243,8 +255,10 @@ struct CopyBuilderTests {
       .combined(switchingValue: 0.4, backend: .gamma),
       .softwareOnly(backend: .gamma, reason: .ddcTurnedOff, dimsBelow: 0.25),
       .unavailable(.ddcTurnedOffWithNoSoftwareLeg),
+      .softwareOnly(backend: .gamma, reason: .ddcUnresponsive, dimsBelow: 0.25),
+      .unavailable(.ddcUnresponsiveWithNoSoftwareLeg),
     ]
-    #expect(Set(perArm.map { render(DiagnosticsPageCopy.brightnessPath($0)) }).count == 6)
+    #expect(Set(perArm.map { render(DiagnosticsPageCopy.brightnessPath($0)) }).count == 8)
     #expect(
       render(DiagnosticsPageCopy.brightnessPath(.software(.gamma)))
         == render(DiagnosticsPageCopy.brightnessPath(.software(.overlay))))
@@ -634,25 +648,46 @@ struct CopyBuilderTests {
 
   // MARK: - OledCareCopy
 
-  /// OC13's pause has two reasons since SS8, and the whole point of the
-  /// parameter is that the sentences differ: a person who never mirrored
-  /// anything must not be told they did. The three synthesis strings reached
-  /// only the scans below, which would pass just as happily if all three fell
-  /// back to their mirrored neighbours' words.
-  @Test func theSynthesisPauseSaysWhichMirrorItIsAbout() {
-    // No terminal period on either arm (ruled 2026-08-18): a status row reads
+  /// The whole point of the parameter is that the sentences differ: a person
+  /// who never mirrored anything must not be told they did. The scans below
+  /// reach every arm but would pass with all of them saying the mirrored words.
+  @Test func theSuspendedCopySaysWhichPauseItIsAbout() {
+    // No terminal period on any arm (ruled 2026-08-18): a status row reads
     // like its neighbours, and every one of those is period-free.
-    #expect(render(OledCareCopy.suspendedStatus(synthesized: true))
+    #expect(render(OledCareCopy.suspendedStatus(reason: .synthesizedSize))
       .contains("\"Paused while a synthesized size is active\""))
-    #expect(OledCareCopy.suspendedPreview(synthesized: true) == "Paused for a synthesized size")
-    #expect(OledCareCopy.suspendedSpokenPreview(synthesized: true)
+    #expect(OledCareCopy.suspendedPreview(reason: .synthesizedSize)
+      == "Paused for a synthesized size")
+    #expect(OledCareCopy.suspendedSpokenPreview(reason: .synthesizedSize)
       == "Paused while a synthesized size is active")
 
-    #expect(render(OledCareCopy.suspendedStatus(synthesized: false))
+    #expect(render(OledCareCopy.suspendedStatus(reason: .mirrored))
       .contains("\"Paused while this display is mirrored\""))
-    #expect(OledCareCopy.suspendedPreview(synthesized: false) == "Paused while mirrored")
-    #expect(OledCareCopy.suspendedSpokenPreview(synthesized: false)
+    #expect(OledCareCopy.suspendedPreview(reason: .mirrored) == "Paused while mirrored")
+    #expect(OledCareCopy.suspendedSpokenPreview(reason: .mirrored)
       == "Paused while this display is mirrored")
+
+    #expect(render(OledCareCopy.suspendedStatus(reason: .checkup))
+      .contains("\"Paused while a checkup field is showing\""))
+    #expect(OledCareCopy.suspendedPreview(reason: .checkup) == "Paused for a checkup")
+    #expect(OledCareCopy.suspendedSpokenPreview(reason: .checkup)
+      == "Paused while a checkup field is showing")
+  }
+
+  /// A switch arm that fell through to its neighbour cannot pass. `allCases` is
+  /// what makes a new reason arrive as a failure rather than a duplicated
+  /// sentence.
+  @Test func noTwoSuspensionReasonsShareTheirWords() {
+    let statuses = OledCareSuspensionReason.allCases.map {
+      render(OledCareCopy.suspendedStatus(reason: $0))
+    }
+    let previews = OledCareSuspensionReason.allCases.map { OledCareCopy.suspendedPreview(reason: $0) }
+    let spoken = OledCareSuspensionReason.allCases.map {
+      OledCareCopy.suspendedSpokenPreview(reason: $0)
+    }
+    #expect(Set(statuses).count == OledCareSuspensionReason.allCases.count)
+    #expect(Set(previews).count == OledCareSuspensionReason.allCases.count)
+    #expect(Set(spoken).count == OledCareSuspensionReason.allCases.count)
   }
 
   /// OC17's denominator is MASK-COULD-APPLY time (ruled 2026-08-18) and the
@@ -916,16 +951,13 @@ struct CopyBuilderTests {
       add("OledCareCopy.lockDimPreview(\(name))", OledCareCopy.lockDimPreview(skip))
       add("OledCareCopy.lockDimSpokenPreview(\(name))", OledCareCopy.lockDimSpokenPreview(skip))
     }
-    for synthesized in [true, false] {
+    for reason in OledCareSuspensionReason.allCases {
+      let name = String(describing: reason)
+      add("OledCareCopy.suspendedStatus(\(name))", OledCareCopy.suspendedStatus(reason: reason))
+      add("OledCareCopy.suspendedPreview(\(name))", OledCareCopy.suspendedPreview(reason: reason))
       add(
-        "OledCareCopy.suspendedStatus(\(synthesized))",
-        OledCareCopy.suspendedStatus(synthesized: synthesized))
-      add(
-        "OledCareCopy.suspendedPreview(\(synthesized))",
-        OledCareCopy.suspendedPreview(synthesized: synthesized))
-      add(
-        "OledCareCopy.suspendedSpokenPreview(\(synthesized))",
-        OledCareCopy.suspendedSpokenPreview(synthesized: synthesized))
+        "OledCareCopy.suspendedSpokenPreview(\(name))",
+        OledCareCopy.suspendedSpokenPreview(reason: reason))
     }
     add("OledCareCopy.wearFractionScope", OledCareCopy.wearFractionScope)
 
@@ -1058,6 +1090,8 @@ struct CopyBuilderTests {
     .combined(switchingValue: 0, backend: .overlay),
     .softwareOnly(backend: .gamma, reason: .ddcTurnedOff, dimsBelow: 0.25),
     .unavailable(.ddcTurnedOffWithNoSoftwareLeg),
+    .softwareOnly(backend: .gamma, reason: .ddcUnresponsive, dimsBelow: 0.25),
+    .unavailable(.ddcUnresponsiveWithNoSoftwareLeg),
   ]
 
   private static func guardBrightnessPath(_ path: BrightnessPath) -> Int {
@@ -1068,6 +1102,8 @@ struct CopyBuilderTests {
     case .combined: 3
     case .softwareOnly(_, .ddcTurnedOff, _): 4
     case .unavailable(.ddcTurnedOffWithNoSoftwareLeg): 5
+    case .softwareOnly(_, .ddcUnresponsive, _): 6
+    case .unavailable(.ddcUnresponsiveWithNoSoftwareLeg): 7
     }
   }
 
@@ -1228,7 +1264,7 @@ struct CopyBuilderTests {
     #expect(Set(Self.allReapplyNotices.map(Self.guardReapplyNotice)).count == 5)
     #expect(Set(Self.allApplyNotices.map(Self.guardApplyNotice)).count == 2)
     #expect(Set(Self.allProblemShapes.flatMap { $0 }.map(Self.guardProblem)).count == 2)
-    #expect(Set(Self.allBrightnessPaths.map(Self.guardBrightnessPath)).count == 6)
+    #expect(Set(Self.allBrightnessPaths.map(Self.guardBrightnessPath)).count == 8)
     #expect(Set(Self.allReadEvidence.map(Self.guardReadEvidence)).count == 4)
     #expect(Set(Self.allMirrorRefusals.map(Self.guardMirrorRefusal)).count == 8)
     #expect(Set(Self.allRotationRefusals.map(Self.guardRotationRefusal)).count == 4)

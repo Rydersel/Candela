@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import CandelaKit
@@ -114,6 +115,71 @@ struct CheckupReportTests {
     let olderReport = try decoder.decode(CheckupReport.self, from: older)
     #expect(olderReport.partiallyOccludedFields.isEmpty)
     #expect(olderReport.claims.count == 3)
+  }
+
+  /// The file an older Candela would have written. Cutting the key from the
+  /// canonical text rather than re-serializing keeps the other bytes exact.
+  private func fileWrittenBeforeTheOcclusionList() throws -> Data {
+    let canonical = String(
+      decoding: try CheckupReportEnvelope.canonicalData(sample()), as: UTF8.self)
+    #expect(canonical.contains("\"partiallyOccludedFields\":[],"))
+    let body = canonical.replacingOccurrences(of: "\"partiallyOccludedFields\":[],", with: "")
+    let digest = SHA256.hash(data: Data(body.utf8)).map { String(format: "%02x", $0) }.joined()
+    return Data("{\"report\":\(body),\"schemaVersion\":1,\"sha256\":\"\(digest)\"}".utf8)
+  }
+
+  private func decodeStoredEnvelope(_ data: Data) throws -> CheckupReportEnvelope {
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return try decoder.decode(CheckupReportEnvelope.self, from: data)
+  }
+
+  @Test func aReportSavedByThisBuildValidatesWhenItIsReadBack() throws {
+    let data = try CheckupStore.encoded(try CheckupReportEnvelope(report: sample()))
+    #expect(try decodeStoredEnvelope(data).validate())
+  }
+
+  /// A nil optional writes no key, so the stored body carries fewer keys than
+  /// the model has.
+  @Test func aReportWithNothingInItsOptionalsValidatesFromTheFile() throws {
+    var report = sample()
+    report.endedAt = nil
+    report.plant = nil
+    report.exposureBookingID = nil
+    let data = try CheckupStore.encoded(try CheckupReportEnvelope(report: report))
+    #expect(!String(decoding: data, as: UTF8.self).contains("endedAt"))
+    #expect(try decodeStoredEnvelope(data).validate())
+  }
+
+  @Test func aBodyWrittenBeforeAKeyExistedStillValidates() throws {
+    let envelope = try decodeStoredEnvelope(try fileWrittenBeforeTheOcclusionList())
+    #expect(envelope.report.partiallyOccludedFields.isEmpty)
+    #expect(envelope.validate())
+  }
+
+  @Test func aKeyAddedToAStoredBodyFailsValidation() throws {
+    let older = String(decoding: try fileWrittenBeforeTheOcclusionList(), as: UTF8.self)
+    let injected = older.replacingOccurrences(
+      of: "\"plant\":",
+      with: "\"partiallyOccludedFields\":[\"field.black\"],\"plant\":")
+    #expect(injected != older)
+    #expect(try decodeStoredEnvelope(Data(injected.utf8)).validate() == false)
+
+    // A key no build knows, added to a body this build wrote.
+    let current = String(
+      decoding: try JSONEncoder().encode(try CheckupReportEnvelope(report: sample())),
+      as: UTF8.self)
+    let foreign = current.replacingOccurrences(of: "\"report\":{", with: "\"report\":{\"extra\":1,")
+    #expect(foreign != current)
+    let decoded = try JSONDecoder().decode(CheckupReportEnvelope.self, from: Data(foreign.utf8))
+    #expect(decoded.validate() == false)
+  }
+
+  @Test func writingAnOlderEnvelopeAgainKeepsTheShapeItWasWrittenWith() throws {
+    let envelope = try decodeStoredEnvelope(try fileWrittenBeforeTheOcclusionList())
+    let written = try CheckupStore.encoded(envelope)
+    #expect(!String(decoding: written, as: UTF8.self).contains("partiallyOccludedFields"))
+    #expect(try decodeStoredEnvelope(written).validate())
   }
 
   @Test func theHeaderSentenceIsFixed() {
