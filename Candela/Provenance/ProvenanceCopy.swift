@@ -9,6 +9,7 @@ enum ProvenanceCopy {
   static let note =
     "A provenance record bundles this display's hours, exposure history and checkup runs into one file "
     + "with a hash of its own contents. It goes with the display when you sell or return it. "
+    + "The record states that its data is self-reported: it corroborates, it does not certify. "
     + "Nothing is sent anywhere."
 
   static let check = "Check a provenance file"

@@ -35,7 +35,7 @@ enum CheckupCopy {
 
   static let pickTitle = "Which display?"
   static let pickSubtitle =
-    "One run covers one display. The report is filed under the display's own identity, so a later run on the same panel lands beside this one."
+    "One run covers one display. The report is filed under the display's own identity, so a later run on the same display lands beside this one."
   static let pickEmpty = "No display is attached that a checkup can run on."
 
   /// Grouped digits: VoiceOver reads an ungrouped 3840 digit by digit. The row
@@ -96,19 +96,19 @@ enum CheckupCopy {
 
   static let plantDisclosureTitle = "One planted mark"
   static let plantDisclosure =
-    "Before the colour fields, Candela will plant one small mark on the screen at a position it will not reveal. When you see it, tap where it is. This checks that a defect of that size is visible from where you sit, so the report can say how sensitive your answers were."
+    "Before the color fields, Candela will plant one small mark on the screen at a position it will not reveal. When you see it, tap where it is. This checks that a defect of that size is visible from where you sit, so the report can say how sensitive your answers were."
 
   static func plantMissed(size: Int) -> String {
     "At this distance a mark of \(size) pixels would not be visible. The same field will show once more with a larger mark."
   }
 
   static let plantMissedTwice =
-    "A mark of 8 pixels was not visible either, so the colour fields will be recorded as inconclusive rather than clean. The other checks stand."
+    "A mark of 8 pixels was not visible either, so the color fields will be recorded as inconclusive rather than clean. The other checks stand."
 
   // MARK: - Fields
 
   static let showAgain = "Show it again"
-  static let showAgainCap = "Each field can be shown three times, so the run stays short on the panel."
+  static let showAgainCap = "Each field can be shown three times, so the run stays short on the display."
   static let start = "Start"
   static let continueLabel = "Continue"
   static let back = "Back"
@@ -118,7 +118,7 @@ enum CheckupCopy {
   static func instruction(for kind: CheckupFieldKind) -> String {
     switch kind {
     case .black: "The screen will be solid black for up to 20 seconds. Look for any point that is not black: a white, red, green or blue dot. You will be asked whether you saw none, one, or more than one."
-    case .red: "The screen will be solid red for up to 20 seconds. Look for any dot that is not red: black, white or another colour. You will be asked whether you saw none, one, or more than one."
+    case .red: "The screen will be solid red for up to 20 seconds. Look for any dot that is not red: black, white or another color. You will be asked whether you saw none, one, or more than one."
     case .green: "The screen will be solid green for up to 20 seconds. Look for any dot that is not green. You will be asked whether you saw none, one, or more than one."
     case .blue: "The screen will be solid blue for up to 20 seconds. Look for any dot that is not blue. You will be asked whether you saw none, one, or more than one."
     case .gray7: "The screen will be a very dark gray for up to 20 seconds. Look for vertical or horizontal bands, streaks, or areas that are lighter or darker than the rest. Answer whether you saw any."

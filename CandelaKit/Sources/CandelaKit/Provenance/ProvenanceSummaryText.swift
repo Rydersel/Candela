@@ -85,7 +85,7 @@ public enum ProvenanceSummaryText {
   private static func readingsLine(_ e: ProvenanceExposure) -> String {
     switch e.confidence {
     case .measured: "Readings: \(e.sampleCount) (measured)"
-    case .insufficient: "Readings: \(e.sampleCount) (too few to analyse)"
+    case .insufficient: "Readings: \(e.sampleCount) (too few to analyze)"
     case .estimated: "Readings: \(e.sampleCount) recorded earlier; exposure measurement is off"
     }
   }

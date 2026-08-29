@@ -57,7 +57,7 @@ enum RotationCopy {
     switch refusal {
     case .unavailable: unavailable
     case .displayGone: "That display disconnected before the change could be made."
-    case .unreadable: "This display reports an orientation Candela does not recognise, so it will not offer to change it."
+    case .unreadable: "This display reports an orientation Candela does not recognize, so it will not offer to change it."
     case .unchanged: "That display is already in this orientation."
     }
   }

@@ -20,7 +20,7 @@ struct OnboardingWelcomePage: View {
       Spacer(minLength: 18)
       OnboardingHeading(
         title: "Welcome to \(AppInfo.productName)",
-        subtitle: "Control the brightness, volume and contrast of your external displays from the menu bar, or straight from the keys you already use."
+        subtitle: "\(AppInfo.productName) looks after your external displays: health, burn-in protection, and the everyday controls, done carefully."
       )
       .opacity(appeared ? 1 : 0)
       .offset(y: appeared ? 0 : 10)

@@ -195,7 +195,7 @@ struct OnboardingOledCarePage: View {
   /// appears only once the preflight confirms the grant.
   private var measuredCardText: String {
     guard model.screenRecordingRequested && model.measuredTelemetry else {
-      return "Uses Screen Recording to see exactly what your display shows, so wear tracking reflects reality."
+      return "Uses Screen Recording to measure how bright each part of the display is, once a minute. Health figures are measured rather than estimated."
     }
     if model.screenRecordingGranted {
       return "Screen Recording enabled. \(AppInfo.productName) reads the picture only to average its brightness; nothing leaves your Mac."

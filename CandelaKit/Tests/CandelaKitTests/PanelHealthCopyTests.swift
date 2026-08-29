@@ -87,7 +87,7 @@ struct PanelHealthCopyTests {
 
   @Test func theCentreIsNamedAsTheCentre() {
     let middle = (PanelGrid.rows / 2) * PanelGrid.cols + PanelGrid.cols / 2
-    #expect(PanelHealthCopy.region(cell: middle) == "across the middle, in the centre")
+    #expect(PanelHealthCopy.region(cell: middle) == "across the middle, in the center")
   }
 
   /// The thirds split must not depend on `PanelGrid` happening to be 24×10:
@@ -97,7 +97,7 @@ struct PanelHealthCopyTests {
     #expect(
       PanelHealthCopy.region(cell: 0, cols: 3, rows: 3) == "toward the top, on the left")
     #expect(
-      PanelHealthCopy.region(cell: 4, cols: 3, rows: 3) == "across the middle, in the centre")
+      PanelHealthCopy.region(cell: 4, cols: 3, rows: 3) == "across the middle, in the center")
     #expect(
       PanelHealthCopy.region(cell: 8, cols: 3, rows: 3) == "toward the bottom, on the right")
   }

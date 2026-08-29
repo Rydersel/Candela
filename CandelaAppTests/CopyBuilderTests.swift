@@ -621,7 +621,7 @@ struct CopyBuilderTests {
     #expect(Set(rendered).count == 4)
     #expect(render(RotationCopy.refusal(.unavailable)) == render(RotationCopy.unavailable))
     #expect(render(RotationCopy.refusal(.displayGone)).contains("disconnected before the change could be made"))
-    #expect(render(RotationCopy.refusal(.unreadable)).contains("does not recognise"))
+    #expect(render(RotationCopy.refusal(.unreadable)).contains("does not recognize"))
     #expect(render(RotationCopy.refusal(.unchanged(.ninety))).contains("already in this orientation"))
   }
 

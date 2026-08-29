@@ -168,7 +168,7 @@ struct ProvenanceSummaryTextTests {
 
   @Test func tooFewReadingsSaysSoWithoutContradictingItself() throws {
     let text = ProvenanceSummaryText.render(try Self.fullRecord(confidence: .insufficient))
-    #expect(text.contains("Readings: 40 (too few to analyse)"))
+    #expect(text.contains("Readings: 40 (too few to analyze)"))
     #expect(!text.contains("Hottest cell"))
   }
 

@@ -16,7 +16,7 @@ enum CheckupPaneCopy {
   static let run = "Run a checkup"
   static let runNote =
     "One run covers one display: what it reports about itself, what it answers over DDC, "
-    + "its native mode, its refresh rates and its HDR support, then a set of colour fields you "
+    + "its native mode, its refresh rates and its HDR support, then a set of color fields you "
     + "look at yourself. The run opens in its own window, and you can stop it at any point."
 
   static let historyTitle = "Past checkups"

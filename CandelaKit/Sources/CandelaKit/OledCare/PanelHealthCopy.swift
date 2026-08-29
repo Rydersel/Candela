@@ -56,7 +56,7 @@ public enum PanelHealthCopy {
     let row = index / cols
     let vertical = ["toward the top", "across the middle", "toward the bottom"][
       min(2, row * 3 / rows)]
-    let horizontal = ["on the left", "in the centre", "on the right"][
+    let horizontal = ["on the left", "in the center", "on the right"][
       min(2, col * 3 / cols)]
     return "\(vertical), \(horizontal)"
   }

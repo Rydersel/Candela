@@ -228,10 +228,10 @@ struct PanelHealthView: View {
           // page claimed window geometry over a list reading "No data yet".
           message: summary.observationEnabled
             ? Text(
-              "Measuring is off for this display, so nothing here comes from the screen itself. What is left is window geometry: which app held which part of the display, and for how long. Turn on \"Measure how bright each part of this display is\" in OLED Care to record what the display is actually showing."
+              "Measuring is off for this display, so nothing here comes from the screen itself. What is left is window geometry: which app held which part of the display, and for how long. Turn on \"Measure how bright each part of this display is\" on the Health pane to record what the display is actually showing."
             )
             : Text(
-              "Measuring is off for this display and so is app attribution, so nothing new is being recorded at all. Anything below was recorded earlier. Turn on \"Measure how bright each part of this display is\" and \"Note which apps are on this display\" in OLED Care to start recording again."
+              "Measuring is off for this display and so is app attribution, so nothing new is being recorded at all. Anything below was recorded earlier. Turn on \"Measure how bright each part of this display is\" and \"Note which apps are on this display\" on the Health pane to start recording again."
             ))
       case .insufficient:
         PanelHealthBanner(
