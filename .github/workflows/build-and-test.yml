@@ -4,10 +4,12 @@
 # system: green meant somebody remembered to run `swift test` locally and read
 # the output.
 #
-# Three jobs. Two of them run tests:
+# Four jobs. Two of them run tests:
 #   test             CandelaKit's suite, the engine's automated coverage
 #   app-build        the app target compiles, which the Kit suite cannot tell
 #                    you, then CandelaAppTests runs over the app's own sources
+#   release-build    the configuration that ships compiles, and carries none of
+#                    the debug markers CLAUDE.md §3 requires be grepped for
 #   hardware-ledger  reports how stale the last hardware verification run is,
 #                    and gates nothing on the answer
 #
@@ -48,11 +50,19 @@ on:
 permissions:
   contents: read
 
-# A newer push makes the older run's verdict worthless, and on a 10x-billed
-# runner there is no reason to pay for the answer to a superseded question.
+# PR runs supersede each other; main runs never do. Only a PR's tip has to be
+# green, but every commit on main is one `git bisect` can land on and one a
+# release can be cut from, so a run cancelled by the next push leaves that
+# commit with no verdict at all.
+#
+# The group key does that work, not cancel-in-progress. With the flag false and
+# every main push still sharing one group, GitHub cancels the queued `pending`
+# run when the next one arrives, so three quick pushes lose the middle commit's
+# verdict anyway and the fix looks like it worked. Non-PR runs therefore key on
+# the run id: unique per run, so nothing queues behind anything or cancels it.
 concurrency:
-  group: build-and-test-${{ github.ref }}
-  cancel-in-progress: true
+  group: build-and-test-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -207,8 +217,26 @@ jobs:
       # newer xcodegen emitted a broken project, this job goes red rather than
       # quietly shipping one. The project file itself is generated and gitignored
       # (CLAUDE.md §3), so there is nothing to compare against anyway.
+      # This is the pipeline's only external fetch, so a Homebrew outage is the
+      # one failure here that reddens a run for a reason the diff cannot
+      # explain. Hence the skip and the retries.
       - name: Install xcodegen
-        run: brew install xcodegen
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v xcodegen >/dev/null 2>&1; then
+            echo "xcodegen already present: $(xcodegen --version)"
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            if brew install xcodegen; then
+              exit 0
+            fi
+            echo "::warning::brew install xcodegen failed (attempt $attempt of 3)"
+            sleep $(( attempt * 15 ))
+          done
+          echo "::error::xcodegen could not be installed after 3 attempts. This is an environment failure, not a result about the diff."
+          exit 1
 
       # project.yml is the source of truth and Candela.xcodeproj is gitignored,
       # so CI has to generate it exactly as a developer does.
@@ -242,16 +270,22 @@ jobs:
       # DDC write ACK as proof a monitor changed (CLAUDE.md §2): check the
       # achieved state. A misconfigured scheme or a target that compiled to
       # nothing can both exit 0, so the binary is looked for by name.
+      # The digest is logged so the control's evidence outlives the test step
+      # below, which writes into this same build directory.
       - name: Positive control (a product actually came out)
         shell: bash
         run: |
           set -euo pipefail
           app="$RUNNER_TEMP/dd/Build/Products/Debug/Candela.app"
-          if [ ! -x "$app/Contents/MacOS/Candela" ]; then
-            echo "::error::xcodebuild reported success but produced no executable at $app/Contents/MacOS/Candela. The build is not building what this job claims it is."
+          bin="$app/Contents/MacOS/Candela"
+          if [ ! -x "$bin" ]; then
+            echo "::error::xcodebuild reported success but produced no executable at $bin. The build is not building what this job claims it is."
             exit 1
           fi
-          echo "Positive control OK: $(file -b "$app/Contents/MacOS/Candela")"
+          echo "Positive control OK: $(file -b "$bin")"
+          echo "Attested product: $bin"
+          echo "  sha256: $(shasum -a 256 "$bin" | cut -d' ' -f1)"
+          echo "  built:  $(date -u -r "$bin" '+%Y-%m-%dT%H:%M:%SZ')"
 
       # Folded into app-build rather than given a third job, for the same
       # 10x-billing reason the trigger split at the top of this file documents.
@@ -261,10 +295,14 @@ jobs:
       # no signal that running it from here does not already buy. The setup is
       # already paid for; reuse it.
       #
-      # Its own -derivedDataPath, separate from the build above. The product
-      # control that just passed described THIS job's Debug build, and a test
-      # build writing over that location would leave the control describing
-      # something else.
+      # Shares the build above's -derivedDataPath. A separate path recompiled
+      # every shared dependency a second time inside one job, and the digest
+      # logged above is what keeps the control's evidence intact without it.
+      #
+      # Only the dependencies are recovered. The app's own sources still compile
+      # twice, because CandelaAppTests compiles them straight into the test
+      # bundle instead of depending on the Candela target, which is how the
+      # tests reach internal types with no @testable.
       #
       # Unmeasured as of 2026-08-17, and stated rather than assumed: the render
       # smoke layer drives `ImageRenderer`, which is proven only on an unlocked
@@ -285,7 +323,7 @@ jobs:
           # it this reports tee's, and tee succeeds whatever xcodebuild did.
           # Every failing suite would be published as green.
           xcodebuild test -project Candela.xcodeproj -scheme CandelaAppTests \
-            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/dd-tests" \
+            -destination 'platform=macOS' -derivedDataPath "$RUNNER_TEMP/dd" \
             2>&1 | tee "$RUNNER_TEMP/app-tests.log"
 
       # The Kit job's control, applied to the app suite for the same reason: a
@@ -334,6 +372,107 @@ jobs:
             exit 1
           fi
           echo "Positive control OK: $count app tests discovered and run, above the floor of $floor."
+
+  # Release is the configuration that ships, and Debug exercises neither its
+  # optimisation level nor the code `#if DEBUG` excludes. CLAUDE.md §3's rule
+  # about grepping the Release binary for debug markers also had nowhere to live
+  # but a person's memory, and a marker has already reached a Release build once.
+  #
+  # What this job does NOT establish: the runner has no keychain and no
+  # certificate, so it builds with the same signing override app-build uses.
+  # Signing, the hardened runtime and notarisation stay verified at deploy time.
+  release-build:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install xcodegen
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v xcodegen >/dev/null 2>&1; then
+            echo "xcodegen already present: $(xcodegen --version)"
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            if brew install xcodegen; then
+              exit 0
+            fi
+            echo "::warning::brew install xcodegen failed (attempt $attempt of 3)"
+            sleep $(( attempt * 15 ))
+          done
+          echo "::error::xcodegen could not be installed after 3 attempts. This is an environment failure, not a result about the diff."
+          exit 1
+
+      - name: Generate the project
+        run: xcodegen generate
+
+      # Same signing override as the Debug job, for the same reason: no keychain
+      # on a hosted runner. The entitlements are NOT overridden, so this build
+      # still proves the file parses and applies under Release.
+      - name: Build the app (Release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project Candela.xcodeproj -scheme Candela \
+            -configuration Release -derivedDataPath "$RUNNER_TEMP/dd-release" build \
+            CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM=""
+
+      # The grep CLAUDE.md §3 requires, plus a positive control, because as
+      # usually written this check cannot fail: a grep pointed at the wrong path
+      # returns zero and reads exactly like a clean build.
+      #
+      # Two traps the candela-deploy skill measured. `strings` without -a misses
+      # sections; it once found the bundle identifier and missed a SwiftUI
+      # literal in the same binary. And Swift stores literals of 15 UTF-8 bytes
+      # or fewer inline in the code rather than in a string section, out of
+      # reach, so keep the control literal and every marker longer than that.
+      - name: Debug markers are absent from the Release build
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/dd-release/Build/Products/Release/Candela.app"
+          bin="$app/Contents/MacOS/Candela"
+
+          if [ ! -x "$bin" ]; then
+            echo "::error::Release build reported success but produced no executable at $bin. Nothing below would be measuring the shipped product."
+            exit 1
+          fi
+          echo "Scanning: $(file -b "$bin")"
+          echo "  sha256: $(shasum -a 256 "$bin" | cut -d' ' -f1)"
+
+          # grep -c exits 1 on no match, which pipefail would turn into a job
+          # failure before the count could be read. It still prints the 0.
+          control="$(strings -a "$bin" | grep -c 'Where this display has been lit' || true)"
+          if [ "$control" -eq 0 ]; then
+            echo "::error::Positive control found none of a literal that is definitely in the app. strings is not reading this binary, so a zero marker count below would mean nothing. Fix the method, not the build."
+            exit 1
+          fi
+          echo "Positive control OK: the control literal is visible to strings ($control hit(s))."
+
+          # Every Mach-O in the bundle, not just the main executable: a marker
+          # compiled into an embedded framework ships just as surely.
+          found=0
+          while IFS= read -r macho; do
+            hits="$(strings -a "$macho" | grep -c 'CANDELA_DEBUG' || true)"
+            if [ "$hits" -ne 0 ]; then
+              echo "::error::${macho#"$app/"} carries $hits CANDELA_DEBUG marker reference(s) in a Release build."
+              strings -a "$macho" | grep 'CANDELA_DEBUG' | sort -u | sed 's/^/    /'
+              found=$(( found + hits ))
+            fi
+          done < <(find "$app" -type f -exec sh -c 'file -b "$1" | grep -q "Mach-O" && printf "%s\n" "$1"' _ {} \;)
+
+          if [ "$found" -ne 0 ]; then
+            echo "::error::$found debug-marker reference(s) reached the Release build. An env-var switch or diagnostic added while iterating has not come back out."
+            exit 1
+          fi
+          echo "No CANDELA_DEBUG markers in any Mach-O in the bundle."
 
   # The hardware tier NEVER gates a merge. Nothing about a panel can be observed
   # from a Linux runner, so this job makes no claim about display behaviour at
